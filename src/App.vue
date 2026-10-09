@@ -4,17 +4,23 @@
             <div id="background" v-if="isMobileSidebarOpen" aria-hidden="true" @click="isRevealed = false"></div>
             <div id="side_menu_swipe"></div>
             <div v-if="isLandingTab" class="mobile-topbar" :class="{ 'mobile-topbar--hidden': topbarHidden }">
-                <div class="mobile-topbar__logo" :title="logoTooltip" aria-hidden="true"></div>
+                <GyroflightBrand
+                    class="mobile-topbar__brand"
+                    :configurator-version="CONFIGURATOR.getDisplayVersion()"
+                    :firmware-version="FC.CONFIG.flightControllerVersion"
+                    :firmware-id="FC.CONFIG.flightControllerIdentifier"
+                    :hardware-id="FC.CONFIG.hardwareName"
+                />
             </div>
             <UserSession v-if="BETAFLIGHT_ACCOUNTS_ENABLED" is-compact class="floating-account" />
             <div id="tab-content-container" :class="{ 'has-mobile-topbar': isLandingTab }">
                 <div class="tab_container" :class="{ reveal: isMobileSidebarOpen }">
-                    <betaflight-logo
+                    <GyroflightBrand
                         :configurator-version="CONFIGURATOR.getDisplayVersion()"
                         :firmware-version="FC.CONFIG.flightControllerVersion"
                         :firmware-id="FC.CONFIG.flightControllerIdentifier"
                         :hardware-id="FC.CONFIG.hardwareName"
-                    ></betaflight-logo>
+                    />
                     <Teleport to=".floating-connect" :disabled="!useFloatingChrome">
                         <ConnectButton />
                     </Teleport>
@@ -61,13 +67,13 @@ import { computed, nextTick, provide, reactive, ref, shallowRef, watch } from "v
 import { useMediaQuery } from "@vueuse/core";
 import ConnectButton from "./components/device-picker/ConnectButton.vue";
 import GlobalDialogs from "./components/dialogs/GlobalDialogs.vue";
+import GyroflightBrand from "./gyroflight/components/GyroflightBrand.vue";
 import Sidebar from "./components/sidebar/Sidebar.vue";
 import FCModule from "./js/fc";
 import MSPModule from "./js/msp";
 import PortUsageModule from "./js/port_usage.js";
 import CONFIGURATORModule from "./js/data_storage";
 import GUI from "./js/gui.js";
-import { i18n } from "./js/localization";
 import { useUiLocale } from "./composables/useUiLocale";
 import {
     completeVueTabMount,
@@ -176,20 +182,6 @@ watch(isLandingTab, (isLanding) => {
         topbarHidden.value = false;
         lastScrollTop = 0;
     }
-});
-
-const logoTooltip = computed(() => {
-    const lines = [`${i18n.getMessage("versionLabelConfigurator")}: ${CONFIGURATOR.value.getDisplayVersion()}`];
-    const cfg = FC.value.CONFIG ?? {};
-    if (cfg.flightControllerVersion && cfg.flightControllerIdentifier) {
-        lines.push(
-            `${i18n.getMessage("versionLabelFirmware")}: ${cfg.flightControllerVersion} ${cfg.flightControllerIdentifier}`,
-        );
-    }
-    if (cfg.hardwareName) {
-        lines.push(`${i18n.getMessage("versionLabelTarget")}: ${cfg.hardwareName}`);
-    }
-    return lines.join("\n");
 });
 
 provide("toggleMobileSidebar", () => {
@@ -318,17 +310,9 @@ watch(
 .mobile-topbar--hidden {
     transform: translateY(-100%);
 }
-.mobile-topbar__logo {
+.mobile-topbar__brand {
     flex: 1;
     min-width: 0;
-    height: 2.5rem;
-    background-image: url(./images/bf_logo_white.svg);
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: auto 100%;
-}
-.dark .mobile-topbar__logo {
-    background-image: url(./images/bf_logo_black.svg);
 }
 body.mobile-app-shell {
     @media all and (max-width: 575px), all and (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
