@@ -21,17 +21,21 @@
 
 // Read-only capability statements for the Gyroflight tab. "available" entries are
 // upstream Betaflight features used unchanged; nothing here performs analysis.
+export type GyroflightCapabilityStatus = "available" | "active" | "foundation" | "locked" | "planned";
+
 export interface GyroflightCapability {
     key: string;
     label: string;
-    available: boolean;
+    status: GyroflightCapabilityStatus;
 }
 
 export const gyroflightCapabilities: readonly GyroflightCapability[] = [
-    { key: "firmware_flasher", label: "gyroflightCapFirmwareFlasher", available: true },
-    { key: "blackbox_viewer", label: "gyroflightCapBlackboxViewer", available: true },
-    { key: "autotune", label: "gyroflightCapAutotune", available: true },
-    { key: "analysis", label: "gyroflightCapAnalysis", available: false },
-    { key: "safety", label: "gyroflightCapSafety", available: false },
-    { key: "compare", label: "gyroflightCapCompare", available: false },
+    { key: "firmware_flasher", label: "gyroflightCapFirmwareFlasher", status: "available" },
+    { key: "blackbox_viewer", label: "gyroflightCapBlackboxViewer", status: "available" },
+    { key: "autotune", label: "gyroflightCapAutotune", status: "available" },
+    { key: "chirp_qualification", label: "gyroflightCapChirpQualification", status: "active" },
+    { key: "global_tune", label: "gyroflightCapGlobalTune", status: "active" },
+    { key: "safety", label: "gyroflightCapSafetyFoundation", status: "foundation" },
+    { key: "compare", label: "gyroflightCapCrossFlightCompare", status: "planned" },
+    { key: "physical_apply", label: "gyroflightCapPhysicalApply", status: "locked" },
 ];
