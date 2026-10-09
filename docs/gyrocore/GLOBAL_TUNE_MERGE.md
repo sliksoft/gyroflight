@@ -1,4 +1,4 @@
-# Global tune merge and Apply authorization (WU3)
+# Global tune merge and Apply authorization (WU3, WU3.1)
 
 Betaflight's simplified-tuning sliders are global. Every key Autotune proposes affects every axis the
 slider mode covers: master multiplier, PI gain, I gain, D gain, feed-forward and the D-term filter
@@ -8,6 +8,11 @@ sliders to all axes.
 WU3 changes this. Apply now writes one **composite (global) recommendation**, merged by GyroCore's
 existing merge from the qualified per-axis Betaflight recommendations of one log. Per-axis
 recommendations are evidence and can no longer be applied.
+
+WU3.1 adds two things after the merge, without changing it: an **axis-coverage** rule (every axis the
+slider mode drives needs its own qualified, selected measurement) and a temporary **product Apply lock**
+(`full_safety_engine_pending`). Until GyroCore's Safety engine is migrated (WU4), Gyroflight does not
+write a tune to a craft.
 
 Branch `gyroflight/wu3-global-slider` from `gyroflight/main` (`ebd73798`). GyroCore reference:
 `~/GyroCore` at `d2e60f7`, read only.
@@ -19,9 +24,13 @@ Betaflight Viewer parser            decode every embedded log                 sr
 → GyroCore measurement qualification valid for tuning? (WU2)                   src/gyrocore/chirp/
 → Betaflight tuning math            per-axis recommendGains (evidence)        spectral_analysis.ts (unmodified)
 → GyroCore global merge             one slider set, or review                 src/gyrocore/tuning/merge.ts
-→ GyroCore safety authorization     composite gate + live FC recheck          src/gyrocore/tuning/{composite,authorize}.ts
+→ GyroCore axis-coverage authorization  composite gate + live FC recheck      src/gyrocore/tuning/{coverage,composite,authorize}.ts
+→ GyroCore Safety [WU4 pending]     product Apply lock until then             src/gyrocore/productLock/productApply.ts
 → FC Apply                          MSP_SET_SIMPLIFIED_TUNING + EEPROM        useAutotune.applyGains
 ```
+
+The composite gate and axis coverage are not the Safety engine. They decide whether a merged tune is
+complete and still current; mechanical safety, safe-tune limits and output safety come with WU4.
 
 ## The reference merge (ported unchanged)
 
@@ -102,24 +111,67 @@ the qualification table does (`selectMeasurement(id, true)`).
     - block `composite_clamp_material:<key>` if the value is more than 0.5 (rounding) away.
     - Requested and applied values are kept in `sliders[]`.
 
-### Consequence of the ported contract: one-axis composites
+### Axis coverage (WU3.1): merge validity is not apply authorization
 
-GyroCore's merge requires no axis, so a log with only a roll sweep yields an authorized one-source
-composite (`single_axis_matches_upstream_apply`; the `single_roll` end-to-end case). Under slider mode
-RPY, applying it changes pitch and yaw from a roll measurement alone. That is what upstream Autotune
-does, and what WU2 did. Gyroflight keeps the reference contract here instead of inventing a stricter
-one. The smallest adaptation, if the owner wants it, is to require a participating source for every axis
-the logged slider mode covers (roll + pitch for RP; roll + pitch + yaw for RPY).
+GyroCore's merge requires no axis, so a log with only a roll sweep still merges into a one-source result
+(`single_axis_matches_upstream_apply`; the `single_roll` end-to-end case). `merge.ts` is unchanged and
+keeps exact parity. Applying that result would change pitch and yaw PIDs from a roll measurement alone,
+so Gyroflight adds a rule after the merge (`src/gyrocore/tuning/coverage.ts`).
+
+Mode semantics, checked against Betaflight firmware master `4fc1520c`:
+
+- `src/main/config/simplified_tuning.h`, `pidSimplifiedTuningMode_e`: `OFF = 0`, `RP = 1`, `RPY = 2`
+  (CLI lookup `"OFF", "RP", "RPY"`).
+- `src/main/config/simplified_tuning.c`, `calculateNewPidValues`:
+  `for (axis = FD_ROLL; axis <= simplified_pids_mode; ++axis)`. RP recomputes roll and pitch PIDs, RPY
+  roll, pitch and yaw, OFF none (`applySimplifiedTuningPids` skips OFF).
+- The app's `calculateSimplifiedPidValues` (`src/js/simplifiedTuning.ts`) uses the same loop.
+
+| Slider mode     | Required evidence  | Otherwise                                        |
+| --------------- | ------------------ | ------------------------------------------------ |
+| RPY (2)         | roll + pitch + yaw | `missing_axis_evidence:<axis>` per missing axis  |
+| RP (1)          | roll + pitch       | `missing_axis_evidence:<axis>`; yaw never counts |
+| OFF (0)         | none: blocked      | `axis_coverage_mode_off`                         |
+| unknown/missing | none: blocked      | `axis_coverage_mode_unknown`                     |
+
+An axis is covered only by a source whose role is `participating`:
+
+- a qualified measurement;
+- the only qualified sweep of its axis, or the one the user explicitly chose;
+- not left out by an axis gate.
+
+A rejected sweep, an unselected repeat, and a sweep left out by an axis gate (yaw under RP) never cover
+an axis. Neither does another axis. Nothing is averaged or inferred.
+
+The composite records `coverage`:
+
+- `pidsMode` and `modeName`;
+- `requiredAxes`, `coveredAxes` and `missingAxes`;
+- `sourceByAxis` (the measurement id covering each axis);
+- `blocked`.
+
+The coverage codes join `blocked`, so `authorized` is false; the merge output and `final` are kept for
+display.
+
+At Apply, `liveCompositeBlocks()` recomputes coverage under the **live** mode (`fc:missing_axis_evidence:<axis>`,
+`fc:axis_coverage_mode_off` / `_unknown`). It keeps every WU3 live check:
+
+- analysed RP with roll + pitch, craft now RPY: blocked by `fc:simplified_pids_mode_changed` and
+  `fc:missing_axis_evidence:yaw`.
+- analysed RPY, craft now RP: coverage under RP passes (roll and pitch are covered), but the current
+  contract still blocks with `fc:simplified_pids_mode_changed` and `fc:yaw_not_under_slider_control`.
+  Any mode change blocks.
 
 ### Deliberate adaptations (documented, tested)
 
-| Topic                                   | Python engine                                       | Gyroflight                                   | Why                                                                                                                                            |
-| --------------------------------------- | --------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| an axis with only rejected measurements | merge ignores it; proposal `proposed_with_warnings` | composite **blocked** (`system_id_unusable`) | GyroCore's own safety-pipeline test (`test_system_id_unusable`) blocks this; its helper lifts axis blocks to the proposal, the engine does not |
-| slider clamped by 25–250                | warning `slider_clamped`                            | block on direction change or > rounding      | WU2 §6 / WU3 §6 (FF floor)                                                                                                                     |
-| `simplified_pids_mode` unknown          | warning; axis takes part                            | axis gated (WU2); composite blocked          | a slider proposal cannot be shown to reach the PIDs                                                                                            |
-| several qualified sweeps of one axis    | not defined (one per axis)                          | explicit user selection required             | no rule exists; no averaging or recency invented                                                                                               |
-| multi-log                               | one log per run                                     | one composite per log (selected log)         | each log has its own current tune                                                                                                              |
+| Topic                                   | Python engine                                       | Gyroflight                                             | Why                                                                                                                                            |
+| --------------------------------------- | --------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| an axis with only rejected measurements | merge ignores it; proposal `proposed_with_warnings` | composite **blocked** (`system_id_unusable`)           | GyroCore's own safety-pipeline test (`test_system_id_unusable`) blocks this; its helper lifts axis blocks to the proposal, the engine does not |
+| slider clamped by 25–250                | warning `slider_clamped`                            | block on direction change or > rounding                | WU2 §6 / WU3 §6 (FF floor)                                                                                                                     |
+| `simplified_pids_mode` unknown          | warning; axis takes part                            | axis gated (WU2); composite blocked                    | a slider proposal cannot be shown to reach the PIDs                                                                                            |
+| several qualified sweeps of one axis    | not defined (one per axis)                          | explicit user selection required                       | no rule exists; no averaging or recency invented                                                                                               |
+| axes without evidence (WU3.1)           | merge needs no axis; one axis proposes for all      | composite **blocked** (`missing_axis_evidence:<axis>`) | sliders are global: every axis the slider mode drives needs its own evidence; applied after the merge, which is unchanged                      |
+| multi-log                               | one log per run                                     | one composite per log (selected log)                   | each log has its own current tune                                                                                                              |
 
 ## Apply hard gate v2
 
@@ -127,14 +179,14 @@ the logged slider mode covers (roll + pitch for RP; roll + pitch + yaw for RPY).
 (`src/gyrocore/tuning/authorize.ts`) before any flight-controller access. The gate rebuilds the composite
 from the current state, never from a cached copy, and throws `ApplyBlockedError` for:
 
-| Code                                         | When                                                                           |
-| -------------------------------------------- | ------------------------------------------------------------------------------ |
-| `apply:no_qualified_analysis`                | nothing analysed                                                               |
-| `apply:missing_composite_id`                 | no composite named, including the pre-WU3 call without one                     |
-| `apply:single_measurement_apply_not_allowed` | a measurement id (the WU2 single-axis apply)                                   |
-| `apply:stale_composite`                      | another analysis, log, selection or target, or a changed source recommendation |
-| the composite's own blocks                   | any block above (merge review, rejected source, axis gates, clamp guards, …)   |
-| `apply:sliders_differ_from_composite`        | sliders not exactly the composite's final values (tampering)                   |
+| Code                                         | When                                                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `apply:no_qualified_analysis`                | nothing analysed                                                                            |
+| `apply:missing_composite_id`                 | no composite named, including the pre-WU3 call without one                                  |
+| `apply:single_measurement_apply_not_allowed` | a measurement id (the WU2 single-axis apply)                                                |
+| `apply:stale_composite`                      | another analysis, log, selection or target, or a changed source recommendation              |
+| the composite's own blocks                   | any block above (merge review, rejected source, axis gates, axis coverage, clamp guards, …) |
+| `apply:sliders_differ_from_composite`        | sliders not exactly the composite's final values (tampering)                                |
 
 Only then does the action read the craft (`MSP_SIMPLIFIED_TUNING`; a read). `liveCompositeBlocks()` then
 refuses before any write when:
@@ -142,6 +194,7 @@ refuses before any write when:
 - the live slider mode is OFF or unknown (`fc:simplified_pids_mode_off` / `_unknown`);
 - the live mode differs from the analysed log's (`fc:simplified_pids_mode_changed`);
 - the live mode is RP while yaw contributed to the composite (`fc:yaw_not_under_slider_control`);
+- an axis the live mode drives has no covering source (`fc:missing_axis_evidence:<axis>`, WU3.1);
 - any of the 13 written slider fields differs live from the logged value
   (`fc:current_slider_changed:<key>`):
     - the six proposed sliders, because every recommendation is a scaling of the logged values;
@@ -150,9 +203,36 @@ refuses before any write when:
       with their live values, so they must equal the logged ones that `merge.simplified` and the pitch
       baseline assume.
 
+Between the composite gate and the read, the product Apply lock (below) refuses in production, so today
+no flight-controller access happens at all.
+
 The write then sets the six composite keys on top of the live slider state and sends
 `MSP_SET_SIMPLIFIED_TUNING`. `validateTuningSliders()` runs next, and `MSP_EEPROM_WRITE` comes last. The
 safe positive fixture asserts the exact 53-byte payload.
+
+## Product Apply lock (WU3.1, temporary)
+
+`src/gyrocore/productLock/productApply.ts` returns `["full_safety_engine_pending"]`. `applyGains()` calls
+`assertProductApplyReleased()`:
+
+- after the composite gate, so a tune's own blocks are still reported first;
+- before any MSP access.
+
+The panel binds Apply to `authorization.allowed && no product lock`. It shows "Apply is disabled until
+Gyroflight Safety validation is complete." in its own element (`data-gyrocore="product-apply-locked"`),
+apart from the red list of reasons the tune is rejected. The tune may be valid; the product write is not
+released.
+
+- The module has no switch. Production cannot release it.
+- Tests that exercise the write path (authorization, live recheck, exact payload) replace the module
+  explicitly with `vi.mock("@/gyrocore/productLock/productApply", …)` and
+  `test/gyrocore/harness/productRelease.ts`.
+- `test/gyrocore/product_apply_lock.test.ts` runs with no mock:
+    - the safe fixture passes merge, coverage and `authorizeCompositeApply`;
+    - `applyGains` then throws `full_safety_engine_pending` with 0 MSP calls;
+    - the button is disabled.
+- Betaflight's write code and the low-level Apply pipeline are unchanged. WU4 replaces the lock with the
+  migrated Safety engine.
 
 ## UI
 
@@ -163,10 +243,12 @@ safe positive fixture asserts the exact 53-byte payload.
     - per slider: the logged current value, each participating axis's proposal labelled "per-axis
       evidence" with its unclamped request, and the global value "(would be applied)";
     - every source measurement and its role, with reasons;
+    - axis coverage: slider mode, required axes, covered axes with their measurement, missing axes;
     - blocks and warnings in plain language.
 - Betaflight's gain table keeps its per-axis rows, under a note that they are evidence. The "apply from
   axis" selector is removed. Apply sends the composite and is disabled, with the reasons listed,
-  whenever the composite is not authorized.
+  whenever the composite is not authorized. It is also disabled by the product Apply lock, with its own
+  message.
 
 ## Results
 
@@ -192,23 +274,31 @@ The merge cases cover:
 There are no floating-point internals in the merge, so no tolerance is used. The end-to-end flights use
 Betaflight's math in Gyroflight and GyroCore's port in Python; their integers agree exactly.
 
-The final authorization matches Python's proposal except in two cases, where Gyroflight is stricter as
-documented above: `roll_ok_pitch_rejected` (`system_id_unusable`) and `ff_floor_three_axis` (FF floor
-reversal).
+The final authorization matches Python's proposal except in three cases, where Gyroflight is stricter as
+documented above:
+
+- `roll_ok_pitch_rejected`: `system_id_unusable`;
+- `ff_floor_three_axis`: FF floor reversal;
+- `single_roll`: WU3.1 axis coverage, `missing_axis_evidence:pitch` / `:yaw` under RPY.
+
+The merge outputs themselves are identical in all seven cases.
 
 ### Safe positive fixture
 
 The fixture is three identical roll, pitch and yaw sweeps (40 Hz loop, 2-sample delay) with a complete
 logged slider tune at 100 and slider mode RPY.
 
-| What                    | Value                                                                                                                                                           |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| measurement gates       | 3 × USABLE                                                                                                                                                      |
-| per-axis proposals      | 3 × master 100, PI 138, I 100, D 100, FF 138, D-term filter 100                                                                                                 |
-| merge                   | `merged`, unanimous, participating roll, pitch, yaw                                                                                                             |
-| expected / actual final | {100, 138, 100, 100, 138, 100} / identical                                                                                                                      |
-| MSP sequence (mocked)   | `MSP_SIMPLIFIED_TUNING` (read), `MSP_SET_SIMPLIFIED_TUNING`, `MSP_EEPROM_WRITE`                                                                                 |
-| SET payload             | 53 bytes, exactly: mode 2, master 100, ratio 100, I 100, D 100, PI 138, D-max 100, FF 138, pitch-PI 100, reserved, D-term 1/100 + live Hz, gyro 1/100 + live Hz |
+| What                                                                  | Value                                                                                                                                                           |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| measurement gates                                                     | 3 × USABLE                                                                                                                                                      |
+| per-axis proposals                                                    | 3 × master 100, PI 138, I 100, D 100, FF 138, D-term filter 100                                                                                                 |
+| merge                                                                 | `merged`, unanimous, participating roll, pitch, yaw                                                                                                             |
+| axis coverage (RPY)                                                   | required roll, pitch, yaw; covered log1-seg1, -seg2, -seg3; missing none                                                                                        |
+| low-level authorization                                               | allowed                                                                                                                                                         |
+| product Apply                                                         | **blocked**: `full_safety_engine_pending`, 0 MSP calls (production default)                                                                                     |
+| expected / actual final                                               | {100, 138, 100, 100, 138, 100} / identical                                                                                                                      |
+| MSP sequence (mocked, product lock released by the test-only harness) | `MSP_SIMPLIFIED_TUNING` (read), `MSP_SET_SIMPLIFIED_TUNING`, `MSP_EEPROM_WRITE`                                                                                 |
+| SET payload                                                           | 53 bytes, exactly: mode 2, master 100, ratio 100, I 100, D 100, PI 138, D-max 100, FF 138, pitch-PI 100, reserved, D-term 1/100 + live Hz, gyro 1/100 + live Hz |
 
 No test connects to a flight controller.
 
@@ -217,6 +307,8 @@ No test connects to a flight controller.
 Every measurement fails WU2's gates, so no axis takes part in any of the three logs. Each composite is
 `MERGE_REQUIRES_REVIEW` / `no_participating_axes`, with `system_id_unusable` for every measurement.
 
+- The logged slider mode is OFF in all three logs, so coverage blocks too (`axis_coverage_mode_off`).
+- The product Apply lock blocks too (`full_safety_engine_pending`).
 - Global composites: **0**.
 - Apply by composite id or by measurement id: blocked.
 - MSP calls: **0**.
@@ -225,14 +317,15 @@ Nothing in the code or tests names AIR65.
 
 ## Tests
 
-| File                                                 | Covers                                                                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `test/gyrocore/global_merge_parity.test.ts`          | merge port vs Python, 20 cases                                                                                      |
-| `test/gyrocore/global_merge_e2e_parity.test.ts`      | generated flights vs Python engine + merge                                                                          |
-| `test/gyrocore/chirp_apply_gate.test.ts`             | safe positive payload, RP case, every v2 rejection, live FC recheck, final clamp guard, repeated sweeps, WU2 blocks |
-| `test/gyrocore/chirp_qualification_pipeline.test.ts` | Global tune panel rendering (valid and conflict)                                                                    |
-| `test/gyrocore/autotune_apply_blocked_ui.test.ts`    | Apply button disabled with composite reasons; a click cannot reach the action                                       |
-| `test/gyrocore/air65_qualification.local.test.ts`    | AIR65: 0 composites, Apply blocked, 0 MSP calls                                                                     |
+| File                                                 | Covers                                                                                                                                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/gyrocore/global_merge_parity.test.ts`          | merge port vs Python, 20 cases                                                                                                                                                                                 |
+| `test/gyrocore/global_merge_e2e_parity.test.ts`      | generated flights vs Python engine + merge                                                                                                                                                                     |
+| `test/gyrocore/chirp_apply_gate.test.ts`             | safe positive payload, RP case, every v2 rejection, live FC recheck, final clamp guard, repeated sweeps, WU2 blocks; WU3.1 axis-coverage matrix (RPY/RP), rejected/repeated coverage, OFF/unknown, live RP↔RPY |
+| `test/gyrocore/product_apply_lock.test.ts`           | product Apply lock with no mock: safe fixture authorized low-level, blocked for the product, 0 MSP calls; UI message                                                                                           |
+| `test/gyrocore/chirp_qualification_pipeline.test.ts` | Global tune panel rendering (valid and conflict)                                                                                                                                                               |
+| `test/gyrocore/autotune_apply_blocked_ui.test.ts`    | Apply button disabled with composite reasons; a click cannot reach the action                                                                                                                                  |
+| `test/gyrocore/air65_qualification.local.test.ts`    | AIR65: 0 composites, Apply blocked, product lock on, 0 MSP calls                                                                                                                                               |
 
 To regenerate the references (only GyroCore's Python is imported; nothing is written to GyroCore):
 
@@ -248,6 +341,7 @@ TMPDIR=$PWD PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=~/GyroCore:~/GyroCore/core \
 ## Not done here
 
 - The full Safety engine (mechanical safety, safe-tune clamps, absolute PID mapping and validity):
-  `absolute.py` firmware mapping and `safety/` are not ported.
+  `absolute.py` firmware mapping and `safety/` are not ported (WU4). Until then the product Apply lock
+  stays on.
 - Filter autotuning, Analysis, Compare, AI and the legacy tuner.
 - Live-PID verification after the write beyond Betaflight's own `validateTuningSliders`.

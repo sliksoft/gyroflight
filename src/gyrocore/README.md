@@ -12,13 +12,14 @@ Application glue (tabs, strings, product policy) belongs in `src/gyroflight/`.
 
 ## Subdirectories
 
-| Path           | Contents                                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------------------- |
-| `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate        |
-| `tuning/`      | GyroCore global-slider merge (port of `merge.py`), composite recommendation, Apply gate v2              |
-| `components/`  | `ChirpQualificationPanel.vue`, `DiagnosticOnlyBanner.vue`, `GlobalTunePanel.vue`, `ApplyGateNotice.vue` |
-| `composables/` | `useApplyGate`                                                                                          |
-| `stores/`      | `chirpQualification` (every measurement, and which ones Autotune shows)                                 |
+| Path           | Contents                                                                                                  |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate          |
+| `tuning/`      | GyroCore global-slider merge (port of `merge.py`), composite recommendation, axis coverage, Apply gate v2 |
+| `productLock/` | product Apply lock (`full_safety_engine_pending`) until the Safety engine is migrated (WU4)               |
+| `components/`  | `ChirpQualificationPanel.vue`, `DiagnosticOnlyBanner.vue`, `GlobalTunePanel.vue`, `ApplyGateNotice.vue`   |
+| `composables/` | `useApplyGate`                                                                                            |
+| `stores/`      | `chirpQualification` (every measurement, and which ones Autotune shows)                                   |
 
 ## Planned subdirectories (created when first used)
 
