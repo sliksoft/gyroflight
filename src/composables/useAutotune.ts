@@ -26,36 +26,52 @@ import FC from "@/js/fc";
 import MSP from "@/js/msp";
 import MSPCodes from "@/js/msp/MSPCodes";
 import { mspHelper } from "@/js/msp/MSPHelper";
-import {
-    findLogBoundaries,
-    parseChirpLog,
-    type ChirpData,
-    type ChirpSegment,
-    type LogBoundary,
-    type SysConfig,
-} from "@/js/blackbox/chirp_bbl_parser";
-import {
-    welchTransferFunction,
-    recommendGains,
-    computeSensitivity,
-    computeStepResponse,
-    computeSpectrogram,
-    type CurrentSliders,
-    type GainRecommendation,
-    type Sensitivity,
-    type StepResponse,
+import type { SysConfig } from "@/js/blackbox/chirp_bbl_parser";
+import type {
+    CurrentSliders,
+    GainRecommendation,
+    Sensitivity,
+    Spectrogram,
+    StepResponse,
+    TransferFunction,
 } from "@/js/blackbox/spectral_analysis";
 import { validateTuningSliders } from "@/composables/useTuningSliders";
+// Gyroflight: CHIRP input comes from the Blackbox Viewer decode and is qualified
+// by GyroCore before Betaflight's recommendation may be shown or applied.
+// See docs/gyrocore/CHIRP_QUALIFICATION.md.
+import { qualifyChirpFile, recomputeRecommendations, type AutotuneMath } from "@/gyrocore/chirp/qualification";
+import { ApplyBlockedError, assertApplyAuthorized, liveSliderModeBlocks } from "@/gyrocore/chirp/applyGate";
+import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 
 export type AxisName = "roll" | "pitch" | "yaw";
 
-const AXIS_NAMES: AxisName[] = ["roll", "pitch", "yaw"];
+/** The gains derived for one axis, as the table shows them. */
+export type AxisGains = ReturnType<typeof buildGains>;
 
-/** One axis of an analysed log: the measured responses and the recommended gains. */
-export type AxisResult = NonNullable<ReturnType<typeof computeAxisResult>>;
+/**
+ * One axis of an analysed log: the measured responses and the recommended gains.
+ * `gains` is null when GyroCore rejected the measurement: the plots are then
+ * diagnostic only and no recommendation exists.
+ */
+export interface AxisResult {
+    transferFunction: TransferFunction;
+    sensitivity: Sensitivity;
+    stepResponse: StepResponse;
+    spectrogram: Spectrogram;
+    gains: AxisGains | null;
+    sampleCount: number;
+}
 
 /** A whole analysed log, as the autotune store holds it. */
-export type AnalysisResult = { filename: string } & NonNullable<ReturnType<typeof analyzeLog>>;
+export interface AnalysisResult {
+    filename: string;
+    sampleRate: number;
+    axes: Partial<Record<AxisName, AxisResult>>;
+    sysConfig: SysConfig;
+    // Kept so the gain recommendation can be recomputed against a different
+    // phase-margin target without re-importing the log.
+    currentSliders: Required<CurrentSliders>;
+}
 
 export type ProposedSliders = GainRecommendation["proposed"];
 
@@ -77,6 +93,8 @@ export function useAutotune() {
     const store = useAutotuneStore();
 
     async function importAndAnalyze() {
+        const gate = useChirpQualificationStore();
+        gate.reset();
         store.analysisState = "importing";
         store.errorMessage = "";
         store.progressMessage = "Selecting file...";
@@ -92,15 +110,22 @@ export function useAutotune() {
             const data = new Uint8Array(await blob.arrayBuffer());
 
             store.analysisState = "analyzing";
-            store.progressMessage = "Finding log boundaries...";
-            const logs = findLogBoundaries(data);
-            if (!logs || logs.length === 0) {
+            store.progressMessage = "Decoding logs...";
+            const report = qualifyChirpFile(data, file.name, store.targetPhaseMarginDeg, AUTOTUNE_MATH, (i, n) => {
+                store.progressMessage = `Analysing log ${i + 1} of ${n}...`;
+            });
+            if (report.logCount === 0) {
                 throw new Error("No log segments found in the file.");
             }
+            gate.setReport(report);
+            if (report.state === "no_chirp") {
+                throw new Error(i18n.getMessage("gyrocoreChirpNoChirpError", [report.logCount]));
+            }
 
-            const result = tryParseLogs(data, logs, file.name, store, store.targetPhaseMarginDeg);
+            const result = gate.analysisResult();
             if (!result) {
-                throw new Error("No chirp data found in any log segment.");
+                // CHIRP exists but nothing could even be plotted: still REJECTED, not "no CHIRP".
+                throw new Error(i18n.getMessage("gyrocoreChirpRejectedError"));
             }
 
             store.analysisResult = result;
@@ -121,16 +146,19 @@ export function useAutotune() {
      *
      */
     function recomputeGains(targetPhaseMarginDeg: number) {
+        const gate = useChirpQualificationStore();
         const result = store.analysisResult;
-        if (!result?.axes) {
+        if (!gate.report || !result?.axes) {
             return;
         }
-        for (const axis of Object.values(result.axes)) {
-            if (!axis) {
-                continue;
+        // Recommendations exist only for qualified measurements; rejected ones stay without gains.
+        recomputeRecommendations(gate.report, targetPhaseMarginDeg, AUTOTUNE_MATH);
+        gate.touch();
+        for (const [axisName, axis] of Object.entries(result.axes)) {
+            const measurement = gate.selectedMeasurements[axisName as AxisName];
+            if (axis && measurement) {
+                axis.gains = measurement.recommendation?.gains ?? null;
             }
-            const rec = recommendGains(axis.transferFunction, result.currentSliders, targetPhaseMarginDeg);
-            axis.gains = buildGains(rec, axis.sensitivity, axis.stepResponse);
         }
     }
 
@@ -160,75 +188,6 @@ async function pickFileOrSetError(store: AutotuneStore) {
         store.progressMessage = "";
         return null;
     }
-}
-
-function tryParseLogs(
-    data: Uint8Array,
-    logs: LogBoundary[],
-    filename: string,
-    store: AutotuneStore,
-    targetPhaseMarginDeg: number,
-): AnalysisResult | null {
-    let lastError: unknown = null;
-    for (let idx = 0; idx < logs.length; idx++) {
-        store.progressMessage = `Parsing log ${idx + 1} of ${logs.length}...`;
-        try {
-            const parsed = analyzeLog(data, logs[idx], targetPhaseMarginDeg);
-            if (parsed) {
-                return { filename, ...parsed };
-            }
-        } catch (err) {
-            lastError = err;
-        }
-    }
-    if (lastError) {
-        throw lastError;
-    }
-    return null;
-}
-
-function analyzeLog(data: Uint8Array, log: LogBoundary, targetPhaseMarginDeg: number) {
-    const { sysConfig, chirpData } = parseChirpLog(data, log.start, log.end);
-    if (chirpData.sampleCount === 0 || chirpData.segments.length === 0) {
-        return null;
-    }
-
-    const sampleRate = computeSampleRate(sysConfig);
-    const segmentSize = chooseSegmentSize(sampleRate);
-    const currentSliders = extractCurrentSliders(sysConfig);
-
-    const axes: Partial<Record<AxisName, AxisResult>> = {};
-    for (const seg of chirpData.segments) {
-        if (!Number.isInteger(seg.axis) || seg.axis < 0 || seg.axis > 2) {
-            throw new Error(
-                "Log uses unsupported DEBUG_CHIRP axis encoding. " + "Use a log recorded with the companion firmware.",
-            );
-        }
-        const axisResult = computeAxisResult(
-            seg,
-            chirpData,
-            sampleRate,
-            segmentSize,
-            currentSliders,
-            targetPhaseMarginDeg,
-        );
-        if (axisResult) {
-            axes[AXIS_NAMES[seg.axis]] = axisResult;
-        }
-    }
-
-    if (Object.keys(axes).length === 0) {
-        return null;
-    }
-
-    return {
-        sampleRate: Math.round(sampleRate),
-        axes,
-        sysConfig,
-        // Kept so the gain recommendation can be recomputed against a different
-        // phase-margin target without re-importing the log.
-        currentSliders,
-    };
 }
 
 function computeSampleRate(sysConfig: SysConfig) {
@@ -285,36 +244,28 @@ function buildGains(rec: GainRecommendation, sensitivity: Sensitivity, stepRespo
     };
 }
 
-function computeAxisResult(
-    seg: ChirpSegment,
-    chirpData: ChirpData,
-    sampleRate: number,
-    segmentSize: number,
-    currentSliders: CurrentSliders,
-    targetPhaseMarginDeg: number,
-) {
-    const len = seg.endIdx - seg.startIdx + 1;
-    if (len < segmentSize) {
-        return null;
-    }
-    const input = chirpData.setpoint[seg.axis].subarray(seg.startIdx, seg.endIdx + 1);
-    const output = chirpData.gyro[seg.axis].subarray(seg.startIdx, seg.endIdx + 1);
-    const tf = welchTransferFunction(input, output, sampleRate, segmentSize, 0.5);
-    const rec = recommendGains(tf, currentSliders, targetPhaseMarginDeg);
-    const sensitivity = computeSensitivity(tf);
-    const stepResponse = computeStepResponse(tf, sampleRate, segmentSize);
-    const spectrogram = computeSpectrogram(output, sampleRate);
-    return {
-        transferFunction: tf,
-        sensitivity,
-        stepResponse,
-        spectrogram,
-        gains: buildGains(rec, sensitivity, stepResponse),
-        sampleCount: len,
-    };
-}
+/** Betaflight helpers the GyroCore qualification calls instead of re-implementing them. */
+export const AUTOTUNE_MATH: AutotuneMath<AxisGains> = {
+    computeSampleRate,
+    chooseSegmentSize,
+    extractCurrentSliders,
+    buildGains,
+};
 
-async function applyGains(proposed: ProposedSliders) {
+async function applyGains(proposed: ProposedSliders, measurementId?: string | null) {
+    // GyroCore hard gate, enforced here before any flight-controller access, not
+    // only by the disabled button: the measurement must have passed every gate
+    // and the sliders must be exactly the ones recommended for it.
+    const measurement = assertApplyAuthorized(useChirpQualificationStore().report, measurementId, proposed);
+    // Read the craft's live slider state (no write) and refuse if its sliders
+    // do not drive the PIDs. This also keeps the slider fields the proposal
+    // does not set at their live values in the write below.
+    await MSP.promise(MSPCodes.MSP_SIMPLIFIED_TUNING);
+    const live = liveSliderModeBlocks(FC.TUNING_SLIDERS.slider_pids_mode, measurement.axis);
+    if (live.length) {
+        throw new ApplyBlockedError(live);
+    }
+
     // Object.keys widens to string[]; the keys are the proposal's own.
     for (const key of Object.keys(proposed) as (keyof ProposedSliders)[]) {
         if (key in FC.TUNING_SLIDERS) {

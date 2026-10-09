@@ -18,5 +18,145 @@
         "message": "Gyroflight is based on the Betaflight App by the Betaflight open source project and is distributed under the GNU General Public License v3.0."
     },
     "gyroflightSourceLink": { "message": "Gyroflight source" },
-    "gyroflightUpstreamLink": { "message": "Betaflight App source" }
+    "gyroflightUpstreamLink": { "message": "Betaflight App source" },
+    "gyrocoreChirpTitle": { "message": "GyroCore CHIRP qualification" },
+    "gyrocoreChirpIntro": {
+        "message": "Every CHIRP sweep in every embedded log, decoded with the Blackbox Viewer parser and checked by GyroCore before Betaflight Autotune may recommend or apply gains. Betaflight computes the transfer function and the recommendation; GyroCore decides whether the measurement is valid for tuning and whether Apply is allowed."
+    },
+    "gyrocoreChirpStateNoChirp": { "message": "NO CHIRP" },
+    "gyrocoreChirpStateRejected": { "message": "REJECTED" },
+    "gyrocoreChirpStateWarn": { "message": "USABLE WITH WARNINGS" },
+    "gyrocoreChirpStateUsable": { "message": "USABLE" },
+    "gyrocoreChirpStateNoChirpText": { "message": "No CHIRP sweep was found in any of the $1 embedded logs." },
+    "gyrocoreChirpStateRejectedText": { "message": "CHIRP was found, but no measurement is valid for tuning." },
+    "gyrocoreChirpStateWarnText": { "message": "At least one measurement is valid for tuning, with warnings." },
+    "gyrocoreChirpStateUsableText": { "message": "At least one measurement is valid for tuning." },
+    "gyrocoreChirpNoChirpError": { "message": "No CHIRP sweep found in any of the $1 embedded logs." },
+    "gyrocoreChirpRejectedError": {
+        "message": "CHIRP found, but no measurement is valid for tuning and none could be analysed. See GyroCore CHIRP qualification below."
+    },
+    "gyrocoreChirpDiagnosticOnly": { "message": "Diagnostic only — not valid for tuning" },
+    "gyrocoreChirpDiagnosticAxes": {
+        "message": "Diagnostic only — not valid for tuning: $1. These plots are shown for inspection; no gains are recommended from them."
+    },
+    "gyrocoreChirpLog": { "message": "Log $1" },
+    "gyrocoreChirpLogError": { "message": "Log $1: not analysed ($2)" },
+    "gyrocoreChirpLogNoChirp": { "message": "Log $1: no CHIRP" },
+    "gyrocoreChirpColShown": { "message": "Shown" },
+    "gyrocoreChirpColLog": { "message": "Log" },
+    "gyrocoreChirpColAxis": { "message": "Axis" },
+    "gyrocoreChirpColSweep": { "message": "Sweep" },
+    "gyrocoreChirpColTime": { "message": "Time (s)" },
+    "gyrocoreChirpColSamples": { "message": "Samples" },
+    "gyrocoreChirpColRate": { "message": "Rate (Hz)" },
+    "gyrocoreChirpColCoherence": { "message": "Coherence" },
+    "gyrocoreChirpColState": { "message": "Measurement" },
+    "gyrocoreChirpColApply": { "message": "Apply" },
+    "gyrocoreChirpApplyAllowed": { "message": "allowed" },
+    "gyrocoreChirpApplyBlocked": { "message": "blocked" },
+    "gyrocoreChirpReasons": { "message": "Why" },
+    "gyrocoreChirpWarnings": { "message": "Warnings" },
+    "gyrocoreApplyBlockedTitle": { "message": "Apply Gains is blocked by GyroCore for this axis:" },
+    "gyrocoreApplyNoAxis": { "message": "Apply Gains is blocked: no measurement in this log is valid for tuning." },
+    "gyrocoreApplyBlockedError": { "message": "Apply Gains blocked by GyroCore" },
+    "gyrocoreReason_invalid_sample_rate": { "message": "No trustworthy sample rate (status: $1)." },
+    "gyrocoreReason_non_uniform_sampling": {
+        "message": "Timestamps are not uniform: only $1% of sample intervals are within ±10% of the median (needs 90%), or time runs backwards."
+    },
+    "gyrocoreReason_excessive_gaps": {
+        "message": "Significant timestamp gaps: about $1% of samples missing in $2 gaps (limit 1%)."
+    },
+    "gyrocoreReason_timestamp_gaps_present": { "message": "$1 small timestamp gaps." },
+    "gyrocoreReason_sample_rate_crosscheck": { "message": "Sample rate not confirmed by timestamps (status: $1)." },
+    "gyrocoreReason_insufficient_samples": { "message": "Not enough data: $1, needs at least $2." },
+    "gyrocoreReason_insufficient_excitation": { "message": "Insufficient excitation: setpoint RMS $1 is below $2." },
+    "gyrocoreReason_low_coherence": { "message": "Low coherence: $3 is $1, below $2." },
+    "gyrocoreReason_unusable_frequency_range": {
+        "message": "Unusable frequency coverage: $1 usable frequency bins, needs $2."
+    },
+    "gyrocoreReason_no_transfer_function": { "message": "No transfer function could be computed from this sweep." },
+    "gyrocoreReason_chirp_band_unknown_default_used": {
+        "message": "CHIRP band not in the log header; 5–100 Hz assumed."
+    },
+    "gyrocoreReason_chirp_band_near_nyquist": {
+        "message": "CHIRP band ends at $1 Hz, near the Nyquist limit ($2 Hz)."
+    },
+    "gyrocoreReason_sample_rate_contract_ok": { "message": "Sample rate confirmed." },
+    "gyrocoreReason_sample_rate_contract_mismatch": {
+        "message": "Sample-rate contract invalid: header rate and timestamp rate disagree."
+    },
+    "gyrocoreReason_sample_rate_contract_timestamp_only": {
+        "message": "Sample-rate contract invalid: the log has no usable rate headers, so the rate comes from timestamps only."
+    },
+    "gyrocoreReason_sample_rate_contract_header_only": {
+        "message": "Sample-rate contract invalid: the header rate could not be checked against timestamps."
+    },
+    "gyrocoreReason_sample_rate_contract_unusable": {
+        "message": "Sample-rate contract invalid: no trustworthy sample rate."
+    },
+    "gyrocoreReason_sample_rate_contract_unknown": {
+        "message": "Sample-rate contract invalid: the sample rate is unknown."
+    },
+    "gyrocoreReason_sample_rate_contract_betaflight_header_rate_differs": {
+        "message": "Sample-rate contract invalid: Betaflight's header-only rate ($1 Hz) differs from the measured rate ($2 Hz)."
+    },
+    "gyrocoreReason_current_tune_missing": {
+        "message": "Current $1 slider is not in the log header, so the current tune cannot be represented."
+    },
+    "gyrocoreReason_current_tune_unparseable": { "message": "Current $1 slider in the log header cannot be read." },
+    "gyrocoreReason_current_tune_zero": {
+        "message": "Current $1 slider is 0 in the log header (Betaflight would silently assume 100)."
+    },
+    "gyrocoreReason_simplified_pids_mode_off": {
+        "message": "Simplified (slider) PID mode is OFF in this log: the sliders do not set the PIDs the recommendation is for."
+    },
+    "gyrocoreReason_simplified_pids_mode_unknown": {
+        "message": "Simplified (slider) PID mode is not recorded in this log, so the recommendation cannot be shown to reach the PIDs."
+    },
+    "gyrocoreReason_yaw_not_under_slider_control": {
+        "message": "Simplified PID mode is RP: yaw is not under slider control."
+    },
+    "gyrocoreReason_simplified_dterm_filter_unknown": {
+        "message": "Simplified D-term filter mode is not recorded in this log."
+    },
+    "gyrocoreReason_simplified_dterm_filter_off": {
+        "message": "Simplified D-term filter is OFF: the D-term filter slider has no effect."
+    },
+    "gyrocoreReason_recommendation_not_produced": {
+        "message": "No recommendation: the measurement is not valid for tuning."
+    },
+    "gyrocoreReason_slider_clamp_changes_direction": {
+        "message": "$1: the recommendation asks for $2 → $3 ($4), but the 25–250 slider limit turns it into $5 ($6)."
+    },
+    "gyrocoreReason_slider_clamp_material": {
+        "message": "$1: the recommendation asks for $2 → $3, but the 25–250 slider limit turns it into $5."
+    },
+    "gyrocoreReason_slider_non_finite": { "message": "$1: the recommendation is not a finite number." },
+    "gyrocoreReason_slider_clamped": { "message": "$1: requested $3 was limited to $5 by the slider range." },
+    "gyrocoreReason_autotune_sensitivity_bound_unreachable": {
+        "message": "No slider value keeps peak sensitivity within the robustness bound: the craft is fragile beyond what one pass can repair."
+    },
+    "gyrocoreReason_autotune_sensitivity_bound_binds": {
+        "message": "Robustness (peak sensitivity), not the phase-margin target, limits the gain."
+    },
+    "gyrocoreReason_autotune_target_margin_unreachable_gain_held": {
+        "message": "The phase-margin target is not reachable; the gain is held."
+    },
+    "gyrocoreReason_autotune_no_open_loop_crossover": { "message": "No open-loop crossover inside the coherent band." },
+    "gyrocoreReason_autotune_gain_clamped_per_pass": { "message": "The gain change is limited by the per-pass range." },
+    "gyrocoreReason_apply_no_qualified_analysis": { "message": "No GyroCore-qualified analysis is loaded." },
+    "gyrocoreReason_apply_unknown_measurement": { "message": "The selected axis has no qualified measurement." },
+    "gyrocoreReason_apply_sliders_differ_from_qualified_recommendation": {
+        "message": "The sliders to apply are not the ones recommended for the qualified measurement."
+    },
+    "gyrocoreReason_apply_not_authorized": { "message": "Not authorized by GyroCore." },
+    "gyrocoreReason_fc_simplified_pids_mode_off": {
+        "message": "The connected flight controller has simplified (slider) PID mode OFF."
+    },
+    "gyrocoreReason_fc_simplified_pids_mode_unknown": {
+        "message": "The connected flight controller's simplified PID mode could not be read."
+    },
+    "gyrocoreReason_fc_yaw_not_under_slider_control": {
+        "message": "The connected flight controller's slider mode is RP: yaw is not under slider control."
+    }
 }

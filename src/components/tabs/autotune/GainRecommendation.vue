@@ -68,13 +68,19 @@
                 <span class="text-dimmed">{{ $t("autotuneApplyFromAxis") }}</span>
                 <USelect v-model="selectedAxisKey" :items="axisOptions" size="xs" class="min-w-28" />
             </label>
-            <UButton @click="onApply" size="xs" :disabled="!isConnected || !selectedAxisKey || applying">
+            <UButton
+                @click="onApply"
+                size="xs"
+                :disabled="!isConnected || !selectedAxisKey || applying || !applyAuthorization.allowed"
+            >
                 {{ $t("autotuneApplyGains") }}
             </UButton>
             <span v-if="!isConnected" class="text-sm text-dimmed" v-html="$t('autotuneConnectRequired')"></span>
             <span v-if="applied" class="text-sm text-green-500 font-bold" v-html="$t('autotuneApplied')"></span>
             <span v-if="applyError" class="text-sm text-red-500 font-bold">{{ applyError }}</span>
         </div>
+        <!-- Gyroflight: why GyroCore blocks Apply for the selected axis -->
+        <ApplyGateNotice :measurement="applyMeasurement" :authorization="applyAuthorization" />
 
         <!-- Notes on any axis where the recommendation is not simply the margin
              target met in full: the craft's phase peak caps the reachable
@@ -94,8 +100,10 @@ import { PHASE_MARGIN_PRESETS } from "@/js/blackbox/spectral_analysis";
 import type { SysConfig } from "@/js/blackbox/chirp_bbl_parser";
 import { i18n } from "@/js/localization";
 import UiBox from "../../elements/UiBox.vue";
+import ApplyGateNotice from "@/gyrocore/components/ApplyGateNotice.vue";
+import { useApplyGate } from "@/gyrocore/composables/useApplyGate";
 
-type Gains = AxisResult["gains"];
+type Gains = NonNullable<AxisResult["gains"]>;
 type ProposedSliders = Gains["proposed"];
 type NumericGainKey = { [K in keyof Gains]: Gains[K] extends number ? K : never }[keyof Gains];
 type NumericConfigKey = { [K in keyof SysConfig]-?: SysConfig[K] extends number ? K : never }[keyof SysConfig];
@@ -153,6 +161,11 @@ const applyError = ref("");
 const selectedAxisKey = ref<AxisName | null>(null);
 
 const isConnected = computed(() => connectionStore.connectionValid);
+const {
+    measurement: applyMeasurement,
+    measurementId: applyMeasurementId,
+    authorization: applyAuthorization,
+} = useApplyGate(selectedAxisKey);
 
 const MARGIN_OPTIONS = [
     { value: PHASE_MARGIN_PRESETS.AGGRESSIVE, labelKey: "autotuneMarginAggressive" },
@@ -339,7 +352,8 @@ const visibleAxisList = computed(() => {
     if (!axes) {
         return [];
     }
-    return AXIS_DEFS.filter((a) => axes[a.key] && store.visibleAxes[a.key]);
+    // Gyroflight: an axis GyroCore rejected has no gains and is not offered here.
+    return AXIS_DEFS.filter((a) => axes[a.key]?.gains && store.visibleAxes[a.key]);
 });
 
 // Reset the "applied" indicator and select a default axis each time a new
@@ -487,7 +501,7 @@ async function onApply() {
         return;
     }
     const proposed = store.analysisResult?.axes?.[selectedAxisKey.value]?.gains?.proposed;
-    if (!proposed) {
+    if (!proposed || !applyAuthorization.value.allowed) {
         return;
     }
 
@@ -508,7 +522,7 @@ async function onApply() {
     applied.value = false;
     applying.value = true;
     try {
-        await applyGains(proposed);
+        await applyGains(proposed, applyMeasurementId.value);
         applied.value = true;
     } catch (err) {
         // `err?.message || err` for a caught value of unknown type.

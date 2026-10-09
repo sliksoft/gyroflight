@@ -2,11 +2,21 @@
 
 GyroCore is the Redline Dynamics analysis, safety and tuning engine. It is being
 migrated into Gyroflight (the Betaflight-based app) from the separate GyroCore
-repository; see `docs/gyrocore/MIGRATION_MAP.md`. Nothing has been migrated yet.
+repository; see `docs/gyrocore/MIGRATION_MAP.md`. Migrated so far: the CHIRP qualification gate in
+front of Betaflight Autotune (`docs/gyrocore/CHIRP_QUALIFICATION.md`).
 
 Engine code consumes upstream Betaflight modules (Blackbox `FlightLog`, the
 Autotune chirp parser and results, MSP via stores) and never replaces them.
 Application glue (tabs, strings, product policy) belongs in `src/gyroflight/`.
+
+## Subdirectories
+
+| Path           | Contents                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate |
+| `components/`  | `ChirpQualificationPanel.vue`, `ApplyGateNotice.vue`                                             |
+| `composables/` | `useApplyGate`                                                                                   |
+| `stores/`      | `chirpQualification` (every measurement, and which ones Autotune shows)                          |
 
 ## Planned subdirectories (created when first used)
 
@@ -16,8 +26,5 @@ Application glue (tabs, strings, product policy) belongs in `src/gyroflight/`.
 | `safety/`      | Safety validation of proposed tunes                                |
 | `compare/`     | Log / tune comparison                                              |
 | `integration/` | Adapters onto upstream modules (blackbox, autotune, MSP)           |
-| `components/`  | GyroCore Vue components (evidence, review panels)                  |
-| `composables/` | GyroCore composables                                               |
-| `stores/`      | GyroCore Pinia stores                                              |
 
 Tests go in `test/gyrocore/`.

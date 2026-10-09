@@ -58,6 +58,9 @@ import GainRecommendation from "../../src/components/tabs/autotune/GainRecommend
 import UApp from "@nuxt/ui/components/App.vue";
 import { useAutotuneStore } from "../../src/stores/autotune";
 import type { AnalysisResult } from "../../src/composables/useAutotune";
+// Gyroflight: Apply requires a GyroCore-qualified measurement (docs/gyrocore/CHIRP_QUALIFICATION.md).
+import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
+import { qualifiedReportFor } from "../gyrocore/harness/qualifiedReport";
 
 const PROPOSED = {
     slider_master_multiplier: 110,
@@ -87,6 +90,7 @@ function mountAndSeed(): Mounted {
     setActivePinia(pinia);
     const store = useAutotuneStore();
     store.analysisResult = FAKE_RESULT as unknown as AnalysisResult;
+    useChirpQualificationStore().setReport(qualifiedReportFor("roll", PROPOSED));
 
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -132,7 +136,7 @@ describe("autotune apply confirmation gate", () => {
         await flush();
         await flush();
         expect(applyGains).toHaveBeenCalledTimes(1);
-        expect(applyGains).toHaveBeenCalledWith(PROPOSED);
+        expect(applyGains).toHaveBeenCalledWith(PROPOSED, "log1-seg1");
     });
 
     it("declined confirmation leaves the flight controller untouched", async () => {
