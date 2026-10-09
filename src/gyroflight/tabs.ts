@@ -43,3 +43,10 @@ export const gyroflightSidebarItems: GyroflightSidebarItem[] = [
 
 /** Tabs that must be reachable with or without a flight controller. */
 export const gyroflightAllowedTabs = [GYROFLIGHT_TAB_KEY];
+
+
+/**
+ * Product navigation policy. Upstream implementations stay in the tree; these
+ * entries are simply not advertised in the Gyroflight sidebar.
+ */
+export const gyroflightHiddenSidebarKeys = new Set(["preflight", "flight_plan", "flight_plan_connected"]);
