@@ -1,4 +1,7 @@
 <template>
+    <p v-if="productLock.length" class="text-sm mt-2 font-bold" role="status" data-gyrocore="product-apply-locked">
+        {{ $t("gyrocoreProductApplyPending") }}
+    </p>
     <div v-if="!authorization.allowed" class="text-sm mt-2" role="status" data-gyrocore="apply-blocked">
         <p class="font-bold text-red-500">
             {{ composite ? $t("gyrocoreApplyBlockedTitle") : $t("gyrocoreApplyNoComposite") }}
@@ -19,5 +22,7 @@ import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 defineProps<{
     composite: CompositeRecommendation | null;
     authorization: CompositeAuthorization;
+    /** Product release lock (productLock/productApply.ts): not a rejection of the tune. */
+    productLock: string[];
 }>();
 </script>

@@ -28,7 +28,8 @@
  * tune. This module turns the qualified per-axis Betaflight recommendations
  * of one log into one composite through GyroCore's merge (merge.ts), and adds
  * the checks GyroCore runs after the merge (autotune/absolute.py,
- * safety/output.py) plus Gyroflight's final slider-limit guard.
+ * safety/output.py) plus Gyroflight's axis-coverage rule and final
+ * slider-limit guard.
  *
  * Per log only: the current tune, and so every recommendation's baseline,
  * belongs to one log (GyroCore merges one log's system-ID run).
@@ -45,6 +46,7 @@ import {
     type SimplifiedSliders,
     type SliderKey,
 } from "./merge";
+import { axisCoverage, type AxisCoverage } from "./coverage";
 
 type Proposed = GainRecommendation["proposed"];
 type Direction = "increase" | "decrease" | "hold";
@@ -98,6 +100,8 @@ export interface CompositeRecommendation {
     /** Logged firmware sliders: the baseline every recommendation scaled from. */
     current: SimplifiedSliders;
     merge: GlobalSliderMerge;
+    /** Axis-coverage authorization under the logged slider mode (coverage.ts), after the merge. */
+    coverage: AxisCoverage;
     /** The global slider set Apply would write (Autotune keys); null unless the merge resolved. */
     final: Proposed | null;
     sliders: CompositeSlider[];
@@ -326,6 +330,11 @@ export function buildComposite(
         }
     }
 
+    // Gyroflight axis coverage: a merged result is still not applicable unless
+    // every axis the logged slider mode drives has a selected, qualified source.
+    const coverage = axisCoverage(current.pids_mode, sources);
+    blocked.push(...coverage.blocked);
+
     // Final slider-limit guard on the global values: no direction change and
     // no clamp beyond rounding against any participating axis's request.
     const final = merge.proposed_sliders ? ({ ...merge.proposed_sliders } as Proposed) : null;
@@ -385,6 +394,7 @@ export function buildComposite(
         sources,
         current,
         merge,
+        coverage,
         final,
         sliders,
         blocked: uniqueBlocked,

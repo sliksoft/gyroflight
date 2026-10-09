@@ -159,6 +159,15 @@
     "gyrocoreReason_fc_yaw_not_under_slider_control": {
         "message": "The connected flight controller's slider mode is RP: yaw is not under slider control."
     },
+    "gyrocoreReason_fc_missing_axis_evidence": {
+        "message": "The connected flight controller's slider mode drives $1, but the global recommendation has no qualified measurement for that axis."
+    },
+    "gyrocoreReason_fc_axis_coverage_mode_off": {
+        "message": "The connected flight controller has simplified (slider) PID mode OFF."
+    },
+    "gyrocoreReason_fc_axis_coverage_mode_unknown": {
+        "message": "The connected flight controller's simplified PID mode could not be read."
+    },
     "gyrocoreReason_log_malformed_rows_skipped": {
         "message": "Some frames of this log could not be read and were skipped."
     },
@@ -212,6 +221,21 @@
     "gyrocoreGlobal_repeated_axis_requires_selection": {
         "message": "$1 has more than one qualified sweep. Choose one explicitly in the CHIRP qualification table; GyroCore has no rule to pick for you."
     },
+    "gyrocoreGlobal_missing_axis_evidence": {
+        "message": "The slider mode drives $1, but no qualified, selected measurement of that axis is in this log. The sliders are global, so every axis they drive needs its own evidence."
+    },
+    "gyrocoreGlobal_axis_coverage_mode_off": {
+        "message": "Simplified (slider) PID mode is OFF in this log: the sliders drive no axis."
+    },
+    "gyrocoreGlobal_axis_coverage_mode_unknown": {
+        "message": "The log does not record the simplified PID mode, so the axes the sliders drive are unknown."
+    },
+    "gyrocoreGlobalCoverage": { "message": "Axis coverage:" },
+    "gyrocoreGlobalCoverageMode": { "message": "slider mode $1" },
+    "gyrocoreGlobalCoverageRequired": { "message": "required" },
+    "gyrocoreGlobalCoverageCovered": { "message": "covered" },
+    "gyrocoreGlobalCoverageMissing": { "message": "missing" },
+    "gyrocoreProductApplyPending": { "message": "Apply is disabled until Gyroflight Safety validation is complete." },
     "gyrocoreGlobal_axis_excluded": { "message": "Left out of the global recommendation: $1" },
     "gyrocoreGlobal_rejected_repeat_not_used": { "message": "A rejected sweep was not used: $1" },
     "gyrocoreGlobal_proposed_pid_sliders_incomplete": { "message": "The logged slider tune is incomplete: $1" },
