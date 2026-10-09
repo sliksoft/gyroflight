@@ -23,6 +23,7 @@ import ShortUniqueId from "short-unique-id";
 import { set as setConfig, get as getConfig } from "./ConfigStorage";
 import GUI from "./gui";
 import CONFIGURATOR from "./data_storage";
+import { UPSTREAM_ANALYTICS_ENABLED } from "../gyroflight/policy";
 
 export interface AnalyticsSettings {
     sessionId: string;
@@ -124,7 +125,7 @@ export class Analytics {
     }
 
     send(name: string, properties: unknown) {
-        if (this._optOut) {
+        if (this._optOut || !UPSTREAM_ANALYTICS_ENABLED) {
             return;
         }
 

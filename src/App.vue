@@ -6,7 +6,7 @@
             <div v-if="isLandingTab" class="mobile-topbar" :class="{ 'mobile-topbar--hidden': topbarHidden }">
                 <div class="mobile-topbar__logo" :title="logoTooltip" aria-hidden="true"></div>
             </div>
-            <UserSession is-compact class="floating-account" />
+            <UserSession v-if="BETAFLIGHT_ACCOUNTS_ENABLED" is-compact class="floating-account" />
             <div id="tab-content-container" :class="{ 'has-mobile-topbar': isLandingTab }">
                 <div class="tab_container" :class="{ reveal: isMobileSidebarOpen }">
                     <betaflight-logo
@@ -56,6 +56,7 @@
 
 <script setup lang="ts">
 import { isAndroid } from "@/js/utils/checkCompatibility.js";
+import { BETAFLIGHT_ACCOUNTS_ENABLED } from "@/gyroflight/policy";
 import { computed, nextTick, provide, reactive, ref, shallowRef, watch } from "vue";
 import { useMediaQuery } from "@vueuse/core";
 import ConnectButton from "./components/device-picker/ConnectButton.vue";

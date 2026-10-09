@@ -70,16 +70,11 @@ Gyroflight uses the **normal Betaflight Firmware Flasher and build infrastructur
 
 ## Deployment notes for https://app.gyrocore.dev/
 
-Not acted on in the foundation work; listed so they are decided deliberately.
-
 - `vite.config.js` uses `base: "./"`, so the build works at the domain root. The manifest's `start_url`
   and `scope` are `./`. Icons are referenced as `/images/pwa/…`.
-- **Login / cloud account features will not work from our origin.** `LoginApi.js` (`login.betaflight.com`,
-  WebAuthn) and `UserApi.js` are bound to Betaflight's relying party and CORS policy. Anonymous cloud
-  build and flash should still work, but must be checked against `build.betaflight.com` CORS from the
+- **Betaflight accounts (login, passkeys) are hidden** because they cannot work from our origin, and
+  **upstream analytics are disabled**. See UPSTREAM.md, "Privacy and accounts".
+- Anonymous cloud build and flash must still be checked against `build.betaflight.com` CORS from the
   deployed origin.
-- **Analytics:** `Analytics.ts` sends usage events to `analytics.betaflight.com` with
-  `appName = productName` (now "Gyroflight"), and the opt-out text links Betaflight's privacy policy.
-  Decide whether to disable or redirect this before public deployment.
 - Upstream deploy workflows target Betaflight's Cloudflare project; a Gyroflight deploy needs its own
   workflow (see UPSTREAM.md → CI).
