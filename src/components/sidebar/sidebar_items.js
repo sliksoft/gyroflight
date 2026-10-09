@@ -1,5 +1,5 @@
 import { configHasBuildOption } from "../../composables/useBuildOptions";
-import { gyroflightSidebarItems } from "../../gyroflight/tabs";
+import { gyroflightHiddenSidebarKeys, gyroflightSidebarItems } from "../../gyroflight/tabs";
 
 export const sidebarItems = [
     { key: "landing", mode: "disconnected", i18n: "tabLanding", icon: "i-lucide-home" },
@@ -54,6 +54,9 @@ export const sidebarItems = [
 ];
 
 export function isItemVisible(item, ctx) {
+    if (gyroflightHiddenSidebarKeys.has(item.key)) {
+        return false;
+    }
     if (item.expert && !ctx.expertMode) {
         return false;
     }
