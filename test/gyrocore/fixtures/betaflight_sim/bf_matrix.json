@@ -1,0 +1,2449 @@
+{
+ "firmware": {
+  "repo": "https://github.com/betaflight/betaflight",
+  "sha": "4fc1520c5a5decddc8ef07ad57c0e766ea8747ba",
+  "file": "src/main/config/simplified_tuning.c"
+ },
+ "variants": {
+  "fw_real_f405": "GROUND TRUTH: the real calculateNewPidValues.lto_priv.0 at 0x08014574 from betaflight_STM32F405.elf built from 4fc1520c with Arm GNU Toolchain 13.3.Rel1 (13.3.1 20240614, the version Betaflight requires), executed under unicorn 2.1.4 (FPSCR=0)",
+  "fw_arm_emul": "x86 float32 replay of the disassembled op sequence (x/100->x*0.01f, reassociated products, vfms/vfma); 0 mismatches vs fw_real_f405 over 1,001,681 slider configs x 3 axes",
+  "fw_strict": "verbatim C, strict IEEE float32, x86-64 -O2 -fno-fast-math -ffp-contract=off \u2014 NOT what ships",
+  "app_ts": "Gyroflight src/js/simplifiedTuning.ts logic in double (C replica); app_ts_node = actual TS run in node"
+ },
+ "note_mode": "axes 0..simplified_pids_mode are recomputed; RP(1) leaves yaw PIDs/FF/d_max unchanged (yaw shown as null); OFF(0) recomputes nothing",
+ "pid_configs": [
+  {
+   "name": "defaults_all_100_RPY",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "app_ts": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "dMax": 46
+     },
+     "fw_real_f405": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "fw_arm_emul": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "pi138_ff138",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 138,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 138,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 62,
+      "I": 110,
+      "D": 30,
+      "F": 165,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 62,
+      "I": 110,
+      "D": 30,
+      "F": 165,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 62,
+      "I": 110,
+      "D": 30,
+      "F": 165,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 62,
+      "I": 110,
+      "D": 30,
+      "F": 165,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 62,
+      "I": 110,
+      "D": 30,
+      "F": 165,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 64,
+      "I": 115,
+      "D": 34,
+      "F": 172,
+      "d_max": 46
+     },
+     "app_ts": {
+      "P": 64,
+      "I": 115,
+      "D": 34,
+      "F": 172,
+      "d_max": 46
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 64,
+      "I": 115,
+      "D": 34,
+      "F": 172,
+      "dMax": 46
+     },
+     "fw_real_f405": {
+      "P": 64,
+      "I": 115,
+      "D": 34,
+      "F": 172,
+      "d_max": 46
+     },
+     "fw_arm_emul": {
+      "P": 64,
+      "I": 115,
+      "D": 34,
+      "F": 172,
+      "d_max": 46
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 62,
+      "I": 110,
+      "D": 0,
+      "F": 165,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 62,
+      "I": 110,
+      "D": 0,
+      "F": 165,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 62,
+      "I": 110,
+      "D": 0,
+      "F": 165,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 62,
+      "I": 110,
+      "D": 0,
+      "F": 165,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 62,
+      "I": 110,
+      "D": 0,
+      "F": 165,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "master50",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 50,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 22,
+      "I": 40,
+      "D": 15,
+      "F": 60,
+      "d_max": 20
+     },
+     "app_ts": {
+      "P": 22,
+      "I": 40,
+      "D": 15,
+      "F": 60,
+      "d_max": 20
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 22,
+      "I": 40,
+      "D": 15,
+      "F": 60,
+      "dMax": 20
+     },
+     "fw_real_f405": {
+      "P": 22,
+      "I": 40,
+      "D": 15,
+      "F": 60,
+      "d_max": 20
+     },
+     "fw_arm_emul": {
+      "P": 22,
+      "I": 40,
+      "D": 15,
+      "F": 60,
+      "d_max": 20
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 23,
+      "I": 42,
+      "D": 17,
+      "F": 62,
+      "d_max": 23
+     },
+     "app_ts": {
+      "P": 23,
+      "I": 42,
+      "D": 17,
+      "F": 62,
+      "d_max": 23
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 23,
+      "I": 42,
+      "D": 17,
+      "F": 62,
+      "dMax": 23
+     },
+     "fw_real_f405": {
+      "P": 23,
+      "I": 42,
+      "D": 17,
+      "F": 62,
+      "d_max": 23
+     },
+     "fw_arm_emul": {
+      "P": 23,
+      "I": 42,
+      "D": 17,
+      "F": 62,
+      "d_max": 23
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 22,
+      "I": 40,
+      "D": 0,
+      "F": 60,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 22,
+      "I": 40,
+      "D": 0,
+      "F": 60,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 22,
+      "I": 40,
+      "D": 0,
+      "F": 60,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 22,
+      "I": 40,
+      "D": 0,
+      "F": 60,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 22,
+      "I": 40,
+      "D": 0,
+      "F": 60,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "master200",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 200,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 90,
+      "I": 160,
+      "D": 60,
+      "F": 240,
+      "d_max": 80
+     },
+     "app_ts": {
+      "P": 90,
+      "I": 160,
+      "D": 60,
+      "F": 240,
+      "d_max": 80
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 90,
+      "I": 160,
+      "D": 60,
+      "F": 240,
+      "dMax": 80
+     },
+     "fw_real_f405": {
+      "P": 90,
+      "I": 160,
+      "D": 60,
+      "F": 240,
+      "d_max": 80
+     },
+     "fw_arm_emul": {
+      "P": 90,
+      "I": 160,
+      "D": 60,
+      "F": 240,
+      "d_max": 80
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 94,
+      "I": 168,
+      "D": 68,
+      "F": 250,
+      "d_max": 92
+     },
+     "app_ts": {
+      "P": 94,
+      "I": 168,
+      "D": 68,
+      "F": 250,
+      "d_max": 92
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 94,
+      "I": 168,
+      "D": 68,
+      "F": 250,
+      "dMax": 92
+     },
+     "fw_real_f405": {
+      "P": 94,
+      "I": 168,
+      "D": 68,
+      "F": 250,
+      "d_max": 92
+     },
+     "fw_arm_emul": {
+      "P": 94,
+      "I": 168,
+      "D": 68,
+      "F": 250,
+      "d_max": 92
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 90,
+      "I": 160,
+      "D": 0,
+      "F": 240,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 90,
+      "I": 160,
+      "D": 0,
+      "F": 240,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 90,
+      "I": 160,
+      "D": 0,
+      "F": 240,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 90,
+      "I": 160,
+      "D": 0,
+      "F": 240,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 90,
+      "I": 160,
+      "D": 0,
+      "F": 240,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "d150",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 150,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 45,
+      "F": 120,
+      "d_max": 60
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 45,
+      "F": 120,
+      "d_max": 60
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 45,
+      "F": 120,
+      "dMax": 60
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 45,
+      "F": 120,
+      "d_max": 60
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 45,
+      "F": 120,
+      "d_max": 60
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 47,
+      "I": 84,
+      "D": 51,
+      "F": 125,
+      "d_max": 69
+     },
+     "app_ts": {
+      "P": 47,
+      "I": 84,
+      "D": 51,
+      "F": 125,
+      "d_max": 69
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 47,
+      "I": 84,
+      "D": 51,
+      "F": 125,
+      "dMax": 69
+     },
+     "fw_real_f405": {
+      "P": 47,
+      "I": 84,
+      "D": 51,
+      "F": 125,
+      "d_max": 69
+     },
+     "fw_arm_emul": {
+      "P": 47,
+      "I": 84,
+      "D": 51,
+      "F": 125,
+      "d_max": 69
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "i150",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 150,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 120,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 120,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 120,
+      "D": 30,
+      "F": 120,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 120,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 120,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 47,
+      "I": 126,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "app_ts": {
+      "P": 47,
+      "I": 126,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 47,
+      "I": 126,
+      "D": 34,
+      "F": 125,
+      "dMax": 46
+     },
+     "fw_real_f405": {
+      "P": 47,
+      "I": 126,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "fw_arm_emul": {
+      "P": 47,
+      "I": 126,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 120,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 120,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 120,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 120,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 120,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "pitch_rpr120_pp110",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 120,
+    "simplified_pitch_pi_gain": 110
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 51,
+      "I": 92,
+      "D": 40,
+      "F": 137,
+      "d_max": 55
+     },
+     "app_ts": {
+      "P": 51,
+      "I": 92,
+      "D": 40,
+      "F": 137,
+      "d_max": 55
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 51,
+      "I": 92,
+      "D": 40,
+      "F": 137,
+      "dMax": 55
+     },
+     "fw_real_f405": {
+      "P": 51,
+      "I": 92,
+      "D": 40,
+      "F": 137,
+      "d_max": 55
+     },
+     "fw_arm_emul": {
+      "P": 51,
+      "I": 92,
+      "D": 40,
+      "F": 137,
+      "d_max": 55
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "pitch_rpr80_pp90",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 80,
+    "simplified_pitch_pi_gain": 90
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 42,
+      "I": 75,
+      "D": 27,
+      "F": 112,
+      "d_max": 36
+     },
+     "app_ts": {
+      "P": 42,
+      "I": 75,
+      "D": 27,
+      "F": 112,
+      "d_max": 36
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 42,
+      "I": 75,
+      "D": 27,
+      "F": 112,
+      "dMax": 36
+     },
+     "fw_real_f405": {
+      "P": 42,
+      "I": 75,
+      "D": 27,
+      "F": 112,
+      "d_max": 36
+     },
+     "fw_arm_emul": {
+      "P": 42,
+      "I": 75,
+      "D": 27,
+      "F": 112,
+      "d_max": 36
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "dmax_gain0",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 0,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 30
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 30
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "dMax": 30
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 30
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 30
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 34
+     },
+     "app_ts": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 34
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "dMax": 34
+     },
+     "fw_real_f405": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 34
+     },
+     "fw_arm_emul": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 34
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "dmax_gain200",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 200,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 50
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 50
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "dMax": 50
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 50
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 120,
+      "d_max": 50
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 57
+     },
+     "app_ts": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 58
+     },
+     "all_agree": false,
+     "app_ts_node": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "dMax": 58
+     },
+     "fw_real_f405": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 58
+     },
+     "fw_arm_emul": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 125,
+      "d_max": 58
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "ff0",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 0,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 0,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 0,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 0,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 0,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 30,
+      "F": 0,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 0,
+      "d_max": 46
+     },
+     "app_ts": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 0,
+      "d_max": 46
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 0,
+      "dMax": 46
+     },
+     "fw_real_f405": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 0,
+      "d_max": 46
+     },
+     "fw_arm_emul": {
+      "P": 47,
+      "I": 84,
+      "D": 34,
+      "F": 0,
+      "d_max": 46
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 0,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 0,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 0,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 0,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 45,
+      "I": 80,
+      "D": 0,
+      "F": 0,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "master110",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 110,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 49,
+      "I": 88,
+      "D": 33,
+      "F": 132,
+      "d_max": 44
+     },
+     "app_ts": {
+      "P": 49,
+      "I": 88,
+      "D": 33,
+      "F": 132,
+      "d_max": 44
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 49,
+      "I": 88,
+      "D": 33,
+      "F": 132,
+      "dMax": 44
+     },
+     "fw_real_f405": {
+      "P": 49,
+      "I": 88,
+      "D": 33,
+      "F": 132,
+      "d_max": 44
+     },
+     "fw_arm_emul": {
+      "P": 49,
+      "I": 88,
+      "D": 33,
+      "F": 132,
+      "d_max": 44
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 51,
+      "I": 92,
+      "D": 37,
+      "F": 137,
+      "d_max": 50
+     },
+     "app_ts": {
+      "P": 51,
+      "I": 92,
+      "D": 37,
+      "F": 137,
+      "d_max": 50
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 51,
+      "I": 92,
+      "D": 37,
+      "F": 137,
+      "dMax": 50
+     },
+     "fw_real_f405": {
+      "P": 51,
+      "I": 92,
+      "D": 37,
+      "F": 137,
+      "d_max": 50
+     },
+     "fw_arm_emul": {
+      "P": 51,
+      "I": 92,
+      "D": 37,
+      "F": 137,
+      "d_max": 50
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 49,
+      "I": 88,
+      "D": 0,
+      "F": 132,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 49,
+      "I": 88,
+      "D": 0,
+      "F": 132,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 49,
+      "I": 88,
+      "D": 0,
+      "F": 132,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 49,
+      "I": 88,
+      "D": 0,
+      "F": 132,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 49,
+      "I": 88,
+      "D": 0,
+      "F": 132,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "master125_pi125_i80_d110_ff90_dg50",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 125,
+    "simplified_pi_gain": 125,
+    "simplified_i_gain": 80,
+    "simplified_d_gain": 110,
+    "simplified_feedforward_gain": 90,
+    "simplified_d_max_gain": 50,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 70,
+      "I": 100,
+      "D": 41,
+      "F": 135,
+      "d_max": 48
+     },
+     "app_ts": {
+      "P": 70,
+      "I": 100,
+      "D": 41,
+      "F": 135,
+      "d_max": 48
+     },
+     "all_agree": false,
+     "app_ts_node": {
+      "P": 70,
+      "I": 100,
+      "D": 41,
+      "F": 135,
+      "dMax": 48
+     },
+     "fw_real_f405": {
+      "P": 70,
+      "I": 99,
+      "D": 41,
+      "F": 135,
+      "d_max": 48
+     },
+     "fw_arm_emul": {
+      "P": 70,
+      "I": 99,
+      "D": 41,
+      "F": 135,
+      "d_max": 48
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 73,
+      "I": 105,
+      "D": 46,
+      "F": 140,
+      "d_max": 55
+     },
+     "app_ts": {
+      "P": 73,
+      "I": 105,
+      "D": 46,
+      "F": 140,
+      "d_max": 55
+     },
+     "all_agree": false,
+     "app_ts_node": {
+      "P": 73,
+      "I": 105,
+      "D": 46,
+      "F": 140,
+      "dMax": 55
+     },
+     "fw_real_f405": {
+      "P": 73,
+      "I": 104,
+      "D": 46,
+      "F": 140,
+      "d_max": 55
+     },
+     "fw_arm_emul": {
+      "P": 73,
+      "I": 104,
+      "D": 46,
+      "F": 140,
+      "d_max": 55
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 70,
+      "I": 100,
+      "D": 0,
+      "F": 135,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 70,
+      "I": 100,
+      "D": 0,
+      "F": 135,
+      "d_max": 0
+     },
+     "all_agree": false,
+     "app_ts_node": {
+      "P": 70,
+      "I": 100,
+      "D": 0,
+      "F": 135,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 70,
+      "I": 99,
+      "D": 0,
+      "F": 135,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 70,
+      "I": 99,
+      "D": 0,
+      "F": 135,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "all200",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 200,
+    "simplified_pi_gain": 200,
+    "simplified_i_gain": 200,
+    "simplified_d_gain": 200,
+    "simplified_feedforward_gain": 200,
+    "simplified_d_max_gain": 200,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 200,
+    "simplified_pitch_pi_gain": 200
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 180,
+      "I": 250,
+      "D": 120,
+      "F": 480,
+      "d_max": 200
+     },
+     "app_ts": {
+      "P": 180,
+      "I": 250,
+      "D": 120,
+      "F": 480,
+      "d_max": 200
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 180,
+      "I": 250,
+      "D": 120,
+      "F": 480,
+      "dMax": 200
+     },
+     "fw_real_f405": {
+      "P": 180,
+      "I": 250,
+      "D": 120,
+      "F": 480,
+      "d_max": 200
+     },
+     "fw_arm_emul": {
+      "P": 180,
+      "I": 250,
+      "D": 120,
+      "F": 480,
+      "d_max": 200
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 250,
+      "I": 250,
+      "D": 250,
+      "F": 1000,
+      "d_max": 250
+     },
+     "app_ts": {
+      "P": 250,
+      "I": 250,
+      "D": 250,
+      "F": 1000,
+      "d_max": 250
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 250,
+      "I": 250,
+      "D": 250,
+      "F": 1000,
+      "dMax": 250
+     },
+     "fw_real_f405": {
+      "P": 250,
+      "I": 250,
+      "D": 250,
+      "F": 1000,
+      "d_max": 250
+     },
+     "fw_arm_emul": {
+      "P": 250,
+      "I": 250,
+      "D": 250,
+      "F": 1000,
+      "d_max": 250
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 180,
+      "I": 250,
+      "D": 0,
+      "F": 480,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 180,
+      "I": 250,
+      "D": 0,
+      "F": 480,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 180,
+      "I": 250,
+      "D": 0,
+      "F": 480,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 180,
+      "I": 250,
+      "D": 0,
+      "F": 480,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 180,
+      "I": 250,
+      "D": 0,
+      "F": 480,
+      "d_max": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "RP_mode_master150",
+   "sliders": {
+    "simplified_pids_mode": 1,
+    "simplified_master_multiplier": 150,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 67,
+      "I": 120,
+      "D": 45,
+      "F": 180,
+      "d_max": 60
+     },
+     "app_ts": {
+      "P": 67,
+      "I": 120,
+      "D": 45,
+      "F": 180,
+      "d_max": 60
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 67,
+      "I": 120,
+      "D": 45,
+      "F": 180,
+      "dMax": 60
+     },
+     "fw_real_f405": {
+      "P": 67,
+      "I": 120,
+      "D": 45,
+      "F": 180,
+      "d_max": 60
+     },
+     "fw_arm_emul": {
+      "P": 67,
+      "I": 120,
+      "D": 45,
+      "F": 180,
+      "d_max": 60
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 70,
+      "I": 126,
+      "D": 51,
+      "F": 187,
+      "d_max": 69
+     },
+     "app_ts": {
+      "P": 70,
+      "I": 126,
+      "D": 51,
+      "F": 187,
+      "d_max": 69
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 70,
+      "I": 126,
+      "D": 51,
+      "F": 187,
+      "dMax": 69
+     },
+     "fw_real_f405": {
+      "P": 70,
+      "I": 126,
+      "D": 51,
+      "F": 187,
+      "d_max": 69
+     },
+     "fw_arm_emul": {
+      "P": 70,
+      "I": 126,
+      "D": 51,
+      "F": 187,
+      "d_max": 69
+     }
+    },
+    "yaw": null
+   }
+  },
+  {
+   "name": "OFF_mode_master150",
+   "sliders": {
+    "simplified_pids_mode": 0,
+    "simplified_master_multiplier": 150,
+    "simplified_pi_gain": 100,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": null,
+    "pitch": null,
+    "yaw": null
+   }
+  },
+  {
+   "name": "pi250_outside_cli_range_msp_only",
+   "sliders": {
+    "simplified_pids_mode": 2,
+    "simplified_master_multiplier": 100,
+    "simplified_pi_gain": 250,
+    "simplified_i_gain": 100,
+    "simplified_d_gain": 100,
+    "simplified_feedforward_gain": 100,
+    "simplified_d_max_gain": 100,
+    "simplified_pitch_d_gain(roll_pitch_ratio)": 100,
+    "simplified_pitch_pi_gain": 100
+   },
+   "axes": {
+    "roll": {
+     "fw_strict": {
+      "P": 112,
+      "I": 200,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "app_ts": {
+      "P": 112,
+      "I": 200,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 112,
+      "I": 200,
+      "D": 30,
+      "F": 120,
+      "dMax": 40
+     },
+     "fw_real_f405": {
+      "P": 112,
+      "I": 200,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     },
+     "fw_arm_emul": {
+      "P": 112,
+      "I": 200,
+      "D": 30,
+      "F": 120,
+      "d_max": 40
+     }
+    },
+    "pitch": {
+     "fw_strict": {
+      "P": 117,
+      "I": 210,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "app_ts": {
+      "P": 117,
+      "I": 210,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 117,
+      "I": 210,
+      "D": 34,
+      "F": 125,
+      "dMax": 46
+     },
+     "fw_real_f405": {
+      "P": 117,
+      "I": 210,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     },
+     "fw_arm_emul": {
+      "P": 117,
+      "I": 210,
+      "D": 34,
+      "F": 125,
+      "d_max": 46
+     }
+    },
+    "yaw": {
+     "fw_strict": {
+      "P": 112,
+      "I": 200,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "app_ts": {
+      "P": 112,
+      "I": 200,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "all_agree": true,
+     "app_ts_node": {
+      "P": 112,
+      "I": 200,
+      "D": 0,
+      "F": 120,
+      "dMax": 0
+     },
+     "fw_real_f405": {
+      "P": 112,
+      "I": 200,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     },
+     "fw_arm_emul": {
+      "P": 112,
+      "I": 200,
+      "D": 0,
+      "F": 120,
+      "d_max": 0
+     }
+    }
+   }
+  }
+ ],
+ "filter_configs": [
+  {
+   "multiplier": 0,
+   "cli_legal": false,
+   "dterm": {
+    "lpf1_dyn_min_hz": 0,
+    "lpf1_dyn_max_hz": 0,
+    "lpf1_static_hz": 0,
+    "lpf2_static_hz": 0
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 0,
+    "lpf1_dyn_max_hz": 0,
+    "lpf1_static_hz": 0,
+    "lpf2_static_hz": 0
+   }
+  },
+  {
+   "multiplier": 1,
+   "cli_legal": false,
+   "dterm": {
+    "lpf1_dyn_min_hz": 0,
+    "lpf1_dyn_max_hz": 1,
+    "lpf1_static_hz": 0,
+    "lpf2_static_hz": 1
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 2,
+    "lpf1_dyn_max_hz": 5,
+    "lpf1_static_hz": 2,
+    "lpf2_static_hz": 5
+   }
+  },
+  {
+   "multiplier": 5,
+   "cli_legal": false,
+   "dterm": {
+    "lpf1_dyn_min_hz": 3,
+    "lpf1_dyn_max_hz": 7,
+    "lpf1_static_hz": 3,
+    "lpf2_static_hz": 7
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 12,
+    "lpf1_dyn_max_hz": 25,
+    "lpf1_static_hz": 12,
+    "lpf2_static_hz": 25
+   }
+  },
+  {
+   "multiplier": 10,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 7,
+    "lpf1_dyn_max_hz": 15,
+    "lpf1_static_hz": 7,
+    "lpf2_static_hz": 15
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 25,
+    "lpf1_dyn_max_hz": 50,
+    "lpf1_static_hz": 25,
+    "lpf2_static_hz": 50
+   }
+  },
+  {
+   "multiplier": 25,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 18,
+    "lpf1_dyn_max_hz": 37,
+    "lpf1_static_hz": 18,
+    "lpf2_static_hz": 37
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 62,
+    "lpf1_dyn_max_hz": 125,
+    "lpf1_static_hz": 62,
+    "lpf2_static_hz": 125
+   }
+  },
+  {
+   "multiplier": 50,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 37,
+    "lpf1_dyn_max_hz": 75,
+    "lpf1_static_hz": 37,
+    "lpf2_static_hz": 75
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 125,
+    "lpf1_dyn_max_hz": 250,
+    "lpf1_static_hz": 125,
+    "lpf2_static_hz": 250
+   }
+  },
+  {
+   "multiplier": 75,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 56,
+    "lpf1_dyn_max_hz": 112,
+    "lpf1_static_hz": 56,
+    "lpf2_static_hz": 112
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 187,
+    "lpf1_dyn_max_hz": 375,
+    "lpf1_static_hz": 187,
+    "lpf2_static_hz": 375
+   }
+  },
+  {
+   "multiplier": 90,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 67,
+    "lpf1_dyn_max_hz": 135,
+    "lpf1_static_hz": 67,
+    "lpf2_static_hz": 135
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 225,
+    "lpf1_dyn_max_hz": 450,
+    "lpf1_static_hz": 225,
+    "lpf2_static_hz": 450
+   }
+  },
+  {
+   "multiplier": 100,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 75,
+    "lpf1_dyn_max_hz": 150,
+    "lpf1_static_hz": 75,
+    "lpf2_static_hz": 150
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 250,
+    "lpf1_dyn_max_hz": 500,
+    "lpf1_static_hz": 250,
+    "lpf2_static_hz": 500
+   }
+  },
+  {
+   "multiplier": 110,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 82,
+    "lpf1_dyn_max_hz": 165,
+    "lpf1_static_hz": 82,
+    "lpf2_static_hz": 165
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 275,
+    "lpf1_dyn_max_hz": 550,
+    "lpf1_static_hz": 275,
+    "lpf2_static_hz": 550
+   }
+  },
+  {
+   "multiplier": 120,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 90,
+    "lpf1_dyn_max_hz": 180,
+    "lpf1_static_hz": 90,
+    "lpf2_static_hz": 180
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 300,
+    "lpf1_dyn_max_hz": 600,
+    "lpf1_static_hz": 300,
+    "lpf2_static_hz": 600
+   }
+  },
+  {
+   "multiplier": 138,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 103,
+    "lpf1_dyn_max_hz": 207,
+    "lpf1_static_hz": 103,
+    "lpf2_static_hz": 207
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 345,
+    "lpf1_dyn_max_hz": 690,
+    "lpf1_static_hz": 345,
+    "lpf2_static_hz": 690
+   }
+  },
+  {
+   "multiplier": 150,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 112,
+    "lpf1_dyn_max_hz": 225,
+    "lpf1_static_hz": 112,
+    "lpf2_static_hz": 225
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 375,
+    "lpf1_dyn_max_hz": 750,
+    "lpf1_static_hz": 375,
+    "lpf2_static_hz": 750
+   }
+  },
+  {
+   "multiplier": 175,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 131,
+    "lpf1_dyn_max_hz": 262,
+    "lpf1_static_hz": 131,
+    "lpf2_static_hz": 262
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 437,
+    "lpf1_dyn_max_hz": 875,
+    "lpf1_static_hz": 437,
+    "lpf2_static_hz": 875
+   }
+  },
+  {
+   "multiplier": 200,
+   "cli_legal": true,
+   "dterm": {
+    "lpf1_dyn_min_hz": 150,
+    "lpf1_dyn_max_hz": 300,
+    "lpf1_static_hz": 150,
+    "lpf2_static_hz": 300
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 500,
+    "lpf1_dyn_max_hz": 1000,
+    "lpf1_static_hz": 500,
+    "lpf2_static_hz": 1000
+   }
+  },
+  {
+   "multiplier": 250,
+   "cli_legal": false,
+   "dterm": {
+    "lpf1_dyn_min_hz": 187,
+    "lpf1_dyn_max_hz": 375,
+    "lpf1_static_hz": 187,
+    "lpf2_static_hz": 375
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 625,
+    "lpf1_dyn_max_hz": 1000,
+    "lpf1_static_hz": 625,
+    "lpf2_static_hz": 1000
+   }
+  },
+  {
+   "multiplier": 255,
+   "cli_legal": false,
+   "dterm": {
+    "lpf1_dyn_min_hz": 191,
+    "lpf1_dyn_max_hz": 382,
+    "lpf1_static_hz": 191,
+    "lpf2_static_hz": 382
+   },
+   "gyro": {
+    "lpf1_dyn_min_hz": 637,
+    "lpf1_dyn_max_hz": 1000,
+    "lpf1_static_hz": 637,
+    "lpf2_static_hz": 1000
+   }
+  }
+ ],
+ "exhaustive_sweep_0_200": {
+  "roll.P": {
+   "total": 40401,
+   "strict_vs_arm": 72,
+   "strict_vs_app": 11,
+   "arm_vs_app": 77
+  },
+  "roll.I": {
+   "total": 8120601,
+   "strict_vs_arm": 3323,
+   "strict_vs_app": 710,
+   "arm_vs_app": 3665
+  },
+  "roll.D": {
+   "total": 40401,
+   "strict_vs_arm": 115,
+   "strict_vs_app": 12,
+   "arm_vs_app": 125
+  },
+  "roll.F": {
+   "total": 40401,
+   "strict_vs_arm": 246,
+   "strict_vs_app": 48,
+   "arm_vs_app": 280
+  },
+  "roll.dmax": {
+   "total": 8120601,
+   "strict_vs_arm": 1331,
+   "strict_vs_app": 515,
+   "arm_vs_app": 1720
+  },
+  "pitch.P": {
+   "total": 8120601,
+   "strict_vs_arm": 38,
+   "strict_vs_app": 6,
+   "arm_vs_app": 32
+  },
+  "pitch.I": {
+   "total": 1632240801,
+   "strict_vs_arm": 13502,
+   "strict_vs_app": 6315,
+   "arm_vs_app": 8607
+  },
+  "pitch.D": {
+   "total": 8120601,
+   "strict_vs_arm": 73,
+   "strict_vs_app": 6,
+   "arm_vs_app": 79
+  },
+  "pitch.F": {
+   "total": 8120601,
+   "strict_vs_arm": 31290,
+   "strict_vs_app": 2005,
+   "arm_vs_app": 31697
+  },
+  "pitch.dmax": {
+   "total": 1632240801,
+   "strict_vs_arm": 12228,
+   "strict_vs_app": 6678,
+   "arm_vs_app": 8534
+  },
+  "yaw.P": {
+   "total": 40401,
+   "strict_vs_arm": 72,
+   "strict_vs_app": 11,
+   "arm_vs_app": 77
+  },
+  "yaw.I": {
+   "total": 8120601,
+   "strict_vs_arm": 3323,
+   "strict_vs_app": 710,
+   "arm_vs_app": 3665
+  },
+  "yaw.F": {
+   "total": 40401,
+   "strict_vs_arm": 246,
+   "strict_vs_app": 48,
+   "arm_vs_app": 280
+  }
+ },
+ "filter_note": "each value is written only if that field was nonzero before apply (and simplified_*_filter on); dyn min nonzero gates both dyn min and dyn max; integer arithmetic DEFAULT*mult/100 (C int division)",
+ "filter_sweep": "firmware integer DEFAULT*m/100 vs app double trunc((DEFAULT*m)/100): 0 mismatches for m=0..255",
+ "app_ts_node_crosscheck_mismatches": 0,
+ "toolchain": {
+  "arm": "arm-none-eabi-gcc 13.2.1 20231009 (Betaflight requires 13.3.1, mk/tools.mk:24)",
+  "x86": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "arm_real_build": "Arm GNU Toolchain 13.3.Rel1 (Build arm-13.24) 13.3.1 20240614, make STM32F405"
+ },
+ "consumer_guidance": "Use fw_real_f405 (or fw_arm_emul, identical) as firmware truth for STM32F4/F7 (cortex-m7 harness codegen identical). fw_strict and app_ts differ by +-1 at many exact-integer points.",
+ "real_firmware_check": {
+  "configs": 1001681,
+  "real_vs_arm_emul": 0,
+  "real_vs_strict": 243867,
+  "real_vs_app": 255831,
+  "axes": 3005043,
+  "examples_real_vs_arm": []
+ }
+}
