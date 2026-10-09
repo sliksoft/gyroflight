@@ -1,0 +1,42 @@
+/*
+ * Gyroflight product theme.
+ *
+ * Keep this as a small override layer instead of repainting Betaflight
+ * components one-by-one. Semantic status colors remain unchanged:
+ * green=success, amber/orange=warning, red=error. Only the normal primary
+ * accent moves from Betaflight yellow to the GyroCore cyan family.
+ */
+
+body[data-theme="gyroflight"],
+body:not([data-theme]) {
+    --primary-50: #ecfeff;
+    --primary-100: #cffafe;
+    --primary-200: #a5f3fc;
+    --primary-300: #67e8f9;
+    --primary-400: #22d3ee;
+    --primary-500: #22d3ee;
+    --primary-600: #22d3ee;
+    --primary-700: #0891b2;
+    --primary-800: #0e7490;
+    --primary-900: #155e75;
+    --primary-950: #083344;
+
+    --color-primary-50: var(--primary-50);
+    --color-primary-100: var(--primary-100);
+    --color-primary-200: var(--primary-200);
+    --color-primary-300: var(--primary-300);
+    --color-primary-400: var(--primary-400);
+    --color-primary-500: var(--primary-500);
+    --color-primary-600: var(--primary-600);
+    --color-primary-700: var(--primary-700);
+    --color-primary-800: var(--primary-800);
+    --color-primary-900: var(--primary-900);
+    --color-primary-950: var(--primary-950);
+
+    --primary-transparent-1: rgba(34, 211, 238, 0.1);
+    --primary-transparent-2: rgba(34, 211, 238, 0.2);
+    --primary-transparent-3: rgba(34, 211, 238, 0.3);
+    --primary-transparent-4: rgba(34, 211, 238, 0.4);
+
+    --ui-primary: var(--primary-500);
+}
