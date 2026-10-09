@@ -13,12 +13,8 @@
                             :data-capability="cap.key"
                             class="flex items-center gap-2"
                         >
-                            <UIcon
-                                :name="cap.available ? 'i-lucide-check-circle' : 'i-lucide-clock'"
-                                class="size-4 shrink-0"
-                            />
-                            {{ $t(cap.label) }} —
-                            {{ $t(cap.available ? "gyroflightStatusAvailable" : "gyroflightStatusPending") }}
+                            <UIcon :name="statusIcon(cap.status)" class="size-4 shrink-0" />
+                            {{ $t(cap.label) }} — {{ $t(statusMessage(cap.status)) }}
                         </li>
                     </ul>
                 </UiBox>
@@ -48,5 +44,27 @@
 <script setup lang="ts">
 import BaseTab from "@/components/tabs/BaseTab.vue";
 import UiBox from "@/components/elements/UiBox.vue";
-import { gyroflightCapabilities as capabilities } from "../capabilities";
+import { gyroflightCapabilities as capabilities, type GyroflightCapabilityStatus } from "../capabilities";
+
+const statusIcon = (status: GyroflightCapabilityStatus) => {
+    switch (status) {
+        case "locked":
+            return "i-lucide-lock";
+        case "planned":
+            return "i-lucide-clock";
+        case "foundation":
+            return "i-lucide-shield-check";
+        default:
+            return "i-lucide-check-circle";
+    }
+};
+
+const statusMessage = (status: GyroflightCapabilityStatus) =>
+    ({
+        available: "gyroflightStatusAvailable",
+        active: "gyroflightStatusActive",
+        foundation: "gyroflightStatusFoundation",
+        locked: "gyroflightStatusLocked",
+        planned: "gyroflightStatusPlanned",
+    })[status];
 </script>
