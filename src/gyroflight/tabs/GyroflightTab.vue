@@ -11,14 +11,14 @@
                             v-for="cap in capabilities"
                             :key="cap.key"
                             :data-capability="cap.key"
-                            class="flex items-center gap-2"
+                            :data-status="cap.status"
+                            class="flex items-start gap-2"
                         >
-                            <UIcon
-                                :name="cap.available ? 'i-lucide-check-circle' : 'i-lucide-clock'"
-                                class="size-4 shrink-0"
-                            />
-                            {{ $t(cap.label) }} —
-                            {{ $t(cap.available ? "gyroflightStatusAvailable" : "gyroflightStatusPending") }}
+                            <UIcon :name="CAPABILITY_STATUS_ICON[cap.status]" class="size-4 shrink-0 mt-0.5" />
+                            <span>
+                                {{ $t(cap.label) }} — {{ $t(`gyroflightStatus_${cap.status}`) }}
+                                <span v-if="cap.detail" class="block text-xs text-muted">{{ $t(cap.detail) }}</span>
+                            </span>
                         </li>
                     </ul>
                 </UiBox>
@@ -48,5 +48,5 @@
 <script setup lang="ts">
 import BaseTab from "@/components/tabs/BaseTab.vue";
 import UiBox from "@/components/elements/UiBox.vue";
-import { gyroflightCapabilities as capabilities } from "../capabilities";
+import { CAPABILITY_STATUS_ICON, gyroflightCapabilities as capabilities } from "../capabilities";
 </script>

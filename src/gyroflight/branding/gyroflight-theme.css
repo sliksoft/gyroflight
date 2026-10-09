@@ -1,0 +1,89 @@
+/*
+ * This file is part of Gyroflight, a derivative of the Betaflight App.
+ *
+ * Gyroflight is free software. You can redistribute this software
+ * and/or modify this software under the terms of the GNU General
+ * Public License as published by the Free Software Foundation,
+ * either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * Gyroflight is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this software.
+ *
+ * If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
+ * Gyroflight theme layer, loaded after Betaflight's src/css/theme.css.
+ *
+ * Gyroflight's normal accent is the GyroCore cyan family (#22d3ee). Only the
+ * primary tokens of the DEFAULT theme ("yellow" in ConfigStorage, shown as
+ * "Gyroflight (default)") are remapped. Betaflight's Amber and High-contrast
+ * themes keep their own colours. Semantic colours are never touched here:
+ * success (green), warning (yellow/orange) and error (red) stay as upstream
+ * defines them, so PASS / WARN / BLOCK keep their meaning.
+ *
+ * Nuxt UI resolves --ui-primary and --ui-color-primary-* on the root element,
+ * so they are restated here, where the remapped scale is visible, exactly as
+ * upstream's amber theme restates --ui-primary.
+ */
+
+body:not([data-theme="amber"]):not([data-theme="contrast"]) {
+    --gyroflight-cyan: #22d3ee;
+
+    --color-primary-50: #ecfeff;
+    --color-primary-100: #cffafe;
+    --color-primary-200: #a5f3fc;
+    --color-primary-300: #67e8f9;
+    --color-primary-400: #45dcf1;
+    --color-primary-500: var(--gyroflight-cyan);
+    --color-primary-600: #06b6d4;
+    --color-primary-700: #0891b2;
+    --color-primary-800: #0e7490;
+    --color-primary-900: #155e75;
+    --color-primary-950: #083344;
+
+    --primary-50: var(--color-primary-50);
+    --primary-100: var(--color-primary-100);
+    --primary-200: var(--color-primary-200);
+    --primary-300: var(--color-primary-300);
+    --primary-400: var(--color-primary-400);
+    --primary-500: var(--color-primary-500);
+    --primary-600: var(--color-primary-500);
+    --primary-700: var(--color-primary-700);
+    --primary-800: var(--color-primary-800);
+    --primary-900: var(--color-primary-900);
+    --primary-950: var(--color-primary-950);
+
+    --primary-transparent-1: rgba(34, 211, 238, 0.1);
+    --primary-transparent-2: rgba(34, 211, 238, 0.2);
+    --primary-transparent-3: rgba(34, 211, 238, 0.3);
+    --primary-transparent-4: rgba(34, 211, 238, 0.4);
+
+    --ui-color-primary-50: var(--color-primary-50);
+    --ui-color-primary-100: var(--color-primary-100);
+    --ui-color-primary-200: var(--color-primary-200);
+    --ui-color-primary-300: var(--color-primary-300);
+    --ui-color-primary-400: var(--color-primary-400);
+    --ui-color-primary-500: var(--color-primary-500);
+    --ui-color-primary-600: var(--color-primary-600);
+    --ui-color-primary-700: var(--color-primary-700);
+    --ui-color-primary-800: var(--color-primary-800);
+    --ui-color-primary-900: var(--color-primary-900);
+    --ui-color-primary-950: var(--color-primary-950);
+    --ui-primary: var(--color-primary-500);
+}
+
+/* The mobile top bar on the home page shows the Gyroflight wordmark instead of the Betaflight logo image. */
+.mobile-topbar__logo.gyroflight-logo {
+    background-image: none;
+}
+.dark .mobile-topbar__logo.gyroflight-logo {
+    background-image: none;
+}
