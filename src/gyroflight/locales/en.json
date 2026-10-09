@@ -247,5 +247,8 @@
     },
     "gyrocoreReason_fc_current_slider_changed": {
         "message": "The connected craft's $1 differs from the analysed log, so the recommendation's baseline no longer holds."
+    },
+    "gyrocorePerAxisEvidenceNote": {
+        "message": "Per-axis proposals are evidence. Sliders are global, so Apply writes only the GyroCore global tune shown above, never one axis's column."
     }
 }

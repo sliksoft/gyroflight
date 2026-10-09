@@ -58,6 +58,11 @@
             </table>
         </div>
 
+        <!-- Gyroflight: these per-axis proposals are evidence; Apply writes the global tune -->
+        <p v-if="visibleAxisList.length" class="text-sm text-dimmed mb-3" data-gyrocore="per-axis-evidence">
+            {{ $t("gyrocorePerAxisEvidenceNote") }}
+        </p>
+
         <!-- Tuning target + Axis selector + Apply Button -->
         <div class="flex flex-wrap items-center gap-4">
             <label class="flex items-center gap-2 text-sm">
