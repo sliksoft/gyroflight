@@ -21,25 +21,22 @@
 
 /*
  * A minimal GyroCore qualification report for UI tests that seed the Autotune
- * store by hand: one measurement on one axis whose own evidence is clean (or
- * carries the given block codes), in a log with a complete logged slider tune
- * at 100. Only the fields the gates and views read. Its global (composite)
- * recommendation is the measurement's sliders, authorized when `blocked` is empty.
+ * store by hand: one measurement on each of roll, pitch and yaw, all with the
+ * same proposal and clean evidence (or carrying the given block codes), in a
+ * log with a complete logged slider tune at 100, slider mode RPY. The sliders
+ * drive all three axes there, so each needs its own evidence (axis coverage).
+ * Only the fields the gates and views read. Its global (composite)
+ * recommendation is the proposal, authorized when `blocked` is empty.
  */
 
 import type { GainRecommendation } from "../../../src/js/blackbox/spectral_analysis";
 import type { QualifiedReport } from "../../../src/gyrocore/stores/chirpQualification";
 
-export function qualifiedReportFor(
-    axisName: "roll" | "pitch" | "yaw",
-    proposed: GainRecommendation["proposed"],
-    blocked: string[] = [],
-): QualifiedReport {
-    const axis = ["roll", "pitch", "yaw"].indexOf(axisName);
-    const measurement = {
-        id: "log1-seg1",
+export function qualifiedReportFor(proposed: GainRecommendation["proposed"], blocked: string[] = []): QualifiedReport {
+    const measurements = (["roll", "pitch", "yaw"] as const).map((axisName, axis) => ({
+        id: `log1-seg${axis + 1}`,
         logIndex: 0,
-        segmentIndex: 0,
+        segmentIndex: axis,
         axis,
         axisName,
         axisOccurrence: 1,
@@ -66,7 +63,7 @@ export function qualifiedReportFor(
         },
         tune: { blocked: [], warnings: [] },
         apply: { allowed: blocked.length === 0, blocked, warnings: [] },
-    };
+    }));
     return {
         token: "seeded",
         filename: "seeded.bbl",
@@ -92,10 +89,10 @@ export function qualifiedReportFor(
                     gyro_filter: 1,
                     gyro_filter_multiplier: 100,
                 },
-                measurements: [measurement],
+                measurements,
             },
         ],
-        measurements: [measurement],
+        measurements,
         state: "usable",
         targetPhaseMarginDeg: 60,
     } as unknown as QualifiedReport;

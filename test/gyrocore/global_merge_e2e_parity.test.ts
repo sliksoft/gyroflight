@@ -57,7 +57,8 @@ const reference = readFixtureJson<{ gyrocore_commit: string; cases: E2eCase[] }>
 const EXPECTED_AUTHORIZATION: Record<string, { authorized: boolean; stricterBecause?: string }> = {
     three_axis_agree: { authorized: true },
     rp_mode_yaw_excluded: { authorized: true },
-    single_roll: { authorized: true },
+    // GyroCore's merge needs no axis; Gyroflight's axis coverage needs pitch and yaw under RPY.
+    single_roll: { authorized: false, stricterBecause: "missing_axis_evidence:pitch" },
     roll_pitch_conflict: { authorized: false },
     pids_mode_off: { authorized: false },
     // Python merges roll alone and proposes; its safety-pipeline test blocks an unusable axis, so Gyroflight does.
