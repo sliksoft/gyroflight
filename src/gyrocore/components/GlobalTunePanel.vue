@@ -66,6 +66,17 @@
                 </li>
             </ul>
 
+            <p
+                class="text-sm mt-2"
+                data-gyrocore="axis-coverage"
+                :data-mode="composite.coverage.modeName"
+                :data-missing="composite.coverage.missingAxes.join(',')"
+            >
+                <span class="font-bold">{{ $t("gyrocoreGlobalCoverage") }}</span>
+                {{ coverageText.mode }} · {{ coverageText.required }} · {{ coverageText.covered }}
+                <span v-if="coverageText.missing" class="text-red-500">· {{ coverageText.missing }}</span>
+            </p>
+
             <div v-if="composite.blocked.length" class="text-sm mt-2" data-gyrocore="global-blocked">
                 <p class="font-bold text-red-500">{{ $t("gyrocoreGlobalBlocked") }}</p>
                 <ul class="list-disc ps-5">
@@ -113,6 +124,24 @@ const SLIDER_LABEL_KEYS: Record<string, string> = {
 
 const participating = computed(() => (composite.value?.merge.participating_axes ?? []) as ChirpAxisName[]);
 const logLabel = computed(() => i18n.getMessage("gyrocoreChirpLog", [String((composite.value?.logIndex ?? 0) + 1)]));
+
+const coverageText = computed(() => {
+    const c = composite.value?.coverage;
+    if (!c) {
+        return { mode: "", required: "", covered: "", missing: "" };
+    }
+    const axes = (list: ChirpAxisName[]) => list.map(axisLabel).join(", ") || "--";
+    return {
+        mode: i18n.getMessage("gyrocoreGlobalCoverageMode", [c.modeName]),
+        required: `${i18n.getMessage("gyrocoreGlobalCoverageRequired")} ${axes(c.requiredAxes)}`,
+        covered: `${i18n.getMessage("gyrocoreGlobalCoverageCovered")} ${
+            c.coveredAxes.map((a) => `${axisLabel(a)} (${c.sourceByAxis[a]})`).join(", ") || "--"
+        }`,
+        missing: c.missingAxes.length
+            ? `${i18n.getMessage("gyrocoreGlobalCoverageMissing")} ${axes(c.missingAxes)}`
+            : "",
+    };
+});
 
 function axisLabel(axis: ChirpAxisName) {
     return i18n.getMessage(AXIS_LABEL_KEYS[axis]);

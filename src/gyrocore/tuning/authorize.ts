@@ -31,6 +31,7 @@ import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import type { ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
 import type { ChirpAxisName } from "@/gyrocore/chirp/constants";
 import { buildComposite, type AxisSelection, type CompositeRecommendation } from "./composite";
+import { axisCoverage } from "./coverage";
 import { SLIDER_KEYS } from "./merge";
 
 type Proposed = GainRecommendation["proposed"];
@@ -127,7 +128,8 @@ export interface LiveSliders {
 /**
  * The craft must still be the one the recommendation was computed for: same
  * slider mode, same current sliders (every proposal scales the logged ones),
- * yaw under slider control when yaw contributed. The sliders Autotune never
+ * yaw under slider control when yaw contributed, and every axis the LIVE mode
+ * drives covered by a selected, qualified source. The sliders Autotune never
  * proposes are written back with their live values, so they must equal the
  * logged ones the composite (merge.simplified) and the pitch baseline assume.
  * MSP field -> logged header (MSPHelper readPidSliderSettings order; GyroCore
@@ -149,6 +151,7 @@ export function liveCompositeBlocks(live: LiveSliders, composite: CompositeRecom
         if (mode === 1 && composite.merge.participating_axes.includes("yaw")) {
             out.push("fc:yaw_not_under_slider_control");
         }
+        out.push(...axisCoverage(mode, composite.sources).blocked.map((code) => `fc:${code}`));
     }
     const logged = composite.current;
     const pairs: [keyof LiveSliders, number | null][] = [

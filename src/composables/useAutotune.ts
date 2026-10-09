@@ -42,6 +42,7 @@ import { validateTuningSliders } from "@/composables/useTuningSliders";
 import { qualifyChirpFile, recomputeRecommendations, type AutotuneMath } from "@/gyrocore/chirp/qualification";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { assertCompositeApplyAuthorized, liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
+import { assertProductApplyReleased } from "@/gyrocore/productLock/productApply";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 
 export type AxisName = "roll" | "pitch" | "yaw";
@@ -259,6 +260,9 @@ async function applyGains(proposed: ProposedSliders, compositeId?: string | null
     // composite (global) recommendation may be written, never one axis's, and
     // only with exactly its sliders.
     const composite = assertCompositeApplyAuthorized(useChirpQualificationStore().gateState(), compositeId, proposed);
+    // Product release lock: no tune is written to a craft until GyroCore's
+    // Safety engine is migrated (WU4). Before any flight-controller access.
+    assertProductApplyReleased();
     // Read the craft's live slider state (no write) and refuse unless it is
     // still the tune the recommendation was computed from. This also keeps the
     // slider fields the proposal does not set at their live values below.

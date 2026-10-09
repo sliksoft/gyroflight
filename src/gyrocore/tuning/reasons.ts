@@ -47,6 +47,9 @@ const COMPOSITE_HEADS = [
     "composite_clamp_changes_direction",
     "composite_clamp_material",
     "composite_slider_unverifiable",
+    "missing_axis_evidence",
+    "axis_coverage_mode_off",
+    "axis_coverage_mode_unknown",
     "apply",
     "fc",
 ];
