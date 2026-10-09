@@ -10,38 +10,53 @@ application and platform.
 (CHIRP / system-identification logs, Expert mode). GyroCore does not replace it. GyroCore adds the
 layers around it that make a proposed tune trustworthy and reviewable.
 
+Authority chain, as implemented (WU1–WU3):
+
 ```
  blackbox log (CHIRP flight)
         │
         ▼
- Betaflight Autotune (upstream, unchanged)
-   chirp_bbl_parser.ts → spectral_analysis.ts → recommendGains → stores/autotune
-        │  proposed gains + Bode / spectrogram data
+ Betaflight Blackbox Viewer parser (FlightLog)                 decode               Betaflight
+        │  every embedded log, every CHIRP segment
         ▼
- GyroCore engine in Gyroflight (src/gyrocore/, later)
-   1. measurement qualification   is this log fit to tune from?
-   2. consistency checks          do axes / repeats / slider merge agree?
-   3. safety validation           clamps and limits on the proposal
-   4. evidence & explanation      why each change is proposed
-   5. proposed-tune review        accept / reject per change
-   6. safe output & rollback      (later) CLI snippet / MSP apply + saved previous tune
+ GyroCore measurement qualification (src/gyrocore/chirp/)      valid for tuning?    GyroCore
+        │  usable measurements only
+        ▼
+ Betaflight tuning math (spectral_analysis.ts, recommendGains) per-axis proposal   Betaflight
+        │  per-axis recommendations = evidence
+        ▼
+ GyroCore global merge (src/gyrocore/tuning/merge.ts)          one global set       GyroCore
+        │  composite recommendation
+        ▼
+ GyroCore safety authorization (src/gyrocore/tuning/)          may it be written?   GyroCore
+        │  + live flight-controller recheck
+        ▼
+ FC Apply (MSP_SET_SIMPLIFIED_TUNING, EEPROM)                  write                Betaflight MSP
 ```
+
+Still to come: full safety validation (`core/gyrocore/safety/`), evidence and per-change review, rollback.
+Details: [CHIRP_QUALIFICATION.md](CHIRP_QUALIFICATION.md) (WU2) and
+[GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md) (WU3).
 
 ## Responsibilities
 
-| Concern                                                                          | Owner                                                                       |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| CHIRP log parsing, transfer-function estimation                                  | Betaflight (`chirp_bbl_parser.ts`, `spectral_analysis.ts`)                  |
-| Gain recommendation                                                              | Betaflight (`recommendGains`)                                               |
-| Autotune UI (import, Bode, spectrogram, gains)                                   | Betaflight (`AutotuneTab.vue`, `tabs/autotune/`)                            |
-| Measurement qualification (coverage, sample rate, debug mode, saturation, noise) | GyroCore (from `app/src/chirp/quality.ts`, `sampleRate.ts`, `sysconfig.ts`) |
-| Global-slider merge / `MERGE_REQUIRES_REVIEW`                                    | GyroCore (from `core/gyrocore/autotune/merge.py`)                           |
-| Safety validation                                                                | GyroCore (from `core/gyrocore/safety/`)                                     |
-| Evidence / explanations / review                                                 | GyroCore                                                                    |
-| Safe output, apply and rollback                                                  | GyroCore, through upstream stores / CLI; later                              |
+| Concern                                                                        | Owner                                                                       |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| CHIRP log decoding                                                             | Betaflight Blackbox Viewer `FlightLog` (not `chirp_bbl_parser.ts`, WU1/WU2) |
+| Transfer-function estimation, per-axis gain recommendation                     | Betaflight (`spectral_analysis.ts`, `recommendGains`)                       |
+| Autotune UI (import, Bode, spectrogram, per-axis gains)                        | Betaflight (`AutotuneTab.vue`, `tabs/autotune/`)                            |
+| Measurement qualification (coverage, sample rate, debug mode, gaps, coherence) | GyroCore, `src/gyrocore/chirp/` (WU2)                                       |
+| Global-slider merge / `MERGE_REQUIRES_REVIEW`                                  | GyroCore, `src/gyrocore/tuning/` (WU3, from `autotune/merge.py`)            |
+| Apply authorization (composite gate, live FC recheck)                          | GyroCore, `src/gyrocore/tuning/authorize.ts` (WU3)                          |
+| Full safety validation                                                         | GyroCore (from `core/gyrocore/safety/`), later                              |
+| Evidence / explanations / review                                               | GyroCore                                                                    |
+| Rollback                                                                       | GyroCore, later                                                             |
 
-GyroCore reads Autotune's results from `stores/autotune` and does not patch Autotune's code. If a
-GyroCore check disagrees with upstream's output, the result is a review warning, not a silent override.
+GyroCore does not change Betaflight's math. It decides which measurements Betaflight may recommend from,
+merges the per-axis recommendations into the one global slider set the firmware actually has, and
+decides whether that set may be written. When a check disagrees with upstream's output, the result is a
+visible block or review, never a silent override. The small hooks in Autotune's own files are listed
+in [UPSTREAM.md](UPSTREAM.md).
 
 ## The old GyroCore / AeroTuner tuner
 

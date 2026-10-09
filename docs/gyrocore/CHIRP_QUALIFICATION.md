@@ -112,6 +112,10 @@ Header and debug-mode validation (`not_chirp_debug_mode`, `chirp_debug_mode_unsu
 
 ## Apply Gains hard gate
 
+> **Superseded in WU3** for what Apply may write: Apply now writes only a GyroCore composite (global)
+> recommendation, never a single measurement's sliders. See [GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md).
+> The per-measurement checks below still decide whether a measurement may contribute to it.
+
 `useAutotune().applyGains(proposed, measurementId)` calls `assertApplyAuthorized()` before any
 flight-controller access. The button is also disabled and lists the reasons, but the action enforces the gate
 itself. It throws `ApplyBlockedError` unless all of the following hold:
