@@ -78,9 +78,8 @@ for i in 1 2 3; do blackbox_decode --stdout --unit-vbat raw --unit-amperage raw 
 export TMPDIR=$REF PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=~/GyroCore:~/GyroCore/core
 for i in 0 1 2; do python3 -B ~/GyroCore/tools/chirp_reference/make_browser_golden.py \
     --local air65.bbl --log-index $i --out $REF/golden_log$i.json.gz; done
-python3 -B ~/GyroCore/tools/chirp_reference/diagnose_chirp.py air65.bbl > diagnose.json
-# gc_recommend.json: recommend_autotune_from_bbl(air65.bbl, log_index=i) per log, plus
-# recommend_gains() on the same transfer function with GyroCore's gates bypassed (parity only)
+python3 -B ~/GyroCore/tools/chirp_reference/diagnose_chirp.py air65.bbl > diagnose.txt   # JSON on stdout
+python3 -B ~/Gyroflight/test/gyrocore/tools/gc_recommend.py > gc_recommend.json   # reads air65.bbl
 
 cd ~/Gyroflight
 GYROFLIGHT_AIR65_BBL=$REF/air65.bbl GYROFLIGHT_AIR65_REF_DIR=$REF GYROFLIGHT_QUAL_OUT=$REF/report \
@@ -225,10 +224,15 @@ Betaflight's output comes from the real `importAndAnalyze()`.
 | Segment     | Captured            | Sweep reached | Betaflight Autotune                                                                                                                                                                                                              | GyroCore                                                               |
 | ----------- | ------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Log 1 roll  | 6.78 s of 20 (34 %) | 3.0 Hz        | **shown to the user** (first log). Proposes PI 100→50, I 80→40, FF 15→25, D-term filter 100→50; mean coherence 35 %; notes "cannot reach 60° (limit about 41°)" and "no gain keeps peak sensitivity inside the robustness bound" | rejected: `low_coherence` (0.354 < 0.6)                                |
-| Log 2 pitch | 3.94 s (20 %)       | 1.0 Hz        | recommends PI 71, I 48, FF 25, filter 50 (only reachable if this log is the first log analysed); shows phase margin **373.5°**                                                                                                   | rejected: `low_coherence` (0.409)                                      |
+| Log 2 pitch | 3.94 s (20 %)       | 1.0 Hz        | recommends PI 71, I 48, FF 25, filter 50 ; shows phase margin **373.5°**                                                                                                                                                         | rejected: `low_coherence` (0.409)                                      |
 | Log 3 yaw   | 14.25 s (71 %)      | 60.1 Hz       | recommends PI 71, I 80, FF 25, filter 50; **no warning**                                                                                                                                                                         | rejected: `low_coherence` (0.534)                                      |
 | Log 3 roll  | 15.08 s (75 %)      | 83.5 Hz       | recommends PI 71, I 80, FF 25, filter 50; **no warning**                                                                                                                                                                         | rejected: `low_coherence` (0.590, just below 0.6)                      |
 | Log 3 pitch | 19.03 s (94 %)      | 406.5 Hz      | recommends PI 55, I 80, FF 25, filter 50; **no warning**                                                                                                                                                                         | rejected: `low_coherence` (0.169), `unusable_frequency_range` (5 bins) |
+
+Only log 1 roll is shown in the app, because Autotune analyses only the first log that has a result.
+Log 2 and the three log 3 segments are reached only when their log is the first one in the file
+(for example, a file holding just that flight). Their Betaflight results come from the same
+upstream functions, run per log.
 
 (Sliders are shown as current→proposed. The current values are pi_gain 100, i_gain 80,
 feedforward 15, dterm_filter_multiplier 100, master 125.)
@@ -245,8 +249,14 @@ BLOCKED on every axis and adds a second reason: `simplified_pids_mode_off`.
   sliders in that mode (`simplified_tuning.c:97-101`).
 - It _does_ apply the D-term filter multiplier, because `simplified_dterm_filter:1`
   (`simplified_tuning.c:104-109`).
-- So Betaflight's Apply would leave the PIDs it recommends changing untouched, and would halve the
-  D-term filter cutoffs.
+- Betaflight's Apply sends `slider_pids_mode` and `slider_dterm_filter` as read back from the FC
+  (`MSPHelper.ts` `writePidSliderSettings` / `writeDtermFilterSliderSettings`).
+- With the mode OFF, the firmware's `MSP_VALIDATE_SIMPLIFIED_TUNING` recomputes nothing for the
+  PIDs, so it reports them valid (`msp_simplified_tuning.c:186-201`). `applyGains` therefore goes
+  on to `MSP_EEPROM_WRITE`.
+- Result: the proposed PI, I and FF slider values are stored but **do not change the PIDs**. The
+  D-term filter multiplier (100→50, halving the D-term low-pass cutoffs) **is applied and saved**.
+  This assumes the FC is still in the state its log headers record.
 
 The earlier GyroCore diagnosis (`docs/upstream/CHIRP_REAL_FLIGHT_AIR65.md`) was reproduced from the
 data, not assumed. The per-segment durations, sweep end points and coherence above are this run's
@@ -319,12 +329,20 @@ was not enabled or exercised.
 2. **Autotune decoder bug.** Gyro data feeding every real-log transfer function is corrupted after
    each I-frame. Its effect on AIR65 sliders is small (±1), but the Bode and coherence plots the user
    sees are wrong (up to 41 dB, and 5.8 dB in usable bins).
-3. **Slider mode not checked.** Betaflight proposes and applies slider changes when
+3. **The slider floor can reverse a change, and nothing warns.**
+    - On every AIR65 segment `recommendGains` asks to _cut_ feed-forward (ffScale 0.53–0.79, so
+      15 → 8–12).
+    - `buildProposedSliders` clamps every slider to 25–250, which turns that cut into **15 → 25
+      (+67 %)**.
+    - `gainClamped` covers only the PI pass, so the UI shows no note about it.
+    - GyroCore's port behaves identically when ungated, so this is not a Betaflight-vs-GyroCore
+      difference. It is a further reason for the gate.
+4. **Slider mode not checked.** Betaflight proposes and applies slider changes when
    `simplified_pids_mode` is OFF. The PIDs it means to change are not changed, and the D-term filter
    change is applied.
-4. **Only the first log with chirp data is analysed**, and a later same-axis segment overwrites an
+5. **Only the first log with chirp data is analysed**, and a later same-axis segment overwrites an
    earlier one. The user cannot see that log 3 exists or what it shows.
-5. **Implausible figures are displayed as results**, for example a 373.5° phase margin (log 2 pitch).
+6. **Implausible figures are displayed as results**, for example a 373.5° phase margin (log 2 pitch).
 
 ## Next migration
 
