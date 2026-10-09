@@ -19,6 +19,7 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+import GyroflightLandingTab from "./tabs/GyroflightLandingTab.vue";
 import GyroflightTab from "./tabs/GyroflightTab.vue";
 import { GYROFLIGHT_TAB_KEY } from "./tabs";
 import { registerGyroflightMessages } from "./i18n";
@@ -26,5 +27,6 @@ import { registerGyroflightMessages } from "./i18n";
 registerGyroflightMessages();
 
 export const gyroflightTabComponents = {
+    landing: GyroflightLandingTab,
     [GYROFLIGHT_TAB_KEY]: GyroflightTab,
 };
