@@ -1,0 +1,42 @@
+# Gyroflight fork CI. Upstream workflows are left unmodified; this one only
+# validates our branches. It needs no secrets and publishes nothing.
+name: Gyroflight CI
+
+on:
+  push:
+    branches:
+      - "gyroflight/**"
+      - "gyrocore/**"
+  pull_request:
+    branches:
+      - master
+      - "gyroflight/**"
+      - "gyrocore/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx eslint src scripts *.mjs
+      - run: npx vitest run
+      - run: npm run build
