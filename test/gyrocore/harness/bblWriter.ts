@@ -73,7 +73,16 @@ function values(iteration: number, f: SyntheticFrame) {
 }
 
 /** One log: header, an S-frame with the given flight-mode flags, then I/P frames, then LOG_END. */
-export function encodeLog(frames: SyntheticFrame[], opts: { iInterval: number; flightModeFlags: number }) {
+export function encodeLog(
+    frames: SyntheticFrame[],
+    opts: {
+        iInterval: number;
+        flightModeFlags: number;
+        looptime?: number;
+        pidProcessDenom?: number;
+        extraHeaders?: string[];
+    },
+) {
     const n = FIELDS.length;
     const header = [
         "H Product:Blackbox flight data recorder by Nicholas Sherlock",
@@ -82,9 +91,10 @@ export function encodeLog(frames: SyntheticFrame[], opts: { iInterval: number; f
         "H P interval:1/1",
         "H Firmware type:Cleanflight",
         "H Firmware revision:Betaflight 2026.6.2 (synthetic) STM32F7X2",
-        "H looptime:125",
-        "H pid_process_denom:8",
+        `H looptime:${opts.looptime ?? 125}`,
+        `H pid_process_denom:${opts.pidProcessDenom ?? 8}`,
         "H debug_mode:96",
+        ...(opts.extraHeaders ?? []).map((h) => `H ${h}`),
         `H Field I name:${FIELDS.join(",")}`,
         `H Field I signed:0,0,${Array(n - 2)
             .fill(1)

@@ -28,14 +28,14 @@
  *                             gc_recommend.json         (recommend_autotune_from_bbl per log)
  * See docs/gyrocore/BLACKBOX_CHIRP_PARITY.md for how to regenerate them.
  *
- * The app verdict comes from the real useAutotune().importAndAnalyze() with
- * only the file picker mocked, so it is exactly what a user would be shown.
+ * Upstream Autotune as shipped is reproduced by harness/betaflightAutotune.ts
+ * (verified against the real useAutotune() pipeline in WU1, before WU2 replaced
+ * that pipeline's input and added GyroCore's gate).
  */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { createPinia, setActivePinia } from "pinia";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { analyzeAllLogs, analyzeSegment } from "./harness/betaflightAutotune";
 import type { LogAnalysis } from "./harness/betaflightAutotune";
 import { decodeWithViewer } from "./harness/viewerDecode";
@@ -44,20 +44,6 @@ import type { GyroCoreAxis } from "./harness/chirpCompare";
 import { AIR65_SHA256, localAir65, readJsonFile, sha256, writeReport } from "./harness/fixtures";
 
 const air65 = localAir65();
-
-const picked = vi.hoisted(() => ({ bytes: new Uint8Array() as Uint8Array }));
-
-vi.mock("../../src/js/FileSystem", () => ({
-    default: {
-        pickOpenFile: async () => ({ name: "air65.bbl" }),
-        readFileAsBlob: async () => ({ arrayBuffer: async () => picked.bytes.slice().buffer }),
-    },
-}));
-
-vi.mock("../../src/js/localization", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../src/js/localization")>()),
-    i18n: { getMessage: (key: string) => key },
-}));
 
 interface GoldenLog {
     bbl_sha256: string;
@@ -153,42 +139,16 @@ describe.skipIf(!air65)("AIR65 Betaflight Autotune qualification (local only)", 
     });
 
     it("records what Betaflight Autotune shows the user and compares it with GyroCore", async () => {
-        // 1. The real app pipeline.
-        setActivePinia(createPinia());
-        picked.bytes = bytes;
-        const { useAutotune } = await import("../../src/composables/useAutotune");
-        const { useAutotuneStore } = await import("../../src/stores/autotune");
-        const store = useAutotuneStore();
-        await useAutotune().importAndAnalyze();
-        const app = store.analysisResult;
-        const appView = {
-            analysisState: store.analysisState,
-            errorMessage: store.errorMessage,
-            sampleRate: app?.sampleRate ?? null,
-            axes: Object.fromEntries(
-                Object.entries(app?.axes ?? {}).map(([name, a]) => [
-                    name,
-                    a && { sampleCount: a.sampleCount, gains: a.gains },
-                ]),
-            ),
-        };
-
-        // 2. Every log and segment through the same upstream functions.
+        // 1. Every log and segment through the same upstream functions.
         const logs = analyzeAllLogs(bytes);
         const appLog = logs.find((l) => Object.keys(l.appSelected).length > 0);
 
-        // The mirror must agree with the real pipeline on the log the app selects.
-        expect(store.analysisState).toBe("done");
+        // Since WU2 the app no longer runs this path (its input is the Viewer decode and
+        // GyroCore gates it, air65_qualification.local.test.ts); the mirror records
+        // upstream Autotune as shipped, including the log upstream would show.
         expect(appLog).toBeDefined();
-        for (const [name, i] of Object.entries(appLog!.appSelected)) {
-            const seg = appLog!.segments[i];
-            const real = app!.axes[name as "roll" | "pitch" | "yaw"]!;
-            expect(real.sampleCount).toBe(seg.length);
-            expect(real.gains.proposed).toEqual(seg.recommendation!.proposed);
-            expect(Array.from(real.transferFunction.coherence)).toEqual(Array.from(seg.transferFunction!.coherence));
-        }
 
-        // 3. GyroCore reference outputs, if provided.
+        // 2. GyroCore reference outputs, if provided.
         const refDir = air65?.refDir;
         const gcRec: GcRecommendation[] | null =
             refDir && existsSync(join(refDir, "gc_recommend.json"))
@@ -299,7 +259,7 @@ describe.skipIf(!air65)("AIR65 Betaflight Autotune qualification (local only)", 
             };
         });
 
-        writeReport("air65_autotune", { app: appView, appLogIndex: appLog?.logIndex ?? null, logs: perLog });
+        writeReport("air65_autotune", { appLogIndex: appLog?.logIndex ?? null, logs: perLog });
 
         let shippedDiverges = false;
         for (const log of perLog) {
