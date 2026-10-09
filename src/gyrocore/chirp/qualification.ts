@@ -128,6 +128,8 @@ export interface ChirpMeasurement<G = unknown> {
     betaflightRateHz: number;
     segmentSize: number | null;
     quality: QualityReport;
+    /** Extraction warnings of the measurement's log (see logWarningsFor). */
+    logWarnings: string[];
     state: MeasurementState;
     /** Betaflight math on Viewer samples; may exist for a rejected measurement (diagnostic only). */
     diagnostics: SegmentDiagnostics | null;
@@ -238,22 +240,36 @@ function sampleRateContract(rate: SampleRateEvidence, betaflightRateHz: number):
     return out;
 }
 
-function measurementState(quality: QualityReport, diagnostics: SegmentDiagnostics | null): MeasurementState {
+/**
+ * Log-level extraction warnings that qualify every measurement of the log, as
+ * GyroCore's pipeline downgrades its status for them. Repeated segments on an
+ * axis are not one: GyroCore warned because it discarded all but the last,
+ * and nothing is discarded here.
+ */
+export function logWarningsFor(extractionWarnings: string[]): string[] {
+    return extractionWarnings.filter((w) => w !== "repeated_axis_segments_all_kept");
+}
+
+function measurementState(
+    quality: QualityReport,
+    diagnostics: SegmentDiagnostics | null,
+    logWarnings: string[],
+): MeasurementState {
     if (!quality.usable || diagnostics === null) {
         return "rejected";
     }
-    return quality.warningGates.length ? "usable_with_warnings" : "usable";
+    return quality.warningGates.length || logWarnings.length ? "usable_with_warnings" : "usable";
 }
 
 /** Decide Apply for one measurement. Pure: the same inputs always give the same answer. */
 export function authorizeMeasurement(
     m: Pick<
         ChirpMeasurement,
-        "quality" | "diagnostics" | "sampleRate" | "betaflightRateHz" | "tune" | "recommendation"
+        "quality" | "diagnostics" | "sampleRate" | "betaflightRateHz" | "tune" | "recommendation" | "logWarnings"
     >,
 ): ApplyAuthorization {
     const blocked: string[] = [];
-    const warnings: string[] = [];
+    const warnings: string[] = m.logWarnings.map((w) => `log:${w}`);
     if (m.diagnostics === null) {
         blocked.push("measurement:no_transfer_function");
     }
@@ -300,6 +316,7 @@ function qualifySegment<G>(
         sysConfig: SysConfig;
         currentSliders: Required<CurrentSliders>;
         axisOccurrence: number;
+        logWarnings: string[];
         targetPhaseMarginDeg: number;
         math: AutotuneMath<G>;
     },
@@ -358,7 +375,8 @@ function qualifySegment<G>(
         betaflightRateHz: ctx.math.computeSampleRate(ctx.sysConfig),
         segmentSize,
         quality,
-        state: measurementState(quality, diagnostics),
+        logWarnings: ctx.logWarnings,
+        state: measurementState(quality, diagnostics, ctx.logWarnings),
         diagnostics,
         recommendation: null,
         tune: currentTuneGates(ctx.headers, seg.axis),
@@ -431,6 +449,7 @@ function qualifyLog<G>(
     report.sysConfig = sysConfig;
     report.currentSliders = currentSliders;
 
+    const logWarnings = logWarningsFor(extraction.warnings);
     const seen = [0, 0, 0];
     for (const seg of extraction.segments) {
         seen[seg.axis]++;
@@ -441,6 +460,7 @@ function qualifyLog<G>(
                 sysConfig,
                 currentSliders,
                 axisOccurrence: seen[seg.axis],
+                logWarnings,
                 targetPhaseMarginDeg,
                 math,
             }),

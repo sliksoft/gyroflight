@@ -31,8 +31,10 @@ BBL bytes
   -> Apply authorization, enforced inside the Apply action    GyroCore
 ```
 
-Code: `src/gyrocore/chirp/` (logic), `src/gyrocore/stores/chirpQualification.ts` (every measurement and
-the selection shown), and `src/gyrocore/components/` (qualification panel, Apply notice).
+Code: `src/gyrocore/chirp/` holds the logic. Its `numeric.ts` has only NumPy-compatible mean/median/rint
+for the gate statistics, not spectral math. `src/gyrocore/stores/chirpQualification.ts` holds every
+measurement and the selection shown. `src/gyrocore/components/` holds the qualification panel, the
+diagnostic-only banner and the Apply notice.
 
 ### Why Autotune's own decoder was dropped, not patched
 
@@ -73,12 +75,12 @@ then usable, then usable with warnings, then diagnostic only. Ties go to the lat
 
 ## Autotune states
 
-| State                    | Meaning                                                                      | UI                                                                                                      |
-| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **NO CHIRP**             | no CHIRP segment in any embedded log (or the log is not a CHIRP log)         | error line "No CHIRP sweep found in any of N embedded logs"; panel shows NO CHIRP and each log's reason |
-| **REJECTED**             | CHIRP exists but no measurement passes the measurement-quality gates         | plots shown when computable, labelled "Diagnostic only — not valid for tuning"; no gains, Apply blocked |
-| **USABLE WITH WARNINGS** | at least one measurement passes the blocking gates but raises a warning gate | recommendation shown; Apply still subject to the Apply gate                                             |
-| **USABLE**               | at least one measurement passes every measurement gate without warnings      | recommendation shown; Apply still subject to the Apply gate                                             |
+| State                    | Meaning                                                                      | UI                                                                                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **NO CHIRP**             | no CHIRP segment in any embedded log (or the log is not a CHIRP log)         | error line "No CHIRP sweep found in any of N embedded logs"; panel shows NO CHIRP and each log's reason                                                                       |
+| **REJECTED**             | CHIRP exists but no measurement passes the measurement-quality gates         | plots shown when computable, under a non-collapsible "Diagnostic only — not valid for tuning" banner directly above the Bode plot (and in the panel); no gains, Apply blocked |
+| **USABLE WITH WARNINGS** | at least one measurement passes the blocking gates but raises a warning gate | recommendation shown; Apply still subject to the Apply gate                                                                                                                   |
+| **USABLE**               | at least one measurement passes every measurement gate without warnings      | recommendation shown; Apply still subject to the Apply gate                                                                                                                   |
 
 The overall state is the best of the measurements. Every measurement also carries its own state, Apply
 verdict and reasons in the panel. A REJECTED file with nothing plottable, such as `insufficient_samples`,
@@ -125,10 +127,12 @@ itself. It throws `ApplyBlockedError` unless all of the following hold:
 5. a Betaflight recommendation exists (`recommendation:not_produced`), and the slider guard below passes;
 6. Betaflight does not report an unreachable robustness bound (`autotune_sensitivity_bound_unreachable`).
 
-Only then does the action touch the craft. It first reads the live slider state (`MSP_SIMPLIFIED_TUNING`, a
-read) and refuses if the connected craft's slider mode is OFF, unknown, or RP for a yaw measurement
-(`fc:*`). The read also means the write that follows keeps the live values of slider fields the proposal does
-not set. Upstream wrote whatever `FC.TUNING_SLIDERS` held, which is all zeros until the PID tab loads it.
+Only then does the action touch the craft. Apply now makes one MSP read before writing: it reads the live
+slider state with `MSP.promise(MSPCodes.MSP_SIMPLIFIED_TUNING)`, the same call the PID Tuning tab makes
+(`PidTuningTab.vue`). `MSPHelper` fills `FC.TUNING_SLIDERS` from the reply. Apply refuses if the connected
+craft's slider mode is OFF, unknown, or RP for a yaw measurement (`fc:*`). The read also means the write
+that follows keeps the live values of slider fields the proposal does not set. Upstream wrote whatever
+`FC.TUNING_SLIDERS` held, which is all zeros until the PID tab loads it.
 
 Every reason is shown in plain language, with the measured value where there is one
 (`src/gyrocore/chirp/reasons.ts`; strings in `src/gyroflight/locales/en.json`).
@@ -146,22 +150,28 @@ Every reason is shown in plain language, with the measured value where there is 
 
 It blocks Apply when the proposed direction differs from the requested one
 (`slider_clamp_changes_direction:<slider>`). That covers a reduction turned into an increase, a requested
-change cancelled by the limit, and a held slider moved by the limit. It also blocks when the clamp moves a
-slider more than 5 points from its requested value (`slider_clamp_material:<slider>`). Any other clamp is a
-warning. Betaflight's math is unchanged.
+change cancelled by the limit, and a held slider moved by the limit. It also blocks when the slider limit
+changes the requested value by more than integer rounding (0.5) in the same direction
+(`slider_clamp_material:<slider>`), for example FF 15 asked to go to 20.7 (+38 %) and floored to 25 (+67 %).
+A clamp within rounding is a warning. Betaflight's math is unchanged.
 
 ## Deliberate differences from GyroCore's Python engine
 
-| Topic                               | GyroCore Python (`autotune/engine.py`) | Gyroflight Apply gate                    | Why                                                                    |
-| ----------------------------------- | -------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| `simplified_pids_mode` absent       | warning                                | blocks                                   | a slider proposal cannot be shown to reach the PIDs                    |
-| header/timestamp rate not confirmed | warning (`sample_rate_crosscheck`)     | blocks Apply only                        | WU2 "sample-rate contract invalid"; the measurement state is unchanged |
-| slider clamped by the 25–250 limit  | warning (`slider_clamped`)             | blocks on direction change or > 5 points | WU2 §6 (FF floor)                                                      |
-| Betaflight `sensitivityUnreachable` | warning                                | blocks                                   | "recommendation reports unsafe state"                                  |
-| repeated segments on one axis       | last one analysed                      | all analysed                             | no silent overwrite                                                    |
+| Topic                               | GyroCore Python (`autotune/engine.py`)  | Gyroflight Apply gate                 | Why                                                                    |
+| ----------------------------------- | --------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------- |
+| `simplified_pids_mode` absent       | warning                                 | blocks                                | a slider proposal cannot be shown to reach the PIDs                    |
+| header/timestamp rate not confirmed | warning (`sample_rate_crosscheck`)      | blocks Apply only                     | WU2 "sample-rate contract invalid"; the measurement state is unchanged |
+| slider clamped by the 25–250 limit  | warning (`slider_clamped`)              | blocks unless within integer rounding | WU2 §6 (FF floor)                                                      |
+| Betaflight `sensitivityUnreachable` | warning                                 | blocks                                | "recommendation reports unsafe state"                                  |
+| repeated segments on one axis       | last one analysed; overall status warns | all analysed; no warning              | no silent overwrite, so nothing is discarded to warn about             |
 
-The measurement gates, measurement states and quality numbers are identical to GyroCore's. That is tested
-on all 20 synthetic logs and, locally, on AIR65.
+The measurement gates, per-measurement states and quality numbers are identical to GyroCore's, on all 20
+synthetic logs and, locally, on AIR65. The overall state equals GyroCore's overall status in 19 of 20 cases.
+`repeated_axis` is the documented exception: GyroCore says `usable_with_warnings` because it discards the
+first roll sweep, Gyroflight keeps both and says USABLE. Log-level extraction warnings make every
+measurement of that log USABLE WITH WARNINGS, as in GyroCore, and are listed in the panel and in Apply's
+warnings (`log:*`). These are skipped malformed rows, dropped out-of-range axis frames, CHIRP detected from
+`debug[1]` alone, and a missing CHIRP band.
 
 Not ported, on purpose: GyroCore's Welch, FFT, transfer function, coherence, sensitivity and step math
 (`systemId.ts`, `fft.ts`); its `recommend_gains` port; the old AeroTuner tuner; the global-slider merge
@@ -216,14 +226,14 @@ npx vitest run test/gyrocore/air65_qualification.local.test.ts
 
 ## Tests
 
-| File                                                  | Proves                                                                                                                                                               |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/gyrocore/chirp_qualification_synthetic.test.ts` | 20-case parity with GyroCore, the four upstream-unsafe cases, fail-safe missing rate headers, repeated axis                                                          |
-| `test/gyrocore/chirp_qualification_pipeline.test.ts`  | Viewer samples used, buggy decoder never called, multi-log, same-axis across logs, all four states, diagnostic-only label, recommendation requires usable, recompute |
-| `test/gyrocore/chirp_apply_gate.test.ts`              | handler-level gate: direct calls, no/unknown id, tampered sliders, mode OFF (log and live), yaw in RP, FF reversal, every block reason; no write when blocked        |
-| `test/gyrocore/chirp_gates.test.ts`                   | each gate on its own, the slider guard, and an English text for every reason code                                                                                    |
-| `test/gyrocore/autotune_apply_blocked_ui.test.ts`     | Apply button disabled with reasons; a click cannot reach the action                                                                                                  |
-| `test/gyrocore/air65_qualification.local.test.ts`     | AIR65 (local only), as above                                                                                                                                         |
+| File                                                  | Proves                                                                                                                                                                                                          |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/gyrocore/chirp_qualification_synthetic.test.ts` | 20-case parity with GyroCore (per measurement and overall), the four upstream-unsafe cases, fail-safe missing rate headers, log warnings, repeated axis                                                         |
+| `test/gyrocore/chirp_qualification_pipeline.test.ts`  | Viewer samples used, buggy decoder never called, multi-log, same-axis across logs, all four states, diagnostic-only banner above the Bode plot and outside the panel, recommendation requires usable, recompute |
+| `test/gyrocore/chirp_apply_gate.test.ts`              | handler-level gate: direct calls, no/unknown id, tampered sliders, mode OFF (log and live), yaw in RP, FF reversal, FF floor inflation, every block reason; no write when blocked                               |
+| `test/gyrocore/chirp_gates.test.ts`                   | each gate on its own, the slider guard, and an English text for every reason code                                                                                                                               |
+| `test/gyrocore/autotune_apply_blocked_ui.test.ts`     | Apply button disabled with reasons; a click cannot reach the action                                                                                                                                             |
+| `test/gyrocore/air65_qualification.local.test.ts`     | AIR65 (local only), as above                                                                                                                                                                                    |
 
 MSP is mocked in every test that reaches the Apply action; no test talks to a flight controller.
 
@@ -232,13 +242,9 @@ MSP is mocked in every test that reaches the Apply action; no test talks to a fl
 See [UPSTREAM.md](UPSTREAM.md). In short:
 
 - `src/composables/useAutotune.ts`: decode source, the qualification call, recompute, and the gate in
-  `applyGains`; it removes the old decode/analyse helpers and exports `AUTOTUNE_MATH`.
-- `GainRecommendation.vue`: hides axes without gains, wires the gate and the notice, and passes the
-  measurement id.
-- `AutotuneTab.vue`: mounts the panel.
-- `test/components/autotuneApplyGate.test.ts`: seeds a qualified measurement, since Apply now requires one.
-- `test/gyrocore/air65_autotune.local.test.ts` (WU1): now records upstream-as-shipped through the harness
-  mirror only.
+  `applyGains`; it removes the old decode/analyse helpers and exports `AUTOTUNE_MATH`. Upstream's
+  "unsupported DEBUG_CHIRP axis encoding" error is replaced by GyroCore's drop-and-warn
+  (`chirp_axis_out_of_range_frames_dropped`).
 
 ## Open items
 

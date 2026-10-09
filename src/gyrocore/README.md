@@ -14,7 +14,7 @@ Application glue (tabs, strings, product policy) belongs in `src/gyroflight/`.
 | Path           | Contents                                                                                         |
 | -------------- | ------------------------------------------------------------------------------------------------ |
 | `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate |
-| `components/`  | `ChirpQualificationPanel.vue`, `ApplyGateNotice.vue`                                             |
+| `components/`  | `ChirpQualificationPanel.vue`, `DiagnosticOnlyBanner.vue`, `ApplyGateNotice.vue`                 |
 | `composables/` | `useApplyGate`                                                                                   |
 | `stores/`      | `chirpQualification` (every measurement, and which ones Autotune shows)                          |
 

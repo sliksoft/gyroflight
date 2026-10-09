@@ -135,6 +135,29 @@ describe("GyroCore qualification reproduces GyroCore's verdicts on Viewer-decode
     }
 });
 
+describe("overall state matches GyroCore's overall status", () => {
+    const STATUS_TO_STATE: Record<string, string> = {
+        ok: "usable",
+        usable_with_warnings: "usable_with_warnings",
+        unusable: "rejected",
+        error: "no_chirp",
+    };
+    // GyroCore warns on repeated segments because it discards all but the last; nothing is discarded here.
+    const EXCEPTIONS: Record<string, string> = { repeated_axis: "usable" };
+
+    for (const caseId of cases) {
+        it(caseId, () => {
+            const expected = EXCEPTIONS[caseId] ?? STATUS_TO_STATE[golden[caseId].result.status];
+            expect(qualify(caseId).state).toBe(expected);
+        });
+    }
+
+    it("repeated_axis is the only documented exception", () => {
+        expect(golden.repeated_axis.result.status).toBe("usable_with_warnings");
+        expect(Object.keys(EXCEPTIONS)).toEqual(["repeated_axis"]);
+    });
+});
+
 describe("measurements upstream accepts but GyroCore rejects stay rejected", () => {
     for (const [caseId, gates] of Object.entries(UPSTREAM_UNSAFE)) {
         it(caseId, () => {
@@ -198,6 +221,15 @@ describe("measurements upstream accepts but GyroCore rejects stay rejected", () 
             }
         }
         expect(unsafeAccepted).toBe(0);
+    });
+});
+
+describe("log-level extraction warnings reach every measurement of the log", () => {
+    it("corrupt_axis_frames: dropped axis frames qualify the measurement and are listed for Apply", () => {
+        const [m] = qualify("corrupt_axis_frames").measurements;
+        expect(m.logWarnings).toContain("chirp_axis_out_of_range_frames_dropped");
+        expect(m.state).toBe("usable_with_warnings");
+        expect(m.apply.warnings).toContain("log:chirp_axis_out_of_range_frames_dropped");
     });
 });
 
