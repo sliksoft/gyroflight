@@ -52,7 +52,7 @@
                     <SettingRow :label="$t('colorTheme')">
                         <USelect
                             :items="[
-                                { label: $t('colorThemeYellow'), value: 'yellow' },
+                                { label: $t('gyroflightColorTheme'), value: GYROFLIGHT_COLOR_THEME },
                                 { label: $t('colorThemeAmber'), value: 'amber' },
                                 { label: $t('colorThemeContrast'), value: 'contrast' },
                             ]"
@@ -160,7 +160,7 @@ import DeviceHandler from "../../js/device_handler";
 import CliAutoComplete from "../../js/CliAutoComplete";
 import DarkTheme, { setDarkTheme } from "../../js/DarkTheme";
 import { checkSetupAnalytics } from "../../js/Analytics";
-import { UPSTREAM_ANALYTICS_ENABLED } from "@/gyroflight/policy";
+import { GYROFLIGHT_COLOR_THEME, UPSTREAM_ANALYTICS_ENABLED } from "@/gyroflight/policy";
 import NotificationManager from "../../js/utils/notifications";
 import { ispConnected } from "../../js/utils/connection";
 import { DEFAULT_DEVELOPMENT_OPTIONS, resetDevelopmentOptions } from "../../js/utils/developmentOptions";
@@ -190,7 +190,7 @@ const settings = reactive({
     expertMode: !!getConfig("expertMode").expertMode,
     useLegacyRenderingModel: !!getConfig("useLegacyRenderingModel").useLegacyRenderingModel,
     darkTheme: DarkTheme.configSetting,
-    colorTheme: getConfig("colorTheme", "yellow").colorTheme ?? "yellow",
+    colorTheme: getConfig("colorTheme", GYROFLIGHT_COLOR_THEME).colorTheme ?? GYROFLIGHT_COLOR_THEME,
     showDevToolsOnStartup: !!getConfig("showDevToolsOnStartup").showDevToolsOnStartup,
     showNotifications: !!getConfig("showNotifications").showNotifications,
     backupOnFlash: getConfig("backupOnFlash", 1).backupOnFlash ?? 1,
@@ -215,7 +215,7 @@ const syncSettingsFromStorage = () => {
     settings.expertMode = !!getConfig("expertMode").expertMode;
     settings.useLegacyRenderingModel = !!getConfig("useLegacyRenderingModel").useLegacyRenderingModel;
     settings.darkTheme = DarkTheme.configSetting;
-    settings.colorTheme = getConfig("colorTheme", "yellow").colorTheme ?? "yellow";
+    settings.colorTheme = getConfig("colorTheme", GYROFLIGHT_COLOR_THEME).colorTheme ?? GYROFLIGHT_COLOR_THEME;
     settings.showDevToolsOnStartup = !!getConfig("showDevToolsOnStartup").showDevToolsOnStartup;
     settings.showNotifications = !!getConfig("showNotifications").showNotifications;
     settings.backupOnFlash = getConfig("backupOnFlash", 1).backupOnFlash ?? 1;
