@@ -44,3 +44,7 @@ src-tauri/gen/
 
 # Capacitor copies the web build here during a local Android build.
 android/app/src/main/assets/public/
+
+# Gyroflight: GyroCore qualification fixtures are copied byte-for-byte and pinned by sha256
+# (test/gyrocore/fixtures/PROVENANCE.md); reformatting them would break that provenance.
+test/gyrocore/fixtures/

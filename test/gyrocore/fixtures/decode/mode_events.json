@@ -1,0 +1,41 @@
+{
+  "frame_count": 640,
+  "i_interval": 32,
+  "events": {
+    "100": {
+      "type": 30,
+      "payload": [
+        5,
+        69
+      ]
+    },
+    "200": {
+      "type": 30,
+      "payload": [
+        69,
+        5
+      ]
+    },
+    "300": {
+      "type": 15,
+      "payload": [
+        4
+      ]
+    },
+    "410": {
+      "type": 30,
+      "payload": [
+        68,
+        69
+      ]
+    },
+    "600": {
+      "type": 30,
+      "payload": [
+        4660,
+        0
+      ]
+    }
+  },
+  "unpatched_native_frame_count": 578
+}
