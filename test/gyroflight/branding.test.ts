@@ -81,13 +81,21 @@ describe("Gyroflight branding", () => {
         expect(fs.existsSync(path.join(root, "src/images/bf_logo_white.svg"))).toBe(true);
     });
 
-    it("renders GYROFLIGHT by Redline Dynamics with the version tooltip", () => {
-        const { el, unmount } = mount(GyroflightLogo, { configuratorVersion: "1.2.3" });
-        const logo = el.querySelector('[data-gyroflight="logo"]')!;
-        expect(logo.textContent).toContain("GYROFLIGHT");
-        expect(logo.textContent).toContain("by Redline Dynamics");
+    it("uses the real Gyroflight logo PNG, in a sidebar and a hero size, with the version tooltip", () => {
+        expect(fs.existsSync(path.join(root, "src/gyroflight/branding/logo-Gyrofly.png"))).toBe(true);
+        const sidebar = mount(GyroflightLogo, { configuratorVersion: "1.2.3" });
+        const logo = sidebar.el.querySelector('[data-gyroflight="logo"]')!;
+        expect(logo.getAttribute("data-variant")).toBe("sidebar");
+        const img = logo.querySelector("img")!;
+        expect(img.getAttribute("src")).toMatch(/logo-Gyrofly/);
+        expect(img.getAttribute("alt")).toBe("Gyroflight by Redline Dynamics");
         expect(logo.getAttribute("title")).toContain("1.2.3");
-        unmount();
+        // The artwork carries the wordmark: no separate text branding beside it.
+        expect(logo.textContent!.trim()).toBe("");
+        sidebar.unmount();
+        const hero = mount(GyroflightLogo, { variant: "hero" });
+        expect(hero.el.querySelector('[data-gyroflight="logo"]')!.getAttribute("data-variant")).toBe("hero");
+        hero.unmount();
     });
 
     it("names the document and the PWA Gyroflight", () => {
@@ -134,9 +142,46 @@ describe("Gyroflight theme", () => {
     });
 });
 
+describe("Home label", () => {
+    it("the first sidebar entry is Home in every language, via the Gyroflight product override", async () => {
+        const upstream = (lng: string) =>
+            Object.fromEntries(
+                Object.entries(JSON.parse(read(`locales/${lng}/messages.json`))).map(([k, v]) => [
+                    k,
+                    (v as { message: string }).message,
+                ]),
+            );
+        expect(upstream("en").tabLanding).toBe("Welcome");
+        expect(upstream("nl").tabLanding).toBe("Welkom");
+        await i18next.init({
+            lng: "nl",
+            fallbackLng: "en",
+            ns: ["messages"],
+            defaultNS: "messages",
+            resources: { en: { messages: upstream("en") }, nl: { messages: upstream("nl") } },
+        });
+        registerGyroflightMessages();
+        expect(i18next.t("tabLanding")).toBe("Home");
+        await i18next.changeLanguage("en");
+        expect(i18next.t("tabLanding")).toBe("Home");
+        // A bundle (re)loaded later must not bring the upstream text back.
+        i18next.addResourceBundle("nl", "messages", { tabLanding: "Welkom" }, true, true);
+        i18next.emit("loaded", { nl: { messages: true } });
+        await i18next.changeLanguage("nl");
+        expect(i18next.t("tabLanding")).toBe("Home");
+        expect(sidebarItems[0]).toMatchObject({ key: "landing", i18n: "tabLanding" });
+    });
+});
+
 describe("Gyroflight sidebar policy", () => {
-    it("hides Pre-Flight and both Flight Plan entries with upstream's own hideInSidebar flag", () => {
-        expect(GYROFLIGHT_HIDDEN_SIDEBAR_KEYS).toEqual(["preflight", "flight_plan", "flight_plan_connected"]);
+    it("hides Pre-Flight, both Flight Plan entries, Help and the status tab with upstream's own hideInSidebar flag", () => {
+        expect(GYROFLIGHT_HIDDEN_SIDEBAR_KEYS).toEqual([
+            "preflight",
+            "flight_plan",
+            "flight_plan_connected",
+            "help",
+            "gyroflight",
+        ]);
         for (const key of GYROFLIGHT_HIDDEN_SIDEBAR_KEYS) {
             const item = sidebarItems.find((i) => i.key === key);
             expect(item, key).toBeDefined();
@@ -145,6 +190,9 @@ describe("Gyroflight sidebar policy", () => {
         expect(visibleKeys(true, "disconnected")).not.toContain("preflight");
         expect(visibleKeys(true, "disconnected")).not.toContain("flight_plan");
         expect(visibleKeys(true, "connected")).not.toContain("flight_plan_connected");
+        expect(visibleKeys(true, "disconnected")).not.toContain("help");
+        expect(visibleKeys(true, "disconnected")).not.toContain("gyroflight");
+        expect(visibleKeys(true, "connected")).not.toContain("gyroflight");
     });
 
     it("keeps their implementations: tab components and allowed tabs are unchanged", () => {
@@ -154,12 +202,27 @@ describe("Gyroflight sidebar policy", () => {
         expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("flight_plan");
         expect(fs.existsSync(path.join(root, "src/components/tabs/PreflightTab.vue"))).toBe(true);
         expect(fs.existsSync(path.join(root, "src/components/tabs/FlightPlanTab.vue"))).toBe(true);
+        expect(VueTabComponents.help).toBeDefined();
+        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("help");
+        expect(fs.existsSync(path.join(root, "src/components/tabs/HelpTab.vue"))).toBe(true);
+        expect(VueTabComponents.gyroflight).toBeDefined();
+        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("gyroflight");
+        expect(GUI.defaultAllowedTabs).toContain("gyroflight");
     });
 
     it("changes nothing else in the sidebar list", () => {
         const hidden = sidebarItems.filter((i) => i.hideInSidebar).map((i) => i.key);
         expect(hidden.sort()).toEqual(
-            ["backups", "flight_plan", "flight_plan_connected", "log", "preflight", "user_profile"].sort(),
+            [
+                "backups",
+                "flight_plan",
+                "flight_plan_connected",
+                "gyroflight",
+                "help",
+                "log",
+                "preflight",
+                "user_profile",
+            ].sort(),
         );
         expect(sidebarItems[0].key).toBe("landing");
         expect(sidebarItems[1].key).toBe("firmware_flasher");
@@ -175,7 +238,7 @@ describe("Gyroflight sidebar policy", () => {
 
     it("Firmware Flasher and Blackbox Viewer stay reachable without Expert Mode", () => {
         expect(visibleKeys(false, "disconnected")).toEqual(
-            expect.arrayContaining(["landing", "firmware_flasher", "help", "blackbox_viewer", "gyroflight"]),
+            expect.arrayContaining(["landing", "firmware_flasher", "blackbox_viewer"]),
         );
         expect(GUI.defaultAllowedTabsWhenDisconnected).toEqual(
             expect.arrayContaining(["firmware_flasher", "blackbox_viewer"]),
@@ -194,14 +257,14 @@ describe("Gyroflight Home", () => {
         expert.on = false;
         const { el, unmount } = mount(GyroflightHome);
         const text = el.textContent!;
-        for (const s of [
-            "GYROFLIGHT",
-            "by Redline Dynamics",
-            "Built on Betaflight",
-            "GNU General Public License v3.0",
-        ]) {
+        for (const s of ["Built on Betaflight", "GNU General Public License v3.0", "Betaflight App source"]) {
             expect(text).toContain(s);
         }
+        // One branding element: the hero logo, no text wordmark beside it.
+        const hero = el.querySelector('[data-gyroflight="home-hero"]')!;
+        expect(hero.querySelectorAll('[data-gyroflight="logo"][data-variant="hero"]')).toHaveLength(1);
+        expect(text).not.toContain("GYROFLIGHT");
+        expect(el.querySelectorAll('[data-gyroflight="home-cards"] > *')).toHaveLength(4);
         for (const s of ["home-connect", "home-blackbox", "home-flasher", "home-autotune", "home-attribution"]) {
             expect(el.querySelector(`[data-gyroflight="${s}"]`), s).not.toBeNull();
         }
