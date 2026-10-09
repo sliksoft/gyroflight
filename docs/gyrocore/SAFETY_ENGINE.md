@@ -272,8 +272,8 @@ can only add a block, and an authorized composite has no blocked reasons.
 
 ### Class A but not ported in WU4A, and why
 
-Of the 24 class-A components, WU4A ports 20: group 1 rows 1–12, and group 2 M18, S1–S5, S13 (status),
-O1–O3, O4–O7/O9/O10, O11 and O15. These four are not ported:
+Of the 24 class-A components, WU4A ports 19: group 1 rows 1–12, and group 2 M18, S1–S5, S13 (status),
+O1–O3, O4–O7/O9/O10, O11 and O15. These five are not ported (S10 and S11 share a row):
 
 | Component                                                    | Why not now                                                                                                                                                                                                                                                    |
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
