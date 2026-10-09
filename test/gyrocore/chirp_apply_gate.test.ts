@@ -91,6 +91,12 @@ vi.mock("../../src/js/msp", () => ({
     },
 }));
 
+// Test-only release of the product Apply lock, so the write path behind it can be
+// tested with mocked MSP. product_apply_lock.test.ts tests the lock itself.
+vi.mock("@/gyrocore/productLock/productApply", async () =>
+    (await import("./harness/productRelease")).releasedProductApply(),
+);
+
 vi.mock("../../src/composables/useTuningSliders", () => ({
     validateTuningSliders: vi.fn(async () => {
         const { default: FC } = await import("../../src/js/fc");
@@ -418,6 +424,7 @@ describe("repeated sweeps on one axis", () => {
                 { ...GOOD, axis: 0 },
                 { ...GOOD, axis: 0, amplitude: 180 },
                 { ...GOOD, axis: 1 },
+                { ...GOOD, axis: 2 },
             ]),
         );
 
@@ -426,6 +433,9 @@ describe("repeated sweeps on one axis", () => {
         expect(gate.report!.measurements.filter((m) => m.axisName === "roll" && m.apply.allowed)).toHaveLength(2);
         expect(composite.authorized).toBe(false);
         expect(composite.blocked).toContain("repeated_axis_requires_selection:roll");
+        // An unselected repeated axis is not covered.
+        expect(composite.coverage.missingAxes).toEqual(["roll"]);
+        expect(composite.blocked).toContain("missing_axis_evidence:roll");
         await expectBlocked(
             useAutotune().applyGains(composite.sources[0].proposed!, composite.id),
             "repeated_axis_requires_selection:roll",
@@ -437,7 +447,10 @@ describe("repeated sweeps on one axis", () => {
             ["log1-seg1", "not_selected"],
             ["log1-seg2", "participating"],
             ["log1-seg3", "participating"],
+            ["log1-seg4", "participating"],
         ]);
+        // The selected repeat covers roll.
+        expect(chosen.coverage.sourceByAxis).toEqual({ roll: "log1-seg2", pitch: "log1-seg3", yaw: "log1-seg4" });
         expect(chosen.authorized).toBe(true);
         await useAutotune().applyGains(chosen.final!, chosen.id);
         expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
@@ -450,6 +463,7 @@ describe("repeated sweeps on one axis", () => {
                     { ...UNSTABLE, axis: 0 },
                     { ...GOOD, axis: 0 },
                     { ...GOOD, axis: 1 },
+                    { ...GOOD, axis: 2 },
                 ]),
             ),
         );
@@ -457,8 +471,173 @@ describe("repeated sweeps on one axis", () => {
             ["log1-seg1", "rejected"],
             ["log1-seg2", "participating"],
             ["log1-seg3", "participating"],
+            ["log1-seg4", "participating"],
         ]);
+        expect(composite.coverage.sourceByAxis.roll).toBe("log1-seg2");
         expect(composite.warnings).toContain("rejected_repeat_not_used:log1-seg1");
         expect(composite.authorized).toBe(true);
+    });
+});
+
+describe("axis coverage: every axis the slider mode drives needs its own qualified, selected evidence", () => {
+    const AXIS = { roll: 0, pitch: 1, yaw: 2 } as const;
+    type Axis = keyof typeof AXIS;
+    const flight = (axes: Axis[], mode: number | null) =>
+        encodeChirpLog(
+            simulateChirpSequence(axes.map((a) => ({ ...GOOD, axis: AXIS[a] }))),
+            mode === null
+                ? FULL_TUNE_HEADERS.filter((h) => !h.startsWith("simplified_pids_mode:"))
+                : withHeader(FULL_TUNE_HEADERS, `simplified_pids_mode:${mode}`),
+        );
+
+    const matrix: [string, number, Axis[], Axis[]][] = [
+        // [mode name, mode, axes flown, axes missing]
+        ["RPY", 2, ["roll"], ["pitch", "yaw"]],
+        ["RPY", 2, ["pitch"], ["roll", "yaw"]],
+        ["RPY", 2, ["yaw"], ["roll", "pitch"]],
+        ["RPY", 2, ["roll", "pitch"], ["yaw"]],
+        ["RPY", 2, ["roll", "yaw"], ["pitch"]],
+        ["RPY", 2, ["pitch", "yaw"], ["roll"]],
+        ["RPY", 2, ["roll", "pitch", "yaw"], []],
+        ["RP", 1, ["roll"], ["pitch"]],
+        ["RP", 1, ["pitch"], ["roll"]],
+        ["RP", 1, ["roll", "pitch"], []],
+        ["RP", 1, ["yaw"], ["roll", "pitch"]],
+        ["RP", 1, ["roll", "yaw"], ["pitch"]],
+        ["RP", 1, ["roll", "pitch", "yaw"], []],
+    ];
+    for (const [modeName, mode, axes, missing] of matrix) {
+        const verdict = missing.length ? "blocked" : "coverage pass";
+        it(`${modeName} + ${axes.join("+")} -> ${verdict}`, async () => {
+            msp.live = { ...LOGGED_LIVE, slider_pids_mode: mode };
+            const { composite } = await load(flight(axes, mode));
+            const required: Axis[] = mode === 2 ? ["roll", "pitch", "yaw"] : ["roll", "pitch"];
+            expect(composite.coverage.modeName).toBe(modeName);
+            expect(composite.coverage.pidsMode).toBe(mode);
+            expect(composite.coverage.requiredAxes).toEqual(required);
+            expect(composite.coverage.missingAxes).toEqual(missing);
+            expect(composite.coverage.coveredAxes).toEqual(required.filter((a) => !missing.includes(a)));
+            for (const a of composite.coverage.coveredAxes) {
+                const src = composite.sources.find((s) => s.measurementId === composite.coverage.sourceByAxis[a])!;
+                expect([src.axisName, src.role]).toEqual([a, "participating"]);
+            }
+            const coverageCodes = missing.map((a) => `missing_axis_evidence:${a}`);
+            expect(composite.coverage.blocked).toEqual(coverageCodes);
+            expect(composite.blocked).toEqual(expect.arrayContaining(coverageCodes));
+            if (mode === 1) {
+                // Yaw is never RP authorization evidence; it stays out of the merge as before.
+                expect(composite.coverage.sourceByAxis.yaw).toBeUndefined();
+                expect(composite.merge.participating_axes).not.toContain("yaw");
+            }
+            if (missing.length) {
+                expect(composite.authorized).toBe(false);
+                // The merge itself may still resolve: merge validity is not apply authorization.
+                if (axes.filter((a) => required.includes(a)).length) {
+                    expect(composite.merge.status).toBe("merged");
+                    expect(composite.final).not.toBeNull();
+                }
+                await expectBlocked(
+                    useAutotune().applyGains(composite.final ?? composite.sources[0].proposed!, composite.id),
+                    ...coverageCodes,
+                );
+                expect(msp.calls).toEqual([]);
+            } else {
+                expect(composite.blocked).toEqual([]);
+                expect(composite.authorized).toBe(true);
+                await useAutotune().applyGains(composite.final!, composite.id);
+                expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
+            }
+        });
+    }
+
+    it("a rejected measurement does not cover its axis", async () => {
+        const { composite } = await load(
+            encodeChirpLog(
+                simulateChirpSequence([
+                    { ...GOOD, axis: 0 },
+                    { ...UNSTABLE, axis: 1 },
+                    { ...GOOD, axis: 2 },
+                ]),
+            ),
+        );
+        expect(composite.sources.find((s) => s.axisName === "pitch")?.role).toBe("rejected");
+        expect(composite.coverage.missingAxes).toEqual(["pitch"]);
+        expect(composite.blocked).toEqual(
+            expect.arrayContaining(["missing_axis_evidence:pitch", "system_id_unusable"]),
+        );
+        await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "missing_axis_evidence:pitch");
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("OFF -> blocked", async () => {
+        const { composite } = await load(flight(["roll", "pitch", "yaw"], 0));
+        expect(composite.coverage.modeName).toBe("OFF");
+        expect(composite.coverage.requiredAxes).toEqual([]);
+        expect(composite.coverage.blocked).toEqual(["axis_coverage_mode_off"]);
+        await expectBlocked(
+            useAutotune().applyGains(composite.sources[0].proposed!, composite.id),
+            "axis_coverage_mode_off",
+        );
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("unknown (not logged) slider mode -> blocked", async () => {
+        const { composite } = await load(flight(["roll", "pitch", "yaw"], null));
+        expect(composite.coverage.modeName).toBe("UNKNOWN");
+        expect(composite.coverage.pidsMode).toBeNull();
+        expect(composite.coverage.blocked).toEqual(["axis_coverage_mode_unknown"]);
+        await expectBlocked(
+            useAutotune().applyGains(composite.sources[0].proposed!, composite.id),
+            "axis_coverage_mode_unknown",
+        );
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("a tampered composite is still blocked when coverage passes", async () => {
+        const { composite } = await load(flight(["roll", "pitch", "yaw"], 2));
+        expect(composite.coverage.missingAxes).toEqual([]);
+        const tampered = { ...composite.final!, slider_d_gain: composite.final!.slider_d_gain + 5 };
+        await expectBlocked(useAutotune().applyGains(tampered, composite.id), "apply:sliders_differ_from_composite");
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("the clamp guards still block when coverage passes", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.ff_floor_three_axis());
+        expect(composite.coverage.missingAxes).toEqual([]);
+        expect(composite.blocked).toContain("composite_clamp_changes_direction:slider_feedforward_gain");
+        await expectBlocked(
+            useAutotune().applyGains(composite.final!, composite.id),
+            "composite_clamp_changes_direction:slider_feedforward_gain",
+        );
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("live recheck: analysis RP (roll+pitch valid), craft now RPY -> blocked, yaw evidence missing", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.rp_mode_yaw_excluded());
+        expect(composite.authorized).toBe(true);
+        msp.live = { ...LOGGED_LIVE, slider_pids_mode: 2 };
+        await expectBlocked(
+            useAutotune().applyGains(composite.final!, composite.id),
+            "fc:missing_axis_evidence:yaw",
+            "fc:simplified_pids_mode_changed",
+        );
+        expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
+        noWrites();
+    });
+
+    it("live recheck: analysis RPY, craft now RP -> blocked by the current contract (mode changed, yaw contributed)", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        msp.live = { ...LOGGED_LIVE, slider_pids_mode: 1 };
+        const err = await useAutotune()
+            .applyGains(composite.final!, composite.id)
+            .catch((e: ApplyBlockedError) => e);
+        expect(err).toBeInstanceOf(ApplyBlockedError);
+        // RP needs only roll+pitch, which are covered; the mode change itself still blocks.
+        expect((err as ApplyBlockedError).reasons).toEqual([
+            "fc:simplified_pids_mode_changed",
+            "fc:yaw_not_under_slider_control",
+        ]);
+        expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
+        noWrites();
     });
 });

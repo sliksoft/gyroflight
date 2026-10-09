@@ -49,6 +49,11 @@ vi.mock("@/stores/connection", () => ({
     useConnectionStore: () => ({ connectionValid: true }),
 }));
 
+// Gyroflight: test-only release of the product Apply lock (src/gyrocore/productLock/productApply.ts).
+vi.mock("@/gyrocore/productLock/productApply", async () =>
+    (await import("../gyrocore/harness/productRelease")).releasedProductApply(),
+);
+
 vi.mock("@/js/localization", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../src/js/localization")>()),
     i18n: { getMessage: (key: string) => key },
@@ -90,7 +95,7 @@ function mountAndSeed(): Mounted {
     setActivePinia(pinia);
     const store = useAutotuneStore();
     store.analysisResult = FAKE_RESULT as unknown as AnalysisResult;
-    useChirpQualificationStore().setReport(qualifiedReportFor("roll", PROPOSED));
+    useChirpQualificationStore().setReport(qualifiedReportFor(PROPOSED));
 
     const container = document.createElement("div");
     document.body.appendChild(container);

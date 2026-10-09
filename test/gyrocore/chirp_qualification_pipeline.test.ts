@@ -327,6 +327,7 @@ describe("explicit choice among repeated sweeps, through the panel", () => {
                     { ...GOOD, axis: 0 },
                     { ...GOOD, axis: 0, amplitude: 180 },
                     { ...GOOD, axis: 1 },
+                    { ...GOOD, axis: 2 },
                 ]),
             ),
         );

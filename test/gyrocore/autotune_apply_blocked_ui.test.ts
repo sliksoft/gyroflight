@@ -43,6 +43,10 @@ const { applyGains, recomputeGains, showYesNo } = vi.hoisted(() => ({
 vi.mock("@/composables/useAutotune", () => ({ useAutotune: () => ({ applyGains, recomputeGains }) }));
 vi.mock("@/composables/useDialog", () => ({ useDialog: () => ({ showYesNo }) }));
 vi.mock("@/stores/connection", () => ({ useConnectionStore: () => ({ connectionValid: true }) }));
+// Test-only release of the product Apply lock, to test the gate behind it (product_apply_lock.test.ts tests the lock).
+vi.mock("@/gyrocore/productLock/productApply", async () =>
+    (await import("./harness/productRelease")).releasedProductApply(),
+);
 vi.mock("@/js/localization", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../src/js/localization")>()),
     i18n: { getMessage: (key: string) => key },
@@ -71,7 +75,7 @@ function mount(blocked: string[], withGains = true) {
         axes: { roll: { gains: withGains ? { targetCrossover: 80, maxPhaseMargin: 60, proposed: PROPOSED } : null } },
         sysConfig: {},
     } as unknown as AnalysisResult;
-    useChirpQualificationStore().setReport(qualifiedReportFor("roll", PROPOSED, blocked));
+    useChirpQualificationStore().setReport(qualifiedReportFor(PROPOSED, blocked));
     const container = document.createElement("div");
     document.body.appendChild(container);
     const app = createApp({ render: () => h(UApp, { portal: false }, { default: () => h(GainRecommendation) }) });

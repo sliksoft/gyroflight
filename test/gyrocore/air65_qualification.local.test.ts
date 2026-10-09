@@ -62,6 +62,7 @@ import { useAutotune } from "../../src/composables/useAutotune";
 import { useAutotuneStore } from "../../src/stores/autotune";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
+import { PRODUCT_APPLY_PENDING, productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
 
 const air65 = localAir65();
 
@@ -177,6 +178,7 @@ describe.skipIf(!air65)("AIR65 through the GyroCore CHIRP gate (local only)", ()
             compositeSummary.push({
                 logIndex: log.logIndex,
                 merge: composite.merge.status,
+                coverage: composite.coverage,
                 blocked: composite.blocked,
             });
             const err = await useAutotune()
@@ -188,6 +190,8 @@ describe.skipIf(!air65)("AIR65 through the GyroCore CHIRP gate (local only)", ()
             expect(err).toBeInstanceOf(ApplyBlockedError);
         }
         expect(composites).toBe(0);
+        // WU3.1: and the product write is not released (production default, no mock here).
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
         expect(msp.calls).toEqual([]);
         writeReport("air65_composite", compositeSummary);
 
