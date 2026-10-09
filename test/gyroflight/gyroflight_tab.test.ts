@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { sidebarItems } from "../../src/components/sidebar/sidebar_items.js";
 import GUI from "../../src/js/gui";
-import { GYROFLIGHT_TAB_KEY, gyroflightSidebarItems } from "../../src/gyroflight/tabs";
+import { GYROFLIGHT_TAB_KEY, gyroflightHiddenSidebarKeys, gyroflightSidebarItems } from "../../src/gyroflight/tabs";
 import { gyroflightTabComponents } from "../../src/gyroflight/components";
 import { gyroflightCapabilities } from "../../src/gyroflight/capabilities";
 import gyroflightMessages from "../../src/gyroflight/locales/en.json";
@@ -58,6 +58,21 @@ describe("Gyroflight tab registration", () => {
             expect(GUI.defaultAllowedTabsWhenDisconnected).toContain(key);
         }
     });
+
+    it("keeps Autotune behind upstream Expert Mode", () => {
+        expect(sidebarItems.find((item) => item.key === "autotune")?.expert).toBe(true);
+    });
+
+    it("hides Pre-Flight and both Flight Plan sidebar entries without deleting the upstream tabs", () => {
+        expect([...gyroflightHiddenSidebarKeys].sort()).toEqual(["flight_plan", "flight_plan_connected", "preflight"]);
+        expect(sidebarItems.some((item) => item.key === "preflight")).toBe(true);
+        expect(sidebarItems.some((item) => item.key === "flight_plan")).toBe(true);
+        expect(sidebarItems.some((item) => item.key === "flight_plan_connected")).toBe(true);
+    });
+
+    it("overrides only the landing component through the Gyroflight integration layer", () => {
+        expect(gyroflightTabComponents.landing).toBeDefined();
+    });
 });
 
 describe("Gyroflight messages", () => {
@@ -84,7 +99,7 @@ describe("Gyroflight messages", () => {
         await i18next.init({ lng: "de", fallbackLng: ["en"], ns: ["messages"], defaultNS: "messages", resources: {} });
         registerGyroflightMessages();
         expect(i18next.t("gyroflightTabTitle")).toBe("Gyroflight");
-        expect(i18next.t("gyroflightStatusPending")).toBe("Migration pending");
+        expect(i18next.t("gyroflightStatusLocked")).toBe("Locked");
     });
 
     it("never shadows an upstream message key", () => {
