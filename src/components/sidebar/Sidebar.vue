@@ -56,7 +56,7 @@
                 :class="{ 'mr-auto': !isCompact }"
             />
         </UTooltip>
-        <UserSession :is-compact="isCompact" />
+        <UserSession v-if="BETAFLIGHT_ACCOUNTS_ENABLED" :is-compact="isCompact" />
     </div>
     <OptionsDialog v-model="optionsOpen" />
     <LogDialog v-model="logOpen" />
@@ -66,6 +66,7 @@
 import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue";
 import { useTranslation } from "i18next-vue";
 import UserSession from "@/components/user-session/UserSession.vue";
+import { BETAFLIGHT_ACCOUNTS_ENABLED } from "@/gyroflight/policy";
 import { sidebarItems } from "./sidebar_items.js";
 import { useVisibleTabs } from "./useVisibleTabs";
 import { useNavigationStore } from "@/stores/navigation";

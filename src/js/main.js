@@ -29,6 +29,7 @@ import { useNavigationStore } from "../stores/navigation.js";
 import { useDialogStore } from "../stores/dialog.js";
 import { MspCancelledError } from "./msp/mspErrors";
 import { isDeleteAccountPath, requestDeleteAccountFocus } from "./utils/deleteAccountLink";
+import { BETAFLIGHT_ACCOUNTS_ENABLED } from "../gyroflight/policy";
 
 window.addEventListener("unhandledrejection", (event) => {
     if (event.reason instanceof MspCancelledError) {
@@ -251,7 +252,7 @@ async function startProcess() {
     loadUiScale();
 
     // Kick off initial tab — sidebar handles subsequent clicks reactively.
-    if (isDeleteAccountPath(window.location.pathname)) {
+    if (BETAFLIGHT_ACCOUNTS_ENABLED && isDeleteAccountPath(window.location.pathname)) {
         openDeleteAccountFromLink().catch((err) => {
             console.warn("Failed to open account deletion from link:", err);
         });

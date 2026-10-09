@@ -53,7 +53,7 @@
                         <div v-html="$t('defaultContributingText')"></div>
                     </div>
                 </div>
-                <div class="column third_left text1 grid-col col4">
+                <div v-if="UPSTREAM_ANALYTICS_ENABLED" class="column third_left text1 grid-col col4">
                     <div class="wrap">
                         <h2 v-html="$t('statisticsDisclaimerHead')"></h2>
                         <div class="statsCollection" v-html="$t('statisticsDisclaimer')"></div>
@@ -104,6 +104,7 @@ import BaseTab from "./BaseTab.vue";
 import SponsorTile from "../sponsor/SponsorTile.vue";
 import GUI from "../../js/gui";
 import { i18n } from "../../js/localization";
+import { UPSTREAM_ANALYTICS_ENABLED } from "@/gyroflight/policy";
 
 export default defineComponent({
     name: "LandingTab",
@@ -131,6 +132,7 @@ export default defineComponent({
             selectedLanguage,
             changeLanguage,
             i18n,
+            UPSTREAM_ANALYTICS_ENABLED,
         };
     },
 });

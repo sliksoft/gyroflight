@@ -12,7 +12,7 @@
                     <SettingRow :label="$t('meteredConnection')">
                         <USwitch v-model="settings.meteredConnection" size="sm" />
                     </SettingRow>
-                    <SettingRow :label="$t('analyticsOptOut')">
+                    <SettingRow v-if="UPSTREAM_ANALYTICS_ENABLED" :label="$t('analyticsOptOut')">
                         <USwitch v-model="settings.analyticsOptOut" size="sm" />
                     </SettingRow>
                     <SettingRow :label="$t('cliAutoComplete')">
@@ -160,6 +160,7 @@ import DeviceHandler from "../../js/device_handler";
 import CliAutoComplete from "../../js/CliAutoComplete";
 import DarkTheme, { setDarkTheme } from "../../js/DarkTheme";
 import { checkSetupAnalytics } from "../../js/Analytics";
+import { UPSTREAM_ANALYTICS_ENABLED } from "@/gyroflight/policy";
 import NotificationManager from "../../js/utils/notifications";
 import { ispConnected } from "../../js/utils/connection";
 import { DEFAULT_DEVELOPMENT_OPTIONS, resetDevelopmentOptions } from "../../js/utils/developmentOptions";

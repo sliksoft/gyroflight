@@ -68,16 +68,46 @@ Set the same on any new clone.
 
 ### Upstream files modified by Gyroflight
 
-| File                                                                        | Change                                                            | Why                                                                  |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `src/js/vue_tab_registry.js`                                                | import + `...gyroflightTabComponents`                             | register Gyroflight tab components                                   |
-| `src/components/sidebar/sidebar_items.js`                                   | import + `...gyroflightSidebarItems` appended after Blackbox      | sidebar entries (index 0/1 order is tested)                          |
-| `src/js/gui.js`                                                             | import + `...gyroflightAllowedTabs` in both default allowed lists | `switchTab` rejects tabs not in `allowedTabs`                        |
-| `package.json`                                                              | `productName`, `displayName`, `description`                       | app identity; feeds the PWA manifest                                 |
-| `src/index.html`                                                            | `<title>`, meta description                                       | app identity                                                         |
-| `src/images/pwa/pwa-192-192.png`, `pwa-512-512.png`, `apple-touch-icon.png` | replaced with the Redline Dynamics mark                           | installed-PWA icon (filenames kept so `vite.config.js` is untouched) |
+| File                                                                        | Change                                                            | Why                                                                      |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `src/js/vue_tab_registry.js`                                                | import + `...gyroflightTabComponents`                             | register Gyroflight tab components                                       |
+| `src/components/sidebar/sidebar_items.js`                                   | import + `...gyroflightSidebarItems` appended after Blackbox      | sidebar entries (index 0/1 order is tested)                              |
+| `src/js/gui.js`                                                             | import + `...gyroflightAllowedTabs` in both default allowed lists | `switchTab` rejects tabs not in `allowedTabs`                            |
+| `package.json`                                                              | `productName`, `displayName`, `description`                       | app identity; feeds the PWA manifest                                     |
+| `src/index.html`                                                            | `<title>`, meta description                                       | app identity                                                             |
+| `src/images/pwa/pwa-192-192.png`, `pwa-512-512.png`, `apple-touch-icon.png` | replaced with the Redline Dynamics mark                           | installed-PWA icon (filenames kept so `vite.config.js` is untouched)     |
+| `src/js/Analytics.ts`                                                       | `send()` returns early unless `UPSTREAM_ANALYTICS_ENABLED`        | no usage data to `analytics.betaflight.com` (see below)                  |
+| `src/components/dialogs/OptionsDialog.vue`                                  | analytics opt-out row behind `UPSTREAM_ANALYTICS_ENABLED`         | the toggle would control nothing                                         |
+| `src/components/tabs/LandingTab.vue`                                        | statistics disclaimer column behind `UPSTREAM_ANALYTICS_ENABLED`  | it claims Betaflight collects data and links Betaflight's privacy policy |
+| `src/components/sidebar/Sidebar.vue`, `src/App.vue`                         | `<UserSession>` behind `BETAFLIGHT_ACCOUNTS_ENABLED`              | Betaflight login/passkeys cannot work from our origin (see below)        |
+| `src/js/main.js`                                                            | `/delete` account deep link behind `BETAFLIGHT_ACCOUNTS_ENABLED`  | it opens the (now unreachable) account profile                           |
 
 Everything else (header logo, `favicon.ico`, Tauri/Capacitor identity, welcome text) is still upstream's.
+All policy flags live in `src/gyroflight/policy.ts`; `git grep gyroflight/policy` lists every gated site.
+
+## Privacy and accounts (divergence from upstream)
+
+**Analytics: disabled.** Upstream's `src/js/Analytics.ts` posts settings, app start, tab views, flashing,
+save/change events and exceptions to `https://analytics.betaflight.com`, with a random user id, OS and
+app name, unless the user opts out. Gyroflight makes `Analytics.send()`, the only network call in that
+module, a no-op (`UPSTREAM_ANALYTICS_ENABLED = false`), whatever the opt-out setting says. The tracker
+object is still constructed so upstream callers keep working, and it still stores a random `userId` in
+local config; that value never leaves the browser. No replacement or Redline telemetry exists. The
+opt-out toggle and the landing-page statistics disclaimer are hidden. Tested in
+`test/gyroflight/privacy.test.ts`; the browser smoke confirms zero requests to `analytics.betaflight.com`.
+
+**Betaflight accounts: hidden.** Login, passkeys (WebAuthn via `login.betaflight.com`), the user
+profile, cloud backups and account deletion (`LoginApi.js`, `UserApi.js`, `LoginManager.js`,
+`UserSession.vue`, `UserProfileTab.vue`, `BackupsTab.vue`) are bound to Betaflight's origin and relying
+party and cannot work from https://app.gyrocore.dev/. Gyroflight is local-first and needs no accounts, so
+`BETAFLIGHT_ACCOUNTS_ENABLED = false` hides the Login button and account menu (sidebar and mobile) and
+ignores the `/delete` deep link. The implementation is untouched. With no stored token, `LoginManager`
+makes no network calls, and `BuildApi` simply sends no `Authorization` header, so anonymous cloud builds
+and flashing are unaffected.
+
+**Still contacted (content, not analytics):** `build.betaflight.com` (flasher targets and builds, device
+filters, sponsor tiles and images) and `api.iconify.design` (icons not bundled locally). These requests
+carry no user or usage data beyond what any HTTP request carries (IP address, user agent).
 
 ## Updating from upstream
 
