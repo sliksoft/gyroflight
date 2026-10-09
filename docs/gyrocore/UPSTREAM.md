@@ -154,10 +154,12 @@ code depends on, and update the base commit in the provenance table.
 pushes to `gyroflight/**` and `gyrocore/**` and on pull requests into `master`, `gyroflight/**` or
 `gyrocore/**`. It has read-only permissions, uses no secrets and uploads or publishes nothing.
 
-Upstream workflows are kept unmodified so they never conflict. On a fork, GitHub does not run any
-workflow until the owner presses **"I understand my workflows, go ahead and enable them"** on the
-repository's Actions tab, and that one switch enables the upstream workflows too. Immediately after
-enabling, disable the upstream automation so it can never deploy, publish or touch issues:
+Upstream workflows are kept unmodified so they never conflict. GitHub Actions is **enabled** on this
+repository (verified 2026-10-09: the first push of `gyroflight-ci.yml` ran immediately). Upstream
+workflows are not registered yet because none of their triggers has fired, but the next push to
+`master` (an upstream sync) will fire `deploy.yml` and `translations-upload.yml`. Without Betaflight's
+secrets they fail and cannot deploy anything, but they should not run at all. Right after the first
+`master` sync (or once they appear in `gh workflow list --all`), disable the upstream automation:
 
 ```bash
 for w in deploy.yml deploy_cloudflare.yml build-release.yml tauri-nightly.yml tauri-release-assets.yml \
