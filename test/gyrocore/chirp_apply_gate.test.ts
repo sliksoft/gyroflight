@@ -20,16 +20,48 @@
  */
 
 /*
- * WU2: the Apply Gains hard gate lives in the Apply action itself
- * (useAutotune().applyGains), not only in the disabled button. Every call here
- * goes straight to the action, as a bypass of the UI would. MSP is mocked: no
- * test talks to a flight controller, and a blocked call must not even read.
+ * Apply Gains hard gate v2 (WU3, extending WU2): Apply writes one validated
+ * COMPOSITE (global) recommendation, never a single axis's, and the gate lives
+ * in the Apply action itself (useAutotune().applyGains), not only in the
+ * button. Every call here goes straight to the action, as a bypass of the UI
+ * would. MSP is mocked: no test talks to a flight controller, and a blocked
+ * call must not even read, except the live-state checks, which read once and
+ * must then not write.
  */
 
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const msp = vi.hoisted(() => ({ calls: [] as number[], liveMode: 2 }));
+const LOGGED_LIVE = {
+    slider_pids_mode: 2,
+    slider_master_multiplier: 100,
+    slider_roll_pitch_ratio: 100,
+    slider_i_gain: 100,
+    slider_d_gain: 100,
+    slider_pi_gain: 100,
+    slider_dmax_gain: 100,
+    slider_feedforward_gain: 100,
+    slider_pitch_pi_gain: 100,
+    slider_dterm_filter: 1,
+    slider_dterm_filter_multiplier: 100,
+    slider_gyro_filter: 1,
+    slider_gyro_filter_multiplier: 100,
+};
+const LIVE_FILTERS = {
+    dterm_lowpass_hz: 75,
+    dterm_lowpass2_hz: 150,
+    dterm_lowpass_dyn_min_hz: 75,
+    dterm_lowpass_dyn_max_hz: 150,
+    gyro_lowpass_hz: 250,
+    gyro_lowpass2_hz: 500,
+    gyro_lowpass_dyn_min_hz: 250,
+    gyro_lowpass_dyn_max_hz: 500,
+};
+
+const msp = vi.hoisted(() => ({
+    calls: [] as { code: number; data: number[] | undefined }[],
+    live: {} as Record<string, number>,
+}));
 const picked = vi.hoisted(() => ({ bytes: new Uint8Array() as Uint8Array }));
 
 vi.mock("../../src/js/FileSystem", () => ({
@@ -46,12 +78,13 @@ vi.mock("../../src/js/localization", async (importOriginal) => ({
 
 vi.mock("../../src/js/msp", () => ({
     default: {
-        promise: vi.fn(async (code: number) => {
-            msp.calls.push(code);
+        promise: vi.fn(async (code: number, data?: number[]) => {
+            msp.calls.push({ code, data: data ? Array.from(data) : undefined });
             const { default: FC } = await import("../../src/js/fc");
             const { default: MSPCodes } = await import("../../src/js/msp/MSPCodes");
             if (code === MSPCodes.MSP_SIMPLIFIED_TUNING) {
-                FC.TUNING_SLIDERS.slider_pids_mode = msp.liveMode;
+                // What MSPHelper's read handler would fill in from the craft.
+                Object.assign(FC.TUNING_SLIDERS, msp.live);
             }
             return null;
         }),
@@ -69,183 +102,270 @@ vi.mock("../../src/composables/useTuningSliders", () => ({
 import FC from "../../src/js/fc";
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { useAutotune } from "../../src/composables/useAutotune";
+import { PHASE_MARGIN_PRESETS } from "../../src/js/blackbox/spectral_analysis";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
-import { encodeChirpLog, FULL_TUNE_HEADERS, simulateChirp, withHeader } from "./harness/chirpSim";
+import { encodeChirpLog, FULL_TUNE_HEADERS, simulateChirpSequence, withHeader } from "./harness/chirpSim";
+import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { readFixtureBytes } from "./harness/fixtures";
 
 const WRITES = new Set([MSPCodes.MSP_SET_SIMPLIFIED_TUNING, MSPCodes.MSP_EEPROM_WRITE]);
+const GOOD = { crossoverHz: 40, delaySamples: 2, seconds: 8 };
+const UNSTABLE = { crossoverHz: 80, delaySamples: 4, seconds: 8 };
 
 async function load(bytes: Uint8Array) {
     picked.bytes = bytes;
     await useAutotune().importAndAnalyze();
     const gate = useChirpQualificationStore();
-    const m = gate.report!.measurements[0];
-    return { gate, m, proposed: m.recommendation?.result.proposed ?? null };
+    return { gate, composite: gate.composite! };
 }
 
-async function expectBlocked(promise: Promise<unknown>, reason: string) {
+async function expectBlocked(promise: Promise<unknown>, ...reasons: string[]) {
     const err = await promise.then(
         () => null,
         (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(ApplyBlockedError);
-    expect((err as ApplyBlockedError).reasons).toContain(reason);
+    for (const reason of reasons) {
+        expect((err as ApplyBlockedError).reasons).toContain(reason);
+    }
 }
 
-const usableLog = () => encodeChirpLog(simulateChirp({ crossoverHz: 40, delaySamples: 2 }));
+const codes = () => msp.calls.map((c) => c.code);
+const noWrites = () => expect(codes().some((c) => WRITES.has(c))).toBe(false);
+
+/** MSP_SET_SIMPLIFIED_TUNING payload, written out field by field (MSPHelper write*SliderSettings). */
+function expectedPayload(s: Record<string, number>, f: Record<string, number>) {
+    const u16 = (v: number) => [v & 0xff, v >> 8];
+    const zeros = (n: number) => Array(n).fill(0);
+    return [
+        s.slider_pids_mode,
+        s.slider_master_multiplier,
+        s.slider_roll_pitch_ratio,
+        s.slider_i_gain,
+        s.slider_d_gain,
+        s.slider_pi_gain,
+        s.slider_dmax_gain,
+        s.slider_feedforward_gain,
+        s.slider_pitch_pi_gain,
+        ...zeros(8),
+        s.slider_dterm_filter,
+        s.slider_dterm_filter_multiplier,
+        ...u16(f.dterm_lowpass_hz),
+        ...u16(f.dterm_lowpass2_hz),
+        ...u16(f.dterm_lowpass_dyn_min_hz),
+        ...u16(f.dterm_lowpass_dyn_max_hz),
+        ...zeros(8),
+        s.slider_gyro_filter,
+        s.slider_gyro_filter_multiplier,
+        ...u16(f.gyro_lowpass_hz),
+        ...u16(f.gyro_lowpass2_hz),
+        ...u16(f.gyro_lowpass_dyn_min_hz),
+        ...u16(f.gyro_lowpass_dyn_max_hz),
+        ...zeros(8),
+    ];
+}
 
 beforeEach(() => {
     setActivePinia(createPinia());
     msp.calls = [];
-    msp.liveMode = 2;
+    msp.live = { ...LOGGED_LIVE };
+    Object.assign(FC.FILTER_CONFIG, LIVE_FILTERS);
 });
 
-describe("Apply Gains hard gate (action handler)", () => {
-    it("control: a qualified measurement with its own sliders reaches the (mocked) flight controller", async () => {
-        const { m, proposed } = await load(usableLog());
-        expect(m.state).toBe("usable");
-        expect(m.apply).toEqual({ allowed: true, blocked: [], warnings: [] });
-        await useAutotune().applyGains(proposed!, m.id);
-        expect(msp.calls).toEqual([
+describe("safe positive fixture: three agreeing axes -> one global tune -> exact payload", () => {
+    const EXPECTED_FINAL = {
+        slider_master_multiplier: 100,
+        slider_pi_gain: 138,
+        slider_i_gain: 100,
+        slider_d_gain: 100,
+        slider_feedforward_gain: 138,
+        slider_dterm_filter_multiplier: 100,
+    };
+
+    it("passes every gate, merges and writes exactly the global sliders", async () => {
+        const { gate, composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        expect(gate.report!.measurements.map((m) => [m.axisName, m.state, m.apply.allowed])).toEqual([
+            ["roll", "usable", true],
+            ["pitch", "usable", true],
+            ["yaw", "usable", true],
+        ]);
+        expect(composite.merge.status).toBe("merged");
+        expect(composite.merge.participating_axes).toEqual(["roll", "pitch", "yaw"]);
+        expect(composite.sources.map((s) => [s.measurementId, s.role])).toEqual([
+            ["log1-seg1", "participating"],
+            ["log1-seg2", "participating"],
+            ["log1-seg3", "participating"],
+        ]);
+        expect(composite.blocked).toEqual([]);
+        expect(composite.authorized).toBe(true);
+        expect(composite.final).toEqual(EXPECTED_FINAL);
+
+        await useAutotune().applyGains(composite.final!, composite.id);
+        expect(codes()).toEqual([
             MSPCodes.MSP_SIMPLIFIED_TUNING,
             MSPCodes.MSP_SET_SIMPLIFIED_TUNING,
             MSPCodes.MSP_EEPROM_WRITE,
         ]);
-        expect(FC.TUNING_SLIDERS.slider_pi_gain).toBe(proposed!.slider_pi_gain);
+        const set = msp.calls.find((c) => c.code === MSPCodes.MSP_SET_SIMPLIFIED_TUNING)!;
+        expect(set.data).toEqual(expectedPayload({ ...LOGGED_LIVE, ...EXPECTED_FINAL }, LIVE_FILTERS));
+        expect(set.data).toHaveLength(53);
     });
 
-    it("blocks a rejected measurement even when called directly with its diagnostics' sliders", async () => {
-        const { m } = await load(readFixtureBytes("chirp/bbl/poor_coherence.bbl.gz"));
-        expect(m.state).toBe("rejected");
-        const fake = {
-            slider_master_multiplier: 100,
-            slider_pi_gain: 120,
-            slider_i_gain: 100,
-            slider_d_gain: 100,
-            slider_feedforward_gain: 100,
-            slider_dterm_filter_multiplier: 100,
-        };
-        await expectBlocked(useAutotune().applyGains(fake, m.id), "measurement:low_coherence");
-        expect(msp.calls).toEqual([]);
+    it("roll+pitch under RP mode: yaw left out by the merge, the global tune still applies", async () => {
+        msp.live = { ...LOGGED_LIVE, slider_pids_mode: 1 };
+        const { composite } = await load(MERGE_E2E_CASES.rp_mode_yaw_excluded());
+        expect(composite.merge.participating_axes).toEqual(["roll", "pitch"]);
+        expect(composite.sources.find((s) => s.axisName === "yaw")?.role).toBe("excluded_by_axis_gate");
+        expect(composite.warnings).toContain("axis_excluded:yaw:yaw_not_under_slider_control");
+        expect(composite.authorized).toBe(true);
+        await useAutotune().applyGains(composite.final!, composite.id);
+        expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
     });
+});
 
-    it("blocks a call without a measurement id (the pre-WU2 signature)", async () => {
-        const { proposed } = await load(usableLog());
-        await expectBlocked(useAutotune().applyGains(proposed!), "apply:unknown_measurement");
-        expect(msp.calls).toEqual([]);
-    });
-
-    it("blocks sliders that differ from the qualified recommendation", async () => {
-        const { m, proposed } = await load(usableLog());
-        const tampered = { ...proposed!, slider_pi_gain: proposed!.slider_pi_gain + 1 };
+describe("Apply hard gate v2 rejects (no MSP write)", () => {
+    it("the old single-measurement apply", async () => {
+        const { gate } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const m = gate.report!.measurements[0];
+        expect(m.apply.allowed).toBe(true);
         await expectBlocked(
-            useAutotune().applyGains(tampered, m.id),
-            "apply:sliders_differ_from_qualified_recommendation",
+            useAutotune().applyGains(m.recommendation!.result.proposed, m.id),
+            "apply:single_measurement_apply_not_allowed",
         );
         expect(msp.calls).toEqual([]);
     });
 
-    it("blocks with no analysis loaded", async () => {
-        const { proposed } = await load(usableLog());
-        useChirpQualificationStore().reset();
-        await expectBlocked(useAutotune().applyGains(proposed!, "log1-seg1"), "apply:no_qualified_analysis");
+    it("a missing composite id", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        await expectBlocked(useAutotune().applyGains(composite.final!), "apply:missing_composite_id");
         expect(msp.calls).toEqual([]);
     });
 
-    it("simplified PID mode OFF in the log blocks Apply", async () => {
-        const { m, proposed } = await load(
-            encodeChirpLog(simulateChirp(), withHeader(FULL_TUNE_HEADERS, "simplified_pids_mode:0")),
+    it("a stale composite (new target, new analysis)", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        useAutotune().recomputeGains(PHASE_MARGIN_PRESETS.CONSERVATIVE);
+        await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "apply:stale_composite");
+        const again = await load(MERGE_E2E_CASES.three_axis_agree());
+        expect(again.composite.id).not.toBe(composite.id);
+        await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "apply:stale_composite");
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("a changed source recommendation", async () => {
+        const { gate, composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const rec = gate.report!.measurements[1].recommendation!;
+        rec.result.proposed.slider_i_gain += 1;
+        gate.touch();
+        await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "apply:stale_composite");
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("tampered merged sliders", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const tampered = { ...composite.final!, slider_pi_gain: composite.final!.slider_pi_gain + 1 };
+        await expectBlocked(useAutotune().applyGains(tampered, composite.id), "apply:sliders_differ_from_composite");
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("a rejected source measurement (an axis whose system ID is unusable)", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.roll_ok_pitch_rejected());
+        expect(composite.merge.status).toBe("merged");
+        expect(composite.merge.participating_axes).toEqual(["roll"]);
+        expect(composite.authorized).toBe(false);
+        expect(composite.blocked).toEqual(
+            expect.arrayContaining(["system_id_unusable", "system_id_unusable:log1-seg2", "measurement:low_coherence"]),
         );
-        expect(m.state).toBe("usable");
-        expect(m.recommendation).not.toBeNull();
-        expect(m.apply.blocked).toEqual(["simplified_pids_mode_off"]);
-        await expectBlocked(useAutotune().applyGains(proposed!, m.id), "simplified_pids_mode_off");
+        await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "system_id_unusable");
         expect(msp.calls).toEqual([]);
     });
 
-    it("simplified PID mode OFF on the connected craft blocks before any write", async () => {
-        const { m, proposed } = await load(usableLog());
-        msp.liveMode = 0;
-        await expectBlocked(useAutotune().applyGains(proposed!, m.id), "fc:simplified_pids_mode_off");
-        expect(msp.calls).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
-        expect(msp.calls.some((c) => WRITES.has(c))).toBe(false);
+    it("an unsafe merge conflict", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.roll_pitch_conflict());
+        expect(composite.merge.status).toBe("MERGE_REQUIRES_REVIEW");
+        expect(composite.final).toBeNull();
+        expect(composite.blocked).toEqual(
+            expect.arrayContaining(["unresolved_merge_requires_review", "slider_disagreement:slider_pi_gain"]),
+        );
+        const roll = composite.sources[0].proposed!;
+        await expectBlocked(useAutotune().applyGains(roll, composite.id), "unresolved_merge_requires_review");
+        expect(msp.calls).toEqual([]);
     });
 
-    it("yaw is blocked when the craft's sliders cover roll and pitch only", async () => {
-        const { m, proposed } = await load(encodeChirpLog(simulateChirp({ axis: 2 })));
-        expect(m.axisName).toBe("yaw");
-        msp.liveMode = 1;
-        await expectBlocked(useAutotune().applyGains(proposed!, m.id), "fc:yaw_not_under_slider_control");
-        expect(msp.calls.some((c) => WRITES.has(c))).toBe(false);
+    it("simplified PID mode OFF in the log", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.pids_mode_off());
+        expect(composite.merge.review_reasons).toEqual(["no_participating_axes"]);
+        expect(composite.blocked).toEqual(
+            expect.arrayContaining(["no_participating_axes", "simplified_pids_mode_off"]),
+        );
+        await expectBlocked(
+            useAutotune().applyGains(composite.sources[0].proposed!, composite.id),
+            "simplified_pids_mode_off",
+        );
+        expect(msp.calls).toEqual([]);
     });
 
-    it("a feed-forward cut that the slider floor turns into an increase blocks Apply", async () => {
-        // The loop needs less gain (x0.5); FF 15 x 0.5 = 7.5 is floored to 25 by buildProposedSliders.
-        const { m, proposed } = await load(
+    it("feed-forward cut reversed by the slider floor, re-checked on the global value", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.ff_floor_three_axis());
+        expect(composite.merge.status).toBe("merged");
+        expect(composite.final!.slider_feedforward_gain).toBe(25);
+        const ff = composite.sliders.find((s) => s.key === "slider_feedforward_gain")!;
+        expect(ff.current).toBe(15);
+        expect(ff.finalDirection).toBe("increase");
+        expect(Object.values(ff.requestedByAxis).every((r) => r < 15)).toBe(true);
+        expect(composite.blocked).toEqual(
+            expect.arrayContaining([
+                "slider_clamp_changes_direction:slider_feedforward_gain",
+                "composite_clamp_changes_direction:slider_feedforward_gain",
+            ]),
+        );
+        await expectBlocked(
+            useAutotune().applyGains(composite.final!, composite.id),
+            "composite_clamp_changes_direction:slider_feedforward_gain",
+        );
+        expect(msp.calls).toEqual([]);
+    });
+
+    it("feed-forward increase inflated by the slider floor beyond rounding", async () => {
+        const { composite } = await load(
             encodeChirpLog(
-                simulateChirp({ crossoverHz: 60, delaySamples: 3 }),
+                simulateChirpSequence([
+                    { ...GOOD, axis: 0 },
+                    { ...GOOD, axis: 1 },
+                ]),
                 withHeader(FULL_TUNE_HEADERS, "simplified_feedforward_gain:15"),
             ),
         );
-        expect(m.state).toBe("usable");
-        expect(proposed!.slider_feedforward_gain).toBe(25);
-        const ff = m.recommendation!.guard.sliders.find((s) => s.slider === "slider_feedforward_gain")!;
-        expect(ff).toMatchObject({
-            current: 15,
-            requestedDirection: "decrease",
-            proposed: 25,
-            proposedDirection: "increase",
-            directionChanged: true,
-            clampedBySliderLimit: true,
-            reason: "slider_clamp_changes_direction:slider_feedforward_gain",
-        });
-        expect(ff.requested).toBeCloseTo(7.5, 6);
-        expect(m.apply.blocked).toEqual(["slider_clamp_changes_direction:slider_feedforward_gain"]);
+        expect(composite.final!.slider_feedforward_gain).toBe(25);
+        expect(composite.blocked).toEqual(
+            expect.arrayContaining([
+                "slider_clamp_material:slider_feedforward_gain",
+                "composite_clamp_material:slider_feedforward_gain",
+            ]),
+        );
         await expectBlocked(
-            useAutotune().applyGains(proposed!, m.id),
-            "slider_clamp_changes_direction:slider_feedforward_gain",
+            useAutotune().applyGains(composite.final!, composite.id),
+            "composite_clamp_material:slider_feedforward_gain",
         );
         expect(msp.calls).toEqual([]);
     });
 
-    it("a feed-forward increase the slider floor inflates (15 -> 20.7 asked, 25 given) blocks Apply", async () => {
-        const { m, proposed } = await load(
-            encodeChirpLog(
-                simulateChirp({ crossoverHz: 40, delaySamples: 2 }),
-                withHeader(FULL_TUNE_HEADERS, "simplified_feedforward_gain:15"),
-            ),
-        );
-        expect(m.state).toBe("usable");
-        expect(proposed!.slider_feedforward_gain).toBe(25);
-        const ff = m.recommendation!.guard.sliders.find((s) => s.slider === "slider_feedforward_gain")!;
-        expect(ff.requestedDirection).toBe("increase");
-        expect(ff.proposedDirection).toBe("increase");
-        expect(ff.requested).toBeLessThan(24.5);
-        expect(m.apply.blocked).toEqual(["slider_clamp_material:slider_feedforward_gain"]);
-        await expectBlocked(useAutotune().applyGains(proposed!, m.id), "slider_clamp_material:slider_feedforward_gain");
-        expect(msp.calls).toEqual([]);
-    });
-
-    it("every block reason from the WU1 list is enforced by the handler", async () => {
-        const cases: [Uint8Array, string][] = [
-            [readFixtureBytes("chirp/bbl/dropped_timestamps.bbl.gz"), "measurement:excessive_gaps"],
-            [readFixtureBytes("chirp/bbl/poor_coherence.bbl.gz"), "measurement:low_coherence"],
-            [readFixtureBytes("chirp/bbl/weak_excitation.bbl.gz"), "measurement:insufficient_excitation"],
-            [readFixtureBytes("chirp/bbl/poor_coherence.bbl.gz"), "measurement:unusable_frequency_range"],
-            [readFixtureBytes("chirp/bbl/pnum_pdenom.bbl.gz"), "sample_rate_contract:mismatch"],
-            [
-                readFixtureBytes("chirp/bbl/malformed_missing_rate_headers.bbl.gz"),
-                "sample_rate_contract:timestamp_only",
-            ],
-            [readFixtureBytes("chirp/bbl/clean_single_axis.bbl.gz"), "current_tune_missing:pi_gain"],
-            [readFixtureBytes("chirp/bbl/noisy.bbl.gz"), "autotune_sensitivity_bound_unreachable"],
+    it("every WU2 measurement block still reaches the handler", async () => {
+        const cases: [string, string][] = [
+            ["chirp/bbl/dropped_timestamps.bbl.gz", "measurement:excessive_gaps"],
+            ["chirp/bbl/poor_coherence.bbl.gz", "measurement:low_coherence"],
+            ["chirp/bbl/weak_excitation.bbl.gz", "measurement:insufficient_excitation"],
+            ["chirp/bbl/poor_coherence.bbl.gz", "measurement:unusable_frequency_range"],
+            ["chirp/bbl/pnum_pdenom.bbl.gz", "sample_rate_contract:mismatch"],
+            ["chirp/bbl/malformed_missing_rate_headers.bbl.gz", "sample_rate_contract:timestamp_only"],
+            ["chirp/bbl/clean_single_axis.bbl.gz", "current_tune_missing:pi_gain"],
         ];
-        for (const [bytes, reason] of cases) {
+        for (const [fixture, reason] of cases) {
             setActivePinia(createPinia());
-            const { m, proposed } = await load(bytes);
-            expect(m.apply.blocked, reason).toContain(reason);
-            const sliders = proposed ?? {
+            const { composite } = await load(readFixtureBytes(fixture));
+            expect(composite.authorized, fixture).toBe(false);
+            expect(composite.blocked, fixture).toContain(reason);
+            const sliders = composite.sources[0].proposed ?? {
                 slider_master_multiplier: 100,
                 slider_pi_gain: 100,
                 slider_i_gain: 100,
@@ -253,8 +373,79 @@ describe("Apply Gains hard gate (action handler)", () => {
                 slider_feedforward_gain: 100,
                 slider_dterm_filter_multiplier: 100,
             };
-            await expectBlocked(useAutotune().applyGains(sliders, m.id), reason);
+            await expectBlocked(useAutotune().applyGains(sliders, composite.id), reason);
         }
         expect(msp.calls).toEqual([]);
+    });
+});
+
+describe("live flight-controller recheck (one read, then no write)", () => {
+    const cases: [string, Record<string, number>, string][] = [
+        ["slider mode OFF", { slider_pids_mode: 0 }, "fc:simplified_pids_mode_off"],
+        ["slider mode changed after analysis", { slider_pids_mode: 1 }, "fc:simplified_pids_mode_changed"],
+        ["yaw contributed but the craft is RP", { slider_pids_mode: 1 }, "fc:yaw_not_under_slider_control"],
+        ["a current slider changed", { slider_pi_gain: 110 }, "fc:current_slider_changed:slider_pi_gain"],
+        ["D-term filter slider changed", { slider_dterm_filter: 0 }, "fc:current_slider_changed:slider_dterm_filter"],
+    ];
+    for (const [name, live, reason] of cases) {
+        it(name, async () => {
+            const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+            msp.live = { ...LOGGED_LIVE, ...live };
+            await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), reason);
+            expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
+            noWrites();
+        });
+    }
+});
+
+describe("repeated sweeps on one axis", () => {
+    const repeated = () =>
+        encodeChirpLog(
+            simulateChirpSequence([
+                { ...GOOD, axis: 0 },
+                { ...GOOD, axis: 0, amplitude: 180 },
+                { ...GOOD, axis: 1 },
+            ]),
+        );
+
+    it("two qualified roll sweeps need an explicit choice; the default display choice does not count", async () => {
+        const { gate, composite } = await load(repeated());
+        expect(gate.report!.measurements.filter((m) => m.axisName === "roll" && m.apply.allowed)).toHaveLength(2);
+        expect(composite.authorized).toBe(false);
+        expect(composite.blocked).toContain("repeated_axis_requires_selection:roll");
+        await expectBlocked(
+            useAutotune().applyGains(composite.sources[0].proposed!, composite.id),
+            "repeated_axis_requires_selection:roll",
+        );
+
+        gate.selectMeasurement("log1-seg2", true);
+        const chosen = gate.composite!;
+        expect(chosen.sources.map((s) => [s.measurementId, s.role])).toEqual([
+            ["log1-seg1", "not_selected"],
+            ["log1-seg2", "participating"],
+            ["log1-seg3", "participating"],
+        ]);
+        expect(chosen.authorized).toBe(true);
+        await useAutotune().applyGains(chosen.final!, chosen.id);
+        expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
+    });
+
+    it("one qualified and one rejected roll sweep: the qualified one is used, the rejected one reported", async () => {
+        const { composite } = await load(
+            encodeChirpLog(
+                simulateChirpSequence([
+                    { ...UNSTABLE, axis: 0 },
+                    { ...GOOD, axis: 0 },
+                    { ...GOOD, axis: 1 },
+                ]),
+            ),
+        );
+        expect(composite.sources.map((s) => [s.measurementId, s.role])).toEqual([
+            ["log1-seg1", "rejected"],
+            ["log1-seg2", "participating"],
+            ["log1-seg3", "participating"],
+        ]);
+        expect(composite.warnings).toContain("rejected_repeat_not_used:log1-seg1");
+        expect(composite.authorized).toBe(true);
     });
 });

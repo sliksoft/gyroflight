@@ -79,6 +79,27 @@ export function simulateChirp(o: SimOptions = {}): SyntheticFrame[] {
     return frames;
 }
 
+/**
+ * Several sweeps in one log with continuous time, separated by 100 idle frames
+ * in which debug[1] is -1 (no axis excited), as the firmware logs between sweeps.
+ */
+export function simulateChirpSequence(sweeps: SimOptions[], startTimeUs = 1_000_000): SyntheticFrame[] {
+    const out: SyntheticFrame[] = [];
+    let t = startTimeUs;
+    sweeps.forEach((sweep, i) => {
+        const dt = Math.round(1e6 / (sweep.rateHz ?? 1000));
+        if (i > 0) {
+            for (let k = 0; k < 100; k++, t += dt) {
+                out.push({ time: t, setpoint: [0, 0, 0], gyro: [0, 0, 0], debug: [0, -1, 0, 0] });
+            }
+        }
+        const frames = simulateChirp({ ...sweep, startTimeUs: t });
+        out.push(...frames);
+        t = frames.at(-1)!.time + dt;
+    });
+    return out;
+}
+
 export const FULL_TUNE_HEADERS = [
     "chirp_frequency_start_deci_hz:20",
     "chirp_frequency_end_deci_hz:2000",
@@ -94,6 +115,11 @@ export const FULL_TUNE_HEADERS = [
     "simplified_feedforward_gain:100",
     "simplified_dterm_filter:1",
     "simplified_dterm_filter_multiplier:100",
+    "simplified_d_max_gain:100",
+    "simplified_pitch_d_gain:100",
+    "simplified_pitch_pi_gain:100",
+    "simplified_gyro_filter:1",
+    "simplified_gyro_filter_multiplier:100",
 ];
 
 /** Replace one `key:value` header line. */

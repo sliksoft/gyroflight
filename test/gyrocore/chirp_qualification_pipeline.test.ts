@@ -81,6 +81,7 @@ import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQuali
 import { CHIRP_FLAG, encodeLog, type SyntheticFrame } from "./harness/bblWriter";
 import { concatLogs, encodeChirpLog, simulateChirp } from "./harness/chirpSim";
 import { readFixtureBytes } from "./harness/fixtures";
+import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 
 async function runImport(bytes: Uint8Array, name = "test.bbl") {
     picked.bytes = bytes;
@@ -269,6 +270,50 @@ describe("diagnostic-only banner on the Autotune tab", () => {
         const { container, unmount } = await mountTab();
         expect(container.textContent).toContain("autotuneBodePlotTitle");
         expect(container.querySelector('[data-gyrocore="diagnostic-banner"]')).toBeNull();
+        unmount();
+    });
+});
+
+describe("global tune panel (WU3)", () => {
+    async function mountGlobal() {
+        const { default: GlobalTunePanel } = await import("../../src/gyrocore/components/GlobalTunePanel.vue");
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const app = createApp({ render: () => h(UApp, { portal: false }, { default: () => h(GlobalTunePanel) }) });
+        app.config.globalProperties.$t = ((key: string) => key) as never;
+        app.use(getActivePinia()!);
+        app.mount(container);
+        await new Promise((r) => setTimeout(r, 0));
+        return { container, unmount: () => (app.unmount(), container.remove()) };
+    }
+
+    it("shows sources, current, per-axis evidence and the one global value", async () => {
+        await runImport(MERGE_E2E_CASES.three_axis_agree());
+        const { container, unmount } = await mountGlobal();
+        expect(container.textContent).toContain("gyrocoreGlobalIntro");
+        expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("yes");
+        const pi = container.querySelector('[data-slider="slider_pi_gain"]')!;
+        const cells = [...pi.querySelectorAll("td")].map((td) => td.textContent?.trim());
+        expect(cells[1]).toBe("100");
+        expect(cells.slice(2, 5).map((c) => c?.split(" ")[0])).toEqual(["138", "138", "138"]);
+        expect(pi.querySelector('[data-gyrocore="final"]')?.textContent?.trim()).toBe("138");
+        expect(container.querySelectorAll('[data-role="participating"]')).toHaveLength(3);
+        expect(container.querySelector('[data-gyrocore="global-blocked"]')).toBeNull();
+        unmount();
+    });
+
+    it("explains a conflict and offers no global value", async () => {
+        await runImport(MERGE_E2E_CASES.roll_pitch_conflict());
+        const { container, unmount } = await mountGlobal();
+        expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("no");
+        expect(
+            container.querySelector('[data-slider="slider_pi_gain"] [data-gyrocore="final"]')?.textContent?.trim(),
+        ).toBe("--");
+        expect(
+            container.querySelector(
+                '[data-gyrocore="global-blocked"] [data-reason="slider_disagreement:slider_pi_gain"]',
+            ),
+        ).not.toBeNull();
         unmount();
     });
 });
