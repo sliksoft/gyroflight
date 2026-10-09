@@ -66,7 +66,7 @@
 import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue";
 import { useTranslation } from "i18next-vue";
 import UserSession from "@/components/user-session/UserSession.vue";
-import { BETAFLIGHT_ACCOUNTS_ENABLED } from "@/gyroflight/policy";
+import { BETAFLIGHT_ACCOUNTS_ENABLED, GYROFLIGHT_COLOR_THEME } from "@/gyroflight/policy";
 import { sidebarItems } from "./sidebar_items.js";
 import { useVisibleTabs } from "./useVisibleTabs";
 import { useNavigationStore } from "@/stores/navigation";
@@ -142,7 +142,7 @@ watch(optionsOpen, (open) => {
 const isDark = ref(DarkTheme.enabled);
 
 function toggleDarkMode() {
-    const colorTheme = getConfig("colorTheme", "yellow").colorTheme ?? "yellow";
+    const colorTheme = getConfig("colorTheme", GYROFLIGHT_COLOR_THEME).colorTheme ?? GYROFLIGHT_COLOR_THEME;
     if (colorTheme === "contrast") {
         return;
     }
