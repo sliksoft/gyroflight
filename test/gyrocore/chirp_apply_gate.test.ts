@@ -96,6 +96,9 @@ vi.mock("../../src/js/msp", () => ({
 vi.mock("@/gyrocore/productLock/productApply", async () =>
     (await import("./harness/productRelease")).releasedProductApply(),
 );
+// Test-only release of GyroCore Safety (WU4: it blocks every tune without analysis evidence), so the
+// composite gate, live recheck and payload behind it stay tested. safety_pipeline.test.ts tests Safety.
+vi.mock("@/gyrocore/safety/authorize", async () => (await import("./harness/safetyRelease")).releasedSafety());
 
 vi.mock("../../src/composables/useTuningSliders", () => ({
     validateTuningSliders: vi.fn(async () => {

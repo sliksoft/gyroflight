@@ -63,6 +63,7 @@ import { useAutotuneStore } from "../../src/stores/autotune";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { PRODUCT_APPLY_PENDING, productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
+import { safetyForComposite } from "../../src/gyrocore/safety/authorize";
 
 const air65 = localAir65();
 
@@ -180,7 +181,10 @@ describe.skipIf(!air65)("AIR65 through the GyroCore CHIRP gate (local only)", ()
                 merge: composite.merge.status,
                 coverage: composite.coverage,
                 blocked: composite.blocked,
+                safety: safetyForComposite(gate.gateState(), composite).status,
             });
+            // WU4A: no Safety verdict is manufactured from unqualified measurements.
+            expect(safetyForComposite(gate.gateState(), composite).status).toBe("NOT_EVALUATED");
             const err = await useAutotune()
                 .applyGains(sliders, composite.id)
                 .then(

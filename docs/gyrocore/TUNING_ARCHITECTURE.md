@@ -32,17 +32,28 @@ Authority chain, as implemented (WU1–WU3):
         │  every axis the slider mode drives has its own evidence;
         │  composite gate + live flight-controller recheck
         ▼
- GyroCore Safety [WU4 pending] (src/gyrocore/productLock/)         may it be written?   GyroCore
-        │  until migrated: product Apply lock, full_safety_engine_pending
+ GyroCore Safety (src/gyrocore/safety/)                       is it safe?          GyroCore
+        │  WU4A: deterministic foundation; the analysis-evidence stages are
+        │  not available, so every tune is BLOCK missing_required_analysis
+        ▼
+ Product Apply lock (src/gyrocore/productLock/)                released?            Gyroflight
+        │  full_safety_engine_pending (stays until the full Safety pipeline qualifies)
         ▼
  FC Apply (MSP_SET_SIMPLIFIED_TUNING, EEPROM)                  write                Betaflight MSP
 ```
 
-The axis-coverage authorization is not the Safety engine. Until GyroCore's Safety engine
-(`core/gyrocore/safety/`) is migrated and qualified (WU4), the product Apply lock keeps Gyroflight from
-writing any tune to a craft. Still to come after that: evidence and per-change review, rollback.
-Details: [CHIRP_QUALIFICATION.md](CHIRP_QUALIFICATION.md) (WU2) and
-[GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md) (WU3, WU3.1).
+The axis-coverage authorization is not the Safety engine. WU4A ported GyroCore Safety's deterministic
+foundation (absolute mapping, validity, structural and firmware-range checks). The full pipeline needs
+analysis evidence that Gyroflight does not have and GyroCore has not qualified as stable, so it is
+**blocked by analysis**, and the product Apply lock stays `full_safety_engine_pending`. After the
+Safety-evidence contract WU and the rest of Safety, a hardware-validation lock replaces it until a bench WU
+releases physical writes. Still to come after that: evidence and per-change review, rollback.
+
+Details:
+
+- [CHIRP_QUALIFICATION.md](CHIRP_QUALIFICATION.md) (WU2);
+- [GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md) (WU3, WU3.1);
+- [SAFETY_ENGINE.md](SAFETY_ENGINE.md) (WU4).
 
 ## Responsibilities
 

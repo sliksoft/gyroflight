@@ -20,10 +20,10 @@
  */
 
 /*
- * WU3.1: the product Apply lock. GyroCore's Safety engine is not migrated yet
- * (WU4), so production does not write a tune to a craft even when the global
- * tune passes every existing gate. No module mock here: this is the
- * production default.
+ * WU3.1/WU4A: the production default with no module mocks. The product Apply
+ * lock is on, and GyroCore Safety (WU4A) blocks every tune before it because
+ * Gyroflight has no analysis evidence. product_apply_lock_behind_safety.test.ts
+ * shows the lock still holds when Safety is released by the test harness.
  */
 
 import { join } from "node:path";
@@ -71,6 +71,7 @@ import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { PRODUCT_APPLY_PENDING, productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { authorizeCompositeApply } from "../../src/gyrocore/tuning/authorize";
+import { safetyForComposite } from "../../src/gyrocore/safety/authorize";
 import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { qualifiedReportFor } from "./harness/qualifiedReport";
 import { readJsonFile } from "./harness/fixtures";
@@ -88,7 +89,7 @@ describe("product Apply lock (production default)", () => {
         expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
     });
 
-    it("safe positive fixture: merge, coverage and low-level authorization pass; the product write is blocked", async () => {
+    it("safe positive fixture: merge, coverage and the composite gate pass; GyroCore Safety blocks before any FC access", async () => {
         picked.bytes = MERGE_E2E_CASES.three_axis_agree();
         await useAutotune().importAndAnalyze();
         const gate = useChirpQualificationStore();
@@ -103,7 +104,16 @@ describe("product Apply lock (production default)", () => {
             .applyGains(composite.final!, composite.id)
             .catch((e: unknown) => e);
         expect(err).toBeInstanceOf(ApplyBlockedError);
-        expect((err as ApplyBlockedError).reasons).toEqual(["full_safety_engine_pending"]);
+        // Safety (WU4) decides first: no analysis evidence, so the reference fails closed.
+        // The WU3 synthetic log also lacks the ff_weight / filter header lines, so the baseline is incomplete too.
+        expect((err as ApplyBlockedError).reasons).toEqual([
+            "safety:mechanical_hard_block",
+            "safety:missing_required_analysis",
+            "safety:safe_tune_candidate_blocked",
+            "safety:missing_required_pid_or_filter_baseline:roll.f,pitch.f,yaw.f,dterm.lpf1_dyn_min_hz,dterm.lpf1_dyn_max_hz,dterm.lpf1_static_hz,dterm.lpf2_static_hz,gyro.lpf1_dyn_min_hz,gyro.lpf1_dyn_max_hz,gyro.lpf1_static_hz,gyro.lpf2_static_hz",
+            "safety:missing_required_pid_or_filter_baseline",
+        ]);
+        expect(safetyForComposite(gate.gateState(), composite).status).toBe("BLOCK");
         // Not even the read: no flight-controller access at all.
         expect(msp.calls).toEqual([]);
     });
@@ -138,8 +148,12 @@ describe("product Apply lock (production default)", () => {
         expect(button.disabled).toBe(true);
         const lock = container.querySelector('[data-gyrocore="product-apply-locked"]');
         expect(lock?.textContent?.trim()).toBe("gyrocoreProductApplyPending");
-        // The tune itself is authorized: no rejection notice.
+        // The tune itself passes the composite gate: no rejection notice for it.
         expect(container.querySelector('[data-gyrocore="apply-blocked"]')).toBeNull();
+        // GyroCore Safety blocks it (no analysis evidence), shown separately from the product lock.
+        const safety = container.querySelector('[data-gyrocore="safety-apply-blocked"]');
+        expect(safety?.getAttribute("data-status")).toBe("BLOCK");
+        expect(safety?.querySelector('[data-reason="missing_required_analysis"]')).not.toBeNull();
         button.click();
         await new Promise((r) => setTimeout(r, 0));
         expect(msp.calls).toEqual([]);

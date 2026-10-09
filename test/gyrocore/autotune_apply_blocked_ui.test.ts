@@ -47,6 +47,7 @@ vi.mock("@/stores/connection", () => ({ useConnectionStore: () => ({ connectionV
 vi.mock("@/gyrocore/productLock/productApply", async () =>
     (await import("./harness/productRelease")).releasedProductApply(),
 );
+vi.mock("@/gyrocore/safety/authorize", async () => (await import("./harness/safetyRelease")).releasedSafety());
 vi.mock("@/js/localization", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../src/js/localization")>()),
     i18n: { getMessage: (key: string) => key },

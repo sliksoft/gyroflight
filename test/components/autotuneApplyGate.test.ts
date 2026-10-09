@@ -53,6 +53,10 @@ vi.mock("@/stores/connection", () => ({
 vi.mock("@/gyrocore/productLock/productApply", async () =>
     (await import("../gyrocore/harness/productRelease")).releasedProductApply(),
 );
+// Gyroflight: test-only release of GyroCore Safety (src/gyrocore/safety/authorize.ts).
+vi.mock("@/gyrocore/safety/authorize", async () =>
+    (await import("../gyrocore/harness/safetyRelease")).releasedSafety(),
+);
 
 vi.mock("@/js/localization", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../src/js/localization")>()),

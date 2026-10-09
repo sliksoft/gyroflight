@@ -32,6 +32,35 @@
 import type { GainRecommendation } from "../../../src/js/blackbox/spectral_analysis";
 import type { QualifiedReport } from "../../../src/gyrocore/stores/chirpQualification";
 
+/** Betaflight 2026.6.2 header lines for that tune (blackbox.c writeHeader names). */
+const BF_HEADER_PAIRS: [string, string][] = [
+    ["Firmware revision", "Betaflight 2026.6.2 (seeded) STM32F7X2"],
+    ["rollPID", "45,80,30"],
+    ["pitchPID", "47,84,34"],
+    ["yawPID", "45,80,0"],
+    ["d_max", "40,46,0"],
+    ["ff_weight", "120,125,120"],
+    ["dterm_lpf1_static_hz", "75"],
+    ["dterm_lpf1_dyn_hz", "75,150"],
+    ["dterm_lpf2_static_hz", "150"],
+    ["gyro_lpf1_static_hz", "250"],
+    ["gyro_lpf1_dyn_hz", "250,500"],
+    ["gyro_lpf2_static_hz", "500"],
+    ["simplified_pids_mode", "2"],
+    ["simplified_master_multiplier", "100"],
+    ["simplified_i_gain", "100"],
+    ["simplified_d_gain", "100"],
+    ["simplified_pi_gain", "100"],
+    ["simplified_d_max_gain", "100"],
+    ["simplified_feedforward_gain", "100"],
+    ["simplified_pitch_d_gain", "100"],
+    ["simplified_pitch_pi_gain", "100"],
+    ["simplified_dterm_filter", "1"],
+    ["simplified_dterm_filter_multiplier", "100"],
+    ["simplified_gyro_filter", "1"],
+    ["simplified_gyro_filter_multiplier", "100"],
+];
+
 export function qualifiedReportFor(proposed: GainRecommendation["proposed"], blocked: string[] = []): QualifiedReport {
     const measurements = (["roll", "pitch", "yaw"] as const).map((axisName, axis) => ({
         id: `log1-seg${axis + 1}`,
@@ -89,6 +118,7 @@ export function qualifiedReportFor(proposed: GainRecommendation["proposed"], blo
                     gyro_filter: 1,
                     gyro_filter_multiplier: 100,
                 },
+                headerPairs: BF_HEADER_PAIRS,
                 measurements,
             },
         ],

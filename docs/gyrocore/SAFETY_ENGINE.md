@@ -1,7 +1,6 @@
 # GyroCore Safety engine in Gyroflight (WU4)
 
-Status: **dependency audit complete; WU4A (deterministic foundation) in progress.** The full Safety pipeline
-is **blocked by analysis**: it needs analysis evidence that Gyroflight does not have and that GyroCore itself
+Status: **WU4A (deterministic Safety foundation) complete. The full Safety pipeline is blocked by analysis**: it needs analysis evidence that Gyroflight does not have and that GyroCore itself
 has not qualified as stable. The product Apply lock stays `full_safety_engine_pending`.
 
 - Reference: `~/GyroCore` at `d2e60f7`, read only.
@@ -242,26 +241,97 @@ The pure functions are deterministic, and only the pure functions are portable n
 
 - **The product lock stays `full_safety_engine_pending`.**
 
-## WU4A scope (deterministic foundation)
+## WU4A: what is implemented
 
-Ported now, with Python parity:
+All of it lives in `src/gyrocore/safety/`.
 
-- the firmware slider mapping (`simplified_tuning.py`), labelled not authoritative;
-- the absolute proposal and its validity (`absolute.py`), with the D/E rows above handled as explicit, tested
-  adaptations;
-- the class-A checks of the safety stages.
+| File                  | Port of                                                                 | Notes                                                                                                                                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `simplifiedTuning.ts` | `betaflight/simplified_tuning.py`                                       | binary32 at every step, truncate then clamp, integer filter Hz, validity with mismatch evidence, CLI range. Not authoritative on a real craft (above).                                                                                                  |
+| `absolute.ts`         | `autotune/absolute.py` + `current_tune.py`, BBL-header path             | current absolute tune, absolute proposal from the composite's merge, validity, deltas, `absolute_tune_to_config`. Reference-compatible options plus the adaptations below.                                                                              |
+| `pipeline.ts`         | `safety/pipeline.py`, `mechanical_eval.py`, `safe_tune.py`, `output.py` | Mechanical: missing-analysis branch only. Candidate: structural blocks only. Output safety: every check that reads no analysis field, in the reference's order. Finalize. `scale_max_delta` and `_values_within_firmware` are ported as pure functions. |
+| `evaluate.ts`         | product entry                                                           | `evaluateSafety(composite, log)` gives one `SafetyResult`.                                                                                                                                                                                              |
+| `authorize.ts`        | Apply step                                                              | `safetyForComposite`, `assertSafetyAuthorized`.                                                                                                                                                                                                         |
+| `reasons.ts`          | text                                                                    | `gyrocoreSafety_*` messages.                                                                                                                                                                                                                            |
 
-The product Safety entry takes **no analysis argument**. It returns BLOCK `missing_required_analysis` for
-every tune that reaches it, and NOT_EVALUATED when the composite is already blocked upstream.
+### Adaptations of the reference (explicit, each tested against the reference behaviour)
 
-Not ported now:
+| Id  | Reference behaviour                                                                                    | Gyroflight                                                                                                                                                  | Classification                                  |
+| --- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| D1  | reads `d_min_roll/pitch/yaw` as d_max                                                                  | not ported. Gyroflight reads BBL headers only, and a pre-2025.12 `d_min` line is never d_max                                                                | REFERENCE_STALE                                 |
+| D2  | header-only: F, d_max and dynamic LPF min/max are read only under CLI names, so they come back missing | also reads the Betaflight CSV lines `ff_weight`, `d_max`, `dterm_lpf1_dyn_hz`, `gyro_lpf1_dyn_hz` (blackbox.c); never overrides a value the reference finds | CONTRACT_DIFFERENCE (no CLI dump in Gyroflight) |
+| D3  | RP mode: the zeroed seed profile proposes yaw P/I/F = 0                                                | yaw keeps its logged values, or is missing if not logged; the firmware leaves an undriven axis untouched                                                    | PORT_BUG in the reference                       |
+| E1  | a non-numeric `rollPID` element crashes (`ValueError`)                                                 | that value is missing (`unparseable`), so the baseline is incomplete and Safety blocks                                                                      | NEEDS_INVESTIGATION resolved fail-closed        |
+| E2  | gyro filter ON with its multiplier missing crashes (`TypeError`)                                       | blocks with `proposed_gyro_sliders_incomplete:<names>`                                                                                                      | NEEDS_INVESTIGATION resolved fail-closed        |
 
-- the class C rules: mechanical evidence rules, thermal envelope, confidence blend, quality and confidence
-  output rules;
-- the fail-open paths;
-- the stale firmware gate;
-- the sysid substring heuristic (the composite already blocks `system_id_unusable` explicitly);
-- the demo fallback.
+The sysid substring heuristic of `output.py` (`"system" in reason`, class D) is ported only for parity. It
+can only add a block, and an authorized composite has no blocked reasons.
+
+### Gyroflight input contract
+
+`evaluate.ts` adds input-contract checks. These are not GyroCore rules; they only make sure Safety sees
+exactly what the composite used:
+
+| Code                                            | When                                                                                                                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `safety_not_evaluated:no_global_recommendation` | no composite                                                                                                                                                      |
+| `safety_not_evaluated:blocked_upstream`         | the composite is not authorized (measurement, merge, coverage or clamp guard blocked it). Status NOT_EVALUATED; no Safety verdict is made from unqualified input. |
+| `safety_input_missing:log_headers`              | the log's raw header lines are unavailable                                                                                                                        |
+| `safety_input_inconsistent:current_sliders`     | the sliders read for the absolute tune differ from the composite's logged baseline. Nothing is reconstructed.                                                     |
+
+### Result model (`SafetyResult`)
+
+| Field              | Contents                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `status`           | PASS, WARN, BLOCK or NOT_EVALUATED. Only PASS authorizes; WARN is preview only, as in the reference.                             |
+| binding            | `compositeId`, `sliders` (the exact payload), `reportToken`, `logIndex`, `firmwareRevision`                                      |
+| verdict            | `blocks`, `warnings` (machine-readable codes with `gyrocoreSafety_*` text), `checks`                                             |
+| tune               | `currentSliders`, `proposedSliders`, `current` and `proposed` absolute tunes (each value with source, origin and note), `deltas` |
+| `analysisEvidence` | `"not_available"`                                                                                                                |
+| `pipeline`         | every stage result: mechanical, candidate, output safety, final                                                                  |
+
+### Authority chain at Apply (`useAutotune.applyGains`)
+
+1. **Composite gate (WU3/WU3.1).**
+2. **`assertSafetyAuthorized`.** It recomputes Safety from the current state for exactly this composite id
+   and slider payload, and throws `safety:<code>` unless the result is PASS.
+3. **Product lock (`full_safety_engine_pending`).**
+4. **One MSP read and the live recheck (WU3/WU3.1).**
+5. **SET, then EEPROM.**
+
+Safety recomputes on every call and is bound to the composite id, which changes with selection, target,
+per-axis recommendation, merge or final sliders. An old or edited Safety result is therefore never reused.
+
+Safety does not yet need live FC values beyond the WU3.1 recheck, because it never passes. Once it can,
+the hardware-write WU must read `MSP_PID`, `MSP_PID_ADVANCED` and `MSP_FILTER_CONFIG` before SET and
+compare them with the logged absolute baseline Safety used.
+
+### UI
+
+Under the Global tune box, a **GyroCore Safety** box shows:
+
+- the status badge;
+- why Safety cannot authorize: no analysis evidence, or blocked upstream;
+- current versus proposed absolute values with deltas;
+- the blocks and warnings with their explanations.
+
+The Apply notice shows a Safety block separately from both a composite rejection and the product lock.
+
+### Results
+
+| Fixture                                                                             | Measurement | Merge                 | Coverage               | Safety                                                                                         | Software authorization |
+| ----------------------------------------------------------------------------------- | ----------- | --------------------- | ---------------------- | ---------------------------------------------------------------------------------------------- | ---------------------- |
+| WU3 safe positive (RPY, sliders 100 → PI 138, FF 138), real Betaflight header lines | 3 × usable  | merged                | roll/pitch/yaw covered | **BLOCK**: `mechanical_hard_block`, `missing_required_analysis`, `safe_tune_candidate_blocked` | **false**              |
+| same, WU3 synthetic log (no `ff_weight`/filter lines)                               | 3 × usable  | merged                | covered                | **BLOCK**, as above, plus `missing_required_pid_or_filter_baseline:...`                        | false                  |
+| reference tests' clean analysis (harness only, Python)                              | —           | —                     | —                      | WARN: 9 step clamps, preview only                                                              | false                  |
+| AIR65 (local)                                                                       | 0 usable    | MERGE_REQUIRES_REVIEW | —                      | **NOT_EVALUATED** in all 3 logs                                                                | false; 0 MSP calls     |
+
+On the safe fixture the current and proposed absolute values are:
+
+- roll P 45 → 62, I 80 → 110, F 120 → 165;
+- pitch P 47 → 64, F 125 → 172.
+
+These come from the firmware-mapping port and are not authoritative on a real craft.
 
 ## Parity fixtures
 
