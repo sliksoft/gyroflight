@@ -1,0 +1,120 @@
+/** The tuning-slider values decoded into the multipliers the firmware maths uses. */
+export interface SliderFactors {
+    pidsMode: number;
+    masterMultiplier: number;
+    rollPitchRatio: number;
+    iGain: number;
+    dGain: number;
+    piGain: number;
+    dMaxGain: number;
+    feedforwardGain: number;
+    pitchPIGain: number;
+    gyroFilterMultiplier: number;
+    dtermFilterMultiplier: number;
+    gyroFilterEnabled: boolean;
+    dtermFilterEnabled: boolean;
+}
+
+/** The PID gains computed for one axis. */
+export interface AxisPidValues {
+    P: number;
+    I: number;
+    D: number;
+    F: number;
+    dMax: number;
+}
+
+/** Gyro low-pass values, keyed as FILTER_CONFIG holds them; only the enabled filters are set. */
+export interface GyroFilterValues {
+    gyro_lowpass_dyn_min_hz?: number;
+    gyro_lowpass_dyn_max_hz?: number;
+    gyro_lowpass_hz?: number;
+    gyro_lowpass2_hz?: number;
+}
+
+/** D-term low-pass values, keyed as FILTER_CONFIG holds them; only the enabled filters are set. */
+export interface DtermFilterValues {
+    dterm_lowpass_dyn_min_hz?: number;
+    dterm_lowpass_dyn_max_hz?: number;
+    dterm_lowpass_hz?: number;
+    dterm_lowpass2_hz?: number;
+}
+
+const PID_GAIN_MAX = 250;
+const F_GAIN_MAX = 1000;
+const DYN_LPF_MAX_HZ = 1000;
+const LPF_MAX_HZ = 1000;
+
+const GYRO_LPF1_DYN_MIN_HZ_DEFAULT = 250;
+const GYRO_LPF1_DYN_MAX_HZ_DEFAULT = 500;
+const GYRO_LPF2_HZ_DEFAULT = 500;
+
+const DTERM_LPF1_DYN_MIN_HZ_DEFAULT = 75;
+const DTERM_LPF1_DYN_MAX_HZ_DEFAULT = 150;
+const DTERM_LPF2_HZ_DEFAULT = 150;
+
+const PID_DEFAULTS = [
+    { P: 45, I: 80, D: 30, F: 120 },
+    { P: 47, I: 84, D: 34, F: 125 },
+    { P: 45, I: 80, D: 0, F: 120 },
+];
+
+const D_MAX_DEFAULT = [40, 46, 0];
+
+const FEEDFORWARD_KEYS = ["feedforwardRoll", "feedforwardPitch", "feedforwardYaw"] as const;
+const DMAX_KEYS = ["dMaxRoll", "dMaxPitch", "dMaxYaw"] as const;
+
+// The firmware's constrain() takes int arguments, so a float result is
+// truncated toward zero before clamping (see common/maths.h). Mirror that here
+// so virtual-mode PID/filter values match what a real FC computes.
+function constrain(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+
+function calculateAxisPidValues(factors: SliderFactors, axis: number): AxisPidValues {
+    const defaults = PID_DEFAULTS[axis];
+    const dMaxDefault = D_MAX_DEFAULT[axis];
+    const pitchDGain = axis === 1 ? factors.rollPitchRatio : 1;
+    const pitchPiGain = axis === 1 ? factors.pitchPIGain : 1;
+
+    const P = constrain(defaults.P * factors.masterMultiplier * factors.piGain * pitchPiGain, 0, PID_GAIN_MAX);
+    const I = constrain(
+        defaults.I * factors.masterMultiplier * factors.piGain * factors.iGain * pitchPiGain,
+        0,
+        PID_GAIN_MAX,
+    );
+    const D = constrain(defaults.D * factors.masterMultiplier * factors.dGain * pitchDGain, 0, PID_GAIN_MAX);
+    const F = constrain(defaults.F * factors.masterMultiplier * pitchPiGain * factors.feedforwardGain, 0, F_GAIN_MAX);
+
+    let dMax = 0;
+    if (dMaxDefault > 0) {
+        const dMaxScale = factors.dMaxGain + (1 - factors.dMaxGain) * (defaults.D / dMaxDefault);
+        dMax = constrain(
+            dMaxDefault * factors.masterMultiplier * factors.dGain * pitchDGain * dMaxScale,
+            0,
+            PID_GAIN_MAX,
+        );
+    }
+
+    return { P, I, D, F, dMax };
+}
+
+export function calculateSimplifiedPidValues(factors: SliderFactors): AxisPidValues[] {
+    if (!factors.pidsMode) {
+        return [];
+    }
+
+    const axes: AxisPidValues[] = [];
+    for (let axis = 0; axis <= factors.pidsMode; axis++) {
+        axes.push(calculateAxisPidValues(factors, axis));
+    }
+    return axes;
+}
+
+const cfgs = JSON.parse(process.argv[2]);
+const out = cfgs.map((s: any) => {
+  const f: SliderFactors = { pidsMode: s.mode, masterMultiplier: s.m/100, rollPitchRatio: s.rpr/100, iGain: s.i/100, dGain: s.d/100, piGain: s.pi/100, dMaxGain: s.dg/100, feedforwardGain: s.ff/100, pitchPIGain: s.pp/100, gyroFilterMultiplier: 100, dtermFilterMultiplier: 100, gyroFilterEnabled: true, dtermFilterEnabled: true };
+  return calculateSimplifiedPidValues(f);
+});
+console.log(JSON.stringify(out));
