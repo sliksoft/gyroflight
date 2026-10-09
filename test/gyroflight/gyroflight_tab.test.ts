@@ -65,6 +65,8 @@ describe("Gyroflight messages", () => {
         const used = [
             ...gyroflightSidebarItems.map((item) => item.i18n),
             ...gyroflightCapabilities.map((c) => c.label),
+            ...gyroflightCapabilities.flatMap((c) => (c.detail ? [c.detail] : [])),
+            ...gyroflightCapabilities.map((c) => `gyroflightStatus_${c.status}`),
         ];
         for (const key of used) {
             expect(gyroflightMessages).toHaveProperty(key);
@@ -84,7 +86,7 @@ describe("Gyroflight messages", () => {
         await i18next.init({ lng: "de", fallbackLng: ["en"], ns: ["messages"], defaultNS: "messages", resources: {} });
         registerGyroflightMessages();
         expect(i18next.t("gyroflightTabTitle")).toBe("Gyroflight");
-        expect(i18next.t("gyroflightStatusPending")).toBe("Migration pending");
+        expect(i18next.t("gyroflightStatus_incomplete")).toBe("Not complete");
     });
 
     it("never shadows an upstream message key", () => {

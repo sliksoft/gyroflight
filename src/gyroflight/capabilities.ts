@@ -19,19 +19,51 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Read-only capability statements for the Gyroflight tab. "available" entries are
-// upstream Betaflight features used unchanged; nothing here performs analysis.
+// Read-only capability statements for the Gyroflight tab: what exists today, stated
+// truthfully. Nothing here performs analysis or changes behaviour.
+//
+//   available    upstream Betaflight feature, used unchanged
+//   implemented  GyroCore layer in Gyroflight, in use
+//   incomplete   partly migrated; does not yet authorize anything on its own
+//   locked       deliberately disabled
+//   not_started  not implemented yet
+
+export type CapabilityStatus = "available" | "implemented" | "incomplete" | "locked" | "not_started";
+
 export interface GyroflightCapability {
     key: string;
     label: string;
-    available: boolean;
+    status: CapabilityStatus;
+    /** Optional one-line detail shown under the label. */
+    detail?: string;
 }
 
 export const gyroflightCapabilities: readonly GyroflightCapability[] = [
-    { key: "firmware_flasher", label: "gyroflightCapFirmwareFlasher", available: true },
-    { key: "blackbox_viewer", label: "gyroflightCapBlackboxViewer", available: true },
-    { key: "autotune", label: "gyroflightCapAutotune", available: true },
-    { key: "analysis", label: "gyroflightCapAnalysis", available: false },
-    { key: "safety", label: "gyroflightCapSafety", available: false },
-    { key: "compare", label: "gyroflightCapCompare", available: false },
+    { key: "firmware_flasher", label: "gyroflightCapFirmwareFlasher", status: "available" },
+    { key: "blackbox_viewer", label: "gyroflightCapBlackboxViewer", status: "available" },
+    { key: "autotune", label: "gyroflightCapAutotune", status: "available" },
+    { key: "chirp_qualification", label: "gyroflightCapChirpQualification", status: "implemented" },
+    { key: "global_tune", label: "gyroflightCapGlobalTune", status: "implemented" },
+    { key: "safety_foundation", label: "gyroflightCapSafetyFoundation", status: "implemented" },
+    {
+        key: "safety_full",
+        label: "gyroflightCapSafetyFull",
+        status: "incomplete",
+        detail: "gyroflightCapSafetyFullDetail",
+    },
+    {
+        key: "physical_apply",
+        label: "gyroflightCapPhysicalApply",
+        status: "locked",
+        detail: "gyroflightCapPhysicalApplyDetail",
+    },
+    { key: "tune_session", label: "gyroflightCapTuneSession", status: "not_started" },
 ];
+
+export const CAPABILITY_STATUS_ICON: Record<CapabilityStatus, string> = {
+    available: "i-lucide-check-circle",
+    implemented: "i-lucide-check-circle",
+    incomplete: "i-lucide-circle-dashed",
+    locked: "i-lucide-lock",
+    not_started: "i-lucide-clock",
+};
