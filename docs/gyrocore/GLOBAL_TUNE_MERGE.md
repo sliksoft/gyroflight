@@ -153,8 +153,9 @@ The composite records `coverage`:
 The coverage codes join `blocked`, so `authorized` is false; the merge output and `final` are kept for
 display.
 
-At Apply, `liveCompositeBlocks()` recomputes coverage under the **live** mode (`fc:missing_axis_evidence:<axis>`,
-`fc:axis_coverage_mode_off` / `_unknown`). It keeps every WU3 live check:
+At Apply, `liveCompositeBlocks()` recomputes coverage under the **live** mode when that mode is RP or RPY
+(`fc:missing_axis_evidence:<axis>`). A live OFF or unknown mode is already refused by WU3's
+`fc:simplified_pids_mode_off` / `_unknown`. It keeps every WU3 live check:
 
 - analysed RP with roll + pitch, craft now RPY: blocked by `fc:simplified_pids_mode_changed` and
   `fc:missing_axis_evidence:yaw`.
