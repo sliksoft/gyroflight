@@ -214,12 +214,15 @@ The deterministic clamp stage is **not** analysis-free in the pipeline. Three th
 - the confidence blend reads the confidence score;
 - the thermal cap reads the problem list.
 
-The pure functions are deterministic, and only the pure functions are portable now:
+The pure functions are deterministic and could be ported, but in the pipeline they only run after the
+analysis-scaled step clamp:
 
 - `apply_to_baseline`;
 - `scale_max_delta`;
 - the hard-range and cross-field clamps;
 - the thermal clamp, given a boolean.
+
+WU4A ports `scale_max_delta` only (see below).
 
 ## Consequences
 
@@ -266,6 +269,30 @@ All of it lives in `src/gyrocore/safety/`.
 
 The sysid substring heuristic of `output.py` (`"system" in reason`, class D) is ported only for parity. It
 can only add a block, and an authorized composite has no blocked reasons.
+
+### Class A but not ported in WU4A, and why
+
+Of the 24 class-A components, WU4A ports 20: group 1 rows 1–12, and group 2 M18, S1–S5, S13 (status),
+O1–O3, O4–O7/O9/O10, O11 and O15. These four are not ported:
+
+| Component                                                    | Why not now                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S10 hard ranges, S11 cross-field (`apply_safety_autotune`)   | They run only after the step clamp, whose caps the mechanical result (analysis) scales, together with S8 (confidence blend) and S9 (hardware weight). They are unreachable in a pipeline that blocks without analysis. Port them with the clamp stage in WU4B. |
+| S14 rounding (`config_to_absolute_tune`, round half to even) | Only builds the clamped tune, which exists only after the clamps.                                                                                                                                                                                              |
+| O16 `safe_tune_clamps_applied`                               | Needs a WARN candidate (clamps applied), so it is unreachable without analysis.                                                                                                                                                                                |
+| A1–A13 CLI authorization (`cli/authorize.py`)                | Authorizes a CLI bundle (apply and rollback text). Gyroflight writes sliders over MSP and produces no CLI bundle. The equivalent checks belong to the hardware-write WU.                                                                                       |
+
+Committed reference sections and their consumers:
+
+| Consumed by TS tests            | Committed for WU4B, not consumed yet                  |
+| ------------------------------- | ----------------------------------------------------- |
+| `foundation.simplified_tuning`  | `foundation.safe_tune_output`                         |
+| `foundation.mapping_sweep`      | `foundation.construct_only`                           |
+| `foundation.absolute`           | `stages.apply_to_baseline`                            |
+| `stages.scale_max_delta`        | `stages.apply_safety_autotune`                        |
+| `stages.values_within_firmware` | `stages.record_numeric_clamps`                        |
+| `product_path`                  | `stages.clamp_targets_to_baseline_thermal`            |
+|                                 | all of `safety_harness_reference.json` (harness only) |
 
 ### Gyroflight input contract
 
