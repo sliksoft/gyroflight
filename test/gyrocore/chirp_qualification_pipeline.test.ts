@@ -79,7 +79,7 @@ import { parseLoggedHeaders, readHeaderPairs } from "../../src/gyrocore/chirp/he
 import { qualifyChirpFile, recomputeRecommendations } from "../../src/gyrocore/chirp/qualification";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { CHIRP_FLAG, encodeLog, type SyntheticFrame } from "./harness/bblWriter";
-import { concatLogs, encodeChirpLog, simulateChirp } from "./harness/chirpSim";
+import { concatLogs, encodeChirpLog, simulateChirp, simulateChirpSequence } from "./harness/chirpSim";
 import { readFixtureBytes } from "./harness/fixtures";
 import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 
@@ -315,6 +315,42 @@ describe("global tune panel (WU3)", () => {
             ),
         ).not.toBeNull();
         unmount();
+    });
+});
+
+describe("explicit choice among repeated sweeps, through the panel", () => {
+    it("clicking the already-selected sweep's radio makes it the explicit choice", async () => {
+        const GOOD = { crossoverHz: 40, delaySamples: 2, seconds: 8 };
+        await runImport(
+            encodeChirpLog(
+                simulateChirpSequence([
+                    { ...GOOD, axis: 0 },
+                    { ...GOOD, axis: 0, amplitude: 180 },
+                    { ...GOOD, axis: 1 },
+                ]),
+            ),
+        );
+        const gate = useChirpQualificationStore();
+        expect(gate.selection.roll).toBe("log1-seg2");
+        expect(gate.composite!.blocked).toContain("repeated_axis_requires_selection:roll");
+
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const app = createApp({
+            render: () => h(UApp, { portal: false }, { default: () => h(ChirpQualificationPanel) }),
+        });
+        app.config.globalProperties.$t = ((key: string) => key) as never;
+        app.use(getActivePinia()!);
+        app.mount(container);
+        await new Promise((r) => setTimeout(r, 0));
+        const radio = container.querySelector<HTMLInputElement>('[data-measurement="log1-seg2"] input[type="radio"]')!;
+        expect(radio.checked).toBe(true);
+        radio.click();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(gate.explicitAxes.roll).toBe(true);
+        expect(gate.composite!.authorized).toBe(true);
+        app.unmount();
+        container.remove();
     });
 });
 

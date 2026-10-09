@@ -117,12 +117,23 @@ export interface LiveSliders {
     slider_d_gain?: number;
     slider_feedforward_gain?: number;
     slider_dterm_filter_multiplier?: number;
+    slider_dmax_gain?: number;
+    slider_roll_pitch_ratio?: number;
+    slider_pitch_pi_gain?: number;
+    slider_gyro_filter?: number;
+    slider_gyro_filter_multiplier?: number;
 }
 
 /**
  * The craft must still be the one the recommendation was computed for: same
  * slider mode, same current sliders (every proposal scales the logged ones),
- * yaw under slider control when yaw contributed.
+ * yaw under slider control when yaw contributed. The sliders Autotune never
+ * proposes are written back with their live values, so they must equal the
+ * logged ones the composite (merge.simplified) and the pitch baseline assume.
+ * MSP field -> logged header (MSPHelper readPidSliderSettings order; GyroCore
+ * SimplifiedSliders): slider_roll_pitch_ratio = simplified_pitch_d_gain,
+ * slider_dmax_gain = simplified_d_max_gain, slider_pitch_pi_gain =
+ * simplified_pitch_pi_gain.
  */
 export function liveCompositeBlocks(live: LiveSliders, composite: CompositeRecommendation): string[] {
     const out: string[] = [];
@@ -148,6 +159,11 @@ export function liveCompositeBlocks(live: LiveSliders, composite: CompositeRecom
         ["slider_feedforward_gain", logged.feedforward_gain],
         ["slider_dterm_filter_multiplier", logged.dterm_filter_multiplier],
         ["slider_dterm_filter", logged.dterm_filter],
+        ["slider_dmax_gain", logged.d_max_gain],
+        ["slider_roll_pitch_ratio", logged.pitch_d_gain],
+        ["slider_pitch_pi_gain", logged.pitch_pi_gain],
+        ["slider_gyro_filter", logged.gyro_filter],
+        ["slider_gyro_filter_multiplier", logged.gyro_filter_multiplier],
     ];
     for (const [key, value] of pairs) {
         if (live[key] !== value) {

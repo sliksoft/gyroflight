@@ -386,6 +386,19 @@ describe("live flight-controller recheck (one read, then no write)", () => {
         ["yaw contributed but the craft is RP", { slider_pids_mode: 1 }, "fc:yaw_not_under_slider_control"],
         ["a current slider changed", { slider_pi_gain: 110 }, "fc:current_slider_changed:slider_pi_gain"],
         ["D-term filter slider changed", { slider_dterm_filter: 0 }, "fc:current_slider_changed:slider_dterm_filter"],
+        ["D-max slider changed", { slider_dmax_gain: 90 }, "fc:current_slider_changed:slider_dmax_gain"],
+        [
+            "pitch D (roll/pitch ratio) changed",
+            { slider_roll_pitch_ratio: 120 },
+            "fc:current_slider_changed:slider_roll_pitch_ratio",
+        ],
+        ["pitch PI changed", { slider_pitch_pi_gain: 110 }, "fc:current_slider_changed:slider_pitch_pi_gain"],
+        ["gyro filter slider changed", { slider_gyro_filter: 0 }, "fc:current_slider_changed:slider_gyro_filter"],
+        [
+            "gyro filter multiplier changed",
+            { slider_gyro_filter_multiplier: 80 },
+            "fc:current_slider_changed:slider_gyro_filter_multiplier",
+        ],
     ];
     for (const [name, live, reason] of cases) {
         it(name, async () => {

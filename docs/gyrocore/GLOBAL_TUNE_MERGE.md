@@ -102,6 +102,15 @@ the qualification table does (`selectMeasurement(id, true)`).
     - block `composite_clamp_material:<key>` if the value is more than 0.5 (rounding) away.
     - Requested and applied values are kept in `sliders[]`.
 
+### Consequence of the ported contract: one-axis composites
+
+GyroCore's merge requires no axis, so a log with only a roll sweep yields an authorized one-source
+composite (`single_axis_matches_upstream_apply`; the `single_roll` end-to-end case). Under slider mode
+RPY, applying it changes pitch and yaw from a roll measurement alone. That is what upstream Autotune
+does, and what WU2 did. Gyroflight keeps the reference contract here instead of inventing a stricter
+one. The smallest adaptation, if the owner wants it, is to require a participating source for every axis
+the logged slider mode covers (roll + pitch for RP; roll + pitch + yaw for RPY).
+
 ### Deliberate adaptations (documented, tested)
 
 | Topic                                   | Python engine                                       | Gyroflight                                   | Why                                                                                                                                            |
@@ -133,8 +142,13 @@ refuses before any write when:
 - the live slider mode is OFF or unknown (`fc:simplified_pids_mode_off` / `_unknown`);
 - the live mode differs from the analysed log's (`fc:simplified_pids_mode_changed`);
 - the live mode is RP while yaw contributed to the composite (`fc:yaw_not_under_slider_control`);
-- any of the six proposed sliders or the D-term filter switch differs live from the logged value
-  (`fc:current_slider_changed:<key>`), because every recommendation is a scaling of the logged values.
+- any of the 13 written slider fields differs live from the logged value
+  (`fc:current_slider_changed:<key>`):
+    - the six proposed sliders, because every recommendation is a scaling of the logged values;
+    - the D-term and gyro filter switches, the gyro filter multiplier, D-max, pitch D
+      (`slider_roll_pitch_ratio`, logged as `simplified_pitch_d_gain`) and pitch PI. These are written back
+      with their live values, so they must equal the logged ones that `merge.simplified` and the pitch
+      baseline assume.
 
 The write then sets the six composite keys on top of the live slider state and sends
 `MSP_SET_SIMPLIFIED_TUNING`. `validateTuningSliders()` runs next, and `MSP_EEPROM_WRITE` comes last. The
@@ -150,8 +164,9 @@ safe positive fixture asserts the exact 53-byte payload.
       evidence" with its unclamped request, and the global value "(would be applied)";
     - every source measurement and its role, with reasons;
     - blocks and warnings in plain language.
-- Betaflight's gain table keeps its per-axis rows. The "apply from axis" selector is removed. Apply
-  sends the composite and is disabled, with the reasons listed, whenever the composite is not authorized.
+- Betaflight's gain table keeps its per-axis rows, under a note that they are evidence. The "apply from
+  axis" selector is removed. Apply sends the composite and is disabled, with the reasons listed,
+  whenever the composite is not authorized.
 
 ## Results
 
