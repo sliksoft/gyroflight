@@ -150,13 +150,25 @@ code depends on, and update the base commit in the provenance table.
 
 ## CI on the fork
 
-Upstream workflows are kept unmodified so they never conflict. GitHub Actions starts disabled on new
-forks; leave it that way, or enable only `test.yml` / `build.yml` and **disable** `deploy.yml`,
-`deploy_cloudflare.yml`, `build-release.yml`, `tauri-nightly.yml`, `tauri-release-assets.yml`,
-`android-play-release.yml`, `translations-*.yml`, `stale.yaml`, `auto-close.yml` and
-`hide-artifact-links.yml` in the Actions UI (they need upstream secrets or act on issues/PRs).
-`test.yml` only runs on PRs and on pushes to `master` / `*-maintenance`, so pushes to our branches run
-nothing until a fork workflow is added.
+`.github/workflows/gyroflight-ci.yml` (ours) runs typecheck, eslint, Vitest and the production build on
+pushes to `gyroflight/**` and `gyrocore/**` and on pull requests into `master`, `gyroflight/**` or
+`gyrocore/**`. It has read-only permissions, uses no secrets and uploads or publishes nothing.
+
+Upstream workflows are kept unmodified so they never conflict. On a fork, GitHub does not run any
+workflow until the owner presses **"I understand my workflows, go ahead and enable them"** on the
+repository's Actions tab, and that one switch enables the upstream workflows too. Immediately after
+enabling, disable the upstream automation so it can never deploy, publish or touch issues:
+
+```bash
+for w in deploy.yml deploy_cloudflare.yml build-release.yml tauri-nightly.yml tauri-release-assets.yml \
+         android-play-release.yml translations-pr.yml translations-upload.yml stale.yaml auto-close.yml \
+         hide-artifact-links.yml manual-build.yml; do
+  gh workflow disable "$w" --repo sliksoft/gyroflight
+done
+```
+
+`test.yml` and `build.yml` are harmless (no secrets, no publishing) and may stay enabled. Never add
+upstream's secrets (Cloudflare, Crowdin, signing keys) to this repository.
 
 The local pre-commit hook (husky → lint-staged) runs prettier, `eslint --fix` and `vue-tsc` with whatever
 Node is on `PATH`; use Node 24.
