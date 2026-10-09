@@ -68,8 +68,10 @@ import {
     readHeaderPairs,
     sampleRateInputs,
     SLIDER_HEADER_KEYS,
+    type IntKey,
     type LoggedHeaders,
 } from "./headers";
+import type { SimplifiedSliders } from "@/gyrocore/tuning/merge";
 import { analysisBand, postAnalysisReport, preAnalysisGates, type QualityReport } from "./quality";
 import { guardRecommendation, type RecommendationGuard } from "./recommendationGuard";
 import {
@@ -81,6 +83,26 @@ import {
 } from "./sampleRate";
 
 export const WELCH_OVERLAP = 0.5;
+
+/** The log's simplified-tuning sliders as firmware integers; nothing defaulted. */
+export function loggedSimplifiedSliders(h: LoggedHeaders): SimplifiedSliders {
+    const v = (key: IntKey) => (h.presentKeys.has(key) ? loggedInt(h, key) : null);
+    return {
+        pids_mode: v("simplified_pids_mode"),
+        master_multiplier: v("simplified_master_multiplier"),
+        i_gain: v("simplified_i_gain"),
+        d_gain: v("simplified_d_gain"),
+        pi_gain: v("simplified_pi_gain"),
+        d_max_gain: v("simplified_d_max_gain"),
+        feedforward_gain: v("simplified_feedforward_gain"),
+        pitch_d_gain: v("simplified_pitch_d_gain"),
+        pitch_pi_gain: v("simplified_pitch_pi_gain"),
+        dterm_filter: v("simplified_dterm_filter"),
+        dterm_filter_multiplier: v("simplified_dterm_filter_multiplier"),
+        gyro_filter: v("simplified_gyro_filter"),
+        gyro_filter_multiplier: v("simplified_gyro_filter_multiplier"),
+    };
+}
 
 /** Betaflight Autotune helpers (src/composables/useAutotune.ts), injected to keep one copy of each. */
 export interface AutotuneMath<G> {
@@ -147,11 +169,15 @@ export interface ChirpLogReport<G = unknown> {
     /** Betaflight-shaped header view for the Autotune UI (current PIDs, sliders, CHIRP band). */
     sysConfig: SysConfig | null;
     currentSliders: Required<CurrentSliders> | null;
+    /** Firmware slider integers exactly as logged (null = absent or unreadable); the global tune's baseline. */
+    loggedSliders: SimplifiedSliders | null;
     extractionWarnings: string[];
     measurements: ChirpMeasurement<G>[];
 }
 
 export interface ChirpQualificationReport<G = unknown> {
+    /** Unique per analysis, so a composite of an earlier analysis can never be applied to this one. */
+    token: string;
     filename: string;
     decoder: "betaflight-blackbox-viewer";
     logCount: number;
@@ -414,6 +440,7 @@ function qualifyLog<G>(
         firmwareRevision: null,
         sysConfig: null,
         currentSliders: null,
+        loggedSliders: null,
         extractionWarnings: [],
         measurements: [],
     };
@@ -421,6 +448,7 @@ function qualifyLog<G>(
     const end = index.getLogBeginOffset(logIndex + 1);
     const headers = parseLoggedHeaders(readHeaderPairs(bytes, start, end));
     report.firmwareRevision = headers.firmwareRevision;
+    report.loggedSliders = loggedSimplifiedSliders(headers);
 
     const logError = flightLog.getLogError(logIndex);
     if (logError || !flightLog.openLog(logIndex)) {
@@ -469,6 +497,8 @@ function qualifyLog<G>(
     return report;
 }
 
+let reportSeq = 0;
+
 export function overallState(measurements: ChirpMeasurement[]): QualificationState {
     if (!measurements.length) {
         return "no_chirp";
@@ -499,7 +529,9 @@ export function qualifyChirpFile<G>(
         logs.push(qualifyLog(bytes, flightLog, index, i, targetPhaseMarginDeg, math));
     }
     const measurements = logs.flatMap((l) => l.measurements);
+    reportSeq++;
     return {
+        token: `${Date.now().toString(36)}-${reportSeq}`,
         filename,
         decoder: "betaflight-blackbox-viewer",
         logCount,

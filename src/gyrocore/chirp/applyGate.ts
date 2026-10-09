@@ -20,15 +20,10 @@
  */
 
 /*
- * The Apply Gains hard gate. Called by the Apply action itself
- * (useAutotune.applyGains) before any flight-controller access, so disabling
- * the button is not what keeps an unsafe tune off the craft.
+ * Error thrown by the Apply action when GyroCore does not authorize it. The
+ * gate itself is the composite (global) authorization in
+ * src/gyrocore/tuning/authorize.ts.
  */
-
-import type { GainRecommendation } from "@/js/blackbox/spectral_analysis";
-import type { ApplyAuthorization, ChirpMeasurement, ChirpQualificationReport } from "./qualification";
-
-type Proposed = GainRecommendation["proposed"];
 
 export class ApplyBlockedError extends Error {
     readonly reasons: string[];
@@ -38,71 +33,4 @@ export class ApplyBlockedError extends Error {
         this.name = "ApplyBlockedError";
         this.reasons = reasons;
     }
-}
-
-function sameProposal(a: Proposed, b: Proposed): boolean {
-    const keys = Object.keys(b) as (keyof Proposed)[];
-    return Object.keys(a).length === keys.length && keys.every((k) => a[k] === b[k]);
-}
-
-export function findMeasurement<G>(
-    report: ChirpQualificationReport<G> | null,
-    measurementId: string | null | undefined,
-): ChirpMeasurement<G> | null {
-    return report?.measurements.find((m) => m.id === measurementId) ?? null;
-}
-
-/**
- * Apply is allowed only for a measurement of the current analysis that passed
- * every gate, and only with exactly the sliders recommended for it.
- */
-export function authorizeApply(
-    report: ChirpQualificationReport | null,
-    measurementId: string | null | undefined,
-    proposed: Proposed | null | undefined,
-): ApplyAuthorization {
-    if (!report) {
-        return { allowed: false, blocked: ["apply:no_qualified_analysis"], warnings: [] };
-    }
-    const m = findMeasurement(report, measurementId);
-    if (!m) {
-        return { allowed: false, blocked: ["apply:unknown_measurement"], warnings: [] };
-    }
-    if (!m.apply.allowed) {
-        return m.apply;
-    }
-    if (!m.recommendation || !proposed || !sameProposal(proposed, m.recommendation.result.proposed)) {
-        return { allowed: false, blocked: ["apply:sliders_differ_from_qualified_recommendation"], warnings: [] };
-    }
-    return m.apply;
-}
-
-export function assertApplyAuthorized(
-    report: ChirpQualificationReport | null,
-    measurementId: string | null | undefined,
-    proposed: Proposed | null | undefined,
-): ChirpMeasurement {
-    const auth = authorizeApply(report, measurementId, proposed);
-    const m = findMeasurement(report, measurementId);
-    if (!auth.allowed || !m) {
-        throw new ApplyBlockedError(auth.blocked.length ? auth.blocked : ["apply:not_authorized"]);
-    }
-    return m;
-}
-
-/**
- * The craft's live slider mode, read just before writing: the logged mode
- * qualified the measurement, but the write goes to whatever is connected now.
- */
-export function liveSliderModeBlocks(livePidsMode: number | undefined | null, axis: number): string[] {
-    if (livePidsMode === 0) {
-        return ["fc:simplified_pids_mode_off"];
-    }
-    if (livePidsMode === 1 && axis === 2) {
-        return ["fc:yaw_not_under_slider_control"];
-    }
-    if (livePidsMode !== 1 && livePidsMode !== 2) {
-        return ["fc:simplified_pids_mode_unknown"];
-    }
-    return [];
 }

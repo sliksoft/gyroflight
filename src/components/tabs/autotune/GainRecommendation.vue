@@ -64,15 +64,9 @@
                 <span class="text-dimmed">{{ $t("autotuneTargetMargin") }}</span>
                 <USelect v-model="targetPhaseMargin" :items="marginOptions" size="xs" class="min-w-40" />
             </label>
-            <label v-if="visibleAxisList.length > 1" class="flex items-center gap-2 text-sm">
-                <span class="text-dimmed">{{ $t("autotuneApplyFromAxis") }}</span>
-                <USelect v-model="selectedAxisKey" :items="axisOptions" size="xs" class="min-w-28" />
-            </label>
-            <UButton
-                @click="onApply"
-                size="xs"
-                :disabled="!isConnected || !selectedAxisKey || applying || !applyAuthorization.allowed"
-            >
+            <!-- Gyroflight: no "apply from axis" choice; sliders are global, so Apply writes
+                 GyroCore's global (composite) recommendation shown in the Global tune box. -->
+            <UButton @click="onApply" size="xs" :disabled="!isConnected || applying || !applyAuthorization.allowed">
                 {{ $t("autotuneApplyGains") }}
             </UButton>
             <span v-if="!isConnected" class="text-sm text-dimmed" v-html="$t('autotuneConnectRequired')"></span>
@@ -80,7 +74,7 @@
             <span v-if="applyError" class="text-sm text-red-500 font-bold">{{ applyError }}</span>
         </div>
         <!-- Gyroflight: why GyroCore blocks Apply for the selected axis -->
-        <ApplyGateNotice :measurement="applyMeasurement" :authorization="applyAuthorization" />
+        <ApplyGateNotice :composite="applyComposite" :authorization="applyAuthorization" />
 
         <!-- Notes on any axis where the recommendation is not simply the margin
              target met in full: the craft's phase peak caps the reachable
@@ -161,11 +155,7 @@ const applyError = ref("");
 const selectedAxisKey = ref<AxisName | null>(null);
 
 const isConnected = computed(() => connectionStore.connectionValid);
-const {
-    measurement: applyMeasurement,
-    measurementId: applyMeasurementId,
-    authorization: applyAuthorization,
-} = useApplyGate(selectedAxisKey);
+const { composite: applyComposite, authorization: applyAuthorization } = useApplyGate();
 
 const MARGIN_OPTIONS = [
     { value: PHASE_MARGIN_PRESETS.AGGRESSIVE, labelKey: "autotuneMarginAggressive" },
@@ -178,11 +168,6 @@ const marginOptions = computed(() =>
         label: `${i18n.getMessage(opt.labelKey)} (${opt.value}°)`,
         value: opt.value,
     })),
-);
-
-// `null` is the select's "no axis" value (see selectedAxisKey), so the item type admits it.
-const axisOptions = computed((): { label: string; value: AxisName | null }[] =>
-    visibleAxisList.value.map((axis) => ({ label: i18n.getMessage(axis.labelKey), value: axis.key })),
 );
 
 const targetPhaseMargin = computed({
@@ -497,11 +482,10 @@ function formatChangePct(v: number | null | undefined) {
 }
 
 async function onApply() {
-    if (!isConnected.value || !selectedAxisKey.value) {
-        return;
-    }
-    const proposed = store.analysisResult?.axes?.[selectedAxisKey.value]?.gains?.proposed;
-    if (!proposed || !applyAuthorization.value.allowed) {
+    // Gyroflight: the global (composite) recommendation, never one axis's.
+    const composite = applyComposite.value;
+    const proposed = composite?.final;
+    if (!isConnected.value || !composite || !proposed || !applyAuthorization.value.allowed) {
         return;
     }
 
@@ -522,7 +506,7 @@ async function onApply() {
     applied.value = false;
     applying.value = true;
     try {
-        await applyGains(proposed, applyMeasurementId.value);
+        await applyGains(proposed, composite.id);
         applied.value = true;
     } catch (err) {
         // `err?.message || err` for a caught value of unknown type.

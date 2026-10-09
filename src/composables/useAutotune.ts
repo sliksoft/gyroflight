@@ -40,7 +40,8 @@ import { validateTuningSliders } from "@/composables/useTuningSliders";
 // by GyroCore before Betaflight's recommendation may be shown or applied.
 // See docs/gyrocore/CHIRP_QUALIFICATION.md.
 import { qualifyChirpFile, recomputeRecommendations, type AutotuneMath } from "@/gyrocore/chirp/qualification";
-import { ApplyBlockedError, assertApplyAuthorized, liveSliderModeBlocks } from "@/gyrocore/chirp/applyGate";
+import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
+import { assertCompositeApplyAuthorized, liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 
 export type AxisName = "roll" | "pitch" | "yaw";
@@ -252,16 +253,17 @@ export const AUTOTUNE_MATH: AutotuneMath<AxisGains> = {
     buildGains,
 };
 
-async function applyGains(proposed: ProposedSliders, measurementId?: string | null) {
+async function applyGains(proposed: ProposedSliders, compositeId?: string | null) {
     // GyroCore hard gate, enforced here before any flight-controller access, not
-    // only by the disabled button: the measurement must have passed every gate
-    // and the sliders must be exactly the ones recommended for it.
-    const measurement = assertApplyAuthorized(useChirpQualificationStore().report, measurementId, proposed);
-    // Read the craft's live slider state (no write) and refuse if its sliders
-    // do not drive the PIDs. This also keeps the slider fields the proposal
-    // does not set at their live values in the write below.
+    // only by the disabled button. Sliders are global, so only the validated
+    // composite (global) recommendation may be written, never one axis's, and
+    // only with exactly its sliders.
+    const composite = assertCompositeApplyAuthorized(useChirpQualificationStore().gateState(), compositeId, proposed);
+    // Read the craft's live slider state (no write) and refuse unless it is
+    // still the tune the recommendation was computed from. This also keeps the
+    // slider fields the proposal does not set at their live values below.
     await MSP.promise(MSPCodes.MSP_SIMPLIFIED_TUNING);
-    const live = liveSliderModeBlocks(FC.TUNING_SLIDERS.slider_pids_mode, measurement.axis);
+    const live = liveCompositeBlocks(FC.TUNING_SLIDERS, composite);
     if (live.length) {
         throw new ApplyBlockedError(live);
     }

@@ -177,5 +177,75 @@
     "gyrocoreChirpLogWarnings": { "message": "Log $1: $2" },
     "gyrocoreChirpDiagnosticBanner": {
         "message": "Diagnostic only — not valid for tuning: $1. GyroCore rejected these measurements; the plots below are for inspection and no gains are recommended from them."
+    },
+    "gyrocoreGlobalTitle": { "message": "Global tune (GyroCore composite recommendation)" },
+    "gyrocoreGlobalIntro": {
+        "message": "Simplified tuning sliders are global: one value applies to every axis the slider mode covers. The per-axis recommendations below are evidence. Only this global recommendation, merged by GyroCore from the qualified axes of one log, can be applied."
+    },
+    "gyrocoreGlobalNone": {
+        "message": "No global recommendation: this log has no CHIRP measurement with a logged slider tune."
+    },
+    "gyrocoreGlobalValid": { "message": "VALID GLOBAL RECOMMENDATION" },
+    "gyrocoreGlobalNotValid": { "message": "NO VALID GLOBAL RECOMMENDATION" },
+    "gyrocoreGlobalCurrent": { "message": "Current (logged)" },
+    "gyrocoreGlobalEvidence": { "message": "per-axis evidence" },
+    "gyrocoreGlobalFinal": { "message": "Global (would be applied)" },
+    "gyrocoreGlobalSources": { "message": "Source measurements" },
+    "gyrocoreGlobalBlocked": { "message": "Why the global recommendation cannot be applied:" },
+    "gyrocoreGlobalRole_participating": { "message": "used in the global recommendation" },
+    "gyrocoreGlobalRole_excluded_by_axis_gate": { "message": "left out (axis not under slider control)" },
+    "gyrocoreGlobalRole_not_selected": { "message": "not used (another sweep of this axis was chosen)" },
+    "gyrocoreGlobalRole_rejected": { "message": "not used (rejected measurement)" },
+    "gyrocoreApplyNoComposite": { "message": "Apply Gains is blocked: there is no valid global recommendation." },
+    "gyrocoreGlobal_unresolved_merge_requires_review": {
+        "message": "The axes do not agree on one global slider set (GyroCore merge requires review)."
+    },
+    "gyrocoreGlobal_slider_disagreement": {
+        "message": "Axes propose different values for $1; GyroCore does not average or pick one."
+    },
+    "gyrocoreGlobal_no_participating_axes": {
+        "message": "No axis is eligible to contribute to a global recommendation."
+    },
+    "gyrocoreGlobal_system_id_unusable": {
+        "message": "An axis has no usable measurement $1; its CHIRP evidence failed qualification."
+    },
+    "gyrocoreGlobal_repeated_axis_requires_selection": {
+        "message": "$1 has more than one qualified sweep. Choose one explicitly in the CHIRP qualification table; GyroCore has no rule to pick for you."
+    },
+    "gyrocoreGlobal_axis_excluded": { "message": "Left out of the global recommendation: $1" },
+    "gyrocoreGlobal_rejected_repeat_not_used": { "message": "A rejected sweep was not used: $1" },
+    "gyrocoreGlobal_proposed_pid_sliders_incomplete": { "message": "The logged slider tune is incomplete: $1" },
+    "gyrocoreGlobal_proposed_dterm_sliders_incomplete": {
+        "message": "The logged D-term filter sliders are incomplete: $1"
+    },
+    "gyrocoreGlobal_proposed_sliders_outside_cli_minmax": { "message": "Outside the CLI range (0/10–200): $1" },
+    "gyrocoreGlobal_dterm_filter_off_multiplier_has_no_effect": {
+        "message": "The D-term filter slider is OFF, so the D-term filter multiplier has no effect."
+    },
+    "gyrocoreGlobal_composite_clamp_changes_direction": {
+        "message": "$1: the global value moves in a different direction from what an axis asked for."
+    },
+    "gyrocoreGlobal_composite_clamp_material": {
+        "message": "$1: the global value differs from an axis's request by more than rounding (slider limit)."
+    },
+    "gyrocoreGlobal_composite_slider_unverifiable": {
+        "message": "$1: the current value is unknown, so the change cannot be checked."
+    },
+    "gyrocoreReason_apply_missing_composite_id": { "message": "No global recommendation was named." },
+    "gyrocoreReason_apply_single_measurement_apply_not_allowed": {
+        "message": "A single-axis measurement cannot be applied: sliders are global."
+    },
+    "gyrocoreReason_apply_stale_composite": {
+        "message": "The global recommendation changed since it was shown (new analysis, selection, target or recommendation)."
+    },
+    "gyrocoreReason_apply_composite_not_authorized": { "message": "The global recommendation is not authorized." },
+    "gyrocoreReason_apply_sliders_differ_from_composite": {
+        "message": "The sliders to apply are not the global recommendation's."
+    },
+    "gyrocoreReason_fc_simplified_pids_mode_changed": {
+        "message": "The connected craft's slider mode differs from the analysed log's."
+    },
+    "gyrocoreReason_fc_current_slider_changed": {
+        "message": "The connected craft's $1 differs from the analysed log, so the recommendation's baseline no longer holds."
     }
 }

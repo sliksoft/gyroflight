@@ -21,8 +21,10 @@
 
 /*
  * A minimal GyroCore qualification report for UI tests that seed the Autotune
- * store by hand: one measurement on one axis, authorized (or blocked) for
- * exactly the given sliders. Only the fields the gate and the views read.
+ * store by hand: one measurement on one axis whose own evidence is clean (or
+ * carries the given block codes), in a log with a complete logged slider tune
+ * at 100. Only the fields the gates and views read. Its global (composite)
+ * recommendation is the measurement's sliders, authorized when `blocked` is empty.
  */
 
 import type { GainRecommendation } from "../../../src/js/blackbox/spectral_analysis";
@@ -56,16 +58,43 @@ export function qualifiedReportFor(
         recommendation: {
             result: { proposed },
             gains: { proposed },
-            guard: { blocked: [], warnings: [], sliders: [] },
+            guard: {
+                blocked: [],
+                warnings: [],
+                sliders: Object.entries(proposed).map(([slider, value]) => ({ slider, requested: value })),
+            },
         },
         tune: { blocked: [], warnings: [] },
         apply: { allowed: blocked.length === 0, blocked, warnings: [] },
     };
     return {
+        token: "seeded",
         filename: "seeded.bbl",
         decoder: "betaflight-blackbox-viewer",
         logCount: 1,
-        logs: [{ logIndex: 0, error: null, measurements: [measurement] }],
+        logs: [
+            {
+                logIndex: 0,
+                error: null,
+                firmwareRevision: "seeded",
+                loggedSliders: {
+                    pids_mode: 2,
+                    master_multiplier: 100,
+                    i_gain: 100,
+                    d_gain: 100,
+                    pi_gain: 100,
+                    d_max_gain: 100,
+                    feedforward_gain: 100,
+                    pitch_d_gain: 100,
+                    pitch_pi_gain: 100,
+                    dterm_filter: 1,
+                    dterm_filter_multiplier: 100,
+                    gyro_filter: 1,
+                    gyro_filter_multiplier: 100,
+                },
+                measurements: [measurement],
+            },
+        ],
         measurements: [measurement],
         state: "usable",
         targetPhaseMarginDeg: 60,
