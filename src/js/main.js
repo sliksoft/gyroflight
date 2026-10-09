@@ -1,4 +1,5 @@
 import "../components/init.js";
+import "../gyroflight/theme.css";
 import { gui_log } from "./gui_log";
 import { i18n } from "./localization.js";
 import GUI from "./gui.js";
@@ -29,7 +30,7 @@ import { useNavigationStore } from "../stores/navigation.js";
 import { useDialogStore } from "../stores/dialog.js";
 import { MspCancelledError } from "./msp/mspErrors";
 import { isDeleteAccountPath, requestDeleteAccountFocus } from "./utils/deleteAccountLink";
-import { BETAFLIGHT_ACCOUNTS_ENABLED } from "../gyroflight/policy";
+import { BETAFLIGHT_ACCOUNTS_ENABLED, GYROFLIGHT_COLOR_THEME } from "../gyroflight/policy";
 
 window.addEventListener("unhandledrejection", (event) => {
     if (event.reason instanceof MspCancelledError) {
@@ -300,9 +301,15 @@ async function startProcess() {
         setDarkTheme(result.darkTheme);
     }
 
-    // Apply color theme from config (default to "yellow")
+    // Apply Gyroflight's product theme while preserving explicit upstream theme choices.
+    // Existing installs carrying Betaflight's old default "yellow" migrate once to Gyroflight.
     result = getConfig("colorTheme");
-    const colorTheme = result.colorTheme ?? "yellow";
+    const storedColorTheme = result.colorTheme;
+    const colorTheme =
+        !storedColorTheme || storedColorTheme === "yellow" ? GYROFLIGHT_COLOR_THEME : storedColorTheme;
+    if (colorTheme !== storedColorTheme) {
+        setConfig({ colorTheme });
+    }
     document.body.dataset.theme = colorTheme;
 
     // Contrast theme requires dark mode
