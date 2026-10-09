@@ -1,4 +1,8 @@
-# GyroCore App — tuning architecture
+# Gyroflight — tuning architecture
+
+Gyroflight is the application (this repository, a fork of the Betaflight App). GyroCore is the
+Redline Dynamics analysis/safety engine being migrated into Gyroflight. Betaflight remains the upstream
+application and platform.
 
 ## Decision
 
@@ -14,7 +18,7 @@ layers around it that make a proposed tune trustworthy and reviewable.
    chirp_bbl_parser.ts → spectral_analysis.ts → recommendGains → stores/autotune
         │  proposed gains + Bode / spectrogram data
         ▼
- GyroCore (src/gyrocore/, later)
+ GyroCore engine in Gyroflight (src/gyrocore/, later)
    1. measurement qualification   is this log fit to tune from?
    2. consistency checks          do axes / repeats / slider merge agree?
    3. safety validation           clamps and limits on the proposal

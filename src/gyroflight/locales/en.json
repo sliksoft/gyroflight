@@ -1,0 +1,22 @@
+{
+    "gyroflightTabTitle": { "message": "Gyroflight" },
+    "gyroflightParentBrand": { "message": "by Redline Dynamics" },
+    "gyroflightIntro": {
+        "message": "Gyroflight is built on the Betaflight App. GyroCore, the Redline Dynamics analysis and safety engine, is being integrated to add flight-log analysis, safety validation and tune review. Betaflight's own tools below are used as-is."
+    },
+    "gyroflightCapabilitiesHead": { "message": "Capabilities" },
+    "gyroflightCapFirmwareFlasher": { "message": "Betaflight Firmware Flasher" },
+    "gyroflightCapBlackboxViewer": { "message": "Betaflight Blackbox Viewer" },
+    "gyroflightCapAutotune": { "message": "Betaflight Autotune (Expert mode)" },
+    "gyroflightCapAnalysis": { "message": "GyroCore Analysis" },
+    "gyroflightCapSafety": { "message": "GyroCore Safety" },
+    "gyroflightCapCompare": { "message": "GyroCore Compare" },
+    "gyroflightStatusAvailable": { "message": "Available" },
+    "gyroflightStatusPending": { "message": "Migration pending" },
+    "gyroflightAttributionHead": { "message": "Attribution" },
+    "gyroflightAttribution": {
+        "message": "Gyroflight is based on the Betaflight App by the Betaflight open source project and is distributed under the GNU General Public License v3.0."
+    },
+    "gyroflightSourceLink": { "message": "Gyroflight source" },
+    "gyroflightUpstreamLink": { "message": "Betaflight App source" }
+}
