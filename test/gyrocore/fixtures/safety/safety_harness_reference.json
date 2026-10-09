@@ -93,6 +93,7 @@
   "float_tolerance": 1e-09,
   "rounding": "clamped_tune uses Python round(): half to even"
  },
+ "label": "TEST_HARNESS_ONLY_NOT_PRODUCT_EVIDENCE",
  "harness": {
   "label": "TEST_HARNESS_ONLY_NOT_PRODUCT_EVIDENCE",
   "analysis_source": "tests/core/safety/test_pipeline.py::_clean_analysis == tests/core/cli/helpers.py::clean_analysis",
@@ -204,6 +205,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -833,6 +1021,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -1462,6 +1837,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -2199,6 +2761,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "bbl_header:rollPID",
+        "raw": "45,80,30",
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "bbl_header:rollPID",
+        "raw": "45,80,30",
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "bbl_header:rollPID",
+        "raw": "45,80,30",
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "bbl_header:pitchPID",
+        "raw": "47,84,34",
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "bbl_header:pitchPID",
+        "raw": "47,84,34",
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "bbl_header:pitchPID",
+        "raw": "47,84,34",
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "bbl_header:yawPID",
+        "raw": "45,80,0",
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "bbl_header:yawPID",
+        "raw": "45,80,0",
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "bbl_header:yawPID",
+        "raw": "45,80,0",
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": null,
+        "source": "missing",
+        "origin": "none",
+        "raw": null,
+        "note": ""
+       }
+      },
       "status": "proposed_with_warnings",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -2736,6 +3485,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -3453,6 +4389,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -4081,6 +5204,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -4790,6 +6100,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -5416,6 +6913,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -6062,6 +7746,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -6703,6 +8574,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -7347,6 +9405,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -8091,6 +10336,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -8800,6 +11232,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -9513,6 +12132,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -10139,6 +12945,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -10802,6 +13795,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -11456,6 +14636,193 @@
     },
     "expected": {
      "proposal": {
+      "current_warnings": [],
+      "current_full": {
+       "roll.p": {
+        "name": "roll.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.i": {
+        "name": "roll.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.d": {
+        "name": "roll.d",
+        "value": 30,
+        "source": "parsed",
+        "origin": "cli:profile0:roll_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "roll.f": {
+        "name": "roll.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_roll",
+        "raw": 120,
+        "note": ""
+       },
+       "roll.d_max": {
+        "name": "roll.d_max",
+        "value": 40,
+        "source": "parsed",
+        "origin": "cli:d_max_roll",
+        "raw": 40,
+        "note": ""
+       },
+       "pitch.p": {
+        "name": "pitch.p",
+        "value": 47,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.i": {
+        "name": "pitch.i",
+        "value": 84,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.d": {
+        "name": "pitch.d",
+        "value": 34,
+        "source": "parsed",
+        "origin": "cli:profile0:pitch_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "pitch.f": {
+        "name": "pitch.f",
+        "value": 125,
+        "source": "parsed",
+        "origin": "cli:f_pitch",
+        "raw": 125,
+        "note": ""
+       },
+       "pitch.d_max": {
+        "name": "pitch.d_max",
+        "value": 46,
+        "source": "parsed",
+        "origin": "cli:d_max_pitch",
+        "raw": 46,
+        "note": ""
+       },
+       "yaw.p": {
+        "name": "yaw.p",
+        "value": 45,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.i": {
+        "name": "yaw.i",
+        "value": 80,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.d": {
+        "name": "yaw.d",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:profile0:yaw_pid",
+        "raw": null,
+        "note": "[P, I, D]"
+       },
+       "yaw.f": {
+        "name": "yaw.f",
+        "value": 120,
+        "source": "parsed",
+        "origin": "cli:f_yaw",
+        "raw": 120,
+        "note": ""
+       },
+       "yaw.d_max": {
+        "name": "yaw.d_max",
+        "value": 0,
+        "source": "parsed",
+        "origin": "cli:d_max_yaw",
+        "raw": 0,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_min_hz": {
+        "name": "dterm.lpf1_dyn_min_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_min_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf1_dyn_max_hz": {
+        "name": "dterm.lpf1_dyn_max_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_dyn_max_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "dterm.lpf1_static_hz": {
+        "name": "dterm.lpf1_static_hz",
+        "value": 75,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf1_static_hz",
+        "raw": 75,
+        "note": ""
+       },
+       "dterm.lpf2_static_hz": {
+        "name": "dterm.lpf2_static_hz",
+        "value": 150,
+        "source": "parsed",
+        "origin": "cli:dterm_lpf2_static_hz",
+        "raw": 150,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_min_hz": {
+        "name": "gyro.lpf1_dyn_min_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_min_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf1_dyn_max_hz": {
+        "name": "gyro.lpf1_dyn_max_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_dyn_max_hz",
+        "raw": 500,
+        "note": ""
+       },
+       "gyro.lpf1_static_hz": {
+        "name": "gyro.lpf1_static_hz",
+        "value": 250,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf1_static_hz",
+        "raw": 250,
+        "note": ""
+       },
+       "gyro.lpf2_static_hz": {
+        "name": "gyro.lpf2_static_hz",
+        "value": 500,
+        "source": "parsed",
+        "origin": "cli:gyro_lpf2_static_hz",
+        "raw": 500,
+        "note": ""
+       }
+      },
       "status": "proposed",
       "blocked_reasons": [],
       "review_reasons": [],
@@ -14154,6 +17521,5 @@
     "error": null
    }
   ]
- },
- "label": "TEST_HARNESS_ONLY_NOT_PRODUCT_EVIDENCE"
+ }
 }

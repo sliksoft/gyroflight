@@ -1,7 +1,8 @@
 # This file is part of Gyroflight, a derivative of the Betaflight App (GPL-3.0-or-later).
 #
-# Prototype (agent D, WU4): writes the Safety-engine parity reference
-# (test/gyrocore/fixtures/safety/safety_reference.json) by evaluating GyroCore's Python
+# WU4 Safety-engine parity reference (first drafted by a read-only audit agent, extended in WU4A).
+# Writes one JSON document, split by test/gyrocore/tools/split_safety_reference.py into
+# test/gyrocore/fixtures/safety/safety_{foundation,product_path,harness}_reference.json, by evaluating GyroCore's Python
 # reference (core/gyrocore/autotune/absolute.py, current_tune.py, betaflight/simplified_tuning.py,
 # safety/*.py) on fixed inputs. Only imports GyroCore; writes nothing into the GyroCore repository.
 # Run from a scratch directory with
@@ -207,8 +208,28 @@ def ints(t):
 def validity(v):
     return None if v is None else v.to_dict()
 
+def tv_full(t):
+    d = t.to_dict()
+    if isinstance(d["value"], list):
+        d["value"] = [clean(x) for x in d["value"]]
+    return d
+
+def flat_tune_full(t):
+    out = {}
+    for ax in ("roll", "pitch", "yaw"):
+        a = t.axis(ax)
+        for c in ("p", "i", "d", "f", "d_max"):
+            out[f"{ax}.{c}"] = tv_full(getattr(a, c))
+    for pre in ("dterm", "gyro"):
+        f = getattr(t, pre)
+        for c in ("lpf1_dyn_min_hz", "lpf1_dyn_max_hz", "lpf1_static_hz", "lpf2_static_hz"):
+            out[f"{pre}.{c}"] = tv_full(getattr(f, c))
+    return out
+
 def proj_proposal(p):
     return {
+        "current_warnings": list(p.current.warnings),
+        "current_full": flat_tune_full(p.current),
         "status": p.status,
         "blocked_reasons": list(p.blocked_reasons),
         "review_reasons": list(p.review_reasons),
@@ -265,6 +286,31 @@ def guarded(fn):
     except Exception as e:
         return {"expected": None, "error": type(e).__name__}
 
+# Betaflight 2026.6.2 / master blackbox.c header lines (writeHeader): CSV d_max, ff_weight, *_lpf1_dyn_hz.
+def bf_headers(**over):
+    v = {
+        "rollPID": "45,80,30", "pitchPID": "47,84,34", "yawPID": "45,80,0",
+        "d_max": "40,46,0", "ff_weight": "120,125,120",
+        "dterm_lpf1_static_hz": "75", "dterm_lpf1_dyn_hz": "75,150", "dterm_lpf2_static_hz": "150",
+        "gyro_lpf1_static_hz": "250", "gyro_lpf1_dyn_hz": "250,500", "gyro_lpf2_static_hz": "500",
+        "simplified_pids_mode": "2", "simplified_master_multiplier": "100", "simplified_i_gain": "100",
+        "simplified_d_gain": "100", "simplified_pi_gain": "100", "simplified_d_max_gain": "100",
+        "simplified_feedforward_gain": "100", "simplified_pitch_d_gain": "100", "simplified_pitch_pi_gain": "100",
+        "simplified_dterm_filter": "1", "simplified_dterm_filter_multiplier": "100",
+        "simplified_gyro_filter": "1", "simplified_gyro_filter_multiplier": "100",
+    }
+    for k, x in over.items():
+        if x is None:
+            v.pop(k, None)
+        else:
+            v[k] = x
+    lines = ["Product:Blackbox flight data recorder by Nicholas Sherlock",
+             "Firmware revision:Betaflight 2026.6.2 (synthetic) STM32F7X2"]
+    lines += [f"{k}:{x}" for k, x in v.items()]
+    return "\n".join("H " + h for h in lines) + "\n"
+
+BF_HEADERS = bf_headers()
+
 # ---------------------------------------------------------------- foundation.absolute
 ABSOLUTE_CASES = [
     # id, branch, source kind, source, axes
@@ -287,6 +333,23 @@ ABSOLUTE_CASES = [
     ("sliders_outside_cli_range", "25/250 sliders -> proposed_sliders_outside_cli_minmax warning", "cli", NOMINAL_CLI, three(sliders(100, slider_pi_gain=250, slider_dterm_filter_multiplier=25))),
     ("unparseable_value", "unparseable CLI value stays missing", "cli", cli_text(p_roll="abc"), three(sliders(100))),
     ("nan_slider_proposal", "NaN in per-axis proposal", "cli", NOMINAL_CLI, three(sliders(100, slider_pi_gain=float("nan")))),
+    # WU4A: real Betaflight header format (no CLI dump, as in Gyroflight).
+    ("hdr_bf_noop", "BF header lines, no-op", "headers", BF_HEADERS, three(sliders(100))),
+    ("hdr_bf_wu3_positive", "BF header lines, WU3 safe positive", "headers", BF_HEADERS, three(WU3_POSITIVE)),
+    ("hdr_bf_rp_mode", "BF header lines, RP mode", "headers", bf_headers(simplified_pids_mode="1"), [(0, sliders(105), False), (1, sliders(105), False)]),
+    ("hdr_bf_pids_off", "BF header lines, pids OFF", "headers", bf_headers(simplified_pids_mode="0"), three(sliders(110))),
+    ("hdr_bf_nan_pid", "non-numeric rollPID element", "headers", bf_headers(rollPID="45,x,30"), three(sliders(100))),
+    ("hdr_bf_short_pid", "rollPID with two elements", "headers", bf_headers(rollPID="45,80"), three(sliders(100))),
+    ("hdr_bf_gyro_multiplier_missing", "gyro filter ON, multiplier missing", "headers", bf_headers(simplified_gyro_filter_multiplier=None), three(sliders(100))),
+    ("hdr_bf_gyro_filter_missing", "gyro filter switch missing", "headers", bf_headers(simplified_gyro_filter=None), three(sliders(100))),
+    ("hdr_bf_dterm_off", "dterm filter OFF", "headers", bf_headers(simplified_dterm_filter="0"), three(sliders(100, slider_dterm_filter_multiplier=150))),
+    ("hdr_bf_dterm_150", "dterm multiplier 150", "headers", BF_HEADERS, three(sliders(100, slider_dterm_filter_multiplier=150))),
+    ("hdr_bf_current_inconsistent", "logged rollPID inconsistent with sliders", "headers", bf_headers(rollPID="60,80,30"), three(sliders(100))),
+    ("hdr_bf_slider_unparseable", "slider header not an integer", "headers", bf_headers(simplified_pi_gain="abc"), three(sliders(100))),
+    ("hdr_bf_mode_text", "pids mode given as text", "headers", bf_headers(simplified_pids_mode="RPY", simplified_dterm_filter="ON", simplified_gyro_filter="ON"), three(sliders(100))),
+    ("hdr_bf45_dmin", "4.5-style d_min CSV and simplified_dmin_ratio", "headers",
+        bf_headers(d_max=None, simplified_d_max_gain=None) + "H d_min:30,34,0\nH simplified_dmin_ratio:100\n", three(sliders(100))),
+    ("hdr_bf_master_150", "master 150 (proposal over the step caps)", "headers", BF_HEADERS, three(sliders(150))),
 ]
 
 def absolute_section():
@@ -326,6 +389,31 @@ def simplified_section():
                     "outside_cli_range": list(st.sliders_outside_cli_range(sl))}
         cases.append({"case_id": cid, "input": {"slider_overrides": s}, **guarded(run)})
     return cases
+
+def mapping_sweep():
+    """Firmware PID mapping (calculateNewPidValues, RPY) over a fixed slider set: single-slider sweeps 0..255
+    and a seeded random sample. Rows: [master, pi, i, d, ff, d_max_gain, pitch_d, pitch_pi] -> 15 ints."""
+    import random
+    names = ("master_multiplier", "pi_gain", "i_gain", "d_gain", "feedforward_gain", "d_max_gain", "pitch_d_gain", "pitch_pi_gain")
+    combos = []
+    for j in range(len(names)):
+        for v in range(256):
+            row = [100] * len(names)
+            row[j] = v
+            combos.append(row)
+    rnd = random.Random(20261009)
+    for _ in range(2000):
+        combos.append([rnd.randint(0, 255) for _ in names])
+    base = st.firmware_default_pid_profile()
+    rows = []
+    for row in combos:
+        sl = replace(base.sliders, **dict(zip(names, row)))
+        p = st.calculate_new_pid_values(replace(base, sliders=sl))
+        out = []
+        for a in (p.roll, p.pitch, p.yaw):
+            out += [a.p, a.i, a.d, a.f, a.d_max]
+        rows.append([row, out])
+    return {"slider_order": list(names), "axis_fields": ["p", "i", "d", "f", "d_max"], "rows": rows}
 
 # ---------------------------------------------------------------- foundation.safe_tune / output
 # Mechanical results that need NO analysis evidence:
@@ -566,6 +654,10 @@ def product_section():
         ("wu3_positive_bf45_cli_analysis_none", three(WU3_POSITIVE), {"cli": BF45_CLI}),
         ("noop_firmware_defaults_analysis_none", three(sliders(100)), {"cli": NOMINAL_CLI}),
         ("analysis_not_ok", three(sliders(100)), {"cli": NOMINAL_CLI, "_analysis": {"ok": False, "message": "no_usable_samples"}}),
+        ("hdr_bf_wu3_positive_analysis_none", three(WU3_POSITIVE), {"headers": BF_HEADERS}),
+        ("hdr_bf_noop_analysis_none", three(sliders(100)), {"headers": BF_HEADERS}),
+        ("hdr_bf_rp_mode_analysis_none", [(0, sliders(105), False), (1, sliders(105), False)], {"headers": bf_headers(simplified_pids_mode="1")}),
+        ("hdr_bf_missing_ff_weight_analysis_none", three(WU3_POSITIVE), {"headers": bf_headers(ff_weight=None)}),
     ]:
         analysis = kw.pop("_analysis", None)
         rows.append({"case_id": cid, "input": {**kw, "axes": [{"axis": a, "blocked": b, "proposed": p} for a, p, b in axes_in],
@@ -670,7 +762,8 @@ doc = {
                     "order_insensitive": ["candidate.clamp_ids", "tuning_output_safety.warning_reasons", "final.warnings",
                                           "candidate.checks (filter entries)"],
                     "float_tolerance": 1e-9, "rounding": "clamped_tune uses Python round(): half to even"},
-    "foundation": {"absolute": absolute_section(), "simplified_tuning": simplified_section(), "safe_tune_output": clamp_section(),
+    "foundation": {"absolute": absolute_section(), "simplified_tuning": simplified_section(), "mapping_sweep": mapping_sweep(),
+                   "safe_tune_output": clamp_section(),
                    "construct_only": construct_only_section(), "stages": stages_section()},
     "product_path": product_section(),
     "harness": harness_section(),

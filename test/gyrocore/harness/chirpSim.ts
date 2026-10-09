@@ -122,6 +122,23 @@ export const FULL_TUNE_HEADERS = [
     "simplified_gyro_filter_multiplier:100",
 ];
 
+/**
+ * FULL_TUNE_HEADERS plus the absolute-tune lines Betaflight 2026.6.2 / master
+ * writes (blackbox.c writeHeader): d_max, ff_weight and the filter Hz, at the
+ * firmware defaults for that slider tune. What a real log carries (WU4 Safety).
+ */
+export const BETAFLIGHT_TUNE_HEADERS = [
+    ...FULL_TUNE_HEADERS,
+    "d_max:40,46,0",
+    "ff_weight:120,125,120",
+    "dterm_lpf1_static_hz:75",
+    "dterm_lpf1_dyn_hz:75,150",
+    "dterm_lpf2_static_hz:150",
+    "gyro_lpf1_static_hz:250",
+    "gyro_lpf1_dyn_hz:250,500",
+    "gyro_lpf2_static_hz:500",
+];
+
 /** Replace one `key:value` header line. */
 export function withHeader(headers: string[], line: string): string[] {
     const key = line.slice(0, line.indexOf(":") + 1);
