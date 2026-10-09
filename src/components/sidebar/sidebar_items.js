@@ -1,4 +1,5 @@
 import { configHasBuildOption } from "../../composables/useBuildOptions";
+import { gyrocoreSidebarItems } from "../../gyrocore/tabs";
 
 export const sidebarItems = [
     { key: "landing", mode: "disconnected", i18n: "tabLanding", icon: "i-lucide-home" },
@@ -42,6 +43,7 @@ export const sidebarItems = [
     { key: "onboard_logging", mode: "connected", i18n: "tabOnboardLogging", icon: "i-lucide-database" },
     { key: "autotune", mode: "shared", i18n: "tabAutotune", icon: "i-lucide-gauge", expert: true },
     { key: "blackbox_viewer", mode: "shared", i18n: "tabBlackboxViewer", icon: "i-lucide-line-chart" },
+    ...gyrocoreSidebarItems,
 
     { key: "cli", mode: "cli", i18n: "tabCLI", icon: "i-lucide-terminal" },
 

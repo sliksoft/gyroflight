@@ -1,8 +1,8 @@
 {
   "name": "betaflight-app",
-  "productName": "Betaflight",
-  "displayName": "Betaflight - Configuration and management application",
-  "description": "Crossplatform configuration and management application for the Betaflight flight control firmware.",
+  "productName": "GyroCore",
+  "displayName": "GyroCore - Flight analysis and tuning, built on the Betaflight App",
+  "description": "GyroCore by Redline Dynamics: Betaflight configuration, flight-log analysis and tuning. Based on the Betaflight App.",
   "version": "2026.12.0-alpha",
   "type": "module",
   "main": "index.html",
