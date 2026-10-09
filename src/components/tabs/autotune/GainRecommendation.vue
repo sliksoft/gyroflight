@@ -79,7 +79,12 @@
             <span v-if="applyError" class="text-sm text-red-500 font-bold">{{ applyError }}</span>
         </div>
         <!-- Gyroflight: why GyroCore blocks Apply for the selected axis -->
-        <ApplyGateNotice :composite="applyComposite" :authorization="applyAuthorization" :product-lock="productLock" />
+        <ApplyGateNotice
+            :composite="applyComposite"
+            :authorization="applyAuthorization"
+            :safety="applySafety"
+            :product-lock="productLock"
+        />
 
         <!-- Notes on any axis where the recommendation is not simply the margin
              target met in full: the craft's phase peak caps the reachable
@@ -160,7 +165,13 @@ const applyError = ref("");
 const selectedAxisKey = ref<AxisName | null>(null);
 
 const isConnected = computed(() => connectionStore.connectionValid);
-const { composite: applyComposite, authorization: applyAuthorization, productLock, applyAllowed } = useApplyGate();
+const {
+    composite: applyComposite,
+    authorization: applyAuthorization,
+    safety: applySafety,
+    productLock,
+    applyAllowed,
+} = useApplyGate();
 
 const MARGIN_OPTIONS = [
     { value: PHASE_MARGIN_PRESETS.AGGRESSIVE, labelKey: "autotuneMarginAggressive" },

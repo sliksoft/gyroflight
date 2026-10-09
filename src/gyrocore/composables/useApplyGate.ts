@@ -21,14 +21,16 @@
 
 /*
  * Apply Gains authorization for Betaflight's Autotune panel, for display:
- * the global (composite) recommendation, whether it is authorized, and the
- * product release lock. The same checks run again inside the Apply action.
+ * the global (composite) recommendation, whether it is authorized, its GyroCore
+ * Safety result, and the product release lock. The same checks run again
+ * inside the Apply action.
  */
 
 import { computed } from "vue";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { authorizeCompositeApply } from "@/gyrocore/tuning/authorize";
 import { productApplyBlocks } from "@/gyrocore/productLock/productApply";
+import { safetyForComposite } from "@/gyrocore/safety/authorize";
 
 export function useApplyGate() {
     const gate = useChirpQualificationStore();
@@ -44,7 +46,14 @@ export function useApplyGate() {
     // Not a verdict on the tune: the product write is not released yet.
     const productLock = productApplyBlocks();
 
-    const applyAllowed = computed(() => authorization.value.allowed && productLock.length === 0);
+    const safety = computed(() => {
+        void gate.revision;
+        return safetyForComposite(gate.gateState(), composite.value);
+    });
 
-    return { composite, authorization, productLock, applyAllowed };
+    const applyAllowed = computed(
+        () => authorization.value.allowed && safety.value.authorized && productLock.length === 0,
+    );
+
+    return { composite, authorization, safety, productLock, applyAllowed };
 }
