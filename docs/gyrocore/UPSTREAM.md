@@ -180,3 +180,20 @@ upstream's secrets (Cloudflare, Crowdin, signing keys) to this repository.
 
 The local pre-commit hook (husky → lint-staged) runs prettier, `eslint --fix` and `vue-tsc` with whatever
 Node is on `PATH`; use Node 24.
+
+
+## Gyroflight product UI layer
+
+Gyroflight deliberately keeps Betaflight behavior and implementation structure wherever possible.
+
+- The product home is supplied from `src/gyroflight/tabs/GyroflightLandingTab.vue` by overriding only the
+  `landing` component in the existing Gyroflight component spread. Upstream `LandingTab.vue` remains
+  present and unmodified.
+- The app shell swaps the visual Betaflight wordmark for the Gyroflight / Redline Dynamics brand; FC
+  connection, status, transport and tab behavior are unchanged.
+- The default product accent is the GyroCore cyan palette in `src/gyroflight/theme.css`. Warning, error
+  and success semantics remain Betaflight-compatible. Amber and contrast themes remain available.
+- Pre-Flight and Flight Plan are hidden by product sidebar policy only. Their upstream components stay in
+  the tree for easy upstream synchronization.
+- Autotune remains an Expert Mode feature. Gyroflight must not bypass or relax that upstream visibility
+  rule as part of branding work.
