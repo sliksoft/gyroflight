@@ -1,13 +1,13 @@
 /*
- * This file is part of GyroCore App, a derivative of the Betaflight App.
+ * This file is part of Gyroflight, a derivative of the Betaflight App.
  *
- * GyroCore App is free software. You can redistribute this software
+ * Gyroflight is free software. You can redistribute this software
  * and/or modify this software under the terms of the GNU General
  * Public License as published by the Free Software Foundation,
  * either version 3 of the License, or (at your option) any later
  * version.
  *
- * GyroCore App is distributed in the hope that it will be useful,
+ * Gyroflight is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  *
@@ -19,12 +19,12 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-import GyroCoreTab from "./tabs/GyroCoreTab.vue";
-import { GYROCORE_TAB_KEY } from "./tabs";
-import { registerGyroCoreMessages } from "./i18n";
+import GyroflightTab from "./tabs/GyroflightTab.vue";
+import { GYROFLIGHT_TAB_KEY } from "./tabs";
+import { registerGyroflightMessages } from "./i18n";
 
-registerGyroCoreMessages();
+registerGyroflightMessages();
 
-export const gyrocoreTabComponents = {
-    [GYROCORE_TAB_KEY]: GyroCoreTab,
+export const gyroflightTabComponents = {
+    [GYROFLIGHT_TAB_KEY]: GyroflightTab,
 };

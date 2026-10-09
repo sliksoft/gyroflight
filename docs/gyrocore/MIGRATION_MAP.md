@@ -1,17 +1,21 @@
-# GyroCore → GyroCore App migration map
+# GyroCore → Gyroflight migration map
+
+Gyroflight is the application (this repository, a fork of the Betaflight App). GyroCore is the
+Redline Dynamics analysis/safety engine being migrated into Gyroflight. Betaflight remains the upstream
+application and platform.
 
 Classifies the existing GyroCore repository (local `~/GyroCore`, audited read-only at
 branch `review/wu5-wu13`, HEAD `d2e60f7`, with uncommitted work in `apps/desktop/gyrocore-app/`)
-for the move onto this Betaflight App fork. Nothing has been migrated yet.
+for the move of the GyroCore engine into Gyroflight. Nothing has been migrated yet.
 
 **Principle:** if the Betaflight App already provides a capability, use it. Port only what is
 genuinely GyroCore's, and keep the Python Core and its oracles as the reference that ports are checked against.
 
 | Class                                  | Meaning                                                             |
 | -------------------------------------- | ------------------------------------------------------------------- |
-| `MOVE_LATER`                           | Port into `src/gyrocore/` later, as a GyroCore addition             |
+| `MOVE_LATER`                           | Port into Gyroflight later: engine code to `src/gyrocore/`          |
 | `REFERENCE_ONLY`                       | Keep in the GyroCore repo as a regression/parity oracle; don't port |
-| `OBSOLETE_FRONTEND`                    | React/Tauri UI superseded by the Vue fork                           |
+| `OBSOLETE_FRONTEND`                    | React/Tauri UI superseded by Gyroflight (Vue)                       |
 | `KEEP_AS_SEPARATE_CORE`                | Stays in the separate Python/native Core                            |
 | `UPSTREAM_BETAFLIGHT_ALREADY_REPLACES` | The fork already has this; don't port                               |
 

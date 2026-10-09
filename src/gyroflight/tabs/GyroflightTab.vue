@@ -1,11 +1,11 @@
 <template>
-    <BaseTab tab-name="gyrocore">
+    <BaseTab tab-name="gyroflight">
         <div class="content_wrapper">
-            <div class="tab_title">{{ $t("gyrocoreTabTitle") }}</div>
-            <p class="text-sm text-muted">{{ $t("gyrocoreParentBrand") }}</p>
-            <p>{{ $t("gyrocoreIntro") }}</p>
+            <div class="tab_title">{{ $t("gyroflightTabTitle") }}</div>
+            <p class="text-sm text-muted">{{ $t("gyroflightParentBrand") }}</p>
+            <p>{{ $t("gyroflightIntro") }}</p>
             <div class="grid-row grid-box col2">
-                <UiBox :title="$t('gyrocoreCapabilitiesHead')" type="neutral">
+                <UiBox :title="$t('gyroflightCapabilitiesHead')" type="neutral">
                     <ul>
                         <li
                             v-for="cap in capabilities"
@@ -18,16 +18,16 @@
                                 class="size-4 shrink-0"
                             />
                             {{ $t(cap.label) }} —
-                            {{ $t(cap.available ? "gyrocoreStatusAvailable" : "gyrocoreStatusPending") }}
+                            {{ $t(cap.available ? "gyroflightStatusAvailable" : "gyroflightStatusPending") }}
                         </li>
                     </ul>
                 </UiBox>
-                <UiBox :title="$t('gyrocoreAttributionHead')" type="neutral">
-                    <p>{{ $t("gyrocoreAttribution") }}</p>
+                <UiBox :title="$t('gyroflightAttributionHead')" type="neutral">
+                    <p>{{ $t("gyroflightAttribution") }}</p>
                     <ul>
                         <li>
-                            <a href="https://github.com/sliksoft/gyrocore-app" target="_blank" rel="noopener">{{
-                                $t("gyrocoreSourceLink")
+                            <a href="https://github.com/sliksoft/gyroflight" target="_blank" rel="noopener">{{
+                                $t("gyroflightSourceLink")
                             }}</a>
                         </li>
                         <li>
@@ -35,7 +35,7 @@
                                 href="https://github.com/betaflight/betaflight-configurator"
                                 target="_blank"
                                 rel="noopener"
-                                >{{ $t("gyrocoreUpstreamLink") }}</a
+                                >{{ $t("gyroflightUpstreamLink") }}</a
                             >
                         </li>
                     </ul>
@@ -48,5 +48,5 @@
 <script setup lang="ts">
 import BaseTab from "@/components/tabs/BaseTab.vue";
 import UiBox from "@/components/elements/UiBox.vue";
-import { gyrocoreCapabilities as capabilities } from "../capabilities";
+import { gyroflightCapabilities as capabilities } from "../capabilities";
 </script>

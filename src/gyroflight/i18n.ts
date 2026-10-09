@@ -1,13 +1,13 @@
 /*
- * This file is part of GyroCore App, a derivative of the Betaflight App.
+ * This file is part of Gyroflight, a derivative of the Betaflight App.
  *
- * GyroCore App is free software. You can redistribute this software
+ * Gyroflight is free software. You can redistribute this software
  * and/or modify this software under the terms of the GNU General
  * Public License as published by the Free Software Foundation,
  * either version 3 of the License, or (at your option) any later
  * version.
  *
- * GyroCore App is distributed in the hope that it will be useful,
+ * Gyroflight is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  *
@@ -24,18 +24,18 @@ import { i18n } from "@/js/localization";
 import messages from "./locales/en.json";
 
 /** The bundle in the flat key -> string form i18next expects, parsed exactly as upstream locale files are. */
-export function gyrocoreMessageStrings(): Record<string, string> {
+export function gyroflightMessageStrings(): Record<string, string> {
     return i18n.parseInputFile(JSON.stringify(messages));
 }
 
 /**
- * GyroCore strings live in their own bundle rather than locales/en/messages.json,
+ * Gyroflight strings live in their own bundle rather than locales/en/messages.json,
  * which is upstream's most frequently changed file. They are merged into the
  * English fallback namespace without overwriting any upstream key, so every
  * other language falls back to them.
  */
-export function registerGyroCoreMessages(): void {
-    const add = () => i18next.addResourceBundle("en", "messages", gyrocoreMessageStrings(), true, false);
+export function registerGyroflightMessages(): void {
+    const add = () => i18next.addResourceBundle("en", "messages", gyroflightMessageStrings(), true, false);
     if (i18next.isInitialized) {
         add();
     } else {
