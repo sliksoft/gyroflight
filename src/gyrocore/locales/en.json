@@ -1,0 +1,22 @@
+{
+    "gyrocoreTabTitle": { "message": "GyroCore" },
+    "gyrocoreParentBrand": { "message": "Redline Dynamics" },
+    "gyrocoreIntro": {
+        "message": "GyroCore extends the Betaflight App with flight-log analysis, safety validation and tune review. Betaflight's own tools below are used as-is."
+    },
+    "gyrocoreCapabilitiesHead": { "message": "Capabilities" },
+    "gyrocoreCapFirmwareFlasher": { "message": "Betaflight Firmware Flasher" },
+    "gyrocoreCapBlackboxViewer": { "message": "Betaflight Blackbox Viewer" },
+    "gyrocoreCapAutotune": { "message": "Betaflight Autotune (Expert mode)" },
+    "gyrocoreCapAnalysis": { "message": "GyroCore Analysis" },
+    "gyrocoreCapSafety": { "message": "GyroCore Safety" },
+    "gyrocoreCapCompare": { "message": "GyroCore Compare" },
+    "gyrocoreStatusAvailable": { "message": "Available" },
+    "gyrocoreStatusPending": { "message": "Migration pending" },
+    "gyrocoreAttributionHead": { "message": "Attribution" },
+    "gyrocoreAttribution": {
+        "message": "GyroCore App is based on the Betaflight App by the Betaflight open source project and is distributed under the GNU General Public License v3.0."
+    },
+    "gyrocoreSourceLink": { "message": "GyroCore App source" },
+    "gyrocoreUpstreamLink": { "message": "Betaflight App source" }
+}

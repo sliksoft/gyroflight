@@ -7,6 +7,7 @@ import { useDialogStore } from "../stores/dialog";
 import { useConnectionStore } from "../stores/connection";
 import { pinia } from "./pinia_instance";
 import { getLockManager } from "./lock_manager";
+import { gyrocoreAllowedTabs } from "../gyrocore/tabs";
 
 /** @type {Record<string, Record<string, unknown> | undefined>} registered at runtime by each tab */
 const TABS = {};
@@ -31,6 +32,7 @@ class GuiControl {
             "flight_plan",
             "autotune",
             "blackbox_viewer",
+            ...gyrocoreAllowedTabs,
         ];
 
         this.defaultAllowedTabs = [
@@ -52,6 +54,7 @@ class GuiControl {
             "receiver",
             "sensors",
             "blackbox_viewer",
+            ...gyrocoreAllowedTabs,
         ];
 
         this.defaultCloudBuildTabOptions = ["gps", "led_strip", "osd", "servos", "vtx", "flight_plan"];
