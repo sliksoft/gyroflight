@@ -25,8 +25,18 @@
 // components and switchTab() stay exactly as upstream ships them.
 // Nothing here may change `expert`, `mode`, `buildOptions` or `feature`.
 
-/** Sidebar keys hidden in Gyroflight (both Flight Plan entries: disconnected and connected). */
-export const GYROFLIGHT_HIDDEN_SIDEBAR_KEYS: readonly string[] = ["preflight", "flight_plan", "flight_plan_connected"];
+/**
+ * Sidebar keys hidden in Gyroflight: Pre-Flight, both Flight Plan entries (disconnected and
+ * connected), Documentation & Support (help) and the Gyroflight status tab. Their tabs stay
+ * registered and reachable through switchTab(); only the sidebar entry is hidden.
+ */
+export const GYROFLIGHT_HIDDEN_SIDEBAR_KEYS: readonly string[] = [
+    "preflight",
+    "flight_plan",
+    "flight_plan_connected",
+    "help",
+    "gyroflight",
+];
 
 export function applyGyroflightSidebarPolicy<T extends { key: string; hideInSidebar?: boolean }>(items: T[]): T[] {
     return items.map((item) =>

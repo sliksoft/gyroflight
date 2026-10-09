@@ -1,22 +1,29 @@
 <template>
-    <div class="logo gyroflight-logo" :class="`gyroflight-logo--${variant}`" :title="tooltip" data-gyroflight="logo">
-        <!-- Text wordmark until a final Gyroflight logo exists: replace this span with an <img> of the SVG. -->
-        <span class="gyroflight-logo__wordmark" :aria-label="$t('gyroflightProductName')">
-            <span class="gyroflight-logo__full">{{ $t("gyroflightProductWordmark") }}</span>
-            <span class="gyroflight-logo__short" aria-hidden="true">{{ $t("gyroflightProductWordmarkShort") }}</span>
+    <div
+        class="logo gyroflight-logo"
+        :class="`gyroflight-logo--${variant}`"
+        :title="tooltip"
+        :data-variant="variant"
+        data-gyroflight="logo"
+    >
+        <!-- One raster logo for every size. The frame crops only the PNG's transparent top and
+             bottom margin (object-fit: cover keeps the aspect ratio; no artwork is cut). -->
+        <span class="gyroflight-logo__frame">
+            <img class="gyroflight-logo__image" :src="logoUrl" :alt="$t('gyroflightLogoAlt')" draggable="false" />
         </span>
-        <span v-if="variant === 'sidebar'" class="gyroflight-logo__parent">{{ $t("gyroflightParentBrand") }}</span>
     </div>
 </template>
 
 <script setup lang="ts">
 /*
- * Gyroflight product logo for the app shell (sidebar and mobile top bar), in place of
- * Betaflight's <betaflight-logo>. Same props and the same version tooltip, so the shell
- * passes exactly what it passed before.
+ * Gyroflight product logo (src/gyroflight/branding/logo-Gyrofly.png). Used in the app shell
+ * (sidebar, mobile top bar) in place of Betaflight's <betaflight-logo>, with the same props
+ * and version tooltip, and as the Home hero. The artwork already reads "GYROFLIGHT by Redline
+ * Dynamics", so no text wordmark is rendered next to it.
  */
 import { computed } from "vue";
 import { i18n } from "@/js/localization";
+import logoUrl from "./logo-Gyrofly.png";
 
 const props = withDefaults(
     defineProps<{
@@ -24,12 +31,15 @@ const props = withDefaults(
         firmwareVersion?: string;
         firmwareId?: string;
         hardwareId?: string;
-        variant?: "sidebar" | "mobile";
+        variant?: "sidebar" | "hero" | "mobile";
     }>(),
     { configuratorVersion: "", firmwareVersion: "", firmwareId: "", hardwareId: "", variant: "sidebar" },
 );
 
 const tooltip = computed(() => {
+    if (props.variant === "hero") {
+        return undefined;
+    }
     const lines = [`${i18n.getMessage("versionLabelConfigurator")}: ${props.configuratorVersion}`];
     if (props.firmwareVersion && props.firmwareId) {
         lines.push(`${i18n.getMessage("versionLabelFirmware")}: ${props.firmwareVersion} ${props.firmwareId}`);
@@ -42,64 +52,76 @@ const tooltip = computed(() => {
 </script>
 
 <style>
+/*
+ * logo-Gyrofly.png is 2172 x 724 with the artwork in roughly y 168..530, so a 2172:400 frame
+ * centred on the image keeps all of it. The lettering is white with a glow, so the frame is a
+ * dark plate: legible in the light theme as well as the dark one.
+ */
 .gyroflight-logo {
     display: flex;
-    flex-direction: column;
     justify-content: center;
-    gap: 0.125rem;
-    line-height: 1;
+    line-height: 0;
 }
 
-.tab_container .gyroflight-logo {
-    min-height: 48px;
+.gyroflight-logo__frame {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    aspect-ratio: 2172 / 400;
+    overflow: hidden;
+    border-radius: 0.5rem;
+    background: #0b0f14;
 }
 
-.gyroflight-logo__wordmark {
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    font-size: 1.375rem;
-    color: var(--ui-text-highlighted, currentColor);
+.gyroflight-logo__image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    user-select: none;
 }
 
-.gyroflight-logo__wordmark {
-    border-bottom: 2px solid var(--ui-primary);
-    align-self: flex-start;
-    padding-bottom: 0.125rem;
+/* Sidebar: compact, sidebar width, no extra height. */
+.tab_container .gyroflight-logo--sidebar {
+    padding: 0.25rem 0 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.gyroflight-logo--sidebar .gyroflight-logo__frame {
+    padding: 0.25rem 0.375rem;
 }
 
-.gyroflight-logo--mobile .gyroflight-logo__wordmark {
-    align-self: center;
+/* Home hero: large and centred, capped so it does not take over the page. */
+.gyroflight-logo--hero .gyroflight-logo__frame {
+    width: min(100%, 44rem);
+    padding: 0.75rem 1.25rem;
+    border-radius: 1rem;
 }
 
-.gyroflight-logo__short {
-    display: none;
-}
-
-.gyroflight-logo__parent {
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    color: var(--ui-text-muted, currentColor);
-}
-
+/* Mobile top bar on Home. */
 .gyroflight-logo--mobile {
-    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 2.5rem;
+}
+.gyroflight-logo--mobile .gyroflight-logo__frame {
+    width: auto;
+    height: 100%;
+    padding: 0.125rem 0.5rem;
 }
 
-.gyroflight-logo--mobile .gyroflight-logo__wordmark {
-    font-size: 1.25rem;
-}
-
-/* Same breakpoint at which Betaflight switches to its short logo. */
+/* Same breakpoint at which Betaflight switches to its short logo: show only the emblem. */
 @media (max-width: 1055px) {
-    .tab_container .gyroflight-logo {
-        align-items: center;
+    .tab_container .gyroflight-logo--sidebar .gyroflight-logo__frame {
+        width: 48px;
+        aspect-ratio: 1;
+        padding: 0;
     }
-    .tab_container .gyroflight-logo__full,
-    .tab_container .gyroflight-logo__parent {
-        display: none;
-    }
-    .tab_container .gyroflight-logo__short {
-        display: inline;
+    .tab_container .gyroflight-logo--sidebar .gyroflight-logo__image {
+        object-fit: cover;
+        object-position: 0% center;
+        transform: scale(1.9);
+        transform-origin: 16% 48%;
     }
 }
 </style>
