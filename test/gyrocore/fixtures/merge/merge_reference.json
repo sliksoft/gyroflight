@@ -1,0 +1,2779 @@
+{
+ "generator": "test/gyrocore/tools/gc_merge_reference.py",
+ "gyrocore_commit": "d2e60f7",
+ "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+ "cases": [
+  {
+   "case_id": "single_axis_matches_upstream_apply",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 110,
+       "slider_pi_gain": 110,
+       "slider_i_gain": 110,
+       "slider_d_gain": 90,
+       "slider_feedforward_gain": 110,
+       "slider_dterm_filter_multiplier": 110
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 110,
+     "slider_pi_gain": 110,
+     "slider_i_gain": 110,
+     "slider_d_gain": 90,
+     "slider_feedforward_gain": 110,
+     "slider_dterm_filter_multiplier": 110
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 110,
+     "i_gain": 110,
+     "d_gain": 90,
+     "pi_gain": 110,
+     "d_max_gain": 100,
+     "feedforward_gain": 110,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 110,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "roll_pitch_agreement",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 120,
+       "slider_pi_gain": 120,
+       "slider_i_gain": 120,
+       "slider_d_gain": 120,
+       "slider_feedforward_gain": 120,
+       "slider_dterm_filter_multiplier": 120
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 120,
+       "slider_pi_gain": 120,
+       "slider_i_gain": 120,
+       "slider_d_gain": 120,
+       "slider_feedforward_gain": 120,
+       "slider_dterm_filter_multiplier": 120
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 120,
+       "pitch": 120
+      },
+      "agreed": true,
+      "chosen": 120,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 120,
+       "pitch": 120
+      },
+      "agreed": true,
+      "chosen": 120,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 120,
+       "pitch": 120
+      },
+      "agreed": true,
+      "chosen": 120,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 120,
+       "pitch": 120
+      },
+      "agreed": true,
+      "chosen": 120,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 120,
+       "pitch": 120
+      },
+      "agreed": true,
+      "chosen": 120,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 120,
+       "pitch": 120
+      },
+      "agreed": true,
+      "chosen": 120,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 120,
+     "slider_pi_gain": 120,
+     "slider_i_gain": 120,
+     "slider_d_gain": 120,
+     "slider_feedforward_gain": 120,
+     "slider_dterm_filter_multiplier": 120
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 120,
+     "i_gain": 120,
+     "d_gain": 120,
+     "pi_gain": 120,
+     "d_max_gain": 100,
+     "feedforward_gain": 120,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 120,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "roll_pitch_disagreement_d_gain",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 110,
+       "slider_pi_gain": 110,
+       "slider_i_gain": 110,
+       "slider_d_gain": 110,
+       "slider_feedforward_gain": 110,
+       "slider_dterm_filter_multiplier": 110
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 110,
+       "slider_pi_gain": 110,
+       "slider_i_gain": 110,
+       "slider_d_gain": 90,
+       "slider_feedforward_gain": 110,
+       "slider_dterm_filter_multiplier": 110
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "MERGE_REQUIRES_REVIEW",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 90
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 110
+      },
+      "agreed": true,
+      "chosen": 110,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": null,
+    "simplified": null,
+    "review_reasons": [
+     "slider_disagreement:slider_d_gain"
+    ],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "three_axis_agreement",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 105,
+       "slider_pi_gain": 105,
+       "slider_i_gain": 105,
+       "slider_d_gain": 105,
+       "slider_feedforward_gain": 105,
+       "slider_dterm_filter_multiplier": 105
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 105,
+       "slider_pi_gain": 105,
+       "slider_i_gain": 105,
+       "slider_d_gain": 105,
+       "slider_feedforward_gain": 105,
+       "slider_dterm_filter_multiplier": 105
+      }
+     },
+     {
+      "axis": 2,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 105,
+       "slider_pi_gain": 105,
+       "slider_i_gain": 105,
+       "slider_d_gain": 105,
+       "slider_feedforward_gain": 105,
+       "slider_dterm_filter_multiplier": 105
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch",
+     "yaw"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 105
+      },
+      "agreed": true,
+      "chosen": 105,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 105
+      },
+      "agreed": true,
+      "chosen": 105,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 105
+      },
+      "agreed": true,
+      "chosen": 105,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 105
+      },
+      "agreed": true,
+      "chosen": 105,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 105
+      },
+      "agreed": true,
+      "chosen": 105,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 105
+      },
+      "agreed": true,
+      "chosen": 105,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 105,
+     "slider_pi_gain": 105,
+     "slider_i_gain": 105,
+     "slider_d_gain": 105,
+     "slider_feedforward_gain": 105,
+     "slider_dterm_filter_multiplier": 105
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 105,
+     "i_gain": 105,
+     "d_gain": 105,
+     "pi_gain": 105,
+     "d_max_gain": 100,
+     "feedforward_gain": 105,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 105,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "three_axis_conflict_yaw",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 105,
+       "slider_pi_gain": 105,
+       "slider_i_gain": 105,
+       "slider_d_gain": 105,
+       "slider_feedforward_gain": 105,
+       "slider_dterm_filter_multiplier": 105
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 105,
+       "slider_pi_gain": 105,
+       "slider_i_gain": 105,
+       "slider_d_gain": 105,
+       "slider_feedforward_gain": 105,
+       "slider_dterm_filter_multiplier": 105
+      }
+     },
+     {
+      "axis": 2,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 80,
+       "slider_pi_gain": 80,
+       "slider_i_gain": 80,
+       "slider_d_gain": 80,
+       "slider_feedforward_gain": 80,
+       "slider_dterm_filter_multiplier": 80
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "MERGE_REQUIRES_REVIEW",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch",
+     "yaw"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 80
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 80
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 80
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 80
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 80
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 105,
+       "pitch": 105,
+       "yaw": 80
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     }
+    },
+    "proposed_sliders": null,
+    "simplified": null,
+    "review_reasons": [
+     "slider_disagreement:slider_master_multiplier",
+     "slider_disagreement:slider_pi_gain",
+     "slider_disagreement:slider_i_gain",
+     "slider_disagreement:slider_d_gain",
+     "slider_disagreement:slider_feedforward_gain",
+     "slider_disagreement:slider_dterm_filter_multiplier"
+    ],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "no_participating_axes",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": true,
+      "proposed": null
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "MERGE_REQUIRES_REVIEW",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [],
+    "fields": {},
+    "proposed_sliders": null,
+    "simplified": null,
+    "review_reasons": [
+     "no_participating_axes"
+    ],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "all_axes_blocked",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": true,
+      "proposed": null
+     },
+     {
+      "axis": 1,
+      "blocked": true,
+      "proposed": null
+     },
+     {
+      "axis": 2,
+      "blocked": true,
+      "proposed": null
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "MERGE_REQUIRES_REVIEW",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [],
+    "fields": {},
+    "proposed_sliders": null,
+    "simplified": null,
+    "review_reasons": [
+     "no_participating_axes"
+    ],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "blocked_axis_ignored",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 130,
+       "slider_pi_gain": 130,
+       "slider_i_gain": 130,
+       "slider_d_gain": 130,
+       "slider_feedforward_gain": 130,
+       "slider_dterm_filter_multiplier": 130
+      }
+     },
+     {
+      "axis": 2,
+      "blocked": true,
+      "proposed": null
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 130
+      },
+      "agreed": true,
+      "chosen": 130,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 130
+      },
+      "agreed": true,
+      "chosen": 130,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 130
+      },
+      "agreed": true,
+      "chosen": 130,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 130
+      },
+      "agreed": true,
+      "chosen": 130,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 130
+      },
+      "agreed": true,
+      "chosen": 130,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 130
+      },
+      "agreed": true,
+      "chosen": 130,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 130,
+     "slider_pi_gain": 130,
+     "slider_i_gain": 130,
+     "slider_d_gain": 130,
+     "slider_feedforward_gain": 130,
+     "slider_dterm_filter_multiplier": 130
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 130,
+     "i_gain": 130,
+     "d_gain": 130,
+     "pi_gain": 130,
+     "d_max_gain": 100,
+     "feedforward_gain": 130,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 130,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "demo_merge_review",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 110,
+       "slider_pi_gain": 110,
+       "slider_i_gain": 110,
+       "slider_d_gain": 110,
+       "slider_feedforward_gain": 110,
+       "slider_dterm_filter_multiplier": 110
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 150,
+       "slider_pi_gain": 150,
+       "slider_i_gain": 150,
+       "slider_d_gain": 150,
+       "slider_feedforward_gain": 150,
+       "slider_dterm_filter_multiplier": 150
+      }
+     },
+     {
+      "axis": 2,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 100,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "MERGE_REQUIRES_REVIEW",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch",
+     "yaw"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 150,
+       "yaw": 100
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 150,
+       "yaw": 100
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 150,
+       "yaw": 100
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 150,
+       "yaw": 100
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 150,
+       "yaw": 100
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 110,
+       "pitch": 150,
+       "yaw": 100
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     }
+    },
+    "proposed_sliders": null,
+    "simplified": null,
+    "review_reasons": [
+     "slider_disagreement:slider_master_multiplier",
+     "slider_disagreement:slider_pi_gain",
+     "slider_disagreement:slider_i_gain",
+     "slider_disagreement:slider_d_gain",
+     "slider_disagreement:slider_feedforward_gain",
+     "slider_disagreement:slider_dterm_filter_multiplier"
+    ],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "demo_pass",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 108,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 108,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     },
+     {
+      "axis": 2,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 108,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch",
+     "yaw"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100,
+       "yaw": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 108,
+       "pitch": 108,
+       "yaw": 108
+      },
+      "agreed": true,
+      "chosen": 108,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100,
+       "yaw": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100,
+       "yaw": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100,
+       "yaw": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100,
+       "yaw": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 100,
+     "slider_pi_gain": 108,
+     "slider_i_gain": 100,
+     "slider_d_gain": 100,
+     "slider_feedforward_gain": 100,
+     "slider_dterm_filter_multiplier": 100
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 108,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "slider_limit_boundaries",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 25,
+       "slider_pi_gain": 250,
+       "slider_i_gain": 25,
+       "slider_d_gain": 25,
+       "slider_feedforward_gain": 25,
+       "slider_dterm_filter_multiplier": 25
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 25,
+       "slider_pi_gain": 250,
+       "slider_i_gain": 25,
+       "slider_d_gain": 25,
+       "slider_feedforward_gain": 25,
+       "slider_dterm_filter_multiplier": 25
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 25,
+       "pitch": 25
+      },
+      "agreed": true,
+      "chosen": 25,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 250,
+       "pitch": 250
+      },
+      "agreed": true,
+      "chosen": 250,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 25,
+       "pitch": 25
+      },
+      "agreed": true,
+      "chosen": 25,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 25,
+       "pitch": 25
+      },
+      "agreed": true,
+      "chosen": 25,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 25,
+       "pitch": 25
+      },
+      "agreed": true,
+      "chosen": 25,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 25,
+       "pitch": 25
+      },
+      "agreed": true,
+      "chosen": 25,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 25,
+     "slider_pi_gain": 250,
+     "slider_i_gain": 25,
+     "slider_d_gain": 25,
+     "slider_feedforward_gain": 25,
+     "slider_dterm_filter_multiplier": 25
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 25,
+     "i_gain": 25,
+     "d_gain": 25,
+     "pi_gain": 250,
+     "d_max_gain": 100,
+     "feedforward_gain": 25,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 25,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "one_point_disagreement",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 100,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 25,
+       "slider_dterm_filter_multiplier": 100
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 100,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 26,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "MERGE_REQUIRES_REVIEW",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 25,
+       "pitch": 26
+      },
+      "agreed": false,
+      "chosen": null,
+      "constrained_by": [],
+      "reason": "MERGE_REQUIRES_REVIEW"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": null,
+    "simplified": null,
+    "review_reasons": [
+     "slider_disagreement:slider_feedforward_gain"
+    ],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "yaw_only",
+   "input": {
+    "axes": [
+     {
+      "axis": 2,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 90,
+       "slider_pi_gain": 90,
+       "slider_i_gain": 90,
+       "slider_d_gain": 90,
+       "slider_feedforward_gain": 90,
+       "slider_dterm_filter_multiplier": 90
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "yaw"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "yaw": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "yaw"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "yaw": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "yaw"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "yaw": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "yaw"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "yaw": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "yaw"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "yaw": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "yaw"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "yaw": 90
+      },
+      "agreed": true,
+      "chosen": 90,
+      "constrained_by": [
+       "yaw"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 90,
+     "slider_pi_gain": 90,
+     "slider_i_gain": 90,
+     "slider_d_gain": 90,
+     "slider_feedforward_gain": 90,
+     "slider_dterm_filter_multiplier": 90
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 90,
+     "i_gain": 90,
+     "d_gain": 90,
+     "pi_gain": 90,
+     "d_max_gain": 100,
+     "feedforward_gain": 90,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 90,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "rp_mode_yaw_blocked",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 95,
+       "slider_pi_gain": 95,
+       "slider_i_gain": 95,
+       "slider_d_gain": 95,
+       "slider_feedforward_gain": 95,
+       "slider_dterm_filter_multiplier": 95
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 95,
+       "slider_pi_gain": 95,
+       "slider_i_gain": 95,
+       "slider_d_gain": 95,
+       "slider_feedforward_gain": 95,
+       "slider_dterm_filter_multiplier": 95
+      }
+     },
+     {
+      "axis": 2,
+      "blocked": true,
+      "proposed": null
+     }
+    ],
+    "current": {
+     "pids_mode": 1,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 95,
+       "pitch": 95
+      },
+      "agreed": true,
+      "chosen": 95,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 95,
+       "pitch": 95
+      },
+      "agreed": true,
+      "chosen": 95,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 95,
+       "pitch": 95
+      },
+      "agreed": true,
+      "chosen": 95,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 95,
+       "pitch": 95
+      },
+      "agreed": true,
+      "chosen": 95,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 95,
+       "pitch": 95
+      },
+      "agreed": true,
+      "chosen": 95,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 95,
+       "pitch": 95
+      },
+      "agreed": true,
+      "chosen": 95,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 95,
+     "slider_pi_gain": 95,
+     "slider_i_gain": 95,
+     "slider_d_gain": 95,
+     "slider_feedforward_gain": 95,
+     "slider_dterm_filter_multiplier": 95
+    },
+    "simplified": {
+     "pids_mode": 1,
+     "master_multiplier": 95,
+     "i_gain": 95,
+     "d_gain": 95,
+     "pi_gain": 95,
+     "d_max_gain": 100,
+     "feedforward_gain": 95,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 95,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "input_order_yaw_first",
+   "input": {
+    "axes": [
+     {
+      "axis": 2,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 140,
+       "slider_pi_gain": 140,
+       "slider_i_gain": 140,
+       "slider_d_gain": 140,
+       "slider_feedforward_gain": 140,
+       "slider_dterm_filter_multiplier": 140
+      }
+     },
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 140,
+       "slider_pi_gain": 140,
+       "slider_i_gain": 140,
+       "slider_d_gain": 140,
+       "slider_feedforward_gain": 140,
+       "slider_dterm_filter_multiplier": 140
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "yaw"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 140,
+       "yaw": 140
+      },
+      "agreed": true,
+      "chosen": 140,
+      "constrained_by": [
+       "roll",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 140,
+       "yaw": 140
+      },
+      "agreed": true,
+      "chosen": 140,
+      "constrained_by": [
+       "roll",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 140,
+       "yaw": 140
+      },
+      "agreed": true,
+      "chosen": 140,
+      "constrained_by": [
+       "roll",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 140,
+       "yaw": 140
+      },
+      "agreed": true,
+      "chosen": 140,
+      "constrained_by": [
+       "roll",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 140,
+       "yaw": 140
+      },
+      "agreed": true,
+      "chosen": 140,
+      "constrained_by": [
+       "roll",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 140,
+       "yaw": 140
+      },
+      "agreed": true,
+      "chosen": 140,
+      "constrained_by": [
+       "roll",
+       "yaw"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 140,
+     "slider_pi_gain": 140,
+     "slider_i_gain": 140,
+     "slider_d_gain": 140,
+     "slider_feedforward_gain": 140,
+     "slider_dterm_filter_multiplier": 140
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 140,
+     "i_gain": 140,
+     "d_gain": 140,
+     "pi_gain": 140,
+     "d_max_gain": 100,
+     "feedforward_gain": 140,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 140,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "current_non_default",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 100,
+       "slider_i_gain": 80,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 1,
+     "master_multiplier": 125,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 70,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 110,
+     "pitch_pi_gain": 90,
+     "dterm_filter": 0,
+     "dterm_filter_multiplier": 120,
+     "gyro_filter": 0,
+     "gyro_filter_multiplier": 80
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 80
+      },
+      "agreed": true,
+      "chosen": 80,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 100,
+     "slider_pi_gain": 100,
+     "slider_i_gain": 80,
+     "slider_d_gain": 100,
+     "slider_feedforward_gain": 100,
+     "slider_dterm_filter_multiplier": 100
+    },
+    "simplified": {
+     "pids_mode": 1,
+     "master_multiplier": 100,
+     "i_gain": 80,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 70,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 110,
+     "pitch_pi_gain": 90,
+     "dterm_filter": 0,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 0,
+     "gyro_filter_multiplier": 80
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "current_missing_values",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 100,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": null,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": null,
+     "feedforward_gain": 100,
+     "pitch_d_gain": null,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": null,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll"
+      ],
+      "reason": "single_axis_matches_upstream_apply"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 100,
+     "slider_pi_gain": 100,
+     "slider_i_gain": 100,
+     "slider_d_gain": 100,
+     "slider_feedforward_gain": 100,
+     "slider_dterm_filter_multiplier": 100
+    },
+    "simplified": {
+     "pids_mode": null,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": null,
+     "feedforward_gain": 100,
+     "pitch_d_gain": null,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": null,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "non_integer_proposal_truncated",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 108.6,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     },
+     {
+      "axis": 1,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 108.2,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": {
+    "status": "merged",
+    "policy_id": "gyrocore.autotune.global_slider.merge.v1",
+    "policy_kind": "gyrocore",
+    "upstream_or_gyrocore": "gyrocore",
+    "participating_axes": [
+     "roll",
+     "pitch"
+    ],
+    "fields": {
+     "slider_master_multiplier": {
+      "key": "slider_master_multiplier",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_pi_gain": {
+      "key": "slider_pi_gain",
+      "values_by_axis": {
+       "roll": 108,
+       "pitch": 108
+      },
+      "agreed": true,
+      "chosen": 108,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_i_gain": {
+      "key": "slider_i_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_d_gain": {
+      "key": "slider_d_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_feedforward_gain": {
+      "key": "slider_feedforward_gain",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     },
+     "slider_dterm_filter_multiplier": {
+      "key": "slider_dterm_filter_multiplier",
+      "values_by_axis": {
+       "roll": 100,
+       "pitch": 100
+      },
+      "agreed": true,
+      "chosen": 100,
+      "constrained_by": [
+       "roll",
+       "pitch"
+      ],
+      "reason": "unanimous"
+     }
+    },
+    "proposed_sliders": {
+     "slider_master_multiplier": 100,
+     "slider_pi_gain": 108,
+     "slider_i_gain": 100,
+     "slider_d_gain": 100,
+     "slider_feedforward_gain": 100,
+     "slider_dterm_filter_multiplier": 100
+    },
+    "simplified": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 108,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    },
+    "review_reasons": [],
+    "notes": [
+     "GyroCore merge; upstream Autotune applies one selected axis with no merge.",
+     "Autotune does not propose d_max / pitch_pi / pitch_d / gyro-filter sliders; those stay at current."
+    ]
+   },
+   "error": null
+  },
+  {
+   "case_id": "invalid_missing_key",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": 100,
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": null,
+   "error": "KeyError"
+  },
+  {
+   "case_id": "invalid_nan",
+   "input": {
+    "axes": [
+     {
+      "axis": 0,
+      "blocked": false,
+      "proposed": {
+       "slider_master_multiplier": 100,
+       "slider_pi_gain": "NaN",
+       "slider_i_gain": 100,
+       "slider_d_gain": 100,
+       "slider_feedforward_gain": 100,
+       "slider_dterm_filter_multiplier": 100
+      }
+     }
+    ],
+    "current": {
+     "pids_mode": 2,
+     "master_multiplier": 100,
+     "i_gain": 100,
+     "d_gain": 100,
+     "pi_gain": 100,
+     "d_max_gain": 100,
+     "feedforward_gain": 100,
+     "pitch_d_gain": 100,
+     "pitch_pi_gain": 100,
+     "dterm_filter": 1,
+     "dterm_filter_multiplier": 100,
+     "gyro_filter": 1,
+     "gyro_filter_multiplier": 100
+    }
+   },
+   "expected": null,
+   "error": "ValueError"
+  }
+ ]
+}

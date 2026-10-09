@@ -163,6 +163,34 @@ describe.skipIf(!air65)("AIR65 through the GyroCore CHIRP gate (local only)", ()
         }
         expect(msp.calls).toEqual([]);
 
+        // WU3: no global (composite) recommendation in any log, and Apply by composite is blocked too.
+        let composites = 0;
+        const compositeSummary = [];
+        for (const log of report.logs) {
+            gate.selectLog(log.logIndex);
+            const composite = gate.composite!;
+            expect(composite.authorized).toBe(false);
+            expect(composite.final).toBeNull();
+            if (composite.final) {
+                composites++;
+            }
+            compositeSummary.push({
+                logIndex: log.logIndex,
+                merge: composite.merge.status,
+                blocked: composite.blocked,
+            });
+            const err = await useAutotune()
+                .applyGains(sliders, composite.id)
+                .then(
+                    () => null,
+                    (e: unknown) => e,
+                );
+            expect(err).toBeInstanceOf(ApplyBlockedError);
+        }
+        expect(composites).toBe(0);
+        expect(msp.calls).toEqual([]);
+        writeReport("air65_composite", compositeSummary);
+
         writeReport(
             "air65_qualification",
             report.measurements.map((m) => ({

@@ -87,16 +87,12 @@ const applyButton = (c: HTMLElement) =>
 
 describe("Apply Gains in the Autotune panel", () => {
     it("is disabled with the reasons listed when GyroCore blocks it", async () => {
-        const { container, unmount } = mount([
-            "simplified_pids_mode_off",
-            "slider_clamp_changes_direction:slider_feedforward_gain",
-        ]);
+        const { container, unmount } = mount(["slider_clamp_changes_direction:slider_feedforward_gain"]);
         await flush();
         const button = applyButton(container);
         expect(button.disabled).toBe(true);
         const notice = container.querySelector('[data-gyrocore="apply-blocked"]');
         expect(notice).not.toBeNull();
-        expect(notice!.querySelector('[data-reason="simplified_pids_mode_off"]')).not.toBeNull();
         expect(
             notice!.querySelector('[data-reason="slider_clamp_changes_direction:slider_feedforward_gain"]'),
         ).not.toBeNull();
@@ -107,25 +103,25 @@ describe("Apply Gains in the Autotune panel", () => {
         unmount();
     });
 
-    it("hides a rejected axis's gains and explains that nothing is applicable", async () => {
+    it("hides a rejected axis's gains and explains that no global tune can be applied", async () => {
         const { container, unmount } = mount(["measurement:low_coherence"], false);
         await flush();
         expect(container.querySelector("table.autotune-table")).toBeNull();
         expect(applyButton(container).disabled).toBe(true);
-        expect(container.querySelector('[data-gyrocore="apply-blocked"]')?.textContent).toContain(
-            "gyrocoreApplyNoAxis",
-        );
+        const notice = container.querySelector('[data-gyrocore="apply-blocked"]');
+        expect(notice?.querySelector('[data-reason="system_id_unusable"]')).not.toBeNull();
+        expect(notice?.querySelector('[data-reason="measurement:low_coherence"]')).not.toBeNull();
         unmount();
     });
 
-    it("control: an authorized measurement can be applied", async () => {
+    it("control: an authorized global recommendation can be applied", async () => {
         const { container, unmount } = mount([]);
         await flush();
         expect(container.querySelector('[data-gyrocore="apply-blocked"]')).toBeNull();
         applyButton(container).click();
         await flush();
         await flush();
-        expect(applyGains).toHaveBeenCalledWith(PROPOSED, "log1-seg1");
+        expect(applyGains).toHaveBeenCalledWith(PROPOSED, expect.stringMatching(/^composite-log1-[0-9a-f]{8}$/));
         unmount();
     });
 });

@@ -31,7 +31,6 @@ import { parseLoggedHeaders } from "../../src/gyrocore/chirp/headers";
 import { analysisBand, postAnalysisReport, preAnalysisGates } from "../../src/gyrocore/chirp/quality";
 import { guardRecommendation } from "../../src/gyrocore/chirp/recommendationGuard";
 import { analyzeTimestampSpacing, resolveChirpSampleRate } from "../../src/gyrocore/chirp/sampleRate";
-import { liveSliderModeBlocks } from "../../src/gyrocore/chirp/applyGate";
 import messages from "../../src/gyroflight/locales/en.json";
 
 const ts = (n: number, dt = 1000, at?: (i: number) => number) =>
@@ -213,13 +212,6 @@ describe("current tune", () => {
             "current_tune_unparseable:i_gain",
             "current_tune_zero:d_gain",
         ]);
-    });
-
-    it("live craft slider mode", () => {
-        expect(liveSliderModeBlocks(2, 2)).toEqual([]);
-        expect(liveSliderModeBlocks(0, 0)).toEqual(["fc:simplified_pids_mode_off"]);
-        expect(liveSliderModeBlocks(1, 2)).toEqual(["fc:yaw_not_under_slider_control"]);
-        expect(liveSliderModeBlocks(undefined, 0)).toEqual(["fc:simplified_pids_mode_unknown"]);
     });
 });
 
