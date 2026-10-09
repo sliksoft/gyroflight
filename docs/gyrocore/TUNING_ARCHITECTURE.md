@@ -55,6 +55,14 @@ Details:
 - [GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md) (WU3, WU3.1);
 - [SAFETY_ENGINE.md](SAFETY_ENGINE.md) (WU4).
 
+**Absolute PID and filter values:**
+
+- The browser's firmware-mapping reproduction is for preview, diagnostics and parity only.
+- For physical Apply, the authority is the connected flight controller's `MSP_CALCULATE_SIMPLIFIED_PID` result,
+  because the compiled firmware can differ from source and browser maths (`-ffast-math`).
+- The required sequence for a future write is in
+  [SAFETY_ENGINE.md](SAFETY_ENGINE.md#absolute-value-authority-decision-wu4a).
+
 ## Responsibilities
 
 | Concern                                                                        | Owner                                                                       |

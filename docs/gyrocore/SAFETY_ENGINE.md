@@ -360,6 +360,28 @@ On the safe fixture the current and proposed absolute values are:
 
 These come from the firmware-mapping port and are not authoritative on a real craft.
 
+## Absolute-value authority (decision, WU4A)
+
+| Use                                    | Authority                                                                                                                                                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Analysis, preview, diagnostics, parity | The browser reproduction: GyroCore's absolute mapping (`safety/simplifiedTuning.ts`, `safety/absolute.ts`) may compute expected PID and filter values. They are shown as "Proposed (firmware mapping)" and are never written. |
+| Physical Apply authorization           | The connected flight controller's own result from **`MSP_CALCULATE_SIMPLIFIED_PID`**.                                                                                                                                         |
+
+Why: the compiled Betaflight firmware can differ numerically from its own C source, and so from any browser
+reproduction, because of target compiler settings such as `-ffast-math`. On the STM32F405 build this was
+243,867 of 3,005,043 axis results (`bf_matrix.json`).
+
+Before any future physical SET, the hardware-write WU must, in this order:
+
+1. read the current FC state;
+2. ask the FC to calculate the proposed simplified-PID result (`MSP_CALCULATE_SIMPLIFIED_PID`);
+3. have Safety validate that FC-calculated result;
+4. compare it with the authorized snapshot (composite id, sliders, Safety result);
+5. `MSP_VALIDATE_SIMPLIFIED_TUNING`;
+6. only then `MSP_SET_SIMPLIFIED_TUNING` and `MSP_EEPROM_WRITE`.
+
+None of this is implemented yet; no physical write path exists.
+
 ## Parity fixtures
 
 - **Generator:** `test/gyrocore/tools/gc_safety_reference.py`. It imports GyroCore read-only. Run it with
