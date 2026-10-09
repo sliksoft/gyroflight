@@ -27,7 +27,7 @@
  */
 
 import { createApp, h } from "vue";
-import { createPinia, setActivePinia } from "pinia";
+import { createPinia, getActivePinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 globalThis.ResizeObserver = class {
@@ -237,6 +237,39 @@ describe("a recommendation requires a usable measurement", () => {
         expect(after.slider_pi_gain).toBeLessThan(before);
         expect(gate.report!.measurements[0].recommendation!.result.proposed).toEqual(after);
         expect(gate.report!.targetPhaseMarginDeg).toBe(PHASE_MARGIN_PRESETS.CONSERVATIVE);
+    });
+});
+
+describe("diagnostic-only banner on the Autotune tab", () => {
+    async function mountTab() {
+        const { default: AutotuneTab } = await import("../../src/components/tabs/AutotuneTab.vue");
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const app = createApp({ render: () => h(UApp, { portal: false }, { default: () => h(AutotuneTab) }) });
+        app.config.globalProperties.$t = ((key: string) => key) as never;
+        app.use(getActivePinia()!);
+        app.mount(container);
+        await new Promise((r) => setTimeout(r, 0));
+        return { container, unmount: () => (app.unmount(), container.remove()) };
+    }
+
+    it("labels rejected plots outside the collapsible panel, directly above the Bode plot", async () => {
+        await runImport(readFixtureBytes("chirp/bbl/poor_coherence.bbl.gz"));
+        const { container, unmount } = await mountTab();
+        const banner = container.querySelector('[data-gyrocore="diagnostic-banner"]');
+        expect(banner?.textContent).toContain("gyrocoreChirpDiagnosticBanner");
+        expect(banner?.closest('[data-gyrocore="chirp-qualification"]')).toBeNull();
+        // The next element is Betaflight's Bode plot box.
+        expect(banner?.nextElementSibling?.textContent).toContain("autotuneBodePlotTitle");
+        unmount();
+    });
+
+    it("is absent when every plotted measurement is qualified", async () => {
+        await runImport(encodeChirpLog(simulateChirp()));
+        const { container, unmount } = await mountTab();
+        expect(container.textContent).toContain("autotuneBodePlotTitle");
+        expect(container.querySelector('[data-gyrocore="diagnostic-banner"]')).toBeNull();
+        unmount();
     });
 });
 

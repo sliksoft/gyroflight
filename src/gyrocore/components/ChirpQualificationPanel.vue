@@ -31,6 +31,14 @@
             <li v-else-if="!log.measurements.length" class="text-dimmed" :data-log="log.logIndex">
                 {{ logLine("gyrocoreChirpLogNoChirp", log.logIndex) }}
             </li>
+            <li
+                v-for="w in logWarnings(log.extractionWarnings)"
+                :key="`${log.logIndex}-${w}`"
+                class="text-dimmed"
+                :data-log-warning="w"
+            >
+                {{ logLine("gyrocoreChirpLogWarnings", log.logIndex, describeReason(`log:${w}`)) }}
+            </li>
         </ul>
 
         <div v-if="report.measurements.length" class="overflow-x-auto">
@@ -105,7 +113,7 @@
 import { computed } from "vue";
 import UiBox from "@/components/elements/UiBox.vue";
 import { i18n } from "@/js/localization";
-import type { QualificationState } from "@/gyrocore/chirp/qualification";
+import { logWarningsFor as logWarnings, type QualificationState } from "@/gyrocore/chirp/qualification";
 import { describeReason } from "@/gyrocore/chirp/reasons";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 

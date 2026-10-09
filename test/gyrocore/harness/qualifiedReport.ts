@@ -50,6 +50,7 @@ export function qualifiedReportFor(
         betaflightRateHz: 1000,
         segmentSize: 512,
         quality: { usable: true, failedGates: [], warningGates: [], gates: [], meanBandCoherence: 0.99 },
+        logWarnings: [],
         state: "usable",
         diagnostics: {},
         recommendation: {

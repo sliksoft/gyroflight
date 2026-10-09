@@ -27,15 +27,16 @@
  * (AIR65) showed a requested feed-forward cut (15 -> 8..12) leaving the clamp
  * as 25: a +67 % increase, shown with no warning. This guard reconstructs the
  * value each slider was asked to take, compares direction and size with what
- * the clamp produced, and blocks Apply when they disagree.
+ * the clamp produced, and blocks Apply when the limit changed either beyond
+ * integer rounding.
  */
 
 import type { CurrentSliders, GainRecommendation } from "@/js/blackbox/spectral_analysis";
 
 export const SLIDER_MIN = 25;
 export const SLIDER_MAX = 250;
-/** A clamp that moves a slider further than this from its requested value changes the recommendation. */
-export const MATERIAL_CLAMP_POINTS = 5;
+/** Integer rounding of a slider; any clamp beyond this changes the recommendation. */
+export const ROUNDING_POINTS = 0.5;
 
 export type ProposedSliderKey = keyof GainRecommendation["proposed"];
 export type Direction = "increase" | "decrease" | "hold";
@@ -100,7 +101,8 @@ export function guardRecommendation(
             reason = `slider_non_finite:${slider}`;
         } else if (directionChanged) {
             reason = `slider_clamp_changes_direction:${slider}`;
-        } else if (Math.abs(proposed - requested) > MATERIAL_CLAMP_POINTS) {
+        } else if (clampedBySliderLimit && Math.abs(proposed - requested) > ROUNDING_POINTS) {
+            // Same direction but a different amount, e.g. FF 15 asked to go to 20.7 and floored to 25.
             reason = `slider_clamp_material:${slider}`;
         }
         if (reason) {

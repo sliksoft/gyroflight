@@ -294,6 +294,23 @@ describe("slider translation guard", () => {
         ).toEqual(["slider_clamp_material:slider_pi_gain"]);
     });
 
+    it("a same-direction change the clamp inflates beyond rounding blocks", () => {
+        // FF 15 asked to go to 20.7 (+38 %); the floor gives 25 (+67 %).
+        expect(
+            guardRecommendation(
+                { ...current, feedforwardGain: 0.15 },
+                rec({ ffScale: 1.38 }, { slider_feedforward_gain: 25 }),
+            ).blocked,
+        ).toEqual(["slider_clamp_material:slider_feedforward_gain"]);
+        // A clamp within integer rounding (24.6 -> 25) only warns.
+        const g = guardRecommendation(
+            { ...current, feedforwardGain: 0.15 },
+            rec({ ffScale: 1.64 }, { slider_feedforward_gain: 25 }),
+        );
+        expect(g.blocked).toEqual([]);
+        expect(g.warnings).toEqual(["slider_clamped:slider_feedforward_gain"]);
+    });
+
     it("a held slider the clamp moves blocks", () => {
         // master multiplier 20 is outside 25..250: Betaflight would silently raise it.
         expect(
@@ -363,6 +380,13 @@ describe("every reason code has an English explanation", () => {
         "fc_simplified_pids_mode_off",
         "fc_simplified_pids_mode_unknown",
         "fc_yaw_not_under_slider_control",
+        ...[
+            "malformed_rows_skipped",
+            "flight_mode_flags_column_missing",
+            "chirp_mode_flag_unavailable_debug_axis_only",
+            "chirp_frequency_range_missing",
+            "chirp_axis_out_of_range_frames_dropped",
+        ].map((w) => `log_${w}`),
     ];
     for (const code of [...MEASUREMENT, ...OTHER]) {
         it(code, () => {

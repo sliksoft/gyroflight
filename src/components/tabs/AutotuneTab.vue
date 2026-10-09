@@ -9,6 +9,8 @@
 
             <!-- Analysis Results (visible after successful analysis) -->
             <template v-if="store.analysisState === 'done' && store.analysisResult">
+                <!-- Gyroflight: rejected measurements are plotted as diagnostics only -->
+                <DiagnosticOnlyBanner />
                 <BodePlot />
                 <SpectrogramPlot />
                 <GainRecommendation />
@@ -24,6 +26,7 @@ import BodePlot from "./autotune/BodePlot.vue";
 import SpectrogramPlot from "./autotune/SpectrogramPlot.vue";
 import GainRecommendation from "./autotune/GainRecommendation.vue";
 import ChirpQualificationPanel from "@/gyrocore/components/ChirpQualificationPanel.vue";
+import DiagnosticOnlyBanner from "@/gyrocore/components/DiagnosticOnlyBanner.vue";
 import { useAutotuneStore } from "@/stores/autotune";
 
 const store = useAutotuneStore();

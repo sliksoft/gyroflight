@@ -85,6 +85,9 @@ export function describeReason(code: string, m?: ChirpMeasurement | null): strin
     const head = colon >= 0 ? code.slice(0, colon) : code;
     const tail = colon >= 0 ? code.slice(colon + 1) : "";
 
+    if (head === "log") {
+        return message(`gyrocoreReason_log_${tail}`, [], code);
+    }
     if (head === "measurement") {
         return message(`gyrocoreReason_${tail}`, gateArgs(tail, m), code);
     }

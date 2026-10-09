@@ -209,6 +209,24 @@ describe("Apply Gains hard gate (action handler)", () => {
         expect(msp.calls).toEqual([]);
     });
 
+    it("a feed-forward increase the slider floor inflates (15 -> 20.7 asked, 25 given) blocks Apply", async () => {
+        const { m, proposed } = await load(
+            encodeChirpLog(
+                simulateChirp({ crossoverHz: 40, delaySamples: 2 }),
+                withHeader(FULL_TUNE_HEADERS, "simplified_feedforward_gain:15"),
+            ),
+        );
+        expect(m.state).toBe("usable");
+        expect(proposed!.slider_feedforward_gain).toBe(25);
+        const ff = m.recommendation!.guard.sliders.find((s) => s.slider === "slider_feedforward_gain")!;
+        expect(ff.requestedDirection).toBe("increase");
+        expect(ff.proposedDirection).toBe("increase");
+        expect(ff.requested).toBeLessThan(24.5);
+        expect(m.apply.blocked).toEqual(["slider_clamp_material:slider_feedforward_gain"]);
+        await expectBlocked(useAutotune().applyGains(proposed!, m.id), "slider_clamp_material:slider_feedforward_gain");
+        expect(msp.calls).toEqual([]);
+    });
+
     it("every block reason from the WU1 list is enforced by the handler", async () => {
         const cases: [Uint8Array, string][] = [
             [readFixtureBytes("chirp/bbl/dropped_timestamps.bbl.gz"), "measurement:excessive_gaps"],
