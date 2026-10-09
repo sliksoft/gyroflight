@@ -60,28 +60,32 @@ Set the same on any new clone.
 3. **Never move or rewrite Betaflight implementations** (Firmware Flasher, Blackbox Viewer, Autotune,
    serial/USB/Bluetooth transports, MSP, PWA). Wrap or consume them; don't fork their code into our namespaces.
 4. **Our strings live in `src/gyroflight/locales/en.json`**, not `locales/en/messages.json`
-   (the most frequently changed upstream file). Keys are prefixed `gyroflight` and must never shadow an
-   upstream key (tested).
+   (the most frequently changed upstream file). Keys are prefixed `gyroflight` (application) or `gyrocore`
+   (engine) and must never shadow an upstream key (tested).
 5. **Record every upstream-file modification below.** If a file is copied from upstream into
    our namespaces and modified, note the source path and upstream commit in its header.
 6. Do not edit `src/dist/`, `node_modules/`, generated files, or non-English locale files.
 
 ### Upstream files modified by Gyroflight
 
-| File                                                                        | Change                                                            | Why                                                                       |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `src/js/vue_tab_registry.js`                                                | import + `...gyroflightTabComponents`                             | register Gyroflight tab components                                        |
-| `src/components/sidebar/sidebar_items.js`                                   | import + `...gyroflightSidebarItems` appended after Blackbox      | sidebar entries (index 0/1 order is tested)                               |
-| `src/js/gui.js`                                                             | import + `...gyroflightAllowedTabs` in both default allowed lists | `switchTab` rejects tabs not in `allowedTabs`                             |
-| `package.json`                                                              | `productName`, `displayName`, `description`                       | app identity; feeds the PWA manifest                                      |
-| `src/index.html`                                                            | `<title>`, meta description                                       | app identity                                                              |
-| `src/images/pwa/pwa-192-192.png`, `pwa-512-512.png`, `apple-touch-icon.png` | replaced with the Redline Dynamics mark                           | installed-PWA icon (filenames kept so `vite.config.js` is untouched)      |
-| `src/js/Analytics.ts`                                                       | `send()` returns early unless `UPSTREAM_ANALYTICS_ENABLED`        | no usage data to `analytics.betaflight.com` (see below)                   |
-| `src/components/dialogs/OptionsDialog.vue`                                  | analytics opt-out row behind `UPSTREAM_ANALYTICS_ENABLED`         | the toggle would control nothing                                          |
-| `src/components/tabs/LandingTab.vue`                                        | statistics disclaimer column behind `UPSTREAM_ANALYTICS_ENABLED`  | it claims Betaflight collects data and links Betaflight's privacy policy  |
-| `src/components/sidebar/Sidebar.vue`, `src/App.vue`                         | `<UserSession>` behind `BETAFLIGHT_ACCOUNTS_ENABLED`              | Betaflight login/passkeys cannot work from our origin (see below)         |
-| `src/js/main.js`                                                            | `/delete` account deep link behind `BETAFLIGHT_ACCOUNTS_ENABLED`  | it opens the (now unreachable) account profile                            |
-| `.prettierignore`                                                           | ignore `test/gyrocore/fixtures/`                                  | copied GyroCore fixtures are pinned by sha256 and must not be reformatted |
+| File                                                                        | Change                                                            | Why                                                                         |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `src/js/vue_tab_registry.js`                                                | import + `...gyroflightTabComponents`                             | register Gyroflight tab components                                          |
+| `src/components/sidebar/sidebar_items.js`                                   | import + `...gyroflightSidebarItems` appended after Blackbox      | sidebar entries (index 0/1 order is tested)                                 |
+| `src/js/gui.js`                                                             | import + `...gyroflightAllowedTabs` in both default allowed lists | `switchTab` rejects tabs not in `allowedTabs`                               |
+| `package.json`                                                              | `productName`, `displayName`, `description`                       | app identity; feeds the PWA manifest                                        |
+| `src/index.html`                                                            | `<title>`, meta description                                       | app identity                                                                |
+| `src/images/pwa/pwa-192-192.png`, `pwa-512-512.png`, `apple-touch-icon.png` | replaced with the Redline Dynamics mark                           | installed-PWA icon (filenames kept so `vite.config.js` is untouched)        |
+| `src/js/Analytics.ts`                                                       | `send()` returns early unless `UPSTREAM_ANALYTICS_ENABLED`        | no usage data to `analytics.betaflight.com` (see below)                     |
+| `src/components/dialogs/OptionsDialog.vue`                                  | analytics opt-out row behind `UPSTREAM_ANALYTICS_ENABLED`         | the toggle would control nothing                                            |
+| `src/components/tabs/LandingTab.vue`                                        | statistics disclaimer column behind `UPSTREAM_ANALYTICS_ENABLED`  | it claims Betaflight collects data and links Betaflight's privacy policy    |
+| `src/components/sidebar/Sidebar.vue`, `src/App.vue`                         | `<UserSession>` behind `BETAFLIGHT_ACCOUNTS_ENABLED`              | Betaflight login/passkeys cannot work from our origin (see below)           |
+| `src/js/main.js`                                                            | `/delete` account deep link behind `BETAFLIGHT_ACCOUNTS_ENABLED`  | it opens the (now unreachable) account profile                              |
+| `.prettierignore`                                                           | ignore `test/gyrocore/fixtures/`                                  | copied GyroCore fixtures are pinned by sha256 and must not be reformatted   |
+| `src/composables/useAutotune.ts`                                            | CHIRP input via GyroCore qualification; `applyGains` gate         | Viewer decode instead of the buggy duplicate decoder; Apply hard gate (WU2) |
+| `src/components/tabs/autotune/GainRecommendation.vue`                       | hide axes without gains; gate + notice; pass measurement id       | Apply blocked with reasons unless GyroCore authorizes (WU2)                 |
+| `src/components/tabs/AutotuneTab.vue`                                       | import + `<ChirpQualificationPanel />`                            | every CHIRP measurement with its state and reasons (WU2)                    |
+| `test/components/autotuneApplyGate.test.ts`                                 | seed a qualified measurement; expect the measurement id           | Apply now requires one; same assertions otherwise (WU2)                     |
 
 Everything else (header logo, `favicon.ico`, Tauri/Capacitor identity, welcome text) is still upstream's.
 All policy flags live in `src/gyroflight/policy.ts`; `git grep gyroflight/policy` lists every gated site.
@@ -138,7 +142,8 @@ Then smoke the PWA (`npm run preview`): Firmware Flasher, Blackbox Viewer, Autot
 Gyroflight tab load with no page errors; the manifest still says Gyroflight.
 
 Expected conflict hotspots: `package.json` / `package-lock.json` (take upstream's lockfile, re-apply our
-fields, `npm install`), `src/js/gui.js` allowed-tab lists, `sidebar_items.js`, `vue_tab_registry.js`.
+fields, `npm install`), `src/js/gui.js` allowed-tab lists, `sidebar_items.js`, `vue_tab_registry.js`,
+and the Autotune files above (`useAutotune.ts` most of all; see CHIRP_QUALIFICATION.md).
 After a merge, check upstream's release notes for MSP, blackbox-parser or autotune changes that GyroCore
 code depends on, and update the base commit in the provenance table.
 
