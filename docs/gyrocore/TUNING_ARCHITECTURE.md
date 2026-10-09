@@ -28,15 +28,21 @@ Authority chain, as implemented (WU1–WU3):
  GyroCore global merge (src/gyrocore/tuning/merge.ts)          one global set       GyroCore
         │  composite recommendation
         ▼
- GyroCore safety authorization (src/gyrocore/tuning/)          may it be written?   GyroCore
-        │  + live flight-controller recheck
+ GyroCore axis-coverage authorization (src/gyrocore/tuning/)  complete & current? GyroCore
+        │  every axis the slider mode drives has its own evidence;
+        │  composite gate + live flight-controller recheck
+        ▼
+ GyroCore Safety [WU4 pending] (src/gyrocore/productLock/)         may it be written?   GyroCore
+        │  until migrated: product Apply lock, full_safety_engine_pending
         ▼
  FC Apply (MSP_SET_SIMPLIFIED_TUNING, EEPROM)                  write                Betaflight MSP
 ```
 
-Still to come: full safety validation (`core/gyrocore/safety/`), evidence and per-change review, rollback.
+The axis-coverage authorization is not the Safety engine. Until GyroCore's Safety engine
+(`core/gyrocore/safety/`) is migrated and qualified (WU4), the product Apply lock keeps Gyroflight from
+writing any tune to a craft. Still to come after that: evidence and per-change review, rollback.
 Details: [CHIRP_QUALIFICATION.md](CHIRP_QUALIFICATION.md) (WU2) and
-[GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md) (WU3).
+[GLOBAL_TUNE_MERGE.md](GLOBAL_TUNE_MERGE.md) (WU3, WU3.1).
 
 ## Responsibilities
 
