@@ -235,6 +235,65 @@
     "gyrocoreGlobalCoverageRequired": { "message": "required" },
     "gyrocoreGlobalCoverageCovered": { "message": "covered" },
     "gyrocoreGlobalCoverageMissing": { "message": "missing" },
+    "gyrocoreSafetyTitle": { "message": "GyroCore Safety (global recommendation)" },
+    "gyrocoreSafetyStatus_PASS": { "message": "SAFETY PASS" },
+    "gyrocoreSafetyStatus_WARN": { "message": "SAFETY WARN (preview only)" },
+    "gyrocoreSafetyStatus_BLOCK": { "message": "SAFETY BLOCK" },
+    "gyrocoreSafetyStatus_NOT_EVALUATED": { "message": "SAFETY NOT EVALUATED" },
+    "gyrocoreSafetyNotEvaluated": {
+        "message": "There is no valid global recommendation, so Safety cannot authorize a tune. The reasons are in the Global tune box above."
+    },
+    "gyrocoreSafetyNoAnalysis": {
+        "message": "GyroCore Safety needs analysis evidence (motor diagnostics, noise, resonance, problems, confidence, quality) that Gyroflight does not provide yet, so it cannot authorize this tune."
+    },
+    "gyrocoreSafetyCurrent": { "message": "Current (logged)" },
+    "gyrocoreSafetyProposed": { "message": "Proposed (firmware mapping)" },
+    "gyrocoreSafetyDelta": { "message": "Change" },
+    "gyrocoreSafetyBlocked": { "message": "Why Safety blocks this tune:" },
+    "gyrocoreSafetyApplyBlocked": { "message": "Apply Gains is blocked by GyroCore Safety:" },
+    "gyrocoreSafety_mechanical_hard_block": { "message": "Mechanical safety blocks the tune." },
+    "gyrocoreSafety_missing_required_analysis": {
+        "message": "Required analysis evidence is missing; Safety fails closed without it."
+    },
+    "gyrocoreSafety_safe_tune_candidate_blocked": { "message": "No safe-tune candidate could be formed." },
+    "gyrocoreSafety_missing_required_pid_or_filter_baseline": {
+        "message": "The log does not record the current PID/filter values needed as a baseline: $1"
+    },
+    "gyrocoreSafety_malformed_or_empty_proposal": { "message": "There is no absolute tune proposal to check." },
+    "gyrocoreSafety_malformed_proposal": { "message": "The absolute tune proposal is blocked." },
+    "gyrocoreSafety_proposal_blocked": { "message": "The absolute tune proposal is blocked." },
+    "gyrocoreSafety_unresolved_merge_requires_review": { "message": "The axes do not agree on one global slider set." },
+    "gyrocoreSafety_system_id_unusable": { "message": "An axis's system identification is unusable." },
+    "gyrocoreSafety_invalid_simplified_tuning_state": {
+        "message": "The proposed slider state is incomplete, so its PIDs cannot be checked."
+    },
+    "gyrocoreSafety_slider_inconsistency": {
+        "message": "The proposed PIDs do not match what the sliders produce."
+    },
+    "gyrocoreSafety_resulting_values_invalid": { "message": "A resulting value is outside the firmware range." },
+    "gyrocoreSafety_simplified_pids_mode_off": { "message": "Simplified (slider) PID mode is OFF." },
+    "gyrocoreSafety_proposed_pid_sliders_incomplete": { "message": "PID sliders missing from the log: $1" },
+    "gyrocoreSafety_proposed_dterm_sliders_incomplete": { "message": "D-term filter sliders missing from the log: $1" },
+    "gyrocoreSafety_proposed_gyro_sliders_incomplete": { "message": "Gyro filter sliders missing from the log: $1" },
+    "gyrocoreSafety_pids_sliders_incomplete": { "message": "PID sliders incomplete: $1" },
+    "gyrocoreSafety_gyro_sliders_incomplete": { "message": "Gyro filter sliders incomplete: $1" },
+    "gyrocoreSafety_dterm_sliders_incomplete": { "message": "D-term filter sliders incomplete: $1" },
+    "gyrocoreSafety_slider_missing": { "message": "Slider not in the log: $1" },
+    "gyrocoreSafety_proposed_sliders_outside_cli_minmax": {
+        "message": "Proposed sliders outside the CLI range (0/10 to 200): $1"
+    },
+    "gyrocoreSafety_proposed_dterm_hz_from_present_or_zero_missing_not_defaulted": {
+        "message": "Some D-term filter frequencies are not logged; they were not defaulted."
+    },
+    "gyrocoreSafety_proposed_gyro_hz_from_present_or_zero_missing_not_defaulted": {
+        "message": "Some gyro filter frequencies are not logged; they were not defaulted."
+    },
+    "gyrocoreSafety_safety_not_evaluated": { "message": "Safety not evaluated: $1" },
+    "gyrocoreSafety_safety_input_missing": { "message": "Safety input missing: $1" },
+    "gyrocoreSafety_safety_input_inconsistent": {
+        "message": "The log's sliders differ from the ones the global recommendation used: $1"
+    },
+    "gyrocoreSafety_status_not_evaluated": { "message": "Safety was not evaluated." },
     "gyrocoreProductApplyPending": { "message": "Apply is disabled until Gyroflight Safety validation is complete." },
     "gyrocoreGlobal_axis_excluded": { "message": "Left out of the global recommendation: $1" },
     "gyrocoreGlobal_rejected_repeat_not_used": { "message": "A rejected sweep was not used: $1" },

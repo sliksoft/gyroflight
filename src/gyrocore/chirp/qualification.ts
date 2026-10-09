@@ -171,6 +171,8 @@ export interface ChirpLogReport<G = unknown> {
     currentSliders: Required<CurrentSliders> | null;
     /** Firmware slider integers exactly as logged (null = absent or unreadable); the global tune's baseline. */
     loggedSliders: SimplifiedSliders | null;
+    /** The raw `H key:value` lines of this log, in order: the Safety engine's current absolute tune (WU4). */
+    headerPairs: [string, string][];
     extractionWarnings: string[];
     measurements: ChirpMeasurement<G>[];
 }
@@ -441,12 +443,14 @@ function qualifyLog<G>(
         sysConfig: null,
         currentSliders: null,
         loggedSliders: null,
+        headerPairs: [],
         extractionWarnings: [],
         measurements: [],
     };
     const start = index.getLogBeginOffset(logIndex);
     const end = index.getLogBeginOffset(logIndex + 1);
-    const headers = parseLoggedHeaders(readHeaderPairs(bytes, start, end));
+    report.headerPairs = readHeaderPairs(bytes, start, end);
+    const headers = parseLoggedHeaders(report.headerPairs);
     report.firmwareRevision = headers.firmwareRevision;
     report.loggedSliders = loggedSimplifiedSliders(headers);
 
