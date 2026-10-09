@@ -35,3 +35,10 @@ export const UPSTREAM_ANALYTICS_ENABLED = false;
  * Gyroflight's origin, so their UI entry points are hidden.
  */
 export const BETAFLIGHT_ACCOUNTS_ENABLED = false;
+
+
+/**
+ * Gyroflight keeps Betaflight's theme mechanism, but uses the GyroCore cyan
+ * palette as the product default.
+ */
+export const GYROFLIGHT_COLOR_THEME = "gyroflight";
