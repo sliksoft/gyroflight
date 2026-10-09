@@ -1,193 +1,111 @@
 {
-    "gyroflightTabTitle": {
-        "message": "Gyroflight"
-    },
-    "gyroflightParentBrand": {
-        "message": "by Redline Dynamics"
-    },
+    "gyroflightTabTitle": { "message": "Gyroflight" },
+    "gyroflightParentBrand": { "message": "by Redline Dynamics" },
     "gyroflightIntro": {
         "message": "Gyroflight is built on the Betaflight App. GyroCore adds qualified CHIRP analysis, global tune authorization and Safety layers while Betaflight remains authoritative for FC configuration, Blackbox decoding and tuning math."
     },
-    "gyroflightCapabilitiesHead": {
-        "message": "Capabilities"
-    },
-    "gyroflightCapFirmwareFlasher": {
-        "message": "Betaflight Firmware Flasher"
-    },
-    "gyroflightCapBlackboxViewer": {
-        "message": "Betaflight Blackbox Viewer"
-    },
-    "gyroflightCapAutotune": {
-        "message": "Betaflight Autotune (Expert mode)"
-    },
-    "gyroflightCapAnalysis": {
-        "message": "GyroCore Analysis"
-    },
-    "gyroflightCapSafety": {
-        "message": "GyroCore Safety"
-    },
-    "gyroflightCapCompare": {
-        "message": "GyroCore Compare"
-    },
-    "gyroflightStatusAvailable": {
-        "message": "Available"
-    },
-    "gyroflightStatusPending": {
-        "message": "Migration pending"
-    },
-    "gyroflightAttributionHead": {
-        "message": "Attribution"
-    },
+    "gyroflightCapabilitiesHead": { "message": "Capabilities" },
+    "gyroflightCapFirmwareFlasher": { "message": "Betaflight Firmware Flasher" },
+    "gyroflightCapBlackboxViewer": { "message": "Betaflight Blackbox Viewer" },
+    "gyroflightCapAutotune": { "message": "Betaflight Autotune (Expert mode)" },
+    "gyroflightCapAnalysis": { "message": "GyroCore Analysis" },
+    "gyroflightCapSafety": { "message": "GyroCore Safety" },
+    "gyroflightCapCompare": { "message": "GyroCore Compare" },
+    "gyroflightStatusAvailable": { "message": "Available" },
+    "gyroflightStatusPending": { "message": "Migration pending" },
+    "gyroflightStatusActive": { "message": "Active" },
+    "gyroflightStatusFoundation": { "message": "Foundation active; full validation pending" },
+    "gyroflightStatusLocked": { "message": "Locked" },
+    "gyroflightStatusPlanned": { "message": "Planned" },
+    "gyroflightColorTheme": { "message": "Gyroflight" },
+    "gyroflightHomeParent": { "message": "REDLINE DYNAMICS" },
+    "gyroflightHomeLead": { "message": "Flight controller configuration, blackbox analysis and safe tuning." },
+    "gyroflightHomeUpstream": { "message": "Built on the Betaflight App." },
+    "gyroflightHomeConnectTitle": { "message": "Connect flight controller" },
+    "gyroflightHomeConnectText": { "message": "Use Betaflight's existing Connect control. Device communication and FC configuration stay upstream-standard." },
+    "gyroflightHomeBlackboxTitle": { "message": "Blackbox Viewer" },
+    "gyroflightHomeBlackboxText": { "message": "Inspect flight logs with Betaflight's Blackbox Viewer, which remains Gyroflight's decode authority." },
+    "gyroflightHomeOpenBlackbox": { "message": "Open Blackbox Viewer" },
+    "gyroflightHomeFirmwareTitle": { "message": "Firmware Flasher" },
+    "gyroflightHomeFirmwareText": { "message": "Build and flash Betaflight firmware with the upstream flasher workflow." },
+    "gyroflightHomeOpenFirmware": { "message": "Open Firmware Flasher" },
+    "gyroflightHomeAutotuneTitle": { "message": "Autotune" },
+    "gyroflightHomeAutotuneText": { "message": "Autotune remains an Expert Mode feature, exactly as in Betaflight. GyroCore qualification and Safety are layered around that workflow." },
+    "gyroflightHomeAttribution": { "message": "Gyroflight is based on the Betaflight App and distributed under GPL-3.0." },
+    "gyroflightCapChirpQualification": { "message": "GyroCore CHIRP qualification" },
+    "gyroflightCapGlobalTune": { "message": "GyroCore global tune and axis coverage" },
+    "gyroflightCapSafetyFoundation": { "message": "GyroCore Safety foundation" },
+    "gyroflightCapCrossFlightCompare": { "message": "Cross-flight tune verification" },
+    "gyroflightCapPhysicalApply": { "message": "Physical Apply" },
+    "gyroflightAttributionHead": { "message": "Attribution" },
     "gyroflightAttribution": {
         "message": "Gyroflight is based on the Betaflight App by the Betaflight open source project and is distributed under the GNU General Public License v3.0."
     },
-    "gyroflightSourceLink": {
-        "message": "Gyroflight source"
-    },
-    "gyroflightUpstreamLink": {
-        "message": "Betaflight App source"
-    },
-    "gyrocoreChirpTitle": {
-        "message": "GyroCore CHIRP qualification"
-    },
+    "gyroflightSourceLink": { "message": "Gyroflight source" },
+    "gyroflightUpstreamLink": { "message": "Betaflight App source" },
+    "gyrocoreChirpTitle": { "message": "GyroCore CHIRP qualification" },
     "gyrocoreChirpIntro": {
         "message": "Every CHIRP sweep in every embedded log, decoded with the Blackbox Viewer parser and checked by GyroCore before Betaflight Autotune may recommend or apply gains. Betaflight computes the transfer function and the recommendation; GyroCore decides whether the measurement is valid for tuning and whether Apply is allowed."
     },
-    "gyrocoreChirpStateNoChirp": {
-        "message": "NO CHIRP"
-    },
-    "gyrocoreChirpStateRejected": {
-        "message": "REJECTED"
-    },
-    "gyrocoreChirpStateWarn": {
-        "message": "USABLE WITH WARNINGS"
-    },
-    "gyrocoreChirpStateUsable": {
-        "message": "USABLE"
-    },
-    "gyrocoreChirpStateNoChirpText": {
-        "message": "No CHIRP sweep was found in any of the $1 embedded logs."
-    },
-    "gyrocoreChirpStateRejectedText": {
-        "message": "CHIRP was found, but no measurement is valid for tuning."
-    },
-    "gyrocoreChirpStateWarnText": {
-        "message": "At least one measurement is valid for tuning, with warnings."
-    },
-    "gyrocoreChirpStateUsableText": {
-        "message": "At least one measurement is valid for tuning."
-    },
-    "gyrocoreChirpNoChirpError": {
-        "message": "No CHIRP sweep found in any of the $1 embedded logs."
-    },
+    "gyrocoreChirpStateNoChirp": { "message": "NO CHIRP" },
+    "gyrocoreChirpStateRejected": { "message": "REJECTED" },
+    "gyrocoreChirpStateWarn": { "message": "USABLE WITH WARNINGS" },
+    "gyrocoreChirpStateUsable": { "message": "USABLE" },
+    "gyrocoreChirpStateNoChirpText": { "message": "No CHIRP sweep was found in any of the $1 embedded logs." },
+    "gyrocoreChirpStateRejectedText": { "message": "CHIRP was found, but no measurement is valid for tuning." },
+    "gyrocoreChirpStateWarnText": { "message": "At least one measurement is valid for tuning, with warnings." },
+    "gyrocoreChirpStateUsableText": { "message": "At least one measurement is valid for tuning." },
+    "gyrocoreChirpNoChirpError": { "message": "No CHIRP sweep found in any of the $1 embedded logs." },
     "gyrocoreChirpRejectedError": {
         "message": "CHIRP found, but no measurement is valid for tuning and none could be analysed. See GyroCore CHIRP qualification below."
     },
-    "gyrocoreChirpDiagnosticOnly": {
-        "message": "Diagnostic only — not valid for tuning"
-    },
+    "gyrocoreChirpDiagnosticOnly": { "message": "Diagnostic only — not valid for tuning" },
     "gyrocoreChirpDiagnosticAxes": {
         "message": "Diagnostic only — not valid for tuning: $1. These plots are shown for inspection; no gains are recommended from them."
     },
-    "gyrocoreChirpLog": {
-        "message": "Log $1"
-    },
-    "gyrocoreChirpLogError": {
-        "message": "Log $1: not analysed ($2)"
-    },
-    "gyrocoreChirpLogNoChirp": {
-        "message": "Log $1: no CHIRP"
-    },
-    "gyrocoreChirpColShown": {
-        "message": "Shown"
-    },
-    "gyrocoreChirpColLog": {
-        "message": "Log"
-    },
-    "gyrocoreChirpColAxis": {
-        "message": "Axis"
-    },
-    "gyrocoreChirpColSweep": {
-        "message": "Sweep"
-    },
-    "gyrocoreChirpColTime": {
-        "message": "Time (s)"
-    },
-    "gyrocoreChirpColSamples": {
-        "message": "Samples"
-    },
-    "gyrocoreChirpColRate": {
-        "message": "Rate (Hz)"
-    },
-    "gyrocoreChirpColCoherence": {
-        "message": "Coherence"
-    },
-    "gyrocoreChirpColState": {
-        "message": "Measurement"
-    },
-    "gyrocoreChirpColApply": {
-        "message": "Apply"
-    },
-    "gyrocoreChirpApplyAllowed": {
-        "message": "allowed"
-    },
-    "gyrocoreChirpApplyBlocked": {
-        "message": "blocked"
-    },
-    "gyrocoreChirpReasons": {
-        "message": "Why"
-    },
-    "gyrocoreChirpWarnings": {
-        "message": "Warnings"
-    },
-    "gyrocoreApplyBlockedTitle": {
-        "message": "Apply Gains is blocked by GyroCore for this axis:"
-    },
-    "gyrocoreApplyNoAxis": {
-        "message": "Apply Gains is blocked: no measurement in this log is valid for tuning."
-    },
-    "gyrocoreApplyBlockedError": {
-        "message": "Apply Gains blocked by GyroCore"
-    },
-    "gyrocoreReason_invalid_sample_rate": {
-        "message": "No trustworthy sample rate (status: $1)."
-    },
+    "gyrocoreChirpLog": { "message": "Log $1" },
+    "gyrocoreChirpLogError": { "message": "Log $1: not analysed ($2)" },
+    "gyrocoreChirpLogNoChirp": { "message": "Log $1: no CHIRP" },
+    "gyrocoreChirpColShown": { "message": "Shown" },
+    "gyrocoreChirpColLog": { "message": "Log" },
+    "gyrocoreChirpColAxis": { "message": "Axis" },
+    "gyrocoreChirpColSweep": { "message": "Sweep" },
+    "gyrocoreChirpColTime": { "message": "Time (s)" },
+    "gyrocoreChirpColSamples": { "message": "Samples" },
+    "gyrocoreChirpColRate": { "message": "Rate (Hz)" },
+    "gyrocoreChirpColCoherence": { "message": "Coherence" },
+    "gyrocoreChirpColState": { "message": "Measurement" },
+    "gyrocoreChirpColApply": { "message": "Apply" },
+    "gyrocoreChirpApplyAllowed": { "message": "allowed" },
+    "gyrocoreChirpApplyBlocked": { "message": "blocked" },
+    "gyrocoreChirpReasons": { "message": "Why" },
+    "gyrocoreChirpWarnings": { "message": "Warnings" },
+    "gyrocoreApplyBlockedTitle": { "message": "Apply Gains is blocked by GyroCore for this axis:" },
+    "gyrocoreApplyNoAxis": { "message": "Apply Gains is blocked: no measurement in this log is valid for tuning." },
+    "gyrocoreApplyBlockedError": { "message": "Apply Gains blocked by GyroCore" },
+    "gyrocoreReason_invalid_sample_rate": { "message": "No trustworthy sample rate (status: $1)." },
     "gyrocoreReason_non_uniform_sampling": {
         "message": "Timestamps are not uniform: only $1% of sample intervals are within ±10% of the median (needs 90%), or time runs backwards."
     },
     "gyrocoreReason_excessive_gaps": {
         "message": "Significant timestamp gaps: about $1% of samples missing in $2 gaps (limit 1%)."
     },
-    "gyrocoreReason_timestamp_gaps_present": {
-        "message": "$1 small timestamp gaps."
-    },
-    "gyrocoreReason_sample_rate_crosscheck": {
-        "message": "Sample rate not confirmed by timestamps (status: $1)."
-    },
-    "gyrocoreReason_insufficient_samples": {
-        "message": "Not enough data: $1, needs at least $2."
-    },
-    "gyrocoreReason_insufficient_excitation": {
-        "message": "Insufficient excitation: setpoint RMS $1 is below $2."
-    },
-    "gyrocoreReason_low_coherence": {
-        "message": "Low coherence: $3 is $1, below $2."
-    },
+    "gyrocoreReason_timestamp_gaps_present": { "message": "$1 small timestamp gaps." },
+    "gyrocoreReason_sample_rate_crosscheck": { "message": "Sample rate not confirmed by timestamps (status: $1)." },
+    "gyrocoreReason_insufficient_samples": { "message": "Not enough data: $1, needs at least $2." },
+    "gyrocoreReason_insufficient_excitation": { "message": "Insufficient excitation: setpoint RMS $1 is below $2." },
+    "gyrocoreReason_low_coherence": { "message": "Low coherence: $3 is $1, below $2." },
     "gyrocoreReason_unusable_frequency_range": {
         "message": "Unusable frequency coverage: $1 usable frequency bins, needs $2."
     },
-    "gyrocoreReason_no_transfer_function": {
-        "message": "No transfer function could be computed from this sweep."
-    },
+    "gyrocoreReason_no_transfer_function": { "message": "No transfer function could be computed from this sweep." },
     "gyrocoreReason_chirp_band_unknown_default_used": {
         "message": "CHIRP band not in the log header; 5–100 Hz assumed."
     },
     "gyrocoreReason_chirp_band_near_nyquist": {
         "message": "CHIRP band ends at $1 Hz, near the Nyquist limit ($2 Hz)."
     },
-    "gyrocoreReason_sample_rate_contract_ok": {
-        "message": "Sample rate confirmed."
-    },
+    "gyrocoreReason_sample_rate_contract_ok": { "message": "Sample rate confirmed." },
     "gyrocoreReason_sample_rate_contract_mismatch": {
         "message": "Sample-rate contract invalid: header rate and timestamp rate disagree."
     },
@@ -209,9 +127,7 @@
     "gyrocoreReason_current_tune_missing": {
         "message": "Current $1 slider is not in the log header, so the current tune cannot be represented."
     },
-    "gyrocoreReason_current_tune_unparseable": {
-        "message": "Current $1 slider in the log header cannot be read."
-    },
+    "gyrocoreReason_current_tune_unparseable": { "message": "Current $1 slider in the log header cannot be read." },
     "gyrocoreReason_current_tune_zero": {
         "message": "Current $1 slider is 0 in the log header (Betaflight would silently assume 100)."
     },
@@ -239,12 +155,8 @@
     "gyrocoreReason_slider_clamp_material": {
         "message": "$1: the recommendation asks for $2 → $3, but the 25–250 slider limit turns it into $5."
     },
-    "gyrocoreReason_slider_non_finite": {
-        "message": "$1: the recommendation is not a finite number."
-    },
-    "gyrocoreReason_slider_clamped": {
-        "message": "$1: requested $3 was limited to $5 by the slider range."
-    },
+    "gyrocoreReason_slider_non_finite": { "message": "$1: the recommendation is not a finite number." },
+    "gyrocoreReason_slider_clamped": { "message": "$1: requested $3 was limited to $5 by the slider range." },
     "gyrocoreReason_autotune_sensitivity_bound_unreachable": {
         "message": "No slider value keeps peak sensitivity within the robustness bound: the craft is fragile beyond what one pass can repair."
     },
@@ -254,24 +166,14 @@
     "gyrocoreReason_autotune_target_margin_unreachable_gain_held": {
         "message": "The phase-margin target is not reachable; the gain is held."
     },
-    "gyrocoreReason_autotune_no_open_loop_crossover": {
-        "message": "No open-loop crossover inside the coherent band."
-    },
-    "gyrocoreReason_autotune_gain_clamped_per_pass": {
-        "message": "The gain change is limited by the per-pass range."
-    },
-    "gyrocoreReason_apply_no_qualified_analysis": {
-        "message": "No GyroCore-qualified analysis is loaded."
-    },
-    "gyrocoreReason_apply_unknown_measurement": {
-        "message": "The selected axis has no qualified measurement."
-    },
+    "gyrocoreReason_autotune_no_open_loop_crossover": { "message": "No open-loop crossover inside the coherent band." },
+    "gyrocoreReason_autotune_gain_clamped_per_pass": { "message": "The gain change is limited by the per-pass range." },
+    "gyrocoreReason_apply_no_qualified_analysis": { "message": "No GyroCore-qualified analysis is loaded." },
+    "gyrocoreReason_apply_unknown_measurement": { "message": "The selected axis has no qualified measurement." },
     "gyrocoreReason_apply_sliders_differ_from_qualified_recommendation": {
         "message": "The sliders to apply are not the ones recommended for the qualified measurement."
     },
-    "gyrocoreReason_apply_not_authorized": {
-        "message": "Not authorized by GyroCore."
-    },
+    "gyrocoreReason_apply_not_authorized": { "message": "Not authorized by GyroCore." },
     "gyrocoreReason_fc_simplified_pids_mode_off": {
         "message": "The connected flight controller has simplified (slider) PID mode OFF."
     },
@@ -305,57 +207,29 @@
     "gyrocoreReason_log_chirp_axis_out_of_range_frames_dropped": {
         "message": "Frames with an invalid CHIRP axis in debug[1] were dropped."
     },
-    "gyrocoreChirpLogWarnings": {
-        "message": "Log $1: $2"
-    },
+    "gyrocoreChirpLogWarnings": { "message": "Log $1: $2" },
     "gyrocoreChirpDiagnosticBanner": {
         "message": "Diagnostic only — not valid for tuning: $1. GyroCore rejected these measurements; the plots below are for inspection and no gains are recommended from them."
     },
-    "gyrocoreGlobalTitle": {
-        "message": "Global tune (GyroCore composite recommendation)"
-    },
+    "gyrocoreGlobalTitle": { "message": "Global tune (GyroCore composite recommendation)" },
     "gyrocoreGlobalIntro": {
         "message": "Simplified tuning sliders are global: one value applies to every axis the slider mode covers. The per-axis recommendations below are evidence. Only this global recommendation, merged by GyroCore from the qualified axes of one log, can be applied."
     },
     "gyrocoreGlobalNone": {
         "message": "No global recommendation: this log has no CHIRP measurement with a logged slider tune."
     },
-    "gyrocoreGlobalValid": {
-        "message": "VALID GLOBAL RECOMMENDATION"
-    },
-    "gyrocoreGlobalNotValid": {
-        "message": "NO VALID GLOBAL RECOMMENDATION"
-    },
-    "gyrocoreGlobalCurrent": {
-        "message": "Current (logged)"
-    },
-    "gyrocoreGlobalEvidence": {
-        "message": "per-axis evidence"
-    },
-    "gyrocoreGlobalFinal": {
-        "message": "Global (would be applied)"
-    },
-    "gyrocoreGlobalSources": {
-        "message": "Source measurements"
-    },
-    "gyrocoreGlobalBlocked": {
-        "message": "Why the global recommendation cannot be applied:"
-    },
-    "gyrocoreGlobalRole_participating": {
-        "message": "used in the global recommendation"
-    },
-    "gyrocoreGlobalRole_excluded_by_axis_gate": {
-        "message": "left out (axis not under slider control)"
-    },
-    "gyrocoreGlobalRole_not_selected": {
-        "message": "not used (another sweep of this axis was chosen)"
-    },
-    "gyrocoreGlobalRole_rejected": {
-        "message": "not used (rejected measurement)"
-    },
-    "gyrocoreApplyNoComposite": {
-        "message": "Apply Gains is blocked: there is no valid global recommendation."
-    },
+    "gyrocoreGlobalValid": { "message": "VALID GLOBAL RECOMMENDATION" },
+    "gyrocoreGlobalNotValid": { "message": "NO VALID GLOBAL RECOMMENDATION" },
+    "gyrocoreGlobalCurrent": { "message": "Current (logged)" },
+    "gyrocoreGlobalEvidence": { "message": "per-axis evidence" },
+    "gyrocoreGlobalFinal": { "message": "Global (would be applied)" },
+    "gyrocoreGlobalSources": { "message": "Source measurements" },
+    "gyrocoreGlobalBlocked": { "message": "Why the global recommendation cannot be applied:" },
+    "gyrocoreGlobalRole_participating": { "message": "used in the global recommendation" },
+    "gyrocoreGlobalRole_excluded_by_axis_gate": { "message": "left out (axis not under slider control)" },
+    "gyrocoreGlobalRole_not_selected": { "message": "not used (another sweep of this axis was chosen)" },
+    "gyrocoreGlobalRole_rejected": { "message": "not used (rejected measurement)" },
+    "gyrocoreApplyNoComposite": { "message": "Apply Gains is blocked: there is no valid global recommendation." },
     "gyrocoreGlobal_unresolved_merge_requires_review": {
         "message": "The axes do not agree on one global slider set (GyroCore merge requires review)."
     },
@@ -380,117 +254,55 @@
     "gyrocoreGlobal_axis_coverage_mode_unknown": {
         "message": "The log does not record the simplified PID mode, so the axes the sliders drive are unknown."
     },
-    "gyrocoreGlobalCoverage": {
-        "message": "Axis coverage:"
-    },
-    "gyrocoreGlobalCoverageMode": {
-        "message": "slider mode $1"
-    },
-    "gyrocoreGlobalCoverageRequired": {
-        "message": "required"
-    },
-    "gyrocoreGlobalCoverageCovered": {
-        "message": "covered"
-    },
-    "gyrocoreGlobalCoverageMissing": {
-        "message": "missing"
-    },
-    "gyrocoreSafetyTitle": {
-        "message": "GyroCore Safety (global recommendation)"
-    },
-    "gyrocoreSafetyStatus_PASS": {
-        "message": "SAFETY PASS"
-    },
-    "gyrocoreSafetyStatus_WARN": {
-        "message": "SAFETY WARN (preview only)"
-    },
-    "gyrocoreSafetyStatus_BLOCK": {
-        "message": "SAFETY BLOCK"
-    },
-    "gyrocoreSafetyStatus_NOT_EVALUATED": {
-        "message": "SAFETY NOT EVALUATED"
-    },
+    "gyrocoreGlobalCoverage": { "message": "Axis coverage:" },
+    "gyrocoreGlobalCoverageMode": { "message": "slider mode $1" },
+    "gyrocoreGlobalCoverageRequired": { "message": "required" },
+    "gyrocoreGlobalCoverageCovered": { "message": "covered" },
+    "gyrocoreGlobalCoverageMissing": { "message": "missing" },
+    "gyrocoreSafetyTitle": { "message": "GyroCore Safety (global recommendation)" },
+    "gyrocoreSafetyStatus_PASS": { "message": "SAFETY PASS" },
+    "gyrocoreSafetyStatus_WARN": { "message": "SAFETY WARN (preview only)" },
+    "gyrocoreSafetyStatus_BLOCK": { "message": "SAFETY BLOCK" },
+    "gyrocoreSafetyStatus_NOT_EVALUATED": { "message": "SAFETY NOT EVALUATED" },
     "gyrocoreSafetyNotEvaluated": {
         "message": "There is no valid global recommendation, so Safety cannot authorize a tune. The reasons are in the Global tune box above."
     },
     "gyrocoreSafetyNoAnalysis": {
         "message": "GyroCore Safety needs analysis evidence (motor diagnostics, noise, resonance, problems, confidence, quality) that Gyroflight does not provide yet, so it cannot authorize this tune."
     },
-    "gyrocoreSafetyCurrent": {
-        "message": "Current (logged)"
-    },
-    "gyrocoreSafetyProposed": {
-        "message": "Proposed (firmware mapping)"
-    },
-    "gyrocoreSafetyDelta": {
-        "message": "Change"
-    },
-    "gyrocoreSafetyBlocked": {
-        "message": "Why Safety blocks this tune:"
-    },
-    "gyrocoreSafetyApplyBlocked": {
-        "message": "Apply Gains is blocked by GyroCore Safety:"
-    },
-    "gyrocoreSafety_mechanical_hard_block": {
-        "message": "Mechanical safety blocks the tune."
-    },
+    "gyrocoreSafetyCurrent": { "message": "Current (logged)" },
+    "gyrocoreSafetyProposed": { "message": "Proposed (firmware mapping)" },
+    "gyrocoreSafetyDelta": { "message": "Change" },
+    "gyrocoreSafetyBlocked": { "message": "Why Safety blocks this tune:" },
+    "gyrocoreSafetyApplyBlocked": { "message": "Apply Gains is blocked by GyroCore Safety:" },
+    "gyrocoreSafety_mechanical_hard_block": { "message": "Mechanical safety blocks the tune." },
     "gyrocoreSafety_missing_required_analysis": {
         "message": "Required analysis evidence is missing; Safety fails closed without it."
     },
-    "gyrocoreSafety_safe_tune_candidate_blocked": {
-        "message": "No safe-tune candidate could be formed."
-    },
+    "gyrocoreSafety_safe_tune_candidate_blocked": { "message": "No safe-tune candidate could be formed." },
     "gyrocoreSafety_missing_required_pid_or_filter_baseline": {
         "message": "The log does not record the current PID/filter values needed as a baseline: $1"
     },
-    "gyrocoreSafety_malformed_or_empty_proposal": {
-        "message": "There is no absolute tune proposal to check."
-    },
-    "gyrocoreSafety_malformed_proposal": {
-        "message": "The absolute tune proposal is blocked."
-    },
-    "gyrocoreSafety_proposal_blocked": {
-        "message": "The absolute tune proposal is blocked."
-    },
-    "gyrocoreSafety_unresolved_merge_requires_review": {
-        "message": "The axes do not agree on one global slider set."
-    },
-    "gyrocoreSafety_system_id_unusable": {
-        "message": "An axis's system identification is unusable."
-    },
+    "gyrocoreSafety_malformed_or_empty_proposal": { "message": "There is no absolute tune proposal to check." },
+    "gyrocoreSafety_malformed_proposal": { "message": "The absolute tune proposal is blocked." },
+    "gyrocoreSafety_proposal_blocked": { "message": "The absolute tune proposal is blocked." },
+    "gyrocoreSafety_unresolved_merge_requires_review": { "message": "The axes do not agree on one global slider set." },
+    "gyrocoreSafety_system_id_unusable": { "message": "An axis's system identification is unusable." },
     "gyrocoreSafety_invalid_simplified_tuning_state": {
         "message": "The proposed slider state is incomplete, so its PIDs cannot be checked."
     },
     "gyrocoreSafety_slider_inconsistency": {
         "message": "The proposed PIDs do not match what the sliders produce."
     },
-    "gyrocoreSafety_resulting_values_invalid": {
-        "message": "A resulting value is outside the firmware range."
-    },
-    "gyrocoreSafety_simplified_pids_mode_off": {
-        "message": "Simplified (slider) PID mode is OFF."
-    },
-    "gyrocoreSafety_proposed_pid_sliders_incomplete": {
-        "message": "PID sliders missing from the log: $1"
-    },
-    "gyrocoreSafety_proposed_dterm_sliders_incomplete": {
-        "message": "D-term filter sliders missing from the log: $1"
-    },
-    "gyrocoreSafety_proposed_gyro_sliders_incomplete": {
-        "message": "Gyro filter sliders missing from the log: $1"
-    },
-    "gyrocoreSafety_pids_sliders_incomplete": {
-        "message": "PID sliders incomplete: $1"
-    },
-    "gyrocoreSafety_gyro_sliders_incomplete": {
-        "message": "Gyro filter sliders incomplete: $1"
-    },
-    "gyrocoreSafety_dterm_sliders_incomplete": {
-        "message": "D-term filter sliders incomplete: $1"
-    },
-    "gyrocoreSafety_slider_missing": {
-        "message": "Slider not in the log: $1"
-    },
+    "gyrocoreSafety_resulting_values_invalid": { "message": "A resulting value is outside the firmware range." },
+    "gyrocoreSafety_simplified_pids_mode_off": { "message": "Simplified (slider) PID mode is OFF." },
+    "gyrocoreSafety_proposed_pid_sliders_incomplete": { "message": "PID sliders missing from the log: $1" },
+    "gyrocoreSafety_proposed_dterm_sliders_incomplete": { "message": "D-term filter sliders missing from the log: $1" },
+    "gyrocoreSafety_proposed_gyro_sliders_incomplete": { "message": "Gyro filter sliders missing from the log: $1" },
+    "gyrocoreSafety_pids_sliders_incomplete": { "message": "PID sliders incomplete: $1" },
+    "gyrocoreSafety_gyro_sliders_incomplete": { "message": "Gyro filter sliders incomplete: $1" },
+    "gyrocoreSafety_dterm_sliders_incomplete": { "message": "D-term filter sliders incomplete: $1" },
+    "gyrocoreSafety_slider_missing": { "message": "Slider not in the log: $1" },
     "gyrocoreSafety_proposed_sliders_outside_cli_minmax": {
         "message": "Proposed sliders outside the CLI range (0/10 to 200): $1"
     },
@@ -500,36 +312,20 @@
     "gyrocoreSafety_proposed_gyro_hz_from_present_or_zero_missing_not_defaulted": {
         "message": "Some gyro filter frequencies are not logged; they were not defaulted."
     },
-    "gyrocoreSafety_safety_not_evaluated": {
-        "message": "Safety not evaluated: $1"
-    },
-    "gyrocoreSafety_safety_input_missing": {
-        "message": "Safety input missing: $1"
-    },
+    "gyrocoreSafety_safety_not_evaluated": { "message": "Safety not evaluated: $1" },
+    "gyrocoreSafety_safety_input_missing": { "message": "Safety input missing: $1" },
     "gyrocoreSafety_safety_input_inconsistent": {
         "message": "The log's sliders differ from the ones the global recommendation used: $1"
     },
-    "gyrocoreSafety_status_not_evaluated": {
-        "message": "Safety was not evaluated."
-    },
-    "gyrocoreProductApplyPending": {
-        "message": "Apply is disabled until Gyroflight Safety validation is complete."
-    },
-    "gyrocoreGlobal_axis_excluded": {
-        "message": "Left out of the global recommendation: $1"
-    },
-    "gyrocoreGlobal_rejected_repeat_not_used": {
-        "message": "A rejected sweep was not used: $1"
-    },
-    "gyrocoreGlobal_proposed_pid_sliders_incomplete": {
-        "message": "The logged slider tune is incomplete: $1"
-    },
+    "gyrocoreSafety_status_not_evaluated": { "message": "Safety was not evaluated." },
+    "gyrocoreProductApplyPending": { "message": "Apply is disabled until Gyroflight Safety validation is complete." },
+    "gyrocoreGlobal_axis_excluded": { "message": "Left out of the global recommendation: $1" },
+    "gyrocoreGlobal_rejected_repeat_not_used": { "message": "A rejected sweep was not used: $1" },
+    "gyrocoreGlobal_proposed_pid_sliders_incomplete": { "message": "The logged slider tune is incomplete: $1" },
     "gyrocoreGlobal_proposed_dterm_sliders_incomplete": {
         "message": "The logged D-term filter sliders are incomplete: $1"
     },
-    "gyrocoreGlobal_proposed_sliders_outside_cli_minmax": {
-        "message": "Outside the CLI range (0/10–200): $1"
-    },
+    "gyrocoreGlobal_proposed_sliders_outside_cli_minmax": { "message": "Outside the CLI range (0/10–200): $1" },
     "gyrocoreGlobal_dterm_filter_off_multiplier_has_no_effect": {
         "message": "The D-term filter slider is OFF, so the D-term filter multiplier has no effect."
     },
@@ -542,18 +338,14 @@
     "gyrocoreGlobal_composite_slider_unverifiable": {
         "message": "$1: the current value is unknown, so the change cannot be checked."
     },
-    "gyrocoreReason_apply_missing_composite_id": {
-        "message": "No global recommendation was named."
-    },
+    "gyrocoreReason_apply_missing_composite_id": { "message": "No global recommendation was named." },
     "gyrocoreReason_apply_single_measurement_apply_not_allowed": {
         "message": "A single-axis measurement cannot be applied: sliders are global."
     },
     "gyrocoreReason_apply_stale_composite": {
         "message": "The global recommendation changed since it was shown (new analysis, selection, target or recommendation)."
     },
-    "gyrocoreReason_apply_composite_not_authorized": {
-        "message": "The global recommendation is not authorized."
-    },
+    "gyrocoreReason_apply_composite_not_authorized": { "message": "The global recommendation is not authorized." },
     "gyrocoreReason_apply_sliders_differ_from_composite": {
         "message": "The sliders to apply are not the global recommendation's."
     },
@@ -565,77 +357,5 @@
     },
     "gyrocorePerAxisEvidenceNote": {
         "message": "Per-axis proposals are evidence. Sliders are global, so Apply writes only the GyroCore global tune shown above, never one axis's column."
-    },
-    "gyroflightColorTheme": {
-        "message": "Gyroflight"
-    },
-    "gyroflightHomeParent": {
-        "message": "REDLINE DYNAMICS"
-    },
-    "gyroflightHomeLead": {
-        "message": "Flight controller configuration, blackbox analysis and safe tuning."
-    },
-    "gyroflightHomeUpstream": {
-        "message": "Built on the Betaflight App."
-    },
-    "gyroflightHomeConnectTitle": {
-        "message": "Connect flight controller"
-    },
-    "gyroflightHomeConnectText": {
-        "message": "Use Betaflight's existing Connect control. Device communication and FC configuration stay upstream-standard."
-    },
-    "gyroflightHomeBlackboxTitle": {
-        "message": "Blackbox Viewer"
-    },
-    "gyroflightHomeBlackboxText": {
-        "message": "Inspect flight logs with Betaflight's Blackbox Viewer, which remains Gyroflight's decode authority."
-    },
-    "gyroflightHomeOpenBlackbox": {
-        "message": "Open Blackbox Viewer"
-    },
-    "gyroflightHomeFirmwareTitle": {
-        "message": "Firmware Flasher"
-    },
-    "gyroflightHomeFirmwareText": {
-        "message": "Build and flash Betaflight firmware with the upstream flasher workflow."
-    },
-    "gyroflightHomeOpenFirmware": {
-        "message": "Open Firmware Flasher"
-    },
-    "gyroflightHomeAutotuneTitle": {
-        "message": "Autotune"
-    },
-    "gyroflightHomeAutotuneText": {
-        "message": "Autotune remains an Expert Mode feature, exactly as in Betaflight. GyroCore qualification and Safety are layered around that workflow."
-    },
-    "gyroflightHomeAttribution": {
-        "message": "Gyroflight is based on the Betaflight App and distributed under GPL-3.0."
-    },
-    "gyroflightCapChirpQualification": {
-        "message": "GyroCore CHIRP qualification"
-    },
-    "gyroflightCapGlobalTune": {
-        "message": "GyroCore global tune and axis coverage"
-    },
-    "gyroflightCapSafetyFoundation": {
-        "message": "GyroCore Safety foundation"
-    },
-    "gyroflightCapCrossFlightCompare": {
-        "message": "Cross-flight tune verification"
-    },
-    "gyroflightCapPhysicalApply": {
-        "message": "Physical Apply"
-    },
-    "gyroflightStatusActive": {
-        "message": "Active"
-    },
-    "gyroflightStatusFoundation": {
-        "message": "Foundation active; full validation pending"
-    },
-    "gyroflightStatusLocked": {
-        "message": "Locked"
-    },
-    "gyroflightStatusPlanned": {
-        "message": "Planned"
     }
 }
