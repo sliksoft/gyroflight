@@ -35,6 +35,7 @@ import type { AnalysisResult, AxisGains, AxisName, AxisResult } from "@/composab
 import { useAutotuneStore } from "@/stores/autotune";
 import { AXIS_NAMES } from "@/gyrocore/chirp/constants";
 import type { ChirpMeasurement, ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
+import { currentComposite } from "@/gyrocore/tuning/authorize";
 
 export type QualifiedReport = ChirpQualificationReport<AxisGains>;
 export type QualifiedMeasurement = ChirpMeasurement<AxisGains>;
@@ -123,6 +124,8 @@ export const useChirpQualificationStore = defineStore("gyrocoreChirpQualificatio
     const report = shallowRef<QualifiedReport | null>(null);
     const selectedLogIndex = ref<number | null>(null);
     const selection = ref<Record<AxisName, string | null>>({ roll: null, pitch: null, yaw: null });
+    /** Axes whose shown measurement the user chose; only these count as an explicit choice among repeats. */
+    const explicitAxes = ref<Partial<Record<AxisName, boolean>>>({});
     /** Bumped when recommendations are recomputed in place, so views re-read them. */
     const revision = ref(0);
 
@@ -138,8 +141,24 @@ export const useChirpQualificationStore = defineStore("gyrocoreChirpQualificatio
         return out;
     });
 
+    /** The global recommendation for the shown log (rebuilt from the current state). */
+    const composite = computed(() => {
+        void revision.value;
+        return currentComposite(gateState());
+    });
+
+    function gateState() {
+        return {
+            report: report.value,
+            logIndex: selectedLogIndex.value,
+            selection: selection.value,
+            explicitAxes: explicitAxes.value,
+        };
+    }
+
     function setReport(next: QualifiedReport | null) {
         report.value = next;
+        explicitAxes.value = {};
         selectedLogIndex.value = next ? defaultLogIndex(next) : null;
         selection.value =
             next && selectedLogIndex.value !== null
@@ -154,10 +173,12 @@ export const useChirpQualificationStore = defineStore("gyrocoreChirpQualificatio
         }
         selectedLogIndex.value = logIndex;
         selection.value = defaultSelection(report.value, logIndex);
+        explicitAxes.value = {};
         showSelection();
     }
 
-    function selectMeasurement(id: string) {
+    /** Show a measurement; `explicit` records that the user chose it (needed among repeated sweeps). */
+    function selectMeasurement(id: string, explicit = false) {
         const m = report.value?.measurements.find((x) => x.id === id);
         if (!m) {
             return;
@@ -166,6 +187,7 @@ export const useChirpQualificationStore = defineStore("gyrocoreChirpQualificatio
             selectLog(m.logIndex);
         }
         selection.value = { ...selection.value, [m.axisName]: id };
+        explicitAxes.value = { ...explicitAxes.value, [m.axisName]: explicit };
         showSelection();
     }
 
@@ -194,6 +216,9 @@ export const useChirpQualificationStore = defineStore("gyrocoreChirpQualificatio
         selectedLogIndex,
         selection,
         revision,
+        explicitAxes,
+        composite,
+        gateState,
         selectedMeasurements,
         setReport,
         selectLog,

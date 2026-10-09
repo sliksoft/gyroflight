@@ -81,6 +81,12 @@ const INT_KEYS = [
     "simplified_pids_mode",
     "simplified_dterm_filter",
     ...SLIDER_HEADER_KEYS,
+    // Sliders Autotune never proposes; recorded so the global tune shows the full logged state.
+    "simplified_d_max_gain",
+    "simplified_pitch_d_gain",
+    "simplified_pitch_pi_gain",
+    "simplified_gyro_filter",
+    "simplified_gyro_filter_multiplier",
 ] as const;
 export type IntKey = (typeof INT_KEYS)[number] | "p_interval_num" | "p_interval_denom";
 

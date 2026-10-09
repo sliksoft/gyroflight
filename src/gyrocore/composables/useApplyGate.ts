@@ -20,30 +20,25 @@
  */
 
 /*
- * Apply Gains authorization for the axis selected in Betaflight's Autotune
- * table, for display. The same check runs again inside the Apply action.
+ * Apply Gains authorization for Betaflight's Autotune panel, for display:
+ * the global (composite) recommendation and whether it may be applied. The
+ * same check runs again inside the Apply action.
  */
 
-import { computed, type Ref } from "vue";
-import type { AxisName } from "@/composables/useAutotune";
-import { authorizeApply } from "@/gyrocore/chirp/applyGate";
+import { computed } from "vue";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
+import { authorizeCompositeApply } from "@/gyrocore/tuning/authorize";
 
-export function useApplyGate(selectedAxisKey: Ref<AxisName | null>) {
+export function useApplyGate() {
     const gate = useChirpQualificationStore();
 
-    const measurement = computed(() => {
-        void gate.revision;
-        return selectedAxisKey.value ? (gate.selectedMeasurements[selectedAxisKey.value] ?? null) : null;
-    });
-
-    const measurementId = computed(() => measurement.value?.id ?? null);
+    const composite = computed(() => gate.composite);
 
     const authorization = computed(() => {
         void gate.revision;
-        const m = measurement.value;
-        return authorizeApply(gate.report, m?.id, m?.recommendation?.result.proposed);
+        const c = composite.value;
+        return authorizeCompositeApply(gate.gateState(), c?.id, c?.final);
     });
 
-    return { measurement, measurementId, authorization };
+    return { composite, authorization };
 }

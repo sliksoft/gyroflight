@@ -13,6 +13,8 @@
                 <DiagnosticOnlyBanner />
                 <BodePlot />
                 <SpectrogramPlot />
+                <!-- Gyroflight: the one global slider set Apply may write -->
+                <GlobalTunePanel />
                 <GainRecommendation />
             </template>
         </div>
@@ -27,6 +29,7 @@ import SpectrogramPlot from "./autotune/SpectrogramPlot.vue";
 import GainRecommendation from "./autotune/GainRecommendation.vue";
 import ChirpQualificationPanel from "@/gyrocore/components/ChirpQualificationPanel.vue";
 import DiagnosticOnlyBanner from "@/gyrocore/components/DiagnosticOnlyBanner.vue";
+import GlobalTunePanel from "@/gyrocore/components/GlobalTunePanel.vue";
 import { useAutotuneStore } from "@/stores/autotune";
 
 const store = useAutotuneStore();

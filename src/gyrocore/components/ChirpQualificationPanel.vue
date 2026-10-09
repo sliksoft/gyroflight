@@ -72,7 +72,7 @@
                                 :checked="gate.selection[m.axisName] === m.id"
                                 :disabled="!m.diagnostics"
                                 :aria-label="`${m.id}`"
-                                @change="gate.selectMeasurement(m.id)"
+                                @change="gate.selectMeasurement(m.id, true)"
                             />
                         </td>
                         <td>{{ m.logIndex + 1 }}</td>

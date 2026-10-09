@@ -1,22 +1,23 @@
 <template>
     <div v-if="!authorization.allowed" class="text-sm mt-2" role="status" data-gyrocore="apply-blocked">
         <p class="font-bold text-red-500">
-            {{ measurement ? $t("gyrocoreApplyBlockedTitle") : $t("gyrocoreApplyNoAxis") }}
+            {{ composite ? $t("gyrocoreApplyBlockedTitle") : $t("gyrocoreApplyNoComposite") }}
         </p>
-        <ul v-if="measurement" class="list-disc ps-5">
+        <ul class="list-disc ps-5">
             <li v-for="code in authorization.blocked" :key="code" :data-reason="code">
-                {{ describeReason(code, measurement) }}
+                {{ describeCompositeReason(code) }}
             </li>
         </ul>
     </div>
 </template>
 
 <script setup lang="ts">
-import type { ApplyAuthorization, ChirpMeasurement } from "@/gyrocore/chirp/qualification";
-import { describeReason } from "@/gyrocore/chirp/reasons";
+import { describeCompositeReason } from "@/gyrocore/tuning/reasons";
+import type { CompositeAuthorization } from "@/gyrocore/tuning/authorize";
+import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 
 defineProps<{
-    measurement: ChirpMeasurement | null;
-    authorization: ApplyAuthorization;
+    composite: CompositeRecommendation | null;
+    authorization: CompositeAuthorization;
 }>();
 </script>
