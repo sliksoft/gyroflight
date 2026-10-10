@@ -42,7 +42,7 @@ import {
     type StoredFlight,
     type TuneSession,
 } from "./contract";
-import { plainJsonProblems } from "./validate";
+import { firmwareInconsistencies, loggedApiVersion, plainJsonProblems } from "./validate";
 
 /** A deep, plain-JSON copy: no typed arrays, no shared references with the analysis. */
 function plain<T>(value: T): T {
@@ -133,13 +133,15 @@ export function flightsFromReport(
             continue;
         }
         const log = report.logs.find((l) => l.logIndex === logIndex);
+        const logHeaders = log?.headerPairs.length ? plain(log.headerPairs) : null;
         out.flights.push({
             key: ref.locationId,
             ref: plain(ref),
             fileName: opts.fileName,
             addedAt: opts.analyzedAt,
-            firmware: firmwareIdentity(ref, ms[0].qualityV2.provenance.apiVersion),
-            logHeaders: log?.headerPairs.length ? plain(log.headerPairs) : null,
+            // The logged API version only: provenance falls back to an assumed version when none is logged.
+            firmware: firmwareIdentity(ref, loggedApiVersion(logHeaders)),
+            logHeaders,
             analysis: {
                 decoder: report.decoder,
                 analyzedAt: opts.analyzedAt,
@@ -268,8 +270,16 @@ export function flightPairEvidence(session: TuneSession, keyA: string, keyB: str
     const vb = versions(b);
     // A missing version is unknown, and unknown never equals unknown.
     const same = va.length === 1 && vb.length === 1 && typeof va[0] === "string" && va[0] === vb[0];
+    // A stored field that does not follow from its source (FlightRef header, CHIRP provenance) is UNKNOWN.
+    const inconsistentA = a ? firmwareInconsistencies(a) : [];
+    const inconsistentB = b ? firmwareInconsistencies(b) : [];
     const firmware = Object.fromEntries(
-        FIRMWARE_FIELDS.map((k) => [k, a && b ? match(a.firmware[k], b.firmware[k]) : "UNKNOWN"]),
+        FIRMWARE_FIELDS.map((k) => [
+            k,
+            a && b && !inconsistentA.includes(k) && !inconsistentB.includes(k)
+                ? match(a.firmware[k], b.firmware[k])
+                : "UNKNOWN",
+        ]),
     ) as FlightPairEvidence["firmware"];
     const blockers: string[] = [];
     if (!a) {
@@ -292,6 +302,10 @@ export function flightPairEvidence(session: TuneSession, keyA: string, keyB: str
     if (!same) {
         blockers.push(R.analysisDiffers);
     }
+    blockers.push(
+        ...inconsistentA.map((k) => `${R.firmwareInconsistent}:${k}:a`),
+        ...inconsistentB.map((k) => `${R.firmwareInconsistent}:${k}:b`),
+    );
     for (const k of FIRMWARE_FIELDS) {
         if (firmware[k] === "MISMATCH") {
             blockers.push(`${R.firmwareMismatch}:${k}`);

@@ -27,6 +27,7 @@
  */
 
 import { flightRefProblems } from "@/gyrocore/flight/identity";
+import { parseLoggedHeaders } from "../chirp/headers";
 import { CHIRP_QUALITY_V2_SCHEMA, QV2_REASONS } from "../chirp/qualityV2/contract";
 import { flightRefShape, STORED_QUALITY_V2_SHAPES } from "./shape";
 import {
@@ -49,6 +50,32 @@ const MAX_HEADER_LINES = 4096;
 const MAX_HEADER_VALUE_CHARS = 4096;
 
 const AXIS_NAMES = ["roll", "pitch", "yaw"];
+/**
+ * durationS is (endTimeUs - startTimeUs) / 1e6 unrounded (chirp/extraction.ts); the
+ * tolerance only absorbs floating-point error, never a different duration.
+ */
+export const DURATION_TOLERANCE_S = 1e-6;
+/** Quality V2 identity field → the stored CHIRP field it must equal. */
+const IDENTITY_FIELDS: Record<string, string> = {
+    measurementId: "measurementId",
+    logIndex: "logIndex",
+    chirpIndex: "segmentIndex",
+    axis: "axis",
+    axisName: "axisName",
+    axisOccurrence: "axisOccurrence",
+    startTimeUs: "startTimeUs",
+    endTimeUs: "endTimeUs",
+    durationS: "durationS",
+    sampleCount: "sampleCount",
+};
+/** Stored firmware field → the WU1 FlightRef header line it is copied from (build.ts firmwareIdentity). */
+const FIRMWARE_HEADER_FIELDS = {
+    firmwareType: "Firmware type",
+    firmwareRevision: "Firmware revision",
+    firmwareDate: "Firmware date",
+    boardInformation: "Board information",
+    craftName: "Craft name",
+} as const;
 const STATES = ["rejected", "usable_with_warnings", "usable"];
 const ISO_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z$/;
 
@@ -149,20 +176,30 @@ function chirpProblems(c: unknown, flight: Raw): string[] {
         p.push("too_large");
     }
     const ref = flight.ref as Raw;
-    if (!isLabel(c.measurementId)) {
-        p.push("measurement_id");
-    }
     if (c.logIndex !== ref.logIndex) {
         p.push("log_index");
     }
-    if (!isInt(c.segmentIndex) || !isInt(c.axis) || !isInt(c.axisOccurrence) || !isInt(c.sampleCount)) {
+    if (!isInt(c.segmentIndex) || !isInt(c.axisOccurrence) || !isInt(c.sampleCount)) {
         p.push("indices");
     }
-    if (!AXIS_NAMES.includes(c.axisName as string)) {
+    if (c.measurementId !== `log${(c.logIndex as number) + 1}-seg${(c.segmentIndex as number) + 1}`) {
+        p.push("measurement_id");
+    }
+    if (!(c.axis === 0 || c.axis === 1 || c.axis === 2)) {
+        p.push("axis");
+    } else if (c.axisName !== AXIS_NAMES[c.axis]) {
         p.push("axis_name");
     }
     if (![c.startTimeUs, c.endTimeUs, c.durationS].every(isFiniteNumber)) {
         p.push("time");
+    } else if ((c.startTimeUs as number) >= (c.endTimeUs as number)) {
+        p.push("time_order");
+    } else if (
+        (c.durationS as number) <= 0 ||
+        Math.abs((c.durationS as number) - ((c.endTimeUs as number) - (c.startTimeUs as number)) / 1e6) >
+            DURATION_TOLERANCE_S
+    ) {
+        p.push("duration");
     }
     const q = c.qualification as Raw | undefined;
     if (
@@ -202,19 +239,12 @@ function chirpProblems(c: unknown, flight: Raw): string[] {
     const identity = v.identity as Raw;
     const fileIdentity = identity.file as Raw;
     const flightIdentity = identity.flight as Raw;
-    const sameChirp = [
-        "measurementId",
-        "logIndex",
-        "axis",
-        "axisName",
-        "axisOccurrence",
-        "startTimeUs",
-        "endTimeUs",
-        "durationS",
-        "sampleCount",
-    ].every((k) => identity[k] === c[k]);
-    if (!sameChirp) {
-        p.push("quality_v2_identity");
+    // The report's identity is the CHIRP's own: chirpIndex is the segment index (both seg.index).
+    const mismatched = Object.entries(IDENTITY_FIELDS)
+        .filter(([q, own]) => identity[q] !== c[own])
+        .map(([q]) => `quality_v2_identity:${q}`);
+    if (mismatched.length) {
+        p.push(...mismatched);
     } else if (
         fileIdentity.sha256 !== (ref.file as Raw).sha256 ||
         fileIdentity.byteLength !== (ref.file as Raw).byteLength ||
@@ -222,10 +252,26 @@ function chirpProblems(c: unknown, flight: Raw): string[] {
     ) {
         p.push("quality_v2_flight");
     }
+    // A logged API version is every CHIRP's (provenance takes the logged value first): one log, one header.
+    const fwApi = (flight.firmware as Raw | undefined)?.apiVersion ?? null;
+    if (fwApi !== null && (v.provenance as Raw).apiVersion !== fwApi) {
+        p.push("firmware_api_version");
+    }
     return p;
 }
 
-function firmwareProblems(fw: unknown): string[] {
+/**
+ * The firmware API version as logged (`H Firmware API version`), read with the
+ * qualification's own header parser. Not logged, or logged as 0.0.0, is null:
+ * Quality V2 provenance then holds the analysis fallback, which is no evidence.
+ */
+export function loggedApiVersion(logHeaders: [string, string][] | null): string | null {
+    const v = logHeaders ? parseLoggedHeaders(logHeaders).firmwareApiVersion : null;
+    return v && v !== "0.0.0" ? v : null;
+}
+
+/** Problems of the firmware block; with `flight` (its ref and headers already valid) also against their sources. */
+function firmwareProblems(fw: unknown, flight: Raw | null): string[] {
     if (!isObject(fw)) {
         return ["firmware"];
     }
@@ -236,7 +282,41 @@ function firmwareProblems(fw: unknown): string[] {
         isStringList(fw.unknown) &&
         JSON.stringify([...(fw.unknown as string[])].sort()) ===
             JSON.stringify(keys.filter((k) => fw[k] === null).sort());
-    return fieldsOk && unknownOk ? [] : ["firmware"];
+    if (!fieldsOk || !unknownOk) {
+        return ["firmware"];
+    }
+    if (!flight) {
+        return [];
+    }
+    // Copied from the FlightRef header and the logged API version: equal, null included, or contradictory.
+    const fields = (flight.ref as Raw & { header: { fields: Raw } }).header.fields;
+    const p = Object.entries(FIRMWARE_HEADER_FIELDS)
+        .filter(([k, h]) => fw[k] !== fields[h])
+        .map(([k]) => `firmware:${k}`);
+    if (fw.apiVersion !== loggedApiVersion(flight.logHeaders as [string, string][] | null)) {
+        p.push("firmware:apiVersion");
+    }
+    return p;
+}
+
+/**
+ * Stored firmware fields that do not follow from their sources: the FlightRef
+ * header lines, and for apiVersion the logged header line, carried by the
+ * Quality V2 provenance of every CHIRP (no CHIRP, no MATCH). Such a field is
+ * never evidence of a firmware MATCH.
+ */
+export function firmwareInconsistencies(f: StoredFlight): string[] {
+    const out = Object.entries(FIRMWARE_HEADER_FIELDS)
+        .filter(([k, h]) => f.firmware[k as keyof typeof FIRMWARE_HEADER_FIELDS] !== f.ref.header.fields[h])
+        .map(([k]) => k);
+    const api = f.firmware.apiVersion;
+    if (
+        api !== loggedApiVersion(f.logHeaders) ||
+        (api !== null && (!f.chirps.length || f.chirps.some((c) => c.qualityV2.provenance.apiVersion !== api)))
+    ) {
+        out.push("apiVersion");
+    }
+    return out;
 }
 
 function flightProblems(f: unknown): string[] {
@@ -261,7 +341,6 @@ function flightProblems(f: unknown): string[] {
     if (!isTime(f.addedAt)) {
         p.push("added_at");
     }
-    p.push(...firmwareProblems(f.firmware));
     const h = f.logHeaders;
     if (
         h !== null &&
@@ -278,6 +357,7 @@ function flightProblems(f: unknown): string[] {
     ) {
         p.push("log_headers");
     }
+    p.push(...firmwareProblems(f.firmware, p.length ? null : (f as Raw)));
     const a = f.analysis as Raw | undefined;
     if (
         !isObject(a) ||
@@ -350,11 +430,26 @@ export function validateTuneSession(raw: unknown): ValidationResult {
             return;
         }
         const flight = f as Raw;
+        const raws = flight.chirps as unknown[];
+        const cps = raws.map((c) => chirpProblems(c, flight));
+        // CHIRPs that are sound apart from their API version. If none carries the Flight's logged
+        // apiVersion, the Flight's field (and headers) are the contradiction, not every CHIRP.
+        const fwApi = (flight.firmware as Raw).apiVersion;
+        const sound = raws.flatMap((c, j) => (cps[j].every((x) => x === "firmware_api_version") ? [j] : []));
+        const apiOf = (j: number) => (((raws[j] as Raw).qualityV2 as Raw).provenance as Raw).apiVersion;
+        if (fwApi !== null && sound.length && !sound.some((j) => apiOf(j) === fwApi)) {
+            rejected.push({ path: `flights[${i}]`, problems: ["firmware:apiVersion"] });
+            return;
+        }
+        // Not logged: no anchor, so CHIRPs of one log that disagree are all left out.
+        if (fwApi === null && new Set(sound.map(apiOf)).size > 1) {
+            sound.forEach((j) => cps[j].push("firmware_api_version_conflict"));
+        }
         keys.add(flight.key as string);
         const ids = new Set<string>();
         const chirps: StoredChirp[] = [];
-        (flight.chirps as unknown[]).forEach((c, j) => {
-            const cp = chirpProblems(c, flight);
+        raws.forEach((c, j) => {
+            const cp = cps[j];
             if (!cp.length && ids.has((c as Raw).measurementId as string)) {
                 cp.push("duplicate_measurement_id");
             }

@@ -84,6 +84,7 @@ const FW_HEADERS = [
     "Firmware date:Jun 1 2026 00:00:00",
     "Board information:SYNT SYNTHETIC",
     "Craft name:SYN",
+    "Firmware API version:1.49.0",
 ];
 
 /** Replace one header line's bytes (latin-1) without touching the frame data. */
@@ -895,10 +896,37 @@ describe("flightPairEvidence", () => {
         }
     });
 
+    // Review fix: a stored firmware field must follow from its source, so a real difference is planted in the
+    // FlightRef header (or every CHIRP's provenance, for apiVersion) as well as in the firmware block.
+    const HEADER_OF: Record<string, string> = {
+        firmwareType: "Firmware type",
+        firmwareRevision: "Firmware revision",
+        firmwareDate: "Firmware date",
+        boardInformation: "Board information",
+        craftName: "Craft name",
+    };
+    function withFirmware(f: StoredFlight, field: string, value: string): Loose {
+        const x = clone(f) as Loose;
+        x.firmware[field] = value;
+        if (field === "apiVersion") {
+            x.logHeaders = [
+                ...x.logHeaders.filter(([k]: string[]) => k !== "Firmware API version"),
+                ["Firmware API version", value],
+            ];
+            for (const c of x.chirps) {
+                c.qualityV2.provenance.apiVersion = value;
+            }
+        } else {
+            x.ref.header.fields[HEADER_OF[field]] = value;
+        }
+        return x;
+    }
+
     it("every firmware field that differs is a MISMATCH and blocks", () => {
         for (const field of FW_FIELDS) {
-            const b = clone(flightsB[0]) as Loose;
-            b.firmware[field] = `${b.firmware[field]} `;
+            // The logged API version is read trimmed, so it differs by value, not by whitespace.
+            const value = field === "apiVersion" ? "1.48.0" : `${loose(flightsB[0].firmware)[field]} `;
+            const b = withFirmware(flightsB[0], field, value);
             const e = flightPairEvidence(sessionWith(flightsA[0], b as StoredFlight), flightsA[0].key, b.key);
             expect(loose(e.firmware)[field], field).toBe("MISMATCH");
             expect(e.blockers, field).toContain(`firmware_mismatch:${field}`);
@@ -906,11 +934,11 @@ describe("flightPairEvidence", () => {
     });
 
     it("case is not glossed over", () => {
-        const b = clone(flightsB[0]);
-        b.firmware.firmwareType = b.firmware.firmwareType!.toUpperCase();
-        expect(flightPairEvidence(sessionWith(flightsA[0], b), flightsA[0].key, b.key).firmware.firmwareType).toBe(
-            "MISMATCH",
-        );
+        const b = withFirmware(flightsB[0], "firmwareType", flightsB[0].firmware.firmwareType!.toUpperCase());
+        expect(
+            flightPairEvidence(sessionWith(flightsA[0], b as StoredFlight), flightsA[0].key, b.key).firmware
+                .firmwareType,
+        ).toBe("MISMATCH");
     });
 
     it("outdated analysis versions always block, even when both match", () => {

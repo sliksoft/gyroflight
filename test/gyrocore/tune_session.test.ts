@@ -393,7 +393,10 @@ describe("damaged and old records", () => {
         expect(r.status === "ok" && r.rejected).toEqual([
             { path: "flights[1].chirps[0]", problems: ["quality_v2_schema"] },
             { path: "flights[1].chirps[1]", problems: ["stored_authorization"] },
-            { path: "flights[1].chirps[2]", problems: ["log_index", "quality_v2_identity"] },
+            {
+                path: "flights[1].chirps[2]",
+                problems: ["log_index", "measurement_id", "quality_v2_identity:logIndex"],
+            },
         ]);
         expect(r.status === "ok" && r.session.flights[1].chirps).toEqual([]);
     });

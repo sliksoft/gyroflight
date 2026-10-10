@@ -158,5 +158,6 @@ export const SESSION_REASONS = {
     analysisDiffers: "analysis_version_differs",
     firmwareMismatch: "firmware_mismatch",
     firmwareUnknown: "firmware_unknown",
+    firmwareInconsistent: "firmware_inconsistent",
     flightMissing: "flight_not_in_session",
 } as const;
