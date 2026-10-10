@@ -107,6 +107,7 @@
     "eslint-config-prettier": "^10.0.2",
     "eslint-plugin-unused-imports": "^4.1.4",
     "eslint-plugin-vue": "^10.11.0",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^17.9.0",
     "husky": "^9.1.7",
     "inquirer": "^14.2.2",
