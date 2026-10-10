@@ -16,8 +16,10 @@ Stored per Flight:
   header and frame-prefix hashes;
 - the file name at import, as a label only (never part of the identity);
 - the firmware identity: `Firmware type`, `Firmware revision`, `Firmware date`, `Board information` and `Craft name`
-  from the log header, and the API version. A field that was not logged is `null` and named in `firmware.unknown`;
-  nothing is guessed;
+  copied from the `FlightRef` header fields, and the API version from the logged `H Firmware API version` line. A
+  field that was not logged is `null` and named in `firmware.unknown`; nothing is guessed. In particular the Quality
+  V2 `provenance.apiVersion` is not used when the log has no API version (or logs `0.0.0`): the analysis then runs
+  with an assumed version, which says nothing about the firmware;
 - the log's decoded `H key:value` header lines, for the later configuration comparison (`null` when unavailable);
 - the analysis provenance: decoder, analysis time and the phase-margin target;
 - each CHIRP: its id, log index, axis, timing, the existing qualification outcome (state, failed and warning gates)
@@ -78,9 +80,14 @@ fail-closed blockers:
   `same_flight_section`, a repackaged copy `same_flight_content`, a damaged reference `flight_X_identity_incomplete`);
 - `analysisVersions`: `CURRENT`, `OUTDATED` (a known older Quality V2 version, e.g. 2.0.0) or `UNKNOWN_VERSION`, per
   Flight, and whether both Flights use one version (a missing version is never the same as another missing one);
-- `firmware`: per field `MATCH`, `MISMATCH` or `UNKNOWN` (`null` on either side is `UNKNOWN`, never `MATCH`);
+- `firmware`: per field `MATCH`, `MISMATCH` or `UNKNOWN` (`null` on either side is `UNKNOWN`, never `MATCH`). A field
+  whose stored value does not follow from its source is also `UNKNOWN`, with `firmware_inconsistent:<field>:<a|b>`:
+  a header field that differs from the `FlightRef`, or an API version that differs from the logged line, or that is
+  not carried by every CHIRP's provenance (a Flight without CHIRPs cannot back it). This holds for sessions in memory,
+  not only for validated ones;
 - `blockers`: every independence reason, `analysis_version_outdated:<a|b>`, `analysis_version_unknown:<a|b>`,
-  `analysis_version_differs`, `firmware_mismatch:<field>`, `firmware_unknown:<field>` and `flight_not_in_session:<a|b>`.
+  `analysis_version_differs`, `firmware_inconsistent:<field>:<a|b>`, `firmware_mismatch:<field>`,
+  `firmware_unknown:<field>` and `flight_not_in_session:<a|b>`.
 
 A new firmware or analysis version is therefore never silently comparable. The full configuration comparison
 (MATCH / MISMATCH / UNKNOWN per setting) and repeatability are WU5.
@@ -122,8 +129,28 @@ field the contract does not define, at any depth, is rejected (`identity:shape`,
 cannot be stashed in a stored record as JSON numbers or text. Values in a defined numeric field cannot be told apart
 from measurements; the size caps bound them.
 
-A CHIRP's report must agree with the CHIRP and its Flight: axis, timing, ids and sample count equal the CHIRP's, its
-file hash and length equal the Flight's `FlightRef`, and its `FlightRef` equals the Flight's.
+A stored CHIRP must be consistent in itself, and its report must agree with the CHIRP and its Flight:
+
+- `measurementId` is `log<logIndex + 1>-seg<segmentIndex + 1>` and `logIndex` is the Flight's (`measurement_id`,
+  `log_index`);
+- `axis` is 0, 1 or 2 (`axis`) and `axisName` is roll, pitch or yaw accordingly (`axis_name`);
+- `startTimeUs` is before `endTimeUs` (`time_order`), and `durationS` is positive and equals
+  `(endTimeUs - startTimeUs) / 1e6` within `DURATION_TOLERANCE_S` (1 µs), which only absorbs floating-point error:
+  the extraction computes it unrounded (`duration`);
+- every Quality V2 identity field equals the CHIRP's own, with `chirpIndex` equal to `segmentIndex` (both are the
+  segment index): `quality_v2_identity:<field>`;
+- the report's file hash and length equal the Flight's `FlightRef`, and its `FlightRef` equals the Flight's
+  (`quality_v2_flight`).
+
+The firmware block must follow from its sources: each header field equals the `FlightRef` header field, `null` only
+where that is `null` (`firmware:<field>`, the Flight is rejected), and `apiVersion` equals the logged API version
+line in `logHeaders` (`firmware:apiVersion`). When an API version is logged, a CHIRP whose provenance carries another
+one is rejected (`firmware_api_version`); when no CHIRP carries the Flight's, the Flight is rejected. When none is
+logged there is no anchor, so CHIRPs of one Flight whose provenance versions disagree are all rejected
+(`firmware_api_version_conflict`) and the Flight stays.
+
+These checks are structural. Without the BBL the stored hashes cannot be recomputed, so a record whose fields were
+all changed consistently cannot be told from a genuine one; the file must be imported again to prove its identity.
 
 Each Quality V2 analysis version has a frozen stored shape (`STORED_QUALITY_V2_SHAPES`, now only 2.1.0). A new
 analysis version adds its shape and keeps the old ones, so stored results stay readable and are then reported as
