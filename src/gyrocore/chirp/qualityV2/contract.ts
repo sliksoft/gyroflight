@@ -358,6 +358,7 @@ export const QV2_REASONS = {
     chirpRejected: "chirp_not_qualified",
     tuningBlocked: "tuning_not_authorized",
     authorizationScope: "authorization_scope:measurement_only",
+    authorizationNotPersisted: "authorization_unknown:not_persisted",
     requestedHeadersMissing: "requested_sweep_unknown:headers_missing",
     requestedDurationMissing: "requested_duration_unknown:header_missing",
     requestedAmplitudeMissing: "requested_amplitude_unknown:header_missing",
