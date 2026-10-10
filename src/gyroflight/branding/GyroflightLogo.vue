@@ -54,8 +54,8 @@ const tooltip = computed(() => {
 <style>
 /*
  * logo-Gyrofly.png is 2172 x 724 with the artwork in roughly y 168..530, so a 2172:400 frame
- * centred on the image keeps all of it. The lettering is white with a glow, so the frame is a
- * dark plate: legible in the light theme as well as the dark one.
+ * centred on the image keeps all of it. The PNG is transparent and is shown as it is, directly
+ * on the page (honeycomb or plain); the frame adds no fill, border or rounded box.
  */
 .gyroflight-logo {
     display: flex;
@@ -69,8 +69,6 @@ const tooltip = computed(() => {
     width: 100%;
     aspect-ratio: 2172 / 400;
     overflow: hidden;
-    border-radius: 0.5rem;
-    background: #0b0f14;
 }
 
 .gyroflight-logo__image {
@@ -95,7 +93,6 @@ const tooltip = computed(() => {
 .gyroflight-logo--hero .gyroflight-logo__frame {
     width: min(100%, 44rem);
     padding: 0.75rem 1.25rem;
-    border-radius: 1rem;
 }
 
 /* Mobile top bar on Home. */
@@ -110,18 +107,30 @@ const tooltip = computed(() => {
     padding: 0.125rem 0.5rem;
 }
 
-/* Same breakpoint at which Betaflight switches to its short logo: show only the emblem. */
+/*
+ * Same breakpoint at which Betaflight switches to its short logo: show only the emblem.
+ * The emblem occupies about x 55..540, y 175..505 of the 2172 x 724 PNG. Its right-hand rings
+ * reach past x 515, where the "G" starts (y 265..435 only), so no rectangle shows all of the
+ * emblem without part of the G: the image is scaled so x 55..540 fills 44 px of the 48 px
+ * square (197 x 66 px, 2 px inset) and clip-path hides just the G's band. Aspect ratio unchanged.
+ */
 @media (max-width: 1055px) {
     .tab_container .gyroflight-logo--sidebar .gyroflight-logo__frame {
+        position: relative;
         width: 48px;
-        aspect-ratio: 1;
+        height: 48px;
+        aspect-ratio: auto;
         padding: 0;
     }
     .tab_container .gyroflight-logo--sidebar .gyroflight-logo__image {
-        object-fit: cover;
-        object-position: 0% center;
-        transform: scale(1.9);
-        transform-origin: 16% 48%;
+        position: absolute;
+        left: -3px;
+        top: -6.8px;
+        width: 197px;
+        height: auto;
+        max-width: none;
+        object-fit: fill;
+        clip-path: polygon(0 0, 100% 0, 100% 36.6%, 23.7% 36.6%, 23.7% 60.1%, 100% 60.1%, 100% 100%, 0 100%);
     }
 }
 </style>
