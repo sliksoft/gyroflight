@@ -48,18 +48,47 @@ CHIRP content never affects these levels. A Flight with no CHIRP, with the wrong
 
 ## Flight A and Flight B
 
-`checkIndependentFlights(a, b)` decides whether two Flights may count as two independent recordings. It is fail-closed. It returns `independent: false` with reasons when:
+`checkIndependentFlights(a, b)` decides whether two Flights may count as two independent recordings. It is fail-closed. It returns `independent: false` with reasons, checked in this order:
 
-| Reason                                                          | When                                                                                         |
-| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `flight_a_identity_incomplete` / `flight_b_identity_incomplete` | a reference is missing, has another schema, or lacks a lowercase hex SHA-256 hash            |
-| `flight_a_invalid` / `flight_b_invalid`                         | the Flight is not FLIGHT VALID (status `valid` with no reasons)                              |
-| `same_flight_section`                                           | the section hashes are equal (the same Flight chosen twice, or the same flight in two files) |
-| `same_flight_content`                                           | the header and the first frame data are equal, but the sections differ                       |
+| Reason                                                          | When                                                                                            |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `flight_a_identity_incomplete` / `flight_b_identity_incomplete` | the reference fails validation (below); each problem follows as `flight_X_identity:<problem>`   |
+| `flight_refs_contradict:<what>`                                 | both references name the same file but cannot both be true of it (below)                        |
+| `flight_a_invalid` / `flight_b_invalid`                         | the Flight is not FLIGHT VALID                                                                  |
+| `same_flight_section`                                           | the section hashes are equal (the same Flight chosen twice, or the same flight in two files)    |
+| `same_flight_content`                                           | the first 4096 bytes of frame data are equal, whatever the headers say, but the sections differ |
 
-`same_flight_content` catches a copy of a flight with extra or missing bytes at its end, for example one copy cut short. The first frame data holds the first I-frame (time since boot, loop iteration, sensor values), which no other recording repeats. Two different flights with identical headers, which is normal for two flights on one configuration, stay `distinct`.
+`same_flight_content` catches a repackaged copy of a flight: extra or missing bytes at its end (one copy cut short), or an edited header (another craft name, board line or firmware string). Only frame bytes decide; the header is ignored, because it is the easiest part to change. Both prefixes must be the full 4096 bytes: a shorter shared prefix, from a tiny section or a shared end marker, never makes two Flights the same. The first frame data holds the first I-frame (time since boot, loop iteration, sensor values), which no other recording repeats. Two different flights, with identical or with different headers, stay `distinct`; a flight logged 250 µs later already differs.
 
-Known limit: a copy that is cut short inside its first 4096 bytes of frame data is not matched. Such a section holds well under a second of data and cannot carry a CHIRP measurement.
+Known limits:
+
+- A copy that is cut short inside its first 4096 bytes of frame data is not matched. Such a section holds well under a second of data and cannot carry a CHIRP measurement.
+- A flight re-encoded with another field encoding or predictor has different frame bytes and is not matched. Detecting that needs the decoded frames from the Viewer, which is later work if it is ever needed.
+
+### Stored reference validation
+
+`flightRefProblems(ref)` lists what is wrong with one stored `FlightRef`; an empty list means it is usable. A reference that comes back from storage corrupt or edited fails closed with one of these problems:
+
+| Problem       | Rule                                                                                                                 |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `missing`     | not an object                                                                                                        |
+| `schema`      | `schema` is not `gyrocore.flight-identity.v1`                                                                        |
+| `file`        | `file.sha256` is not lowercase hex SHA-256, or `file.byteLength` is not a positive integer                           |
+| `log_index`   | `logIndex` and `logCount` are not integers with `0 <= logIndex < logCount`                                           |
+| `location_id` | `locationId` is not `<file.sha256>#<logIndex>`                                                                       |
+| `section`     | bad hash, or the byte range is not integers with `begin < end <= file.byteLength`                                    |
+| `header`      | bad hash, header longer than the section, or a kept header line that is neither a string nor `null`                  |
+| `body_prefix` | bad hash, or a length other than `min(4096, section length − header length)`                                         |
+| `status`      | status is not `valid` or `invalid`, reasons is not a string list, `valid` with reasons, or `invalid` without reasons |
+| `time_range`  | not `null` and not finite `min <= max`, or a time range on an invalid Flight                                         |
+
+When both references name the same file hash, they must agree about it:
+
+| Contradiction                    | When                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `flight_refs_contradict:file`    | different file length or log count                                                          |
+| `flight_refs_contradict:section` | the same `logIndex` with a different section, header or prefix                              |
+| `flight_refs_contradict:order`   | the section of the lower `logIndex` does not end at or before the section of the higher one |
 
 Independence says only that the two Flights are different recordings. Whether they are comparable (same physical system and configuration) is the cross-flight work, not this check.
 
@@ -71,8 +100,9 @@ Independence says only that the two Flights are different recordings. Whether th
 - the sections tile the file;
 - the Viewer decodes each Flight of a multi-flight file exactly as the standalone file;
 - the CHIRP qualification gives the same measurements per Flight;
-- every independence case above.
+- every independence case above, including a repackaged flight with an edited header;
+- every stored-reference problem and contradiction above, on both sides, and that real catalog references pass validation before and after a JSON round trip.
 
-`flight_identity_adversarial.test.ts` was written against this document without reading the implementation. It checks every catalog against the Viewer's offsets and `node:crypto`, and covers boundary cases: junk before the first marker, a marker inside frame data, CRLF headers, header-only and short sections, Latin-1 header bytes, and malformed stored references. It found three gaps in the independence check, all fixed: non-hex hashes, upper-cased hashes, and a `valid` reference that carries reasons.
+`flight_identity_adversarial.test.ts` was written against this document without reading the implementation. It checks every catalog against the Viewer's offsets and `node:crypto`, and covers boundary cases: junk before the first marker, a marker inside frame data, CRLF headers, header-only and short sections, Latin-1 header bytes, and malformed stored references. It found three gaps in the independence check, all fixed: non-hex hashes, upper-cased hashes, and a `valid` reference that carries reasons. Review of PR #3 found two more, both fixed with regression tests in `flight_identity.test.ts`: an edited header hid a repackaged flight, and a stored reference was trusted on its hashes alone.
 
 `flight_identity_air65.local.test.ts` runs on the real AIR65 file when `GYROFLIGHT_AIR65_BBL` is set. It checks the file hash, the three Flights and their pairwise independence.

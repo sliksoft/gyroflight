@@ -191,8 +191,10 @@ export async function catalogBbl(bytes: Uint8Array): Promise<BblCatalog> {
 /**
  * How two Flights relate, from their identities alone:
  * - `same_section`: byte-identical log sections (one flight, possibly in two files);
- * - `same_flight_content`: same header and same first frame data, but the sections
- *   differ (a copy with extra or missing bytes at the end);
+ * - `same_flight_content`: the first BODY_PREFIX_BYTES of frame data are identical,
+ *   whatever the header. That is one recording repackaged: a copy with extra or
+ *   missing bytes at the end, or with edited header lines. Both prefixes must be
+ *   full length, so a few shared bytes (an empty log's end marker) never match;
  * - `distinct`: no evidence that they are the same flight.
  */
 export type FlightRelation = "same_section" | "same_flight_content" | "distinct";
@@ -202,9 +204,8 @@ export function relateFlights(a: FlightRef, b: FlightRef): FlightRelation {
         return "same_section";
     }
     if (
-        a.header.sha256 === b.header.sha256 &&
-        a.bodyPrefix.byteLength > 0 &&
-        a.bodyPrefix.byteLength === b.bodyPrefix.byteLength &&
+        a.bodyPrefix.byteLength === BODY_PREFIX_BYTES &&
+        b.bodyPrefix.byteLength === BODY_PREFIX_BYTES &&
         a.bodyPrefix.sha256 === b.bodyPrefix.sha256
     ) {
         return "same_flight_content";
@@ -224,20 +225,112 @@ function isSha256(value: unknown): boolean {
     return typeof value === "string" && SHA256_HEX.test(value);
 }
 
-/** Stored references come back from storage, so every hash is checked to be one sha256Hex can produce. */
-function isCompleteRef(ref: FlightRef | null | undefined): ref is FlightRef {
-    return (
-        !!ref &&
-        ref.schema === FLIGHT_IDENTITY_SCHEMA &&
-        isSha256(ref.file?.sha256) &&
-        isSha256(ref.section?.sha256) &&
-        isSha256(ref.header?.sha256) &&
-        isSha256(ref.bodyPrefix?.sha256)
-    );
+function isCount(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Stored references come back from storage, so a reference is checked field by
+ * field and for internal consistency against how catalogBbl builds it. Returns
+ * the problem codes; empty means usable.
+ */
+export function flightRefProblems(ref: unknown): string[] {
+    if (!ref || typeof ref !== "object") {
+        return ["missing"];
+    }
+    const r = ref as Partial<FlightRef>;
+    const problems: string[] = [];
+    if (r.schema !== FLIGHT_IDENTITY_SCHEMA) {
+        problems.push("schema");
+    }
+    const fileOk = isSha256(r.file?.sha256) && isCount(r.file?.byteLength) && r.file!.byteLength > 0;
+    if (!fileOk) {
+        problems.push("file");
+    }
+    const indexOk = isCount(r.logCount) && r.logCount > 0 && isCount(r.logIndex) && r.logIndex < r.logCount;
+    if (!indexOk) {
+        problems.push("log_index");
+    }
+    if (fileOk && indexOk && r.locationId !== `${r.file!.sha256}#${r.logIndex}`) {
+        problems.push("location_id");
+    }
+    const s = r.section;
+    const sectionOk =
+        isSha256(s?.sha256) &&
+        isCount(s?.byteBegin) &&
+        isCount(s?.byteEnd) &&
+        s!.byteBegin < s!.byteEnd &&
+        (!fileOk || s!.byteEnd <= r.file!.byteLength);
+    if (!sectionOk) {
+        problems.push("section");
+    }
+    const h = r.header;
+    const headerOk =
+        isSha256(h?.sha256) &&
+        isCount(h?.byteLength) &&
+        !!h?.fields &&
+        typeof h.fields === "object" &&
+        IDENTITY_HEADER_KEYS.every((k) => h.fields[k] === null || typeof h.fields[k] === "string") &&
+        (!sectionOk || h!.byteLength <= s!.byteEnd - s!.byteBegin);
+    if (!headerOk) {
+        problems.push("header");
+    }
+    const p = r.bodyPrefix;
+    const prefixOk =
+        isSha256(p?.sha256) &&
+        isCount(p?.byteLength) &&
+        // catalogBbl always hashes the full prefix the section has room for.
+        (!sectionOk ||
+            !headerOk ||
+            p!.byteLength === Math.min(BODY_PREFIX_BYTES, s!.byteEnd - s!.byteBegin - h!.byteLength));
+    if (!prefixOk) {
+        problems.push("body_prefix");
+    }
+    if (
+        (r.status !== "valid" && r.status !== "invalid") ||
+        !Array.isArray(r.reasons) ||
+        !r.reasons.every((x) => typeof x === "string") ||
+        (r.status === "invalid" && r.reasons.length === 0)
+    ) {
+        problems.push("status");
+    }
+    const t = r.timeRangeUs;
+    if (
+        t !== null &&
+        !(t && Number.isFinite(t.min) && Number.isFinite(t.max) && t.min <= t.max && r.status === "valid")
+    ) {
+        problems.push("time_range");
+    }
+    return problems;
+}
+
+/**
+ * Two references from one file (same file hash) must agree on that file and must
+ * not contradict each other: the same log index is the same section, and a later
+ * log index starts after an earlier one ends.
+ */
+function sameFileContradictions(a: FlightRef, b: FlightRef): string[] {
+    if (a.file.sha256 !== b.file.sha256) {
+        return [];
+    }
+    if (a.file.byteLength !== b.file.byteLength || a.logCount !== b.logCount) {
+        return ["flight_refs_contradict:file"];
+    }
+    if (a.logIndex === b.logIndex) {
+        const same =
+            a.section.sha256 === b.section.sha256 &&
+            a.section.byteBegin === b.section.byteBegin &&
+            a.section.byteEnd === b.section.byteEnd &&
+            a.header.sha256 === b.header.sha256 &&
+            a.bodyPrefix.sha256 === b.bodyPrefix.sha256;
+        return same ? [] : ["flight_refs_contradict:section"];
+    }
+    const [first, second] = a.logIndex < b.logIndex ? [a, b] : [b, a];
+    return first.section.byteEnd <= second.section.byteBegin ? [] : ["flight_refs_contradict:order"];
 }
 
 function isValidFlight(ref: FlightRef): boolean {
-    return ref.status === "valid" && Array.isArray(ref.reasons) && ref.reasons.length === 0;
+    return ref.status === "valid" && ref.reasons.length === 0;
 }
 
 /**
@@ -250,23 +343,32 @@ export function checkIndependentFlights(
     a: FlightRef | null | undefined,
     b: FlightRef | null | undefined,
 ): IndependenceCheck {
-    const reasons: string[] = [];
-    if (!isCompleteRef(a)) {
-        reasons.push("flight_a_identity_incomplete");
-    }
-    if (!isCompleteRef(b)) {
-        reasons.push("flight_b_identity_incomplete");
-    }
-    if (!isCompleteRef(a) || !isCompleteRef(b)) {
+    const problemsA = flightRefProblems(a);
+    const problemsB = flightRefProblems(b);
+    const reasons = [
+        ...(problemsA.length
+            ? ["flight_a_identity_incomplete", ...problemsA.map((p) => `flight_a_identity:${p}`)]
+            : []),
+        ...(problemsB.length
+            ? ["flight_b_identity_incomplete", ...problemsB.map((p) => `flight_b_identity:${p}`)]
+            : []),
+    ];
+    if (reasons.length) {
         return { independent: false, relation: null, reasons };
     }
-    if (!isValidFlight(a)) {
+    const refA = a as FlightRef;
+    const refB = b as FlightRef;
+    const contradictions = sameFileContradictions(refA, refB);
+    if (contradictions.length) {
+        return { independent: false, relation: null, reasons: contradictions };
+    }
+    if (!isValidFlight(refA)) {
         reasons.push("flight_a_invalid");
     }
-    if (!isValidFlight(b)) {
+    if (!isValidFlight(refB)) {
         reasons.push("flight_b_invalid");
     }
-    const relation = relateFlights(a, b);
+    const relation = relateFlights(refA, refB);
     if (relation === "same_section") {
         reasons.push("same_flight_section");
     } else if (relation === "same_flight_content") {

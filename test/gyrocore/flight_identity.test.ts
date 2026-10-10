@@ -40,6 +40,7 @@ import {
     checkIndependentFlights,
     FLIGHT_IDENTITY_SCHEMA,
     flightForLog,
+    flightRefProblems,
     relateFlights,
     type FlightRef,
 } from "../../src/gyrocore/flight/identity";
@@ -63,6 +64,8 @@ const CASES = new Map(readFixtureJson<{ cases: Case[] }>("chirp/cases.json").cas
 function fixture(caseId: string): Uint8Array {
     return readFixtureBytes(`chirp/${CASES.get(caseId)!.bbl}`);
 }
+
+const MARKER = "H Product:Blackbox flight data recorder by Nicholas Sherlock\n";
 
 const nodeSha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
@@ -216,13 +219,169 @@ describe("Flight A and Flight B", () => {
         expect(checkIndependentFlights(null, b)).toEqual({
             independent: false,
             relation: null,
-            reasons: ["flight_a_identity_incomplete"],
+            reasons: ["flight_a_identity_incomplete", "flight_a_identity:missing"],
         });
-        expect(checkIndependentFlights(a, undefined).reasons).toEqual(["flight_b_identity_incomplete"]);
+        expect(checkIndependentFlights(a, undefined).reasons).toEqual([
+            "flight_b_identity_incomplete",
+            "flight_b_identity:missing",
+        ]);
         const foreign = { ...b, schema: "something.else" } as unknown as FlightRef;
         expect(checkIndependentFlights(a, foreign).independent).toBe(false);
         const noSection = { ...b, section: undefined } as unknown as FlightRef;
         expect(checkIndependentFlights(a, noSection).independent).toBe(false);
+    });
+});
+
+/** Replace one header line's bytes (latin-1) without touching the frame data. */
+function editHeader(bytes: Uint8Array, from: string, to: string): Uint8Array {
+    const text = new TextDecoder("latin1").decode(bytes);
+    const at = text.indexOf(from);
+    expect(at).toBeGreaterThan(0);
+    const out = new Uint8Array(bytes.length - from.length + to.length);
+    out.set(bytes.subarray(0, at));
+    out.set(
+        Uint8Array.from(to, (c) => c.charCodeAt(0)),
+        at,
+    );
+    out.set(bytes.subarray(at + from.length), at + to.length);
+    return out;
+}
+
+describe("PR #3 review: a repackaged flight with an edited header", () => {
+    const board = "H Board information:SYNT SYNTHETIC";
+
+    it("is the same flight when only header lines differ", async () => {
+        const edited = editHeader(clean, board, "H Board information:REPACKAGED ELSEWHERE\nH Craft name:copy");
+        const [orig] = (await catalogBbl(clean)).flights;
+        const [copy] = (await catalogBbl(edited)).flights;
+        expect(copy.status).toBe("valid");
+        expect(copy.header.sha256).not.toBe(orig.header.sha256);
+        expect(copy.header.fields["Craft name"]).toBe("copy");
+        expect(checkIndependentFlights(orig, copy)).toEqual({
+            independent: false,
+            relation: "same_flight_content",
+            reasons: ["same_flight_content"],
+        });
+    });
+
+    it("is the same flight with an edited header and a cut-short tail, also inside one file", async () => {
+        const edited = editHeader(clean, board, "H Board information:X").slice(0, clean.length - 700);
+        const cat = await catalogBbl(concatLogs(clean, noisy, edited));
+        expect(checkIndependentFlights(cat.flights[0], cat.flights[2]).reasons).toEqual(["same_flight_content"]);
+        expect(checkIndependentFlights(cat.flights[1], cat.flights[2]).independent).toBe(true);
+    });
+
+    it("different recordings stay independent, with equal or with different headers", async () => {
+        const at1 = encodeChirpLog(simulateChirp({ axis: 0, seconds: 6, startTimeUs: 1_000_000 }));
+        const at2 = encodeChirpLog(simulateChirp({ axis: 0, seconds: 6, startTimeUs: 1_000_250 }));
+        const relabelled = editHeader(at2, "(synthetic)", "(synthetic, relabelled)");
+        const cat = await catalogBbl(concatLogs(at1, at2, relabelled, noisy));
+        const [f1, f2, f3, f4] = cat.flights;
+        // Identical simulation 250 us later: only the logged time differs, which is enough.
+        expect(f1.header.sha256).toBe(f2.header.sha256);
+        expect(checkIndependentFlights(f1, f2)).toEqual({ independent: true, relation: "distinct", reasons: [] });
+        expect(f3.header.sha256).not.toBe(f1.header.sha256);
+        expect(checkIndependentFlights(f1, f3)).toEqual({ independent: true, relation: "distinct", reasons: [] });
+        expect(checkIndependentFlights(f2, f3).relation).toBe("same_flight_content");
+        expect(checkIndependentFlights(f1, f4).independent).toBe(true);
+    });
+
+    it("shared bytes shorter than the full prefix never make two flights the same", async () => {
+        const [hl] = (await catalogBbl(clean)).flights.map((f) => f.header.byteLength);
+        const shortA = clean.slice(0, hl + 300);
+        const shortB = editHeader(shortA, board, "H Board information:OTHER");
+        const cat = await catalogBbl(concatLogs(shortA, shortB));
+        const [a, b] = cat.flights;
+        expect(a.bodyPrefix.byteLength).toBe(300);
+        expect(a.bodyPrefix.sha256).toBe(b.bodyPrefix.sha256);
+        expect(relateFlights(a, b)).toBe("distinct");
+    });
+});
+
+// A stored reference is untyped JSON; tamper cases reach into it freely.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = Record<string, any>;
+
+/** A deep copy of a FlightRef with one change, as storage could hand it back. */
+function tampered(ref: FlightRef, change: (r: Loose) => void): FlightRef {
+    const copy = JSON.parse(JSON.stringify(ref));
+    change(copy);
+    return copy;
+}
+
+describe("PR #3 review: stored FlightRef validation", () => {
+    const pair = catalogBbl(concatLogs(clean, noisy, threeAxis));
+
+    const cases: [string, string, (r: Loose) => void][] = [
+        ["log index past the log count", "log_index", (r) => (r.logIndex = r.logCount)],
+        ["negative log index", "log_index", (r) => (r.logIndex = -1)],
+        ["fractional log index", "log_index", (r) => (r.logIndex = 0.5)],
+        ["log count of zero", "log_index", (r) => (r.logCount = 0)],
+        ["log index as a string", "log_index", (r) => (r.logIndex = "0")],
+        ["location id of another log", "location_id", (r) => (r.locationId = `${r.file.sha256}#2`)],
+        ["location id of another file", "location_id", (r) => (r.locationId = `${"0".repeat(64)}#0`)],
+        ["missing location id", "location_id", (r) => delete r.locationId],
+        ["empty file", "file", (r) => (r.file.byteLength = 0)],
+        ["file hash not hex", "file", (r) => (r.file.sha256 = "x")],
+        ["section past the end of the file", "section", (r) => (r.section.byteEnd = r.file.byteLength + 1)],
+        ["empty section", "section", (r) => (r.section.byteEnd = r.section.byteBegin)],
+        ["negative section start", "section", (r) => (r.section.byteBegin = -1)],
+        ["header longer than its section", "header", (r) => (r.header.byteLength = 10_000_000)],
+        ["header field of the wrong type", "header", (r) => (r.header.fields["Craft name"] = 7)],
+        ["missing header fields", "header", (r) => delete r.header.fields],
+        ["short body prefix where the section has room", "body_prefix", (r) => (r.bodyPrefix.byteLength = 100)],
+        ["body prefix longer than the rule", "body_prefix", (r) => (r.bodyPrefix.byteLength = BODY_PREFIX_BYTES + 1)],
+        ["invalid without a reason", "status", (r) => ((r.status = "invalid"), (r.timeRangeUs = null))],
+        ["unknown status", "status", (r) => (r.status = "ok")],
+        ["reasons not a list", "status", (r) => (r.reasons = "none")],
+        ["time range backwards", "time_range", (r) => (r.timeRangeUs = { min: 5, max: 1 })],
+        ["time range not finite", "time_range", (r) => (r.timeRangeUs = { min: 0, max: null })],
+        [
+            "time range on an invalid flight",
+            "time_range",
+            (r) => ((r.status = "invalid"), (r.reasons = ["log_unreadable:x"])),
+        ],
+    ];
+
+    it.each(cases)("rejects a reference with %s", async (_name, problem, change) => {
+        const cat = await pair;
+        const bad = tampered(cat.flights[0], change);
+        for (const [x, y, side] of [
+            [bad, cat.flights[2], "a"],
+            [cat.flights[2], bad, "b"],
+        ] as const) {
+            const r = checkIndependentFlights(x, y);
+            expect(r.independent).toBe(false);
+            expect(r.reasons).toContain(`flight_${side}_identity_incomplete`);
+            expect(r.reasons).toContain(`flight_${side}_identity:${problem}`);
+        }
+    });
+
+    it("every reference catalogBbl produces passes, before and after a JSON round trip", async () => {
+        const cat = await pair;
+        for (const f of [...cat.flights, ...JSON.parse(JSON.stringify(cat.flights))]) {
+            expect(flightRefProblems(f)).toEqual([]);
+        }
+        const broken = await catalogBbl(concatLogs(clean, new TextEncoder().encode(`${MARKER}H Data version:2\nx`)));
+        expect(broken.flights.map((f) => [f.status, flightRefProblems(f)])).toEqual([
+            ["valid", []],
+            ["invalid", []],
+        ]);
+    });
+
+    it("rejects two references of one file that contradict each other", async () => {
+        const cat = await pair;
+        const [f0, , f2] = cat.flights;
+        const otherSection = tampered(f0, (r) => (r.section.sha256 = f2.section.sha256));
+        expect(checkIndependentFlights(f0, otherSection).reasons).toEqual(["flight_refs_contradict:section"]);
+        const otherLength = tampered(f2, (r) => (r.file.byteLength += 1));
+        expect(checkIndependentFlights(f0, otherLength).reasons).toEqual(["flight_refs_contradict:file"]);
+        const overlapping = tampered(f2, (r) => {
+            r.section.byteBegin = f0.section.byteEnd - 1;
+        });
+        expect(checkIndependentFlights(f0, overlapping).reasons).toEqual(["flight_refs_contradict:order"]);
+        // The genuine pair from the same file is still independent.
+        expect(checkIndependentFlights(f0, f2).independent).toBe(true);
     });
 });
 
