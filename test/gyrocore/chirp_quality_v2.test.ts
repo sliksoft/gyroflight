@@ -208,7 +208,7 @@ describe("frequency-dependent coherence", () => {
             if (s !== "USABLE") {
                 return;
             }
-            const derived = b.outputPowerDb[i]! - b.inputPowerDb[i]! + 10 * Math.log10(b.coherence[i]);
+            const derived = b.outputRelativePowerDb[i]! - b.inputRelativePowerDb[i]! + 10 * Math.log10(b.coherence[i]);
             expect(derived).toBeCloseTo(b.magnitudeDb[i]!, 6);
             checked++;
         });
@@ -231,7 +231,7 @@ describe("excitation", () => {
         expect(inBand.length).toBeGreaterThan(0);
         expect(new Set(inBand)).toEqual(new Set(["NO_INPUT_POWER"]));
         expect(v.excitation.noInputPowerBins.value).toBe(inBand.length);
-        expect(v.excitation.inputPowerPeakDb.availability).toBe("UNKNOWN");
+        expect(v.excitation.inputRelativePowerPeakDb.availability).toBe("UNKNOWN");
         expect(v.sweep.usable.binCount).toBe(0);
         // The firmware still swept: the sweep is observed even with no excitation reaching the setpoint.
         expect(v.sweep.observed.availability).toBe("MEASURED");

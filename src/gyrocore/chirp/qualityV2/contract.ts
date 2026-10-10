@@ -33,7 +33,7 @@ import type { ChirpAxisName } from "../constants";
 
 export const CHIRP_QUALITY_V2_SCHEMA = "gyrocore.chirp-quality.v2";
 /** Bump when any computed value or rule changes, so stored reports can be told apart. */
-export const CHIRP_QUALITY_V2_ANALYSIS_VERSION = "2.0.0";
+export const CHIRP_QUALITY_V2_ANALYSIS_VERSION = "2.1.0";
 
 /**
  * MEASURED: derived from this log's data or headers.
@@ -57,6 +57,38 @@ export interface Metric<T> {
 
 export type LevelStatus = "YES" | "NO" | "UNKNOWN";
 
+/**
+ * A quality judgement, kept apart from availability: MEASURED only says a value
+ * exists. PASS, FAIL and WARNING come from an existing quality.ts gate, or a
+ * WARNING from a documented diagnostic finding; everything else is NOT_EVALUATED.
+ */
+export type Verdict = "PASS" | "FAIL" | "WARNING" | "NOT_EVALUATED";
+
+export type VerdictBasis = "EXISTING_GATE" | "DOCUMENTED_DIAGNOSTIC" | "NONE";
+
+export interface TopicVerdictV2 {
+    verdict: Verdict;
+    basis: VerdictBasis;
+    /** The quality.ts gate codes (or reason codes, for a diagnostic finding) behind the verdict. */
+    codes: string[];
+    /** The deciding gate's value and threshold, as quality.ts recorded them. */
+    value: number | null;
+    threshold: number | null;
+    /** MIN: the gate needs value >= threshold. MAX: value <= threshold. */
+    comparator: "MIN" | "MAX" | null;
+}
+
+export type QualityTopic =
+    | "detection"
+    | "sweep"
+    | "coverage"
+    | "excitation"
+    | "coherence"
+    | "usableBins"
+    | "sampleGaps"
+    | "contamination"
+    | "saturation";
+
 export interface Level {
     status: LevelStatus;
     role: MetricRole;
@@ -71,6 +103,10 @@ export interface EvidenceLevels {
     chirpDetected: Level;
     chirpQualityAvailable: Level;
     chirpQualified: Level;
+    /**
+     * The existing per-measurement Apply verdict (apply.allowed) for this CHIRP only.
+     * It is not cross-flight verification, composite tuning, Safety or physical Apply.
+     */
     tuningAuthorized: Level;
 }
 
@@ -97,7 +133,7 @@ export interface ChirpIdentityV2 {
 export interface ChirpProvenanceV2 {
     decoder: "betaflight-blackbox-viewer";
     transferFunction: "betaflight spectral_analysis.welchTransferFunction";
-    powerSpectrum: "betaflight spectral_analysis.computeSpectrogram";
+    relativePowerSpectrum: "betaflight spectral_analysis.computeSpectrogram";
     sweepFrequencySource: "firmware DEBUG_CHIRP debug[2] (0.1 Hz)";
     excitationSource: "firmware DEBUG_CHIRP debug[3] (x1000)";
     inputField: string;
@@ -165,10 +201,28 @@ export interface ExcitationV2 {
     requestedAmplitude: Metric<number>;
     /** The firmware's own excitation signal (debug[3] / 1000) during this CHIRP. */
     firmwareExcitation: Metric<{ rms: number; peakAbs: number }>;
-    /** Highest in-band input power, dB in Betaflight spectrogram units (relative). */
-    inputPowerPeakDb: Metric<number>;
+    /** Highest in-band input relative spectral power (see RelativePowerScaleV2). */
+    inputRelativePowerPeakDb: Metric<number>;
     /** In-band bins below Betaflight's input-power floor (Sxx < 1e-20): no excitation there. */
     noInputPowerBins: Metric<number>;
+}
+
+/**
+ * What the per-bin power numbers are. Not a PSD: Betaflight's spectrogram is
+ * |FFT(hann * x)|^2 per segment, without fs or window-power normalisation, so a
+ * value depends on the segment size and is only comparable within one report.
+ */
+export interface RelativePowerScaleV2 {
+    quantity: "RELATIVE_SPECTRAL_POWER";
+    isPsd: false;
+    /** Mean over the Welch segments of |FFT(hann * x)|^2, i.e. Betaflight's Welch Sxx (or Syy) / numSegments. */
+    definition: "mean_over_welch_segments_of_abs_fft_hann_squared";
+    unit: "dB re 1 (signal unit)^2";
+    window: "hann (betaflight hanningWindow), unnormalised";
+    segmentSize: number | null;
+    numSegments: number | null;
+    /** computeSpectrogram adds this to every |X|^2 before dB; V2 subtracts it again. */
+    spectrogramFloorRemoved: number;
 }
 
 export type BinStatus = "USABLE" | "WEAK_COHERENCE" | "NO_INPUT_POWER" | "OUTSIDE_ANALYSIS_BAND";
@@ -182,9 +236,12 @@ export interface CoherenceBinsV2 {
     coherence: number[];
     /** Null where Betaflight marks the bin below its input floor (-Infinity). */
     magnitudeDb: (number | null)[];
-    inputPowerDb: (number | null)[];
-    outputPowerDb: (number | null)[];
-    /** Coherent-to-incoherent output power, 10 log10(c / (1 - c)); null where c is 0 or 1. */
+    /** Input relative spectral power; null where Betaflight marks the bin below its input floor. */
+    inputRelativePowerDb: (number | null)[];
+    /** Output relative spectral power; null only when it cannot be recovered above the spectrogram floor. */
+    outputRelativePowerDb: (number | null)[];
+    powerScale: RelativePowerScaleV2;
+    /** Coherence-based estimate of coherent-to-incoherent output power, 10 log10(c / (1 - c)); null where c is 0 or 1. */
     snrDb: (number | null)[];
     status: BinStatus[];
     /** Bins above the stored range (beyond the requested and analysis band). */
@@ -201,8 +258,9 @@ export interface CoherenceRegionV2 {
     meanCoherence: number;
     minCoherence: number;
     maxCoherence: number;
-    meanInputPowerDb: number | null;
-    meanOutputPowerDb: number | null;
+    /** Linear mean over the region's bins, in dB (same scale as the bins). */
+    meanInputRelativePowerDb: number | null;
+    meanOutputRelativePowerDb: number | null;
 }
 
 export interface CoherenceV2 {
@@ -276,6 +334,8 @@ export interface ChirpQualityV2 {
     identity: ChirpIdentityV2;
     provenance: ChirpProvenanceV2;
     levels: EvidenceLevels;
+    /** One verdict per card topic; never derived from availability alone. */
+    verdicts: Record<QualityTopic, TopicVerdictV2>;
     sweep: SweepV2;
     excitation: ExcitationV2;
     coherence: CoherenceV2;
@@ -297,6 +357,7 @@ export const QV2_REASONS = {
     noTransferFunction: "quality_unavailable:no_transfer_function",
     chirpRejected: "chirp_not_qualified",
     tuningBlocked: "tuning_not_authorized",
+    authorizationScope: "authorization_scope:measurement_only",
     requestedHeadersMissing: "requested_sweep_unknown:headers_missing",
     requestedDurationMissing: "requested_duration_unknown:header_missing",
     requestedAmplitudeMissing: "requested_amplitude_unknown:header_missing",
@@ -314,6 +375,7 @@ export const QV2_REASONS = {
     excitationChannelConstant: "firmware_excitation_unknown:channel_constant",
     excitationChannelOutOfRange: "firmware_excitation_unknown:channel_out_of_range",
     powerSpectrumMismatch: "power_spectrum_unavailable:segment_mismatch",
+    outputPowerAtFloor: "relative_power_unknown:at_spectrogram_floor",
     gapsUnknown: "sample_gaps_unknown:too_few_timestamps",
     gapsDetected: "sample_gaps_detected",
     timestampsNotIncreasing: "timestamps_not_increasing",

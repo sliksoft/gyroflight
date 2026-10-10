@@ -143,7 +143,7 @@ const SECTIONS = [
 
 function checkInvariants(q: ChirpQualityV2) {
     expect(q.schema).toBe("gyrocore.chirp-quality.v2");
-    expect(q.analysisVersion).toBe("2.0.0");
+    expect(q.analysisVersion).toBe("2.1.0");
     const problems: string[] = [];
     walk(q, "q", (v, path) => {
         if (typeof v === "number" && !Number.isFinite(v)) {
@@ -289,7 +289,14 @@ function checkBins(m: ChirpMeasurement) {
     expect(b.availability).toBe("MEASURED");
     expect(b.kind).toBe("MEASURED_BINS");
     const n = b.frequencyHz.length;
-    for (const arr of [b.coherence, b.magnitudeDb, b.inputPowerDb, b.outputPowerDb, b.snrDb, b.status]) {
+    for (const arr of [
+        b.coherence,
+        b.magnitudeDb,
+        b.inputRelativePowerDb,
+        b.outputRelativePowerDb,
+        b.snrDb,
+        b.status,
+    ]) {
         expect(arr).toHaveLength(n);
     }
     expect(b.frequencyHz).toEqual(idx.map((k) => tf.frequencies[k]));
@@ -361,7 +368,7 @@ function checkRegions(q: ChirpQualityV2) {
 describe("contract", () => {
     it("exports the documented schema and version", () => {
         expect(CHIRP_QUALITY_V2_SCHEMA).toBe("gyrocore.chirp-quality.v2");
-        expect(CHIRP_QUALITY_V2_ANALYSIS_VERSION).toBe("2.0.0");
+        expect(CHIRP_QUALITY_V2_ANALYSIS_VERSION).toBe("2.1.0");
         expect(new Set(Object.values(QV2_REASONS)).size).toBe(Object.values(QV2_REASONS).length);
     });
 
@@ -434,17 +441,17 @@ describe("coherence bins against Betaflight's welchTransferFunction", () => {
             const k = pin.freq.indexOf(f);
             expect(k).toBeGreaterThan(0);
             for (const [got, ref] of [
-                [b.inputPowerDb[i], pin],
-                [b.outputPowerDb[i], pout],
+                [b.inputRelativePowerDb[i], pin],
+                [b.outputRelativePowerDb[i], pout],
             ] as const) {
                 expect(got).not.toBeNull();
                 const ok = Math.abs(got! - ref.db[k]) < 1e-6 || Math.abs(got! - ref.lin[k]) < 1e-6;
                 expect(ok, `bin ${f} Hz: ${got} vs dB-mean ${ref.db[k]} / linear-mean ${ref.lin[k]}`).toBe(true);
             }
         });
-        // inputPowerPeakDb: highest in-band input power.
-        const inBand = b.inputPowerDb.filter((_, i) => b.status[i] !== "OUTSIDE_ANALYSIS_BAND") as number[];
-        expect(q.excitation.inputPowerPeakDb.value).toBeCloseTo(Math.max(...inBand), 9);
+        // inputRelativePowerPeakDb: highest in-band input power.
+        const inBand = b.inputRelativePowerDb.filter((_, i) => b.status[i] !== "OUTSIDE_ANALYSIS_BAND") as number[];
+        expect(q.excitation.inputRelativePowerPeakDb.value).toBeCloseTo(Math.max(...inBand), 9);
     });
 
     it("zero excitation: in-band bins are NO_INPUT_POWER, no usable range, never saturation", () => {
@@ -812,7 +819,7 @@ describe("sample gaps", () => {
         expect(q.coherence.regions.items).toEqual([]);
         expect(q.coherence.meanBandCoherence.availability).not.toBe("MEASURED");
         expect(q.sweep.usableOfAnalysisBand.availability).not.toBe("MEASURED");
-        expect(q.excitation.inputPowerPeakDb.availability).not.toBe("MEASURED");
+        expect(q.excitation.inputRelativePowerPeakDb.availability).not.toBe("MEASURED");
         expect(q.levels.chirpQualified.status).toBe("NO");
         expect(q.levels.tuningAuthorized.status).toBe("NO");
     });
@@ -1196,8 +1203,8 @@ describe("further edge cases", () => {
             let at = 0;
             for (const r of q.coherence.regions.items) {
                 for (const [mean, arr] of [
-                    [r.meanInputPowerDb, b.inputPowerDb],
-                    [r.meanOutputPowerDb, b.outputPowerDb],
+                    [r.meanInputRelativePowerDb, b.inputRelativePowerDb],
+                    [r.meanOutputRelativePowerDb, b.outputRelativePowerDb],
                 ] as const) {
                     const vals = arr.slice(at, at + r.binCount).filter((v): v is number => v !== null);
                     if (vals.length === 0) {

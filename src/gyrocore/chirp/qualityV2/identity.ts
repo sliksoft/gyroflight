@@ -27,7 +27,7 @@
 import { catalogBbl, type BblCatalog } from "@/gyrocore/flight/identity";
 import { Sha256UnavailableError } from "@/gyrocore/flight/sha256";
 import type { ChirpMeasurement, ChirpQualificationReport } from "../qualification";
-import { refreshReasons } from "./analyze";
+import { refreshReasons, tuningAuthorizedLevel } from "./analyze";
 import { QV2_REASONS as R, type ChirpQualityV2 } from "./contract";
 
 function attachOne(v2: ChirpQualityV2, catalog: BblCatalog | null, reason: string | null): void {
@@ -92,10 +92,6 @@ export async function attachChirpFlightIdentity(
 /** Keep the TUNING AUTHORIZED level in step after recommendations are recomputed. */
 export function refreshAuthorizationLevel(m: Pick<ChirpMeasurement, "apply" | "qualityV2">): void {
     const allowed = m.apply.allowed;
-    m.qualityV2.levels.tuningAuthorized = {
-        status: allowed ? "YES" : "NO",
-        role: "ACTIVE_GATE",
-        reasons: allowed ? [] : [R.tuningBlocked],
-    };
+    m.qualityV2.levels.tuningAuthorized = tuningAuthorizedLevel(allowed);
     refreshReasons(m.qualityV2);
 }

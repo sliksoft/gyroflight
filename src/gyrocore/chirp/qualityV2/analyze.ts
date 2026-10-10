@@ -54,6 +54,9 @@ import {
     type Level,
     type Metric,
     type MetricRole,
+    type QualityTopic,
+    type RelativePowerScaleV2,
+    type TopicVerdictV2,
     type SampleGapsV2,
     type SaturationV2,
     type SweepV2,
@@ -285,19 +288,26 @@ interface BinTable {
     frequencyHz: number[];
     coherence: number[];
     magnitudeDb: (number | null)[];
-    inputPowerDb: (number | null)[];
-    outputPowerDb: (number | null)[];
+    inputRelativePowerDb: (number | null)[];
+    outputRelativePowerDb: (number | null)[];
     snrDb: (number | null)[];
     status: BinStatus[];
     omitted: number;
+    segmentSize: number;
     reasons: string[];
 }
 
+/** computeSpectrogram stores 10 log10(|X|^2 + 1e-20) per segment and bin. */
+export const SPECTROGRAM_POWER_FLOOR = 1e-20;
+
 /**
- * Mean power per bin of Betaflight's spectrogram, framed like its Welch
- * estimate. Returns null when the framing does not match the transfer function.
+ * Relative spectral power per bin in dB: the mean over the Welch segments of
+ * Betaflight's spectrogram |X|^2, with its floor removed. That equals the Welch
+ * Sxx / numSegments of welchTransferFunction (same Hann window, segment size and
+ * hop, no detrend). Null per bin where nothing is left above the floor; null
+ * overall when the framing does not match the transfer function.
  */
-function welchPowerDb(
+function relativePowerDb(
     signal: ArrayLike<number>,
     fs: number,
     segmentSize: number,
@@ -308,24 +318,27 @@ function welchPowerDb(
     if (sg.numSegments !== tf.numSegments || sg.numBins !== tf.frequencies.length) {
         return null;
     }
-    const out = new Float64Array(sg.numBins);
+    const out: (number | null)[] = [];
     for (let k = 0; k < sg.numBins; k++) {
         let sum = 0;
         for (let s = 0; s < sg.numSegments; s++) {
             sum += 10 ** (sg.power[s * sg.numBins + k] / 10);
         }
-        out[k] = 10 * Math.log10(sum / sg.numSegments);
+        const mean = sum / sg.numSegments - SPECTROGRAM_POWER_FLOOR;
+        out.push(mean > 0 ? 10 * Math.log10(mean) : null);
     }
     return out;
 }
 
-function binTable(inp: QualityV2Input, fs: number, segmentSize: number, tf: TransferFunction): BinTable {
+function binTable(inp: QualityV2Input, fs: number, tf: TransferFunction): BinTable {
+    // The segment welchTransferFunction actually used (it may clamp the requested one).
+    const segmentSize = 2 * (tf.frequencies.length - 1);
     const band = inp.quality.analysisBandHz;
     const nyquist = fs / 2;
     const top = Math.min(Math.max(band[1], inp.requestedRangeHz?.[1] ?? 0), nyquist);
     const reasons: string[] = [];
-    const inPow = welchPowerDb(inp.setpoint, fs, segmentSize, inp.welchOverlap, tf);
-    const outPow = welchPowerDb(inp.gyro, fs, segmentSize, inp.welchOverlap, tf);
+    const inPow = relativePowerDb(inp.setpoint, fs, segmentSize, inp.welchOverlap, tf);
+    const outPow = relativePowerDb(inp.gyro, fs, segmentSize, inp.welchOverlap, tf);
     if (!inPow || !outPow) {
         reasons.push(R.powerSpectrumMismatch);
     }
@@ -333,11 +346,12 @@ function binTable(inp: QualityV2Input, fs: number, segmentSize: number, tf: Tran
         frequencyHz: [],
         coherence: [],
         magnitudeDb: [],
-        inputPowerDb: [],
-        outputPowerDb: [],
+        inputRelativePowerDb: [],
+        outputRelativePowerDb: [],
         snrDb: [],
         status: [],
         omitted: 0,
+        segmentSize,
         reasons,
     };
     const f = tf.frequencies;
@@ -364,8 +378,12 @@ function binTable(inp: QualityV2Input, fs: number, segmentSize: number, tf: Tran
         t.frequencyHz.push(fk);
         t.coherence.push(c);
         t.magnitudeDb.push(mag);
-        t.inputPowerDb.push(mag === null || !inPow ? null : finiteOrNull(inPow[k]));
-        t.outputPowerDb.push(mag === null || !outPow ? null : finiteOrNull(outPow[k]));
+        t.inputRelativePowerDb.push(mag === null || !inPow ? null : inPow[k]);
+        const out = outPow ? outPow[k] : null;
+        if (outPow && out === null && !reasons.includes(R.outputPowerAtFloor)) {
+            reasons.push(R.outputPowerAtFloor);
+        }
+        t.outputRelativePowerDb.push(out);
         t.snrDb.push(c > 0 && c < 1 ? 10 * Math.log10(c / (1 - c)) : null);
         t.status.push(status);
     }
@@ -381,7 +399,7 @@ function dbMean(values: (number | null)[]): number | null {
 }
 
 export function summarizeRegions(
-    t: Pick<BinTable, "frequencyHz" | "coherence" | "inputPowerDb" | "outputPowerDb" | "status">,
+    t: Pick<BinTable, "frequencyHz" | "coherence" | "inputRelativePowerDb" | "outputRelativePowerDb" | "status">,
 ) {
     const items: CoherenceRegionV2[] = [];
     let i = 0;
@@ -399,12 +417,25 @@ export function summarizeRegions(
             meanCoherence: npMean(coh),
             minCoherence: Math.min(...coh),
             maxCoherence: Math.max(...coh),
-            meanInputPowerDb: dbMean(t.inputPowerDb.slice(i, j + 1)),
-            meanOutputPowerDb: dbMean(t.outputPowerDb.slice(i, j + 1)),
+            meanInputRelativePowerDb: dbMean(t.inputRelativePowerDb.slice(i, j + 1)),
+            meanOutputRelativePowerDb: dbMean(t.outputRelativePowerDb.slice(i, j + 1)),
         });
         i = j + 1;
     }
     return items;
+}
+
+function powerScale(segmentSize: number | null, numSegments: number | null): RelativePowerScaleV2 {
+    return {
+        quantity: "RELATIVE_SPECTRAL_POWER",
+        isPsd: false,
+        definition: "mean_over_welch_segments_of_abs_fft_hann_squared",
+        unit: "dB re 1 (signal unit)^2",
+        window: "hann (betaflight hanningWindow), unnormalised",
+        segmentSize,
+        numSegments,
+        spectrogramFloorRemoved: SPECTROGRAM_POWER_FLOOR,
+    };
 }
 
 function coherenceReport(inp: QualityV2Input, bins: BinTable | null, binWidthHz: number | null): CoherenceV2 {
@@ -429,8 +460,9 @@ function coherenceReport(inp: QualityV2Input, bins: BinTable | null, binWidthHz:
                 frequencyHz: [],
                 coherence: [],
                 magnitudeDb: [],
-                inputPowerDb: [],
-                outputPowerDb: [],
+                inputRelativePowerDb: [],
+                outputRelativePowerDb: [],
+                powerScale: powerScale(null, null),
                 snrDb: [],
                 status: [],
                 omittedBinCount: 0,
@@ -453,8 +485,9 @@ function coherenceReport(inp: QualityV2Input, bins: BinTable | null, binWidthHz:
             frequencyHz: bins.frequencyHz,
             coherence: bins.coherence,
             magnitudeDb: bins.magnitudeDb,
-            inputPowerDb: bins.inputPowerDb,
-            outputPowerDb: bins.outputPowerDb,
+            inputRelativePowerDb: bins.inputRelativePowerDb,
+            outputRelativePowerDb: bins.outputRelativePowerDb,
+            powerScale: powerScale(bins.segmentSize, inp.transferFunction?.numSegments ?? null),
             snrDb: bins.snrDb,
             status: bins.status,
             omittedBinCount: bins.omitted,
@@ -493,18 +526,18 @@ function excitationReport(inp: QualityV2Input, bins: BinTable | null): Excitatio
             firmwareExcitation = metric("MEASURED", { rms: s.rms / 1000, peakAbs: s.peak / 1000 }, "normalized");
         }
     }
-    let inputPowerPeakDb: Metric<number>;
+    let inputRelativePowerPeakDb: Metric<number>;
     let noInputPowerBins: Metric<number>;
     if (!bins) {
-        inputPowerPeakDb = metric("UNAVAILABLE", null, "dB", [R.noTransferFunction]);
+        inputRelativePowerPeakDb = metric("UNAVAILABLE", null, "dB rel", [R.noTransferFunction]);
         noInputPowerBins = metric("UNAVAILABLE", null, "bins", [R.noTransferFunction]);
     } else {
-        const inBand = bins.inputPowerDb.filter(
+        const inBand = bins.inputRelativePowerDb.filter(
             (v, k): v is number => v !== null && bins.status[k] !== "OUTSIDE_ANALYSIS_BAND",
         );
-        inputPowerPeakDb = inBand.length
-            ? metric("MEASURED", Math.max(...inBand), "dB")
-            : metric("UNKNOWN", null, "dB", bins.reasons.length ? bins.reasons : [R.noUsableBins]);
+        inputRelativePowerPeakDb = inBand.length
+            ? metric("MEASURED", Math.max(...inBand), "dB rel")
+            : metric("UNKNOWN", null, "dB rel", bins.reasons.length ? bins.reasons : [R.noUsableBins]);
         noInputPowerBins = metric("MEASURED", bins.status.filter((s) => s === "NO_INPUT_POWER").length, "bins");
     }
     return {
@@ -519,7 +552,7 @@ function excitationReport(inp: QualityV2Input, bins: BinTable | null): Excitatio
                 ? metric("UNKNOWN", null, "header", [R.requestedAmplitudeMissing])
                 : metric("MEASURED", inp.requestedAmplitude, "header"),
         firmwareExcitation,
-        inputPowerPeakDb,
+        inputRelativePowerPeakDb,
         noInputPowerBins,
     };
 }
@@ -662,8 +695,74 @@ function levels(inp: QualityV2Input): EvidenceLevels {
         chirpDetected: level(true, []),
         chirpQualityAvailable: level(inp.transferFunction !== null, inp.transferFunction ? [] : [R.noTransferFunction]),
         chirpQualified: level(inp.qualified, inp.qualified ? [] : [R.chirpRejected], "ACTIVE_GATE"),
-        tuningAuthorized: level(inp.applyAllowed, inp.applyAllowed ? [] : [R.tuningBlocked], "ACTIVE_GATE"),
+        tuningAuthorized: tuningAuthorizedLevel(inp.applyAllowed),
     };
+}
+
+/** The per-measurement Apply verdict, always labelled with its scope. */
+export function tuningAuthorizedLevel(allowed: boolean): Level {
+    return level(allowed, allowed ? [R.authorizationScope] : [R.tuningBlocked, R.authorizationScope], "ACTIVE_GATE");
+}
+
+/** Gates whose rule is value <= threshold; every other mapped gate is value >= threshold. */
+const MAX_GATES = new Set(["excessive_gaps", "timestamp_gaps_present"]);
+
+/** Existing quality.ts gates per card topic. A topic without gates is never judged. */
+const TOPIC_GATES: Record<QualityTopic, string[]> = {
+    detection: [],
+    sweep: ["chirp_band_unknown_default_used", "chirp_band_near_nyquist"],
+    coverage: [],
+    excitation: ["insufficient_excitation"],
+    coherence: ["low_coherence"],
+    usableBins: ["unusable_frequency_range"],
+    sampleGaps: ["excessive_gaps", "timestamp_gaps_present"],
+    contamination: [],
+    saturation: [],
+};
+
+const notEvaluated = (): TopicVerdictV2 => ({
+    verdict: "NOT_EVALUATED",
+    basis: "NONE",
+    codes: [],
+    value: null,
+    threshold: null,
+    comparator: null,
+});
+
+/** The worst existing gate outcome for each topic; NOT_EVALUATED when no gate ran. */
+function verdicts(q: QualityReport, saturation: SaturationV2): Record<QualityTopic, TopicVerdictV2> {
+    const rank = { PASS: 0, WARNING: 1, FAIL: 2 } as const;
+    const out = {} as Record<QualityTopic, TopicVerdictV2>;
+    for (const [topic, codes] of Object.entries(TOPIC_GATES) as [QualityTopic, string[]][]) {
+        const ran = q.gates.filter((g) => codes.includes(g.code));
+        if (!ran.length) {
+            out[topic] = notEvaluated();
+            continue;
+        }
+        const graded = ran.map((g) => ({
+            g,
+            verdict: (g.passed ? "PASS" : g.severity === "blocking" ? "FAIL" : "WARNING") as keyof typeof rank,
+        }));
+        const worst = graded.reduce((a, b) => (rank[b.verdict] > rank[a.verdict] ? b : a));
+        out[topic] = {
+            verdict: worst.verdict,
+            basis: "EXISTING_GATE",
+            codes: [...new Set(ran.map((g) => g.code))],
+            value: Number.isFinite(worst.g.value) ? worst.g.value : null,
+            threshold: worst.g.threshold,
+            comparator: worst.g.threshold === null ? null : MAX_GATES.has(worst.g.code) ? "MAX" : "MIN",
+        };
+    }
+    // Motor saturation has no gate; a detection is a documented diagnostic finding, never a PASS.
+    if (saturation.status === "DETECTED") {
+        out.saturation = {
+            ...notEvaluated(),
+            verdict: "WARNING",
+            basis: "DOCUMENTED_DIAGNOSTIC",
+            codes: saturation.reasons.filter((r) => r.startsWith("saturation_detected:")),
+        };
+    }
+    return out;
 }
 
 function collectReasons(r: Omit<ChirpQualityV2, "reasons">): string[] {
@@ -700,10 +799,11 @@ export function refreshReasons(r: ChirpQualityV2): void {
 export function buildChirpQualityV2(inp: QualityV2Input): ChirpQualityV2 {
     const fs = inp.rate.effectiveRateHz;
     const tf = inp.transferFunction;
-    const bins = tf && fs && inp.segmentSize ? binTable(inp, fs, inp.segmentSize, tf) : null;
+    const bins = tf && fs && inp.segmentSize ? binTable(inp, fs, tf) : null;
     const binWidthHz = tf && tf.frequencies.length > 1 ? tf.frequencies[1] - tf.frequencies[0] : null;
     const { sweep: observed, hz } = observedSweep(inp.chirpFrequencyDeciHz, inp.requestedRangeHz);
     const notAttached = [R.identityNotAttached];
+    const saturation = saturationReport(inp);
 
     const report: Omit<ChirpQualityV2, "reasons"> = {
         schema: CHIRP_QUALITY_V2_SCHEMA,
@@ -725,7 +825,7 @@ export function buildChirpQualityV2(inp: QualityV2Input): ChirpQualityV2 {
         provenance: {
             decoder: "betaflight-blackbox-viewer",
             transferFunction: "betaflight spectral_analysis.welchTransferFunction",
-            powerSpectrum: "betaflight spectral_analysis.computeSpectrogram",
+            relativePowerSpectrum: "betaflight spectral_analysis.computeSpectrogram",
             sweepFrequencySource: "firmware DEBUG_CHIRP debug[2] (0.1 Hz)",
             excitationSource: "firmware DEBUG_CHIRP debug[3] (x1000)",
             inputField: `setpoint[${inp.axis}]`,
@@ -743,6 +843,7 @@ export function buildChirpQualityV2(inp: QualityV2Input): ChirpQualityV2 {
             binWidthHz,
         },
         levels: levels(inp),
+        verdicts: verdicts(inp.quality, saturation),
         sweep: sweepReport(inp, observed, bins),
         excitation: excitationReport(inp, bins),
         coherence: coherenceReport(inp, bins, binWidthHz),
@@ -753,7 +854,7 @@ export function buildChirpQualityV2(inp: QualityV2Input): ChirpQualityV2 {
             role: "DIAGNOSTIC",
             reasons: [R.contaminationUnknown],
         },
-        saturation: saturationReport(inp),
+        saturation,
     };
     return { ...report, reasons: collectReasons(report) };
 }
