@@ -73,6 +73,9 @@ import {
 } from "./headers";
 import type { SimplifiedSliders } from "@/gyrocore/tuning/merge";
 import { analysisBand, postAnalysisReport, preAnalysisGates, type QualityReport } from "./quality";
+import { buildChirpQualityV2 } from "./qualityV2/analyze";
+import type { ChirpQualityV2 } from "./qualityV2/contract";
+import { refreshAuthorizationLevel } from "./qualityV2/identity";
 import { guardRecommendation, type RecommendationGuard } from "./recommendationGuard";
 import {
     analyzeTimestampSpacing,
@@ -83,6 +86,18 @@ import {
 } from "./sampleRate";
 
 export const WELCH_OVERLAP = 0.5;
+
+const CHIRP_AMPLITUDE_KEYS = ["chirp_amplitude_roll", "chirp_amplitude_pitch", "chirp_amplitude_yaw"] as const;
+
+/** The Viewer's motorOutput [min, max], or null when not logged as two ordered numbers. */
+function motorOutputRange(viewer: Record<string, unknown>): [number, number] | null {
+    const r = viewer.motorOutput;
+    if (!Array.isArray(r) || r.length < 2) {
+        return null;
+    }
+    const [min, max] = r;
+    return typeof min === "number" && typeof max === "number" && Number.isFinite(min) && max > min ? [min, max] : null;
+}
 
 /** The log's simplified-tuning sliders as firmware integers; nothing defaulted. */
 export function loggedSimplifiedSliders(h: LoggedHeaders): SimplifiedSliders {
@@ -159,6 +174,8 @@ export interface ChirpMeasurement<G = unknown> {
     recommendation: { result: GainRecommendation; gains: G; guard: RecommendationGuard } | null;
     tune: TuneGateResult;
     apply: ApplyAuthorization;
+    /** CHIRP Quality V2 diagnostics (docs/gyrocore/CHIRP_QUALITY_V2.md). Never read by a gate. */
+    qualityV2: ChirpQualityV2;
 }
 
 export interface ChirpLogReport<G = unknown> {
@@ -343,6 +360,7 @@ function qualifySegment<G>(
         headers: LoggedHeaders;
         sysConfig: SysConfig;
         currentSliders: Required<CurrentSliders>;
+        motorOutputRange: [number, number] | null;
         axisOccurrence: number;
         logWarnings: string[];
         targetPhaseMarginDeg: number;
@@ -409,9 +427,46 @@ function qualifySegment<G>(
         recommendation: null,
         tune: currentTuneGates(ctx.headers, seg.axis),
         apply: { allowed: false, blocked: [], warnings: [] },
+        qualityV2: undefined as unknown as ChirpQualityV2,
     };
     m.recommendation = recommend(m, ctx.currentSliders, ctx.targetPhaseMarginDeg, ctx.math);
     m.apply = authorizeMeasurement(m);
+    // Built last, from the finished verdicts; it reads them and changes none.
+    const sub = (a: ArrayLike<number> | null | undefined) => (a ? (a as Float32Array).subarray(lo, hi) : null);
+    m.qualityV2 = buildChirpQualityV2({
+        measurementId: m.id,
+        logIndex: ctx.logIndex,
+        chirpIndex: seg.index,
+        axisOccurrence: ctx.axisOccurrence,
+        axis: seg.axis,
+        axisName: m.axisName,
+        startTimeUs: seg.startTimeUs,
+        endTimeUs: seg.endTimeUs,
+        durationS: seg.durationS,
+        setpoint: input,
+        gyro: output,
+        timeUs: ts,
+        chirpFrequencyDeciHz: sub(extraction.chirpFrequencyDeciHz),
+        chirpExcitationMilli: sub(extraction.chirpExcitationMilli),
+        motorMax: sub(extraction.motorMax),
+        motorMin: sub(extraction.motorMin),
+        rate,
+        spacing,
+        segmentSize,
+        welchOverlap: WELCH_OVERLAP,
+        transferFunction: diagnostics?.transferFunction ?? null,
+        quality,
+        requestedRangeHz: extraction.frequencyRangeHz,
+        requestedDurationS: loggedInt(ctx.headers, "chirp_time_seconds"),
+        requestedAmplitude: loggedInt(ctx.headers, CHIRP_AMPLITUDE_KEYS[seg.axis]),
+        motorOutputRange: ctx.motorOutputRange,
+        firmwareRevision: ctx.headers.firmwareRevision,
+        apiVersion: extraction.apiVersion,
+        flagGating: extraction.flagGating,
+        highResolutionScale: extraction.highResolutionScale,
+        qualified: m.state !== "rejected",
+        applyAllowed: m.apply.allowed,
+    });
     return m;
 }
 
@@ -476,7 +531,8 @@ function qualifyLog<G>(
         report.error = extraction.errors[0];
         return report;
     }
-    const sysConfig = autotuneSysConfig(flightLog.getSysConfig(), headers, flightLog.getMainFieldNames());
+    const viewerConfig = flightLog.getSysConfig();
+    const sysConfig = autotuneSysConfig(viewerConfig, headers, flightLog.getMainFieldNames());
     const currentSliders = math.extractCurrentSliders(sysConfig);
     report.sysConfig = sysConfig;
     report.currentSliders = currentSliders;
@@ -491,6 +547,7 @@ function qualifyLog<G>(
                 headers,
                 sysConfig,
                 currentSliders,
+                motorOutputRange: motorOutputRange(viewerConfig),
                 axisOccurrence: seen[seg.axis],
                 logWarnings,
                 targetPhaseMarginDeg,
@@ -557,6 +614,7 @@ export function recomputeRecommendations<G>(
         for (const m of log.measurements) {
             m.recommendation = log.currentSliders ? recommend(m, log.currentSliders, targetPhaseMarginDeg, math) : null;
             m.apply = authorizeMeasurement(m);
+            refreshAuthorizationLevel(m);
         }
     }
 }
