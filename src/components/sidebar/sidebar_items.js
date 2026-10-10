@@ -1,7 +1,9 @@
 import { configHasBuildOption } from "../../composables/useBuildOptions";
 import { gyroflightSidebarItems } from "../../gyroflight/tabs";
+import { applyGyroflightSidebarPolicy } from "../../gyroflight/navigation";
 
-export const sidebarItems = [
+// Gyroflight: applyGyroflightSidebarPolicy only sets upstream's hideInSidebar on listed entries.
+export const sidebarItems = applyGyroflightSidebarPolicy([
     { key: "landing", mode: "disconnected", i18n: "tabLanding", icon: "i-lucide-home" },
     { key: "firmware_flasher", mode: "disconnected", i18n: "tabFirmwareFlasher", icon: "i-lucide-zap" },
     { key: "help", mode: "disconnected", i18n: "tabHelp", icon: "i-lucide-help-circle" },
@@ -51,7 +53,7 @@ export const sidebarItems = [
 
     { key: "backups", mode: "loggedin", i18n: "tabBackups", icon: "i-lucide-database", hideInSidebar: true },
     { key: "user_profile", mode: "loggedin", i18n: "tabUserProfile", icon: "i-lucide-user", hideInSidebar: true },
-];
+]);
 
 export function isItemVisible(item, ctx) {
     if (item.expert && !ctx.expertMode) {

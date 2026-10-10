@@ -4,17 +4,25 @@
             <div id="background" v-if="isMobileSidebarOpen" aria-hidden="true" @click="isRevealed = false"></div>
             <div id="side_menu_swipe"></div>
             <div v-if="isLandingTab" class="mobile-topbar" :class="{ 'mobile-topbar--hidden': topbarHidden }">
-                <div class="mobile-topbar__logo" :title="logoTooltip" aria-hidden="true"></div>
+                <!-- Gyroflight: product wordmark in place of the Betaflight logo image -->
+                <GyroflightLogo
+                    variant="mobile"
+                    class="mobile-topbar__logo"
+                    :title="logoTooltip"
+                    aria-hidden="true"
+                    :configurator-version="CONFIGURATOR.getDisplayVersion()"
+                />
             </div>
             <UserSession v-if="BETAFLIGHT_ACCOUNTS_ENABLED" is-compact class="floating-account" />
             <div id="tab-content-container" :class="{ 'has-mobile-topbar': isLandingTab }">
                 <div class="tab_container" :class="{ reveal: isMobileSidebarOpen }">
-                    <betaflight-logo
+                    <!-- Gyroflight: product logo in place of the BetaflightLogo component (same props) -->
+                    <GyroflightLogo
                         :configurator-version="CONFIGURATOR.getDisplayVersion()"
                         :firmware-version="FC.CONFIG.flightControllerVersion"
                         :firmware-id="FC.CONFIG.flightControllerIdentifier"
                         :hardware-id="FC.CONFIG.hardwareName"
-                    ></betaflight-logo>
+                    />
                     <Teleport to=".floating-connect" :disabled="!useFloatingChrome">
                         <ConnectButton />
                     </Teleport>
@@ -57,6 +65,7 @@
 <script setup lang="ts">
 import { isAndroid } from "@/js/utils/checkCompatibility.js";
 import { BETAFLIGHT_ACCOUNTS_ENABLED } from "@/gyroflight/policy";
+import GyroflightLogo from "@/gyroflight/branding/GyroflightLogo.vue";
 import { computed, nextTick, provide, reactive, ref, shallowRef, watch } from "vue";
 import { useMediaQuery } from "@vueuse/core";
 import ConnectButton from "./components/device-picker/ConnectButton.vue";
