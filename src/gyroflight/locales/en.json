@@ -361,5 +361,63 @@
     },
     "gyrocorePerAxisEvidenceNote": {
         "message": "Per-axis proposals are evidence. Sliders are global, so Apply writes only the GyroCore global tune shown above, never one axis's column."
-    }
+    },
+    "gyrocoreQv2Heading": { "message": "CHIRP quality (Quality V2 diagnostics)" },
+    "gyrocoreQv2Title": { "message": "CHIRP QUALITY — $1 ($2)" },
+    "gyrocoreQv2DiagnosticNote": {
+        "message": "Diagnostics only. These values are not used to authorize tuning; only the qualification gates above decide."
+    },
+    "gyrocoreQv2RowDetection": { "message": "Detection" },
+    "gyrocoreQv2RowSweep": { "message": "Sweep" },
+    "gyrocoreQv2RowCoverage": { "message": "Frequency coverage" },
+    "gyrocoreQv2RowExcitation": { "message": "Excitation" },
+    "gyrocoreQv2RowCoherence": { "message": "Coherence" },
+    "gyrocoreQv2RowUsableBins": { "message": "Usable bins" },
+    "gyrocoreQv2RowSampleGaps": { "message": "Sample gaps" },
+    "gyrocoreQv2RowContamination": { "message": "Contamination" },
+    "gyrocoreQv2RowSaturation": { "message": "Saturation" },
+    "gyrocoreQv2DetailDetection": { "message": "$1 samples, $2 s" },
+    "gyrocoreQv2DetailRequested": { "message": "requested $1" },
+    "gyrocoreQv2DetailObserved": { "message": "observed $1" },
+    "gyrocoreQv2DetailRuns": { "message": "$1 runs" },
+    "gyrocoreQv2DetailCoverage": { "message": "usable $1 · observed share of requested $2" },
+    "gyrocoreQv2DetailExcitation": { "message": "setpoint RMS $1 · gyro RMS $2" },
+    "gyrocoreQv2DetailNoInput": { "message": "$1 bins without input" },
+    "gyrocoreQv2DetailCoherence": { "message": "mean $1 over $2–$3 Hz" },
+    "gyrocoreQv2DetailUsableBins": { "message": "of $1 in the analysis band" },
+    "gyrocoreQv2DetailGaps": { "message": "$1 gaps, about $2 samples missing ($3)" },
+    "gyrocoreQv2DetailSaturation": { "message": "motors at maximum: $1 samples, at minimum: $2 samples" },
+    "gyrocoreQv2Level_bblValid": { "message": "BBL valid" },
+    "gyrocoreQv2Level_flightValid": { "message": "Flight valid" },
+    "gyrocoreQv2Level_blackboxDataUsable": { "message": "Data usable" },
+    "gyrocoreQv2Level_chirpDetected": { "message": "CHIRP detected" },
+    "gyrocoreQv2Level_chirpQualityAvailable": { "message": "Quality available" },
+    "gyrocoreQv2Level_chirpQualified": { "message": "CHIRP qualified (existing gates)" },
+    "gyrocoreQv2Level_tuningAuthorized": { "message": "Measurement authorization" },
+    "gyrocoreQv2AuthorizationScope": {
+        "message": "Measurement authorization applies to this CHIRP only. Cross-flight verification, composite tuning, Safety and physical FC Apply are separate gates; physical Apply stays locked ($1)."
+    },
+    "gyrocoreQv2Verdict_PASS": { "message": "Existing gate: PASS" },
+    "gyrocoreQv2Verdict_FAIL": { "message": "Existing gate: FAIL" },
+    "gyrocoreQv2Verdict_WARNING": { "message": "Existing gate: warning" },
+    "gyrocoreQv2Verdict_NOT_EVALUATED": { "message": "Diagnostic only" },
+    "gyrocoreQv2VerdictDiagnosticFinding": { "message": "Diagnostic finding" },
+    "gyrocoreQv2CriterionMin": { "message": "minimum $1" },
+    "gyrocoreQv2CriterionMax": { "message": "maximum $1" },
+    "gyrocoreQv2ChartLabel": { "message": "Coherence per frequency bin for $1" },
+    "gyrocoreQv2ChartAxes": {
+        "message": "Coherence per Betaflight bin (0–1) against frequency (Hz, log). Dashed: existing usable-bin criterion 0.5."
+    },
+    "gyrocoreQv2Bin_USABLE": { "message": "Usable" },
+    "gyrocoreQv2Bin_WEAK_COHERENCE": { "message": "Weak coherence" },
+    "gyrocoreQv2Bin_NO_INPUT_POWER": { "message": "No input power" },
+    "gyrocoreQv2Bin_OUTSIDE_ANALYSIS_BAND": { "message": "Outside analysis band" },
+    "gyrocoreQv2NoBins": {
+        "message": "No frequency bins: Betaflight could not compute a transfer function for this CHIRP."
+    },
+    "gyrocoreQv2RegionsTitle": { "message": "Frequency regions and reason codes" },
+    "gyrocoreQv2ColFrequency": { "message": "Frequency (Hz)" },
+    "gyrocoreQv2ColBins": { "message": "Bins" },
+    "gyrocoreQv2ColCoherence": { "message": "Coherence mean (min–max)" },
+    "gyrocoreQv2ColDiagnostic": { "message": "Diagnostic" }
 }

@@ -53,6 +53,8 @@ export interface SyntheticFrame {
     setpoint: [number, number, number];
     gyro: [number, number, number];
     debug: [number, number, number, number];
+    /** Logged only when encodeLog gets motorCount (fields motor[0..n-1], predictor PREVIOUS). */
+    motors?: number[];
 }
 
 function unsignedVB(out: number[], value: number) {
@@ -68,8 +70,9 @@ function signedVB(out: number[], value: number) {
     unsignedVB(out, ((value << 1) ^ (value >> 31)) >>> 0);
 }
 
-function values(iteration: number, f: SyntheticFrame) {
-    return [iteration, f.time, ...f.setpoint, ...f.gyro, ...f.debug];
+function values(iteration: number, f: SyntheticFrame, motorCount: number) {
+    const motors = Array.from({ length: motorCount }, (_, i) => f.motors?.[i] ?? 0);
+    return [iteration, f.time, ...f.setpoint, ...f.gyro, ...f.debug, ...motors];
 }
 
 /** One log: header, an S-frame with the given flight-mode flags, then I/P frames, then LOG_END. */
@@ -81,9 +84,13 @@ export function encodeLog(
         looptime?: number;
         pidProcessDenom?: number;
         extraHeaders?: string[];
+        motorCount?: number;
     },
 ) {
-    const n = FIELDS.length;
+    const motorCount = opts.motorCount ?? 0;
+    const fields = [...FIELDS, ...Array.from({ length: motorCount }, (_, i) => `motor[${i}]`)];
+    const predictors = [...P_PREDICTOR, ...Array(motorCount).fill(1)];
+    const n = fields.length;
     const header = [
         "H Product:Blackbox flight data recorder by Nicholas Sherlock",
         "H Data version:2",
@@ -95,7 +102,7 @@ export function encodeLog(
         `H pid_process_denom:${opts.pidProcessDenom ?? 8}`,
         "H debug_mode:96",
         ...(opts.extraHeaders ?? []).map((h) => `H ${h}`),
-        `H Field I name:${FIELDS.join(",")}`,
+        `H Field I name:${fields.join(",")}`,
         `H Field I signed:0,0,${Array(n - 2)
             .fill(1)
             .join(",")}`,
@@ -103,7 +110,7 @@ export function encodeLog(
         `H Field I encoding:1,1,${Array(n - 2)
             .fill(0)
             .join(",")}`,
-        `H Field P predictor:${P_PREDICTOR.join(",")}`,
+        `H Field P predictor:${predictors.join(",")}`,
         `H Field P encoding:9,${Array(n - 1)
             .fill(0)
             .join(",")}`,
@@ -122,7 +129,7 @@ export function encodeLog(
     let prev: number[] = [];
     let prev2: number[] = [];
     frames.forEach((frame, iteration) => {
-        const cur = values(iteration, frame);
+        const cur = values(iteration, frame, motorCount);
         if (iteration % opts.iInterval === 0) {
             out.push("I".charCodeAt(0));
             unsignedVB(out, cur[0]);
@@ -137,7 +144,7 @@ export function encodeLog(
         out.push("P".charCodeAt(0));
         for (let i = 1; i < n; i++) {
             let predicted: number;
-            switch (P_PREDICTOR[i]) {
+            switch (predictors[i]) {
                 case 2:
                     predicted = 2 * prev[i] - prev2[i];
                     break;

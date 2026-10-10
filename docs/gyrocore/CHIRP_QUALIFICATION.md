@@ -256,6 +256,6 @@ See [UPSTREAM.md](UPSTREAM.md). In short:
   (`merge.py`, `MERGE_REQUIRES_REVIEW`) is not migrated: it belongs to the Safety/review work.
 - **Upstream `chirp_bbl_parser.ts` bug.** It is no longer on Gyroflight's path. Reporting it upstream is
   for the owner to decide; this fork makes no upstream PRs.
-- **Diagnosis evidence** (completion %, sweep reached, end cause, coherence by band;
-  `diagnose_chirp.py`) is not ported. The gates explain rejections, but they do not say how far the sweep
-  got.
+- **Diagnosis evidence** (completion %, sweep reached, coherence by band) is reported by CHIRP Quality V2
+  (`CHIRP_QUALITY_V2.md`) as diagnostics next to the gates; it does not change them. An end-cause
+  classifier from `diagnose_chirp.py` is not ported.
