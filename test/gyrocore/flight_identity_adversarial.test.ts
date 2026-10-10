@@ -423,16 +423,24 @@ describe("relations and independence", () => {
         expect(checkIndependentFlights(cat.flights[0], cat.flights[1]).independent).toBe(false);
     });
 
-    it("a difference inside the body prefix or header makes flights distinct", async () => {
+    it("a difference inside the body prefix makes flights distinct", async () => {
         const a = log();
         const hl = headerLength(a);
         const b = a.slice();
         b[hl + BODY_PREFIX_BYTES - 1] ^= 0x01;
+        const cat = await catalogBbl(concatLogs(a, b));
+        expect(relateFlights(cat.flights[0], cat.flights[1])).toBe("distinct");
+    });
+
+    // PR #3 review: the same recording repackaged with an edited header used to count as independent.
+    it("the same frame data under an edited header is the same flight", async () => {
+        const a = log();
         const c = withRawHeader(a, headerWith(a, [enc("H Craft name:x\n")]));
-        const cat = await catalogBbl(concatLogs(a, b, c));
-        const [fa, fb, fc] = cat.flights;
-        expect(relateFlights(fa, fb)).toBe("distinct");
-        expect(relateFlights(fa, fc)).toBe("distinct");
+        const cat = await catalogBbl(concatLogs(a, c));
+        const [fa, fc] = cat.flights;
+        expect(fa.header.sha256).not.toBe(fc.header.sha256);
+        expect(relateFlights(fa, fc)).toBe("same_flight_content");
+        expect(checkIndependentFlights(fa, fc).reasons).toEqual(["same_flight_content"]);
     });
 
     it("survives a JSON round trip: plain JSON, deterministic, same relations", async () => {
@@ -530,8 +538,16 @@ describe("checkIndependentFlights is fail-closed", () => {
     it("reports both sides when both are invalid, a before b", async () => {
         await ready;
         const r = checkIndependentFlights(
-            mutate(good[0], (x) => (x.status = "invalid")),
-            mutate(good[1], (x) => (x.status = "invalid")),
+            mutate(good[0], (x) => {
+                x.status = "invalid";
+                x.reasons = ["log_unreadable:x"];
+                x.timeRangeUs = null;
+            }),
+            mutate(good[1], (x) => {
+                x.status = "invalid";
+                x.reasons = ["log_unreadable:x"];
+                x.timeRangeUs = null;
+            }),
         );
         expect(r.independent).toBe(false);
         expect(r.reasons.indexOf("flight_a_invalid")).toBeGreaterThanOrEqual(0);
@@ -562,7 +578,11 @@ describe("checkIndependentFlights is fail-closed", () => {
 
     it("an invalid copy of the same flight is still reported as the same section", async () => {
         await ready;
-        const bad = mutate(good[0], (x) => (x.status = "invalid"));
+        const bad = mutate(good[0], (x) => {
+            x.status = "invalid";
+            x.reasons = ["log_unreadable:x"];
+            x.timeRangeUs = null;
+        });
         const r = checkIndependentFlights(bad, good[0]);
         expect(r.independent).toBe(false);
         expect(r.reasons).toContain("flight_a_invalid");
