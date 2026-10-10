@@ -12,16 +12,16 @@ Application glue (tabs, strings, product policy) belongs in `src/gyroflight/`.
 
 ## Subdirectories
 
-| Path           | Contents                                                                                                                            |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `flight/`      | File and Flight identity: SHA-256 per file and per log section, A/B independence check (`docs/gyrocore/FLIGHT_IDENTITY.md`)         |
-| `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate                                    |
-| `tuning/`      | GyroCore global-slider merge (port of `merge.py`), composite recommendation, axis coverage, Apply gate v2                           |
-| `safety/`      | GyroCore Safety, deterministic foundation (WU4A): firmware slider mapping, absolute tune, staged pipeline without analysis evidence |
-| `productLock/` | product Apply lock (`full_safety_engine_pending`) until the Safety engine is migrated (WU4)                                         |
-| `components/`  | `ChirpQualificationPanel.vue`, `DiagnosticOnlyBanner.vue`, `GlobalTunePanel.vue`, `ApplyGateNotice.vue`                             |
-| `composables/` | `useApplyGate`                                                                                                                      |
-| `stores/`      | `chirpQualification` (every measurement, and which ones Autotune shows)                                                             |
+| Path           | Contents                                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flight/`      | File and Flight identity: SHA-256 per file and per log section, A/B independence check (`docs/gyrocore/FLIGHT_IDENTITY.md`)                                      |
+| `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate; `qualityV2/` diagnostics (`docs/gyrocore/CHIRP_QUALITY_V2.md`) |
+| `tuning/`      | GyroCore global-slider merge (port of `merge.py`), composite recommendation, axis coverage, Apply gate v2                                                        |
+| `safety/`      | GyroCore Safety, deterministic foundation (WU4A): firmware slider mapping, absolute tune, staged pipeline without analysis evidence                              |
+| `productLock/` | product Apply lock (`full_safety_engine_pending`) until the Safety engine is migrated (WU4)                                                                      |
+| `components/`  | `ChirpQualificationPanel.vue`, `ChirpQualityV2Card.vue`, `DiagnosticOnlyBanner.vue`, `GlobalTunePanel.vue`, `ApplyGateNotice.vue`                                |
+| `composables/` | `useApplyGate`                                                                                                                                                   |
+| `stores/`      | `chirpQualification` (every measurement, and which ones Autotune shows)                                                                                          |
 
 ## Planned subdirectories (created when first used)
 

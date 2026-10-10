@@ -40,6 +40,14 @@ export interface SimOptions {
     crossoverHz?: number;
     delaySamples?: number;
     startTimeUs?: number;
+    /**
+     * Log the firmware DEBUG_CHIRP channels as Betaflight pid.c does: debug[0]
+     * phase x 5000, debug[2] instantaneous frequency in 0.1 Hz, debug[3] the
+     * excitation x 1000. Off by default: the WU7 logs carry zeros there.
+     */
+    firmwareDebug?: boolean;
+    /** Motor outputs to log per sample (see encodeLog motorCount). */
+    motors?: (i: number) => number[];
 }
 
 export function simulateChirp(o: SimOptions = {}): SyntheticFrame[] {
@@ -64,7 +72,8 @@ export function simulateChirp(o: SimOptions = {}): SyntheticFrame[] {
         const t = i / fs;
         // Logarithmic sweep f0 -> f1 over the whole run.
         const phase = ((2 * Math.PI * f0 * sweepT) / ratio) * (Math.exp((ratio * t) / sweepT) - 1);
-        const r = Math.round(amp * Math.sin(phase));
+        const excitation = Math.sin(phase);
+        const r = Math.round(amp * excitation);
         sp.push(r);
         y += (i >= d ? u[i - d] : 0) / fs;
         const yi = Math.round(y);
@@ -74,7 +83,11 @@ export function simulateChirp(o: SimOptions = {}): SyntheticFrame[] {
         const gyro: [number, number, number] = [0, 0, 0];
         setpoint[axis] = r;
         gyro[axis] = yi;
-        frames.push({ time: Math.round(t0 + i * dt), setpoint, gyro, debug: [0, axis, 0, 0] });
+        const fInst = f0 * Math.exp((ratio * t) / sweepT);
+        const debug: SyntheticFrame["debug"] = o.firmwareDebug
+            ? [Math.round(5000 * (phase % (2 * Math.PI))), axis, Math.round(10 * fInst), Math.round(1000 * excitation)]
+            : [0, axis, 0, 0];
+        frames.push({ time: Math.round(t0 + i * dt), setpoint, gyro, debug, motors: o.motors?.(i) });
     }
     return frames;
 }
@@ -145,9 +158,14 @@ export function withHeader(headers: string[], line: string): string[] {
     return [...headers.filter((h) => !h.startsWith(key)), line];
 }
 
-export function encodeChirpLog(frames: SyntheticFrame[], headers: string[] = FULL_TUNE_HEADERS, iInterval = 32) {
+export function encodeChirpLog(
+    frames: SyntheticFrame[],
+    headers: string[] = FULL_TUNE_HEADERS,
+    iInterval = 32,
+    motorCount = 0,
+) {
     // 1 kHz = looptime 125 us x pid_process_denom 8 (the encoder's defaults).
-    return encodeLog(frames, { iInterval, flightModeFlags: CHIRP_FLAG, extraHeaders: headers });
+    return encodeLog(frames, { iInterval, flightModeFlags: CHIRP_FLAG, extraHeaders: headers, motorCount });
 }
 
 export function concatLogs(...logs: Uint8Array[]): Uint8Array {
