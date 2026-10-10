@@ -93,6 +93,10 @@ describe("Gyroflight branding", () => {
         // The artwork carries the wordmark: no separate text branding beside it.
         expect(logo.textContent!.trim()).toBe("");
         sidebar.unmount();
+        // The PNG is transparent and sits directly on the page: no plate, box or rounded frame around it.
+        const style = read("src/gyroflight/branding/GyroflightLogo.vue").split("<style>")[1];
+        expect(style).not.toMatch(/background(-color)?\s*:/);
+        expect(style).not.toMatch(/border-radius\s*:/);
         const hero = mount(GyroflightLogo, { variant: "hero" });
         expect(hero.el.querySelector('[data-gyroflight="logo"]')!.getAttribute("data-variant")).toBe("hero");
         hero.unmount();
