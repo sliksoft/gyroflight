@@ -33,11 +33,7 @@
                                 {{ $t("gyroflightHomeOpen") }}
                             </UButton>
                         </div>
-                        <p
-                            v-else
-                            class="gyroflight-home__action text-sm text-muted"
-                            data-gyroflight="home-autotune-expert"
-                        >
+                        <p v-else class="gyroflight-home__action text-muted" data-gyroflight="home-autotune-expert">
                             {{ $t("gyroflightHomeAutotuneExpert") }}
                         </p>
                     </UiBox>
@@ -108,13 +104,12 @@ function open(key: string) {
 /* One centred column inside the content area, whatever the window width. */
 .gyroflight-home__inner {
     width: 100%;
-    max-width: 60rem;
+    max-width: 56rem;
     margin: 0 auto;
     padding: 1.5rem 0 2rem;
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 1.75rem;
 }
 
 .gyroflight-home__hero {
@@ -122,10 +117,12 @@ function open(key: string) {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 0.5rem;
+    gap: 0.25rem;
+    /* The cards' title pills sit on their top border, so this reads as about 2rem of space. */
+    margin-bottom: 2.5rem;
 }
 .gyroflight-home__tagline {
-    margin-top: 0.75rem;
+    margin-top: 1rem;
     font-size: 1.125rem;
 }
 .gyroflight-home__foundation {
@@ -138,7 +135,9 @@ function open(key: string) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-auto-rows: 1fr;
-    gap: 1.25rem;
+    column-gap: 1.5rem;
+    /* A little more than the column gap: each card's title pill overlaps the row above. */
+    row-gap: 2rem;
 }
 .gyroflight-home__cards > * {
     height: 100%;
@@ -147,9 +146,13 @@ function open(key: string) {
 .gyroflight-home__cards > * > div:last-child {
     height: 100%;
 }
-.gyroflight-home__action {
+.gyroflight-home__cards p {
+    margin: 0;
+    line-height: 1.5;
+}
+.gyroflight-home__cards .gyroflight-home__action {
     margin-top: auto;
-    padding-top: 0.5rem;
+    padding-top: 0.75rem;
 }
 @media (max-width: 640px) {
     .gyroflight-home__cards {
@@ -159,6 +162,7 @@ function open(key: string) {
 }
 
 .gyroflight-home__attribution {
+    margin-top: 2.5rem;
     text-align: center;
     font-size: 0.75rem;
     line-height: 1.5;
