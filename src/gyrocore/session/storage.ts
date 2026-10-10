@@ -135,6 +135,9 @@ export function readRecord(
     if (migrated.status === "unsupported_version") {
         return { status: "unsupported_version", id, schemaVersion: migrated.schemaVersion };
     }
+    if (migrated.status === "failed") {
+        return { status: "corrupt", id, problems: [`migration_failed:${migrated.from}`] };
+    }
     const v = validateTuneSession(migrated.raw);
     if (!v.ok) {
         return { status: "corrupt", id, problems: v.problems };

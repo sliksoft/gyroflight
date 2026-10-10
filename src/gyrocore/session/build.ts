@@ -266,7 +266,8 @@ export function flightPairEvidence(session: TuneSession, keyA: string, keyB: str
     const versions = (f: StoredFlight | undefined) => [...new Set(f?.chirps.map((c) => c.qualityV2.analysisVersion))];
     const va = versions(a);
     const vb = versions(b);
-    const same = va.length === 1 && vb.length === 1 && va[0] === vb[0];
+    // A missing version is unknown, and unknown never equals unknown.
+    const same = va.length === 1 && vb.length === 1 && typeof va[0] === "string" && va[0] === vb[0];
     const firmware = Object.fromEntries(
         FIRMWARE_FIELDS.map((k) => [k, a && b ? match(a.firmware[k], b.firmware[k]) : "UNKNOWN"]),
     ) as FlightPairEvidence["firmware"];

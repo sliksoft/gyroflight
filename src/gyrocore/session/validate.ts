@@ -28,6 +28,7 @@
 
 import { flightRefProblems } from "@/gyrocore/flight/identity";
 import { CHIRP_QUALITY_V2_SCHEMA, QV2_REASONS } from "../chirp/qualityV2/contract";
+import { flightRefShape, STORED_QUALITY_V2_SHAPES } from "./shape";
 import {
     SESSION_AUTHORIZATION,
     TUNE_SESSION_SCHEMA,
@@ -49,7 +50,7 @@ const MAX_HEADER_VALUE_CHARS = 4096;
 
 const AXIS_NAMES = ["roll", "pitch", "yaw"];
 const STATES = ["rejected", "usable_with_warnings", "usable"];
-const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+const ISO_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z$/;
 
 type Raw = Record<string, unknown>;
 
@@ -75,7 +76,23 @@ const onlyKeys = (o: Raw, keys: string[]) => Object.keys(o).every((k) => keys.in
 
 const isObject = (v: unknown): v is Raw => !!v && typeof v === "object" && !Array.isArray(v);
 const isLabel = (v: unknown) => typeof v === "string" && v.length > 0 && v.length <= MAX_LABEL_CHARS;
-const isTime = (v: unknown) => typeof v === "string" && ISO_TIME.test(v) && !Number.isNaN(Date.parse(v));
+/** ISO 8601 UTC of a real calendar instant: Date.parse would roll 2026-02-30 over to March. */
+function isTime(v: unknown): boolean {
+    const m = typeof v === "string" ? ISO_TIME.exec(v) : null;
+    if (!m) {
+        return false;
+    }
+    const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number);
+    const t = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+    return (
+        t.getUTCFullYear() === y &&
+        t.getUTCMonth() === mo - 1 &&
+        t.getUTCDate() === d &&
+        t.getUTCHours() === h &&
+        t.getUTCMinutes() === mi &&
+        t.getUTCSeconds() === s
+    );
+}
 const isInt = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const isFiniteNumber = (v: unknown) => typeof v === "number" && Number.isFinite(v);
 const isStringList = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -162,13 +179,6 @@ function chirpProblems(c: unknown, flight: Raw): string[] {
         p.push("quality_v2_schema");
         return p;
     }
-    const identity = v.identity as Raw | undefined;
-    const flightIdentity = isObject(identity) ? (identity.flight as Raw | undefined) : undefined;
-    if (!isObject(identity) || identity.measurementId !== c.measurementId || identity.logIndex !== c.logIndex) {
-        p.push("quality_v2_identity");
-    } else if (!isObject(flightIdentity) || (flightIdentity.ref as Raw | null)?.locationId !== flight.key) {
-        p.push("quality_v2_flight");
-    }
     const levels = v.levels as Raw | undefined;
     const auth = isObject(levels) ? (levels.tuningAuthorized as Raw | undefined) : undefined;
     // A stored report may never carry an authorization verdict.
@@ -179,6 +189,38 @@ function chirpProblems(c: unknown, flight: Raw): string[] {
         !(auth.reasons as string[]).includes(QV2_REASONS.authorizationNotPersisted)
     ) {
         p.push("stored_authorization");
+    }
+    const shape = STORED_QUALITY_V2_SHAPES[v.analysisVersion];
+    if (!shape) {
+        p.push("quality_v2_version_not_storable");
+        return p;
+    }
+    if (!shape(v)) {
+        p.push("quality_v2_shape");
+        return p;
+    }
+    const identity = v.identity as Raw;
+    const fileIdentity = identity.file as Raw;
+    const flightIdentity = identity.flight as Raw;
+    const sameChirp = [
+        "measurementId",
+        "logIndex",
+        "axis",
+        "axisName",
+        "axisOccurrence",
+        "startTimeUs",
+        "endTimeUs",
+        "durationS",
+        "sampleCount",
+    ].every((k) => identity[k] === c[k]);
+    if (!sameChirp) {
+        p.push("quality_v2_identity");
+    } else if (
+        fileIdentity.sha256 !== (ref.file as Raw).sha256 ||
+        fileIdentity.byteLength !== (ref.file as Raw).byteLength ||
+        JSON.stringify(flightIdentity.ref) !== JSON.stringify(ref)
+    ) {
+        p.push("quality_v2_flight");
     }
     return p;
 }
@@ -207,6 +249,8 @@ function flightProblems(f: unknown): string[] {
     }
     if (JSON.stringify(f.ref ?? null).length > MAX_FLIGHT_REF_JSON_CHARS) {
         p.push("identity:too_large");
+    } else if (!p.length && !flightRefShape(f.ref)) {
+        p.push("identity:shape");
     }
     if (!p.length && f.key !== (f.ref as Raw).locationId) {
         p.push("key");
@@ -334,11 +378,13 @@ export const TUNE_SESSION_MIGRATIONS: Readonly<Record<number, Migration>> = {};
 
 export type MigrationResult =
     | { status: "current" | "migrated"; raw: Raw; from: number }
-    | { status: "unsupported_version"; schemaVersion: unknown };
+    | { status: "unsupported_version"; schemaVersion: unknown }
+    | { status: "failed"; from: number };
 
 /**
  * Bring a raw record to `target`, one step at a time. A version from the future
  * or without a migration path is unsupported: it is reported, never rewritten.
+ * A step that throws or returns no object is `failed`.
  */
 export function migrateTuneSession(
     raw: Raw,
@@ -355,7 +401,14 @@ export function migrateTuneSession(
         if (!step) {
             return { status: "unsupported_version", schemaVersion: from };
         }
-        current = step(current);
+        try {
+            current = step(current);
+        } catch {
+            return { status: "failed", from: from as number };
+        }
+        if (!isObject(current)) {
+            return { status: "failed", from: from as number };
+        }
         if (current.schemaVersion !== v + 1) {
             return { status: "unsupported_version", schemaVersion: from };
         }

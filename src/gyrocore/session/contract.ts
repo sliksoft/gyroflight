@@ -31,7 +31,7 @@ import type { MeasurementState } from "../chirp/qualification";
 import type { ChirpQualityV2 } from "../chirp/qualityV2/contract";
 
 export const TUNE_SESSION_SCHEMA = "gyrocore.tune-session";
-/** Bump with a migration in migrate.ts whenever the stored shape changes. */
+/** Bump with a migration in validate.ts (TUNE_SESSION_MIGRATIONS) whenever the stored shape changes. */
 export const TUNE_SESSION_SCHEMA_VERSION = 1;
 
 /** Quality V2 analysis versions this code knows; anything else is UNKNOWN_VERSION. */
