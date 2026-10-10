@@ -20,6 +20,8 @@
  */
 
 import GyroflightTab from "./tabs/GyroflightTab.vue";
+import GyroflightHome from "./tabs/GyroflightHome.vue";
+import "./branding/gyroflight-theme.css";
 import { GYROFLIGHT_TAB_KEY } from "./tabs";
 import { registerGyroflightMessages } from "./i18n";
 
@@ -27,4 +29,7 @@ registerGyroflightMessages();
 
 export const gyroflightTabComponents = {
     [GYROFLIGHT_TAB_KEY]: GyroflightTab,
+    // Gyroflight Home in place of Betaflight's Welcome tab. vue_tab_registry.js spreads these
+    // entries after its own, so this key wins; LandingTab.vue itself is unchanged.
+    landing: GyroflightHome,
 };

@@ -1,18 +1,46 @@
 {
     "gyroflightTabTitle": { "message": "Gyroflight" },
     "gyroflightParentBrand": { "message": "by Redline Dynamics" },
+    "gyroflightProductName": { "message": "Gyroflight" },
+    "gyroflightLogoAlt": { "message": "Gyroflight by Redline Dynamics" },
+    "gyroflightHomeTagline": { "message": "Flight controller configuration, blackbox analysis and safe tuning" },
+    "gyroflightHomeBuiltOn": { "message": "Built on Betaflight" },
+    "gyroflightHomeConnectHead": { "message": "Connect flight controller" },
+    "gyroflightHomeConnectText": {
+        "message": "Plug in the flight controller and use Connect at the top of the sidebar to configure it."
+    },
+    "gyroflightHomeBlackboxText": { "message": "Open a blackbox log and inspect it." },
+    "gyroflightHomeFlasherText": { "message": "Flash Betaflight firmware to a flight controller." },
+    "gyroflightHomeAutotuneText": {
+        "message": "Analyse a CHIRP log: GyroCore qualifies every sweep and builds one global tune. Writing a tune to a craft is locked for now."
+    },
+    "gyroflightHomeAutotuneExpert": { "message": "Autotune is available in Expert Mode (Options)." },
+    "gyroflightHomeOpen": { "message": "Open" },
+    "gyroflightHomeAttribution": {
+        "message": "Gyroflight is based on the Betaflight App and distributed under the GNU General Public License v3.0."
+    },
     "gyroflightIntro": {
-        "message": "Gyroflight is built on the Betaflight App. GyroCore, the Redline Dynamics analysis and safety engine, is being integrated to add flight-log analysis, safety validation and tune review. Betaflight's own tools below are used as-is."
+        "message": "Gyroflight is built on the Betaflight App. GyroCore, the Redline Dynamics analysis and safety engine, adds CHIRP measurement qualification, a global tune and safety checks on top of Betaflight's own tools, which are used as they are."
     },
     "gyroflightCapabilitiesHead": { "message": "Capabilities" },
     "gyroflightCapFirmwareFlasher": { "message": "Betaflight Firmware Flasher" },
     "gyroflightCapBlackboxViewer": { "message": "Betaflight Blackbox Viewer" },
     "gyroflightCapAutotune": { "message": "Betaflight Autotune (Expert mode)" },
-    "gyroflightCapAnalysis": { "message": "GyroCore Analysis" },
-    "gyroflightCapSafety": { "message": "GyroCore Safety" },
-    "gyroflightCapCompare": { "message": "GyroCore Compare" },
-    "gyroflightStatusAvailable": { "message": "Available" },
-    "gyroflightStatusPending": { "message": "Migration pending" },
+    "gyroflightCapChirpQualification": { "message": "GyroCore CHIRP measurement qualification" },
+    "gyroflightCapGlobalTune": { "message": "GyroCore global tune: merge and axis coverage" },
+    "gyroflightCapSafetyFoundation": { "message": "GyroCore Safety: deterministic foundation" },
+    "gyroflightCapSafetyFull": { "message": "GyroCore Safety: full pipeline" },
+    "gyroflightCapSafetyFullDetail": {
+        "message": "Needs analysis evidence Gyroflight does not have yet, so Safety blocks every tune."
+    },
+    "gyroflightCapPhysicalApply": { "message": "Writing a tune to the flight controller" },
+    "gyroflightCapPhysicalApplyDetail": { "message": "Deliberately disabled until Safety is complete." },
+    "gyroflightCapTuneSession": { "message": "Tune session: cross-flight verification" },
+    "gyroflightStatus_available": { "message": "Available" },
+    "gyroflightStatus_implemented": { "message": "Implemented" },
+    "gyroflightStatus_incomplete": { "message": "Not complete" },
+    "gyroflightStatus_locked": { "message": "Locked" },
+    "gyroflightStatus_not_started": { "message": "Not implemented yet" },
     "gyroflightAttributionHead": { "message": "Attribution" },
     "gyroflightAttribution": {
         "message": "Gyroflight is based on the Betaflight App by the Betaflight open source project and is distributed under the GNU General Public License v3.0."
