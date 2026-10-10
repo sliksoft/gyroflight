@@ -14,6 +14,7 @@ Application glue (tabs, strings, product policy) belongs in `src/gyroflight/`.
 
 | Path           | Contents                                                                                                                            |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `flight/`      | File and Flight identity: SHA-256 per file and per log section, A/B independence check (`docs/gyrocore/FLIGHT_IDENTITY.md`)         |
 | `chirp/`       | CHIRP extraction from `FlightLog`, sample-rate/timing checks, quality and tune gates, Apply gate                                    |
 | `tuning/`      | GyroCore global-slider merge (port of `merge.py`), composite recommendation, axis coverage, Apply gate v2                           |
 | `safety/`      | GyroCore Safety, deterministic foundation (WU4A): firmware slider mapping, absolute tune, staged pipeline without analysis evidence |
