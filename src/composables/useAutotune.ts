@@ -45,6 +45,7 @@ import { assertCompositeApplyAuthorized, liveCompositeBlocks } from "@/gyrocore/
 import { assertProductApplyReleased } from "@/gyrocore/productLock/productApply";
 import { assertSafetyAuthorized } from "@/gyrocore/safety/authorize";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
+import { attachChirpFlightIdentity } from "@/gyrocore/chirp/qualityV2/identity";
 
 export type AxisName = "roll" | "pitch" | "yaw";
 
@@ -120,6 +121,8 @@ export function useAutotune() {
             if (report.logCount === 0) {
                 throw new Error("No log segments found in the file.");
             }
+            // Gyroflight: WU1 file and Flight identity on each CHIRP Quality V2 report.
+            await attachChirpFlightIdentity(report, data);
             gate.setReport(report);
             if (report.state === "no_chirp") {
                 throw new Error(i18n.getMessage("gyrocoreChirpNoChirpError", [report.logCount]));

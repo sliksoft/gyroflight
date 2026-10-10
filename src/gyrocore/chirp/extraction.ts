@@ -42,6 +42,8 @@ export const DEBUG_FIELDS = ["debug[0]", "debug[1]", "debug[2]", "debug[3]"] as 
 export const REQUIRED_FIELDS: readonly string[] = [...SETPOINT_FIELDS, ...GYRO_ADC_FIELDS, ...DEBUG_FIELDS];
 
 const FLIGHT_MODE_FLAGS_ALIASES = ["flightmodeflags", "flight_mode_flags", "flightmodestate", "flight_mode"];
+/** Optional: read for CHIRP Quality V2 motor-saturation evidence, never required. */
+export const MOTOR_FIELDS = Array.from({ length: 8 }, (_, i) => `motor[${i}]`);
 
 /** The parts of the Blackbox Viewer FlightLog (untyped JS) read here, after openLog(). */
 export interface FlightLogFrames {
@@ -59,6 +61,9 @@ export interface ChirpFrames {
     debug: [Float64Array, Float64Array, Float64Array, Float64Array];
     /** Integer flags per row, -1 before the first S-frame; null when the column is absent. */
     flightModeFlags: Int32Array | null;
+    /** Highest and lowest logged motor output per row (NaN where a motor value is missing); null without motor fields. */
+    motorMax?: Float32Array | null;
+    motorMin?: Float32Array | null;
     malformedRows: number;
     warnings: string[];
 }
@@ -98,6 +103,7 @@ export function chirpFramesFromFlightLog(log: FlightLogFrames): ChirpFrames {
     }
     const lower = names.map((n) => n.trim().toLowerCase());
     const flagsIdx = FLIGHT_MODE_FLAGS_ALIASES.map((a) => lower.indexOf(a)).find((i) => i >= 0);
+    const motorCols = MOTOR_FIELDS.map((f) => findField(names, f)).filter((i): i is number => i !== undefined);
 
     const min = log.getMinTime();
     const max = log.getMaxTime();
@@ -107,6 +113,8 @@ export function chirpFramesFromFlightLog(log: FlightLogFrames): ChirpFrames {
     const time = new Float64Array(total);
     const vals = REQUIRED_FIELDS.map(() => new Float64Array(total));
     const flags = flagsIdx === undefined ? null : new Int32Array(total);
+    const motorMax = motorCols.length ? new Float32Array(total) : null;
+    const motorMin = motorCols.length ? new Float32Array(total) : null;
     let n = 0;
     let malformed = 0;
     for (const chunk of chunks) {
@@ -130,6 +138,21 @@ export function chirpFramesFromFlightLog(log: FlightLogFrames): ChirpFrames {
                 const f = frame[flagsIdx];
                 flags[n] = typeof f === "number" && Number.isFinite(f) ? Math.trunc(f) : -1;
             }
+            if (motorMax && motorMin) {
+                let hi = -Infinity;
+                let lo = Infinity;
+                for (const c of motorCols) {
+                    const v = frame[c];
+                    if (typeof v !== "number" || !Number.isFinite(v)) {
+                        hi = lo = NaN;
+                        break;
+                    }
+                    hi = Math.max(hi, v);
+                    lo = Math.min(lo, v);
+                }
+                motorMax[n] = hi;
+                motorMin[n] = lo;
+            }
             n++;
         }
     }
@@ -147,6 +170,8 @@ export function chirpFramesFromFlightLog(log: FlightLogFrames): ChirpFrames {
         gyroAdc: [cut(vals[3]), cut(vals[4]), cut(vals[5])],
         debug: [cut(vals[6]), cut(vals[7]), cut(vals[8]), cut(vals[9])],
         flightModeFlags: flags && n !== total ? flags.slice(0, n) : flags,
+        motorMax: motorMax && n !== total ? motorMax.slice(0, n) : motorMax,
+        motorMin: motorMin && n !== total ? motorMin.slice(0, n) : motorMin,
         malformedRows: malformed,
         warnings,
     };
@@ -172,6 +197,16 @@ export interface ChirpExtraction {
     setpoint: [Float32Array, Float32Array, Float32Array];
     gyro: [Float32Array, Float32Array, Float32Array];
     timeUs: Float64Array;
+    /**
+     * Raw firmware DEBUG_CHIRP channels on the same rows (pid.c): debug[2] is the
+     * instantaneous sweep frequency in 0.1 Hz, debug[3] the excitation x 1000.
+     * Read by CHIRP Quality V2 only, which checks they are plausible first.
+     */
+    chirpFrequencyDeciHz?: Float32Array;
+    chirpExcitationMilli?: Float32Array;
+    /** Motor output limits per CHIRP row (see ChirpFrames); null without motor fields. */
+    motorMax?: Float32Array | null;
+    motorMin?: Float32Array | null;
     totalFrames: number;
     droppedAxisFrames: number;
     highResolutionScale: number;
@@ -293,10 +328,10 @@ export function extractChirp(
     }
 
     const m = rows.length;
-    const pick = (src: Float64Array) => {
+    const pick = (src: ArrayLike<number>, factor = scale) => {
         const out = new Float32Array(m);
         for (let i = 0; i < m; i++) {
-            out[i] = src[rows[i]] * scale;
+            out[i] = src[rows[i]] * factor;
         }
         return out;
     };
@@ -332,6 +367,10 @@ export function extractChirp(
         setpoint: [pick(frames.setpoint[0]), pick(frames.setpoint[1]), pick(frames.setpoint[2])],
         gyro: [pick(frames.gyroAdc[0]), pick(frames.gyroAdc[1]), pick(frames.gyroAdc[2])],
         timeUs,
+        chirpFrequencyDeciHz: pick(frames.debug[2], 1),
+        chirpExcitationMilli: pick(frames.debug[3], 1),
+        motorMax: frames.motorMax ? pick(frames.motorMax, 1) : null,
+        motorMin: frames.motorMin ? pick(frames.motorMin, 1) : null,
         totalFrames: n,
         droppedAxisFrames: dropped,
         highResolutionScale: scale,

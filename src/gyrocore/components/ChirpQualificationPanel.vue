@@ -106,12 +106,24 @@
                 </tbody>
             </table>
         </div>
+
+        <div v-if="qualityCards.length" class="mt-3" data-gyrocore="chirp-quality-v2-list">
+            <h3 class="text-sm font-bold mb-2">{{ $t("gyrocoreQv2Heading") }}</h3>
+            <div class="grid gap-3 lg:grid-cols-2">
+                <ChirpQualityV2Card
+                    v-for="m in qualityCards"
+                    :key="`${m.id}-${gate.revision}`"
+                    :quality="m.qualityV2"
+                />
+            </div>
+        </div>
     </UiBox>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
 import UiBox from "@/components/elements/UiBox.vue";
+import ChirpQualityV2Card from "./ChirpQualityV2Card.vue";
 import { i18n } from "@/js/localization";
 import { logWarningsFor as logWarnings, type QualificationState } from "@/gyrocore/chirp/qualification";
 import { describeReason } from "@/gyrocore/chirp/reasons";
@@ -172,6 +184,14 @@ const diagnosticAxes = computed(() =>
     Object.entries(gate.selectedMeasurements)
         .filter(([, m]) => m?.state === "rejected" && m.diagnostics)
         .map(([axis, m]) => `${axisLabel(axis as keyof typeof AXIS_LABEL_KEYS)} (${m?.id})`),
+);
+
+// CHIRP Quality V2 for the measurement each axis currently shows.
+const qualityCards = computed(() =>
+    (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
+        const m = gate.selectedMeasurements[axis];
+        return m ? [m] : [];
+    }),
 );
 
 const diagnosticMessage = computed(() =>
