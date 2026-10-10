@@ -385,6 +385,58 @@ describe("PR #3 review: stored FlightRef validation", () => {
     });
 });
 
+describe("PR #3 review: status and reasons of a stored FlightRef agree", () => {
+    const pair = catalogBbl(concatLogs(clean, noisy, threeAxis));
+    const unreadable = { status: "invalid", reasons: ["log_unreadable:Invalid log header"], timeRangeUs: null };
+
+    // [name, status fields, expected problems]
+    const cases: [string, Loose, string[]][] = [
+        ["valid with no reasons", {}, []],
+        ["valid with a reason", { reasons: ["log_unreadable:x"] }, ["status"]],
+        ["invalid with a Viewer error", unreadable, []],
+        ["invalid with no reasons", { ...unreadable, reasons: [] }, ["status"]],
+        ["invalid with an unknown reason", { ...unreadable, reasons: ["looked_odd"] }, ["status"]],
+        ["invalid with an empty Viewer error", { ...unreadable, reasons: ["log_unreadable:"] }, ["status"]],
+        ["invalid with a reason that is not text", { ...unreadable, reasons: [7] }, ["status"]],
+        [
+            "invalid with one good and one unknown reason",
+            { ...unreadable, reasons: ["log_unreadable:x", "looked_odd"] },
+            ["status"],
+        ],
+    ];
+
+    it.each(cases)("%s", async (_name, fields, problems) => {
+        const cat = await pair;
+        const inMemory = { ...cat.flights[0], ...fields } as FlightRef;
+        const restored = JSON.parse(JSON.stringify(inMemory)) as FlightRef;
+        for (const ref of [inMemory, restored]) {
+            expect(flightRefProblems(ref)).toEqual(problems);
+            for (const [x, y, side] of [
+                [ref, cat.flights[2], "a"],
+                [cat.flights[2], ref, "b"],
+            ] as const) {
+                const r = checkIndependentFlights(x, y);
+                if (problems.length) {
+                    expect(r).toEqual({
+                        independent: false,
+                        relation: null,
+                        reasons: [`flight_${side}_identity_incomplete`, `flight_${side}_identity:status`],
+                    });
+                } else if (ref.status === "invalid") {
+                    // Structurally sound, but an unreadable Flight is never an independent recording.
+                    expect(r).toEqual({
+                        independent: false,
+                        relation: "distinct",
+                        reasons: [`flight_${side}_invalid`],
+                    });
+                } else {
+                    expect(r).toEqual({ independent: true, relation: "distinct", reasons: [] });
+                }
+            }
+        }
+    });
+});
+
 describe("validity levels", () => {
     const marker = "H Product:Blackbox flight data recorder by Nicholas Sherlock\n";
     const broken = new TextEncoder().encode(`${marker}H Data version:2\nnot a blackbox log`);
