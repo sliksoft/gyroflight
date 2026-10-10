@@ -69,18 +69,18 @@ Known limits:
 
 `flightRefProblems(ref)` lists what is wrong with one stored `FlightRef`; an empty list means it is usable. A reference that comes back from storage corrupt or edited fails closed with one of these problems:
 
-| Problem       | Rule                                                                                                                 |
-| ------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `missing`     | not an object                                                                                                        |
-| `schema`      | `schema` is not `gyrocore.flight-identity.v1`                                                                        |
-| `file`        | `file.sha256` is not lowercase hex SHA-256, or `file.byteLength` is not a positive integer                           |
-| `log_index`   | `logIndex` and `logCount` are not integers with `0 <= logIndex < logCount`                                           |
-| `location_id` | `locationId` is not `<file.sha256>#<logIndex>`                                                                       |
-| `section`     | bad hash, or the byte range is not integers with `begin < end <= file.byteLength`                                    |
-| `header`      | bad hash, header longer than the section, or a kept header line that is neither a string nor `null`                  |
-| `body_prefix` | bad hash, or a length other than `min(4096, section length − header length)`                                         |
-| `status`      | status is not `valid` or `invalid`, reasons is not a string list, `valid` with reasons, or `invalid` without reasons |
-| `time_range`  | not `null` and not finite `min <= max`, or a time range on an invalid Flight                                         |
+| Problem       | Rule                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `missing`     | not an object                                                                                                                                                                         |
+| `schema`      | `schema` is not `gyrocore.flight-identity.v1`                                                                                                                                         |
+| `file`        | `file.sha256` is not lowercase hex SHA-256, or `file.byteLength` is not a positive integer                                                                                            |
+| `log_index`   | `logIndex` and `logCount` are not integers with `0 <= logIndex < logCount`                                                                                                            |
+| `location_id` | `locationId` is not `<file.sha256>#<logIndex>`                                                                                                                                        |
+| `section`     | bad hash, or the byte range is not integers with `begin < end <= file.byteLength`                                                                                                     |
+| `header`      | bad hash, header longer than the section, or a kept header line that is neither a string nor `null`                                                                                   |
+| `body_prefix` | bad hash, or a length other than `min(4096, section length − header length)`                                                                                                          |
+| `status`      | not exactly one of: `valid` with an empty `reasons` list, or `invalid` with a non-empty `reasons` list in which every entry is `log_unreadable:<Viewer error>` with a non-empty error |
+| `time_range`  | not `null` and not finite `min <= max`, or a time range on an invalid Flight                                                                                                          |
 
 When both references name the same file hash, they must agree about it:
 
@@ -103,6 +103,6 @@ Independence says only that the two Flights are different recordings. Whether th
 - every independence case above, including a repackaged flight with an edited header;
 - every stored-reference problem and contradiction above, on both sides, and that real catalog references pass validation before and after a JSON round trip.
 
-`flight_identity_adversarial.test.ts` was written against this document without reading the implementation. It checks every catalog against the Viewer's offsets and `node:crypto`, and covers boundary cases: junk before the first marker, a marker inside frame data, CRLF headers, header-only and short sections, Latin-1 header bytes, and malformed stored references. It found three gaps in the independence check, all fixed: non-hex hashes, upper-cased hashes, and a `valid` reference that carries reasons. Review of PR #3 found two more, both fixed with regression tests in `flight_identity.test.ts`: an edited header hid a repackaged flight, and a stored reference was trusted on its hashes alone.
+`flight_identity_adversarial.test.ts` was written against this document without reading the implementation. It checks every catalog against the Viewer's offsets and `node:crypto`, and covers boundary cases: junk before the first marker, a marker inside frame data, CRLF headers, header-only and short sections, Latin-1 header bytes, and malformed stored references. It found three gaps in the independence check, all fixed: non-hex hashes, upper-cased hashes, and a `valid` reference that carries reasons. Review of PR #3 found two more, both fixed with regression tests in `flight_identity.test.ts`: an edited header hid a repackaged flight, and a stored reference was trusted on its hashes alone. A final review found that `flightRefProblems` still accepted a `valid` reference with reasons (only `checkIndependentFlights` rejected it); the `status` rule above now holds in both.
 
 `flight_identity_air65.local.test.ts` runs on the real AIR65 file when `GYROFLIGHT_AIR65_BBL` is set. It checks the file hash, the three Flights and their pairwise independence.

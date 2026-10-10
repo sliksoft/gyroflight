@@ -286,12 +286,15 @@ export function flightRefProblems(ref: unknown): string[] {
     if (!prefixOk) {
         problems.push("body_prefix");
     }
-    if (
-        (r.status !== "valid" && r.status !== "invalid") ||
-        !Array.isArray(r.reasons) ||
-        !r.reasons.every((x) => typeof x === "string") ||
-        (r.status === "invalid" && r.reasons.length === 0)
-    ) {
+    // The only failure catalogBbl records for a Flight is a Viewer error.
+    const statusOk =
+        Array.isArray(r.reasons) &&
+        (r.status === "valid"
+            ? r.reasons.length === 0
+            : r.status === "invalid" &&
+              r.reasons.length > 0 &&
+              r.reasons.every((x) => typeof x === "string" && /^log_unreadable:./s.test(x)));
+    if (!statusOk) {
         problems.push("status");
     }
     const t = r.timeRangeUs;
