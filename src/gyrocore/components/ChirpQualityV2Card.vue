@@ -11,14 +11,35 @@
 
         <table class="w-full text-xs mb-2" data-gyrocore="qv2-rows">
             <tbody>
-                <tr v-for="row in rows" :key="row.id" :data-row="row.id" :data-status="row.status">
+                <tr
+                    v-for="row in rows"
+                    :key="row.id"
+                    :data-row="row.id"
+                    :data-status="row.status"
+                    :data-verdict="row.verdict"
+                >
                     <th scope="row" class="text-start font-normal text-dimmed pe-2 py-0.5 whitespace-nowrap">
                         {{ $t(row.label) }}
                     </th>
                     <td class="pe-2 py-0.5 whitespace-nowrap">
-                        <UBadge :color="toneColor(row.tone)" variant="subtle" size="sm">{{ row.status }}</UBadge>
+                        <UBadge color="neutral" variant="outline" size="sm" data-badge="status">{{
+                            row.status
+                        }}</UBadge>
                     </td>
-                    <td class="py-0.5">{{ row.detail }}</td>
+                    <td class="pe-2 py-0.5 whitespace-nowrap">
+                        <UBadge
+                            :color="toneColor(row.tone)"
+                            :variant="row.verdict === 'NOT_EVALUATED' ? 'outline' : 'subtle'"
+                            size="sm"
+                            data-badge="verdict"
+                            :data-tone="row.tone"
+                        >
+                            {{ verdictLabel(row) }}
+                        </UBadge>
+                    </td>
+                    <td class="py-0.5">
+                        {{ row.detail }}<span v-if="row.criterion" class="text-dimmed"> · {{ row.criterion }}</span>
+                    </td>
                 </tr>
             </tbody>
         </table>
@@ -27,15 +48,19 @@
             <UBadge
                 v-for="key in LEVEL_ORDER"
                 :key="key"
-                :color="levelColor(v.levels[key].status)"
+                :color="toneColor(levelTone(v.levels[key]))"
                 variant="outline"
                 size="sm"
                 :data-level="key"
                 :data-status="v.levels[key].status"
+                :data-tone="levelTone(v.levels[key])"
             >
                 {{ $t(`gyrocoreQv2Level_${key}`) }}: {{ v.levels[key].status }}
             </UBadge>
         </div>
+        <p class="text-[11px] text-dimmed mb-2" data-gyrocore="qv2-authorization-scope">
+            {{ t("gyrocoreQv2AuthorizationScope", [PRODUCT_APPLY_PENDING]) }}
+        </p>
 
         <figure v-if="plot" class="mb-2">
             <svg
@@ -141,12 +166,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { i18n } from "@/js/localization";
-import type { BinStatus, ChirpQualityV2, LevelStatus } from "@/gyrocore/chirp/qualityV2/contract";
+import { PRODUCT_APPLY_PENDING } from "@/gyrocore/productLock/productApply";
+import type { BinStatus, ChirpQualityV2 } from "@/gyrocore/chirp/qualityV2/contract";
 import {
     BIN_STATUS_ORDER,
     coherencePlot,
     LEVEL_ORDER,
+    levelTone,
     qualityRows,
+    type QualityRow,
     type RowTone,
 } from "@/gyrocore/chirp/qualityV2/view";
 
@@ -166,11 +194,13 @@ const plot = computed(() => coherencePlot(v.value, W, H));
 const axisLabel = computed(() => i18n.getMessage(AXIS_LABEL_KEYS[v.value.identity.axisName]).toUpperCase());
 
 function toneColor(tone: RowTone) {
-    return ({ good: "success", warn: "warning", bad: "error", unknown: "neutral", neutral: "neutral" } as const)[tone];
+    return ({ good: "success", warn: "warning", bad: "error", neutral: "neutral" } as const)[tone];
 }
 
-function levelColor(status: LevelStatus) {
-    return status === "YES" ? ("success" as const) : status === "NO" ? ("error" as const) : ("neutral" as const);
+function verdictLabel(row: QualityRow) {
+    return row.verdictBasis === "DOCUMENTED_DIAGNOSTIC"
+        ? i18n.getMessage("gyrocoreQv2VerdictDiagnosticFinding")
+        : i18n.getMessage(`gyrocoreQv2Verdict_${row.verdict}`);
 }
 
 function statusClass(status: BinStatus) {

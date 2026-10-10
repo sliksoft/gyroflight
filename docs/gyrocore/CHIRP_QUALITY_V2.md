@@ -7,21 +7,21 @@ calibration on real repeated flights.
 
 Code: `src/gyrocore/chirp/qualityV2/` (`contract.ts`, `analyze.ts`, `identity.ts`, `view.ts`). UI:
 `src/gyrocore/components/ChirpQualityV2Card.vue`, shown in the GyroCore qualification panel on the Autotune tab.
-Tests: `test/gyrocore/chirp_quality_v2.test.ts`, `chirp_quality_v2_ui.test.ts` and
-`chirp_quality_v2_adversarial.test.ts`.
+Tests: `test/gyrocore/chirp_quality_v2.test.ts`, `chirp_quality_v2_ui.test.ts`,
+`chirp_quality_v2_adversarial.test.ts` and `chirp_quality_v2_review.test.ts`.
 
 ## Where the numbers come from
 
-| Value                          | Source                                                                                                                                                         |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| samples, timestamps            | Blackbox Viewer `FlightLog`, via the existing CHIRP extraction                                                                                                 |
-| coherence, magnitude per bin   | Betaflight `welchTransferFunction`, the same call and result the gates use                                                                                     |
-| input and output power per bin | Betaflight `computeSpectrogram`, with the Welch segment size and overlap, averaged per bin. That is the Welch Sxx and Syy (same Hann window, segments and hop) |
-| observed sweep frequency       | firmware `DEBUG_CHIRP` `debug[2]`, the instantaneous sweep frequency in 0.1 Hz (Betaflight `pid.c`)                                                            |
-| firmware excitation signal     | firmware `DEBUG_CHIRP` `debug[3]`, the raw excitation × 1000 before the phase-compensation filter                                                              |
-| requested sweep                | log headers `chirp_frequency_start_deci_hz`, `chirp_frequency_end_deci_hz`, `chirp_time_seconds`, `chirp_amplitude_<axis>`                                     |
-| motor saturation               | optional `motor[0..7]` fields and the `motorOutput` header, as decoded by the Viewer                                                                           |
-| file and Flight identity       | WU1 `catalogBbl()` ([FLIGHT_IDENTITY.md](FLIGHT_IDENTITY.md))                                                                                                  |
+| Value                          | Source                                                                                                                                                                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| samples, timestamps            | Blackbox Viewer `FlightLog`, via the existing CHIRP extraction                                                                                                                                                                                 |
+| coherence, magnitude per bin   | Betaflight `welchTransferFunction`, the same call and result the gates use                                                                                                                                                                     |
+| input and output power per bin | Betaflight `computeSpectrogram`, framed like the Welch estimate, linear mean per bin with the spectrogram floor removed: **relative spectral power**, Welch Sxx (Syy) / segment count. See [Relative spectral power](#relative-spectral-power) |
+| observed sweep frequency       | firmware `DEBUG_CHIRP` `debug[2]`, the instantaneous sweep frequency in 0.1 Hz (Betaflight `pid.c`)                                                                                                                                            |
+| firmware excitation signal     | firmware `DEBUG_CHIRP` `debug[3]`, the raw excitation × 1000 before the phase-compensation filter                                                                                                                                              |
+| requested sweep                | log headers `chirp_frequency_start_deci_hz`, `chirp_frequency_end_deci_hz`, `chirp_time_seconds`, `chirp_amplitude_<axis>`                                                                                                                     |
+| motor saturation               | optional `motor[0..7]` fields and the `motorOutput` header, as decoded by the Viewer                                                                                                                                                           |
+| file and Flight identity       | WU1 `catalogBbl()` ([FLIGHT_IDENTITY.md](FLIGHT_IDENTITY.md))                                                                                                                                                                                  |
 
 No spectral, transfer-function or recommendation math is re-implemented. The only derived spectral number is the
 per-bin signal-to-noise estimate `10·log10(c / (1 − c))`, from Betaflight's coherence `c`.
@@ -29,7 +29,7 @@ per-bin signal-to-noise estimate `10·log10(c / (1 − c))`, from Betaflight's c
 ## Data contract
 
 `ChirpMeasurement.qualityV2` is a `ChirpQualityV2` object, schema `gyrocore.chirp-quality.v2`, analysis version
-`2.0.0`. It is plain JSON: no typed arrays, no `Infinity` or `NaN`, no file bytes. The same file gives the same JSON.
+`2.1.0` (2.1.0 added `verdicts`, renamed the power fields to relative power and removes the spectrogram floor). It is plain JSON: no typed arrays, no `Infinity` or `NaN`, no file bytes. The same file gives the same JSON.
 Every value carries:
 
 - `availability`:
@@ -46,20 +46,46 @@ Every value carries:
 
 There is no overall quality score. Each problem stays visible on its own.
 
+### Availability is not a verdict
+
+`MEASURED` only says a value exists. Whether it is good enough is a separate `verdicts.<topic>` entry, one per card
+topic:
+
+| Verdict         | When                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `PASS`          | every existing `quality.ts` gate for the topic passed (`basis: EXISTING_GATE`)                                 |
+| `FAIL`          | an existing blocking gate failed                                                                               |
+| `WARNING`       | an existing warning gate fired, or a documented diagnostic finding (`basis: DOCUMENTED_DIAGNOSTIC`, see below) |
+| `NOT_EVALUATED` | no gate ran for the topic, or the topic has none. Shown as "Diagnostic only"                                   |
+
+Each verdict quotes the gate codes, the gate's value and threshold, and whether the threshold is a minimum or maximum.
+The verdict copies the gate outcome; it never re-applies or adds a threshold.
+
+| Topic                                    | Existing gates                                                                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `excitation`                             | `insufficient_excitation` (setpoint RMS ≥ 5)                                                                                    |
+| `coherence`                              | `low_coherence` (mean 5–100 Hz coherence ≥ 0.60)                                                                                |
+| `usableBins`                             | `unusable_frequency_range` (≥ 8 usable bins)                                                                                    |
+| `sampleGaps`                             | `excessive_gaps` (≤ 1 % missing), `timestamp_gaps_present` (warning)                                                            |
+| `sweep`                                  | `chirp_band_unknown_default_used`, `chirp_band_near_nyquist` (warnings, only recorded when they fire)                           |
+| `detection`, `coverage`, `contamination` | none: always `NOT_EVALUATED`                                                                                                    |
+| `saturation`                             | none. A motor saturation detection is a documented diagnostic finding (`WARNING`); its absence is `NOT_EVALUATED`, never `PASS` |
+
 ### Sections
 
-| Section         | Contents                                                                                                                                                                                                                    |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity`      | measurement id, `logIndex`, `chirpIndex` (order within the Flight), axis and its occurrence, start and end time, sample count, WU1 file hash and `FlightRef`                                                                |
-| `provenance`    | decoder, Betaflight functions used, firmware channels, input and output fields, firmware revision, API version, sample rate and its source, Welch segment size, overlap and count, bin width                                |
-| `levels`        | the evidence ladder below                                                                                                                                                                                                   |
-| `sweep`         | `requested`, `observed` and `usable` ranges, the analysis band, and three coverage fractions                                                                                                                                |
-| `excitation`    | setpoint RMS (`ACTIVE_GATE`), peak, mean square and energy; gyro RMS and peak; requested amplitude; the firmware excitation's RMS and peak; the in-band input power peak; and the count of in-band bins without input power |
-| `coherence`     | mean band coherence and usable bin count (`ACTIVE_GATE`), the existing criteria quoted, **every real bin** and **summary regions**                                                                                          |
-| `sampleGaps`    | `NONE`, `DETECTED` or `UNKNOWN`, the counts of the existing spacing analysis, and the gaps themselves                                                                                                                       |
-| `contamination` | pilot interference: always `UNKNOWN` in this version (see below)                                                                                                                                                            |
-| `saturation`    | `DETECTED`, `NOT_DETECTED` or `UNKNOWN` from motor outputs; gyro clipping `UNKNOWN`                                                                                                                                         |
-| `reasons`       | every reason code in the report, once, in section order                                                                                                                                                                     |
+| Section         | Contents                                                                                                                                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `identity`      | measurement id, `logIndex`, `chirpIndex` (order within the Flight), axis and its occurrence, start and end time, sample count, WU1 file hash and `FlightRef`                                                                         |
+| `provenance`    | decoder, Betaflight functions used, firmware channels, input and output fields, firmware revision, API version, sample rate and its source, Welch segment size, overlap and count, bin width                                         |
+| `levels`        | the evidence ladder below                                                                                                                                                                                                            |
+| `verdicts`      | one verdict per card topic (above)                                                                                                                                                                                                   |
+| `sweep`         | `requested`, `observed` and `usable` ranges, the analysis band, and three coverage fractions                                                                                                                                         |
+| `excitation`    | setpoint RMS (`ACTIVE_GATE`), peak, mean square and energy; gyro RMS and peak; requested amplitude; the firmware excitation's RMS and peak; the in-band input relative power peak; and the count of in-band bins without input power |
+| `coherence`     | mean band coherence and usable bin count (`ACTIVE_GATE`), the existing criteria quoted, **every real bin** and **summary regions**                                                                                                   |
+| `sampleGaps`    | `NONE`, `DETECTED` or `UNKNOWN`, the counts of the existing spacing analysis, and the gaps themselves                                                                                                                                |
+| `contamination` | pilot interference: always `UNKNOWN` in this version (see below)                                                                                                                                                                     |
+| `saturation`    | `DETECTED`, `NOT_DETECTED` or `UNKNOWN` from motor outputs; gyro clipping `UNKNOWN`                                                                                                                                                  |
+| `reasons`       | every reason code in the report, once, in section order                                                                                                                                                                              |
 
 ## Evidence levels
 
@@ -75,7 +101,12 @@ The levels are separate. A lower level never implies a higher one.
 | `chirpQualified`        | the existing qualification state is not `rejected`                                                                    | ACTIVE_GATE |
 | `tuningAuthorized`      | the existing per-measurement Apply authorization allows it. Composite, Safety and the product lock still decide Apply | ACTIVE_GATE |
 
-`tuningAuthorized` is refreshed when recommendations are recomputed for another phase-margin target.
+`tuningAuthorized` is **measurement-level authorization only**: it copies `apply.allowed` for this one CHIRP and always
+carries `authorization_scope:measurement_only`. It does not mean that Flight A/B independence or cross-flight
+repeatability is verified, that the RP/RPY composite is approved, that Safety passed, or that physical FC Apply is
+released. The product Apply lock (`full_safety_engine_pending`) stays in force whatever this level says. The UI calls it
+"Measurement authorization" and states those separate gates. The field name is kept for contract stability; its meaning
+is unchanged. It is refreshed when recommendations are recomputed for another phase-margin target.
 
 ## Sweep
 
@@ -106,7 +137,7 @@ Coverage fractions:
 ## Frequency-dependent coherence
 
 `coherence.bins` holds Betaflight's transfer-function bins as parallel arrays. Each bin has its frequency, coherence,
-magnitude (dB), input and output power (dB, Betaflight spectrogram units, relative), the SNR estimate and a status:
+magnitude (dB), input and output relative spectral power (below), the SNR estimate and a status:
 
 | Status                  | Rule (existing criteria only)                                                        |
 | ----------------------- | ------------------------------------------------------------------------------------ |
@@ -121,8 +152,36 @@ Bins are stored from the first bin above 0 Hz up to the higher of the analysis-b
 Nyquist. Bins above that are only counted (`omittedBinCount`). The DC bin and Nyquist are never stored.
 
 `coherence.regions` (`kind: "SUMMARY"`) groups consecutive bins with the same status. A region's edges are real bin
-frequencies, and it gives mean, minimum and maximum coherence and mean input and output power. Regions are a summary of
+frequencies, and it gives mean, minimum and maximum coherence and the linear mean of input and output relative power. Regions are a summary of
 real bins. They are never invented frequency bands, and the UI labels them as such.
+
+## Relative spectral power
+
+What Betaflight computes (`src/js/blackbox/spectral_analysis.ts`, unchanged):
+
+- `welchTransferFunction` multiplies each segment by `hanningWindow(N)` (symmetric Hann, not normalised), takes the FFT,
+  and **sums** `Sxx[k] += |X_k|²` and `Syy[k] += |Y_k|²` over the segments. No detrend, no `fs` or window-power scaling.
+  Sxx and Syy are not returned. A bin with `Sxx < 1e-20` gets magnitude −∞ and coherence 0.
+- `computeSpectrogram` uses the same window, segment size, hop and segment count and returns
+  `10·log10(|X_k|² + 1e-20)` per segment.
+
+V2 converts each spectrogram value back to linear, takes the **mean** over the segments, and subtracts the `1e-20` it
+added. That equals `Sxx / numSegments` (or `Syy / numSegments`), recovered to rounding error, and is reported in dB as
+`inputRelativePowerDb` and `outputRelativePowerDb`; `coherence.bins.powerScale` records the definition, segment size and
+count. The segment size is taken from the transfer function itself, so a clamped segment still matches.
+
+What the numbers are, and are not:
+
+- **Relative spectral power**, in dB re 1 (signal unit)² (setpoint and gyro in deg/s). Not a PSD: there is no division by
+  `fs · Σw²`, so the level depends on the segment size (a tone rises by `20·log10(Σw₂/Σw₁)`, about 6 dB, when the
+  segment doubles) and is comparable only within one report.
+- Averaged, not summed: a longer CHIRP (more segments) does not raise the level.
+- **Reliable**: the output/input difference per bin, which is `10·log10(Syy/Sxx)` and independent of segment size and
+  count, and the shape across bins of one report. `|H|² = Syy/Sxx · γ²` holds per bin.
+- A one-sided PSD in (unit)²/Hz would be `2 · Sxx / (numSegments · fs · Σw²)`. V2 does not report it.
+- Floor: input power is `null` wherever Betaflight marks the bin below its input floor. Output power is `null` only when
+  nothing is left above the spectrogram floor (`relative_power_unknown:at_spectrogram_floor`), for example a silent gyro.
+  Without the subtraction a value of about 1e-19 per segment would read 0.4 dB too high.
 
 ## Sample gaps
 
@@ -184,6 +243,13 @@ currently show (one per axis). Each card has:
   hover title and a dashed line at the existing 0.5 criterion;
 - a collapsible table of the summary regions, with every reason code.
 
+Each row shows two badges: what was measured (availability or status, always neutral) and the verdict. Only the
+verdict is coloured: `PASS` green, `FAIL` red, `WARNING` amber, `NOT_EVALUATED` neutral as "Diagnostic only". A gate
+verdict quotes its criterion ("minimum 5"). In the evidence ladder only the `ACTIVE_GATE` levels are coloured (YES green,
+NO red); diagnostic levels stay neutral. The authorization level is labelled "Measurement authorization", with a note
+that cross-flight verification, composite tuning, Safety and physical FC Apply are separate gates and that physical
+Apply stays locked.
+
 The card states that the values are diagnostics and do not authorize tuning. No new tab, no change to Home, and
 Autotune stays an Expert Mode tab.
 
@@ -211,8 +277,17 @@ These need repeated real flights of one craft and configuration (several CHIRPs 
 - motor-saturation fractions that make a CHIRP unusable;
 - the repeatability of each V2 metric between CHIRPs of the same axis.
 
-The AIR65 file (local only) can verify the `debug[2]` and `debug[3]` interpretation and give the first real V2 values.
-Its 5 measurements have mean coherence 0.17–0.59 (CHIRP_QUALIFICATION.md), so the per-bin view shows where they fail.
+The AIR65 file (local only, not in the cloud workspace) is still needed for these local checks. None of them has been
+done, and no AIR65 result appears in this document:
+
+1. `debug[2]` is the instantaneous sweep frequency in 0.1 Hz: the observed sweep starts and ends near the
+   `chirp_frequency_*_deci_hz` headers and rises monotonically within each CHIRP.
+2. `debug[3]` is the excitation × 1000 within ±1000, and its dominant frequency follows `debug[2]`.
+3. `debug[1]` matches the CHIRP axis the extraction reports.
+4. Motor fields and the `motorOutput` header are present and decoded; saturation is reported only from them.
+5. The first real V2 values per CHIRP (coverage, per-bin coherence, gaps, relative power), recorded without changing any
+   threshold.
+   Its 5 measurements have mean coherence 0.17–0.59 (CHIRP_QUALIFICATION.md), so the per-bin view shows where they fail.
 
 ## Limits of the current Betaflight interfaces
 

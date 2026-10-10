@@ -392,8 +392,18 @@
     "gyrocoreQv2Level_blackboxDataUsable": { "message": "Data usable" },
     "gyrocoreQv2Level_chirpDetected": { "message": "CHIRP detected" },
     "gyrocoreQv2Level_chirpQualityAvailable": { "message": "Quality available" },
-    "gyrocoreQv2Level_chirpQualified": { "message": "CHIRP qualified" },
-    "gyrocoreQv2Level_tuningAuthorized": { "message": "Tuning authorized" },
+    "gyrocoreQv2Level_chirpQualified": { "message": "CHIRP qualified (existing gates)" },
+    "gyrocoreQv2Level_tuningAuthorized": { "message": "Measurement authorization" },
+    "gyrocoreQv2AuthorizationScope": {
+        "message": "Measurement authorization applies to this CHIRP only. Cross-flight verification, composite tuning, Safety and physical FC Apply are separate gates; physical Apply stays locked ($1)."
+    },
+    "gyrocoreQv2Verdict_PASS": { "message": "Existing gate: PASS" },
+    "gyrocoreQv2Verdict_FAIL": { "message": "Existing gate: FAIL" },
+    "gyrocoreQv2Verdict_WARNING": { "message": "Existing gate: warning" },
+    "gyrocoreQv2Verdict_NOT_EVALUATED": { "message": "Diagnostic only" },
+    "gyrocoreQv2VerdictDiagnosticFinding": { "message": "Diagnostic finding" },
+    "gyrocoreQv2CriterionMin": { "message": "minimum $1" },
+    "gyrocoreQv2CriterionMax": { "message": "maximum $1" },
     "gyrocoreQv2ChartLabel": { "message": "Coherence per frequency bin for $1" },
     "gyrocoreQv2ChartAxes": {
         "message": "Coherence per Betaflight bin (0–1) against frequency (Hz, log). Dashed: existing usable-bin criterion 0.5."

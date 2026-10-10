@@ -24,20 +24,44 @@
  * topic with a status word and the measured detail. Display only.
  */
 
-import type { Availability, BinStatus, ChirpQualityV2, EvidenceLevels } from "./contract";
+import type {
+    BinStatus,
+    ChirpQualityV2,
+    EvidenceLevels,
+    Level,
+    QualityTopic,
+    TopicVerdictV2,
+    Verdict,
+} from "./contract";
 
-export type RowTone = "good" | "warn" | "bad" | "unknown" | "neutral";
+export type RowTone = "good" | "warn" | "bad" | "neutral";
 
 export interface QualityRow {
     /** Stable id for tests and data attributes. */
     id: string;
     /** i18n key of the row label. */
     label: string;
-    /** Status word shown as a badge (an availability, a level or an evidence status). */
+    /** What was measured: an availability, a count or an evidence status. Always shown neutral. */
     status: string;
+    /** The quality judgement, from an existing gate or a documented diagnostic finding only. */
+    verdict: Verdict;
+    verdictBasis: TopicVerdictV2["basis"];
+    /** Colour of the verdict badge; follows the verdict alone, never the availability. */
     tone: RowTone;
     /** Measured detail, already formatted; empty when there is none. */
     detail: string;
+    /** The existing criterion behind the verdict ("minimum 5"), or empty. */
+    criterion: string;
+}
+
+const VERDICT_TONE: Record<Verdict, RowTone> = { PASS: "good", FAIL: "bad", WARNING: "warn", NOT_EVALUATED: "neutral" };
+
+/** Badge tone of an evidence level: only an existing gate (ACTIVE_GATE) is coloured. */
+export function levelTone(l: Level): RowTone {
+    if (l.role !== "ACTIVE_GATE" || l.status === "UNKNOWN") {
+        return "neutral";
+    }
+    return l.status === "YES" ? "good" : "bad";
 }
 
 function fmt(v: number | null | undefined, digits = 2): string {
@@ -55,9 +79,6 @@ function range(lo: number | null | undefined, hi: number | null | undefined): st
 function pct(v: number | null | undefined): string {
     return typeof v === "number" && Number.isFinite(v) ? `${Math.round(v * 100)} %` : "--";
 }
-
-const availabilityTone = (a: Availability): RowTone =>
-    a === "MEASURED" ? "good" : a === "NOT_APPLICABLE" ? "neutral" : "unknown";
 
 /** i18n lookup with $1.. arguments (i18n.getMessage in the app). */
 export type Translate = (key: string, args?: (string | number)[]) => string;
@@ -79,107 +100,96 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
         sweepParts.push(t("gyrocoreQv2DetailRuns", [s.observed.runs]));
     }
 
+    const row = (id: string, topic: QualityTopic, label: string, status: string, detail: string): QualityRow => {
+        const vd = v.verdicts[topic];
+        return {
+            id,
+            label,
+            status,
+            verdict: vd.verdict,
+            verdictBasis: vd.basis,
+            tone: VERDICT_TONE[vd.verdict],
+            detail,
+            criterion: criterion(vd, t),
+        };
+    };
+
     return [
-        {
-            id: "detection",
-            label: "gyrocoreQv2RowDetection",
-            status: v.levels.chirpDetected.status === "YES" ? "FOUND" : "NOT_FOUND",
-            tone: v.levels.chirpDetected.status === "YES" ? "good" : "bad",
-            detail: t("gyrocoreQv2DetailDetection", [v.identity.sampleCount, fmt(v.identity.durationS)]),
-        },
-        {
-            id: "sweep",
-            label: "gyrocoreQv2RowSweep",
-            status: s.observed.availability,
-            tone: availabilityTone(s.observed.availability),
-            detail: sweepParts.join(" · "),
-        },
-        {
-            id: "coverage",
-            label: "gyrocoreQv2RowCoverage",
-            status: s.usable.availability,
-            tone:
-                s.usable.availability === "MEASURED" && !s.usable.binCount
-                    ? "bad"
-                    : availabilityTone(s.usable.availability),
-            detail: t("gyrocoreQv2DetailCoverage", [
-                range(s.usable.startHz, s.usable.endHz),
-                pct(s.observedOfRequested.value),
-            ]),
-        },
-        {
-            id: "excitation",
-            label: "gyrocoreQv2RowExcitation",
-            status: e.setpointRms.availability,
-            tone: availabilityTone(e.setpointRms.availability),
-            detail:
-                t("gyrocoreQv2DetailExcitation", [fmt(e.setpointRms.value, 1), fmt(e.gyroRms.value, 1)]) +
+        row(
+            "detection",
+            "detection",
+            "gyrocoreQv2RowDetection",
+            v.levels.chirpDetected.status === "YES" ? "FOUND" : "NOT_FOUND",
+            t("gyrocoreQv2DetailDetection", [v.identity.sampleCount, fmt(v.identity.durationS)]),
+        ),
+        row("sweep", "sweep", "gyrocoreQv2RowSweep", s.observed.availability, sweepParts.join(" · ")),
+        row(
+            "coverage",
+            "coverage",
+            "gyrocoreQv2RowCoverage",
+            s.usable.availability,
+            t("gyrocoreQv2DetailCoverage", [range(s.usable.startHz, s.usable.endHz), pct(s.observedOfRequested.value)]),
+        ),
+        row(
+            "excitation",
+            "excitation",
+            "gyrocoreQv2RowExcitation",
+            e.setpointRms.availability,
+            t("gyrocoreQv2DetailExcitation", [fmt(e.setpointRms.value, 1), fmt(e.gyroRms.value, 1)]) +
                 (e.noInputPowerBins.value ? ` · ${t("gyrocoreQv2DetailNoInput", [e.noInputPowerBins.value])}` : ""),
-        },
-        {
-            id: "coherence",
-            label: "gyrocoreQv2RowCoherence",
-            status: c.meanBandCoherence.availability,
-            // Judged only by the existing low_coherence criterion, so a measured but failing value is not green.
-            tone:
-                c.meanBandCoherence.value === null
-                    ? availabilityTone(c.meanBandCoherence.availability)
-                    : c.meanBandCoherence.value >= c.criteria.meanBandCoherenceMin
-                      ? "good"
-                      : "bad",
-            detail: t("gyrocoreQv2DetailCoherence", [
+        ),
+        row(
+            "coherence",
+            "coherence",
+            "gyrocoreQv2RowCoherence",
+            c.meanBandCoherence.availability,
+            t("gyrocoreQv2DetailCoherence", [
                 fmt(c.meanBandCoherence.value),
                 c.criteria.meanBandHz[0],
                 c.criteria.meanBandHz[1],
             ]),
-        },
-        {
-            id: "usable-bins",
-            label: "gyrocoreQv2RowUsableBins",
-            status: usable === null ? c.usableBinCount.availability : String(usable),
-            tone: usable === null ? "unknown" : usable >= c.criteria.minUsableBins ? "good" : "bad",
-            detail: usable === null ? "" : t("gyrocoreQv2DetailUsableBins", [inBand]),
-        },
-        {
-            id: "sample-gaps",
-            label: "gyrocoreQv2RowSampleGaps",
-            status: g.status,
-            tone: g.status === "NONE" ? "good" : g.status === "DETECTED" ? "warn" : "unknown",
-            detail:
-                g.status === "UNKNOWN"
-                    ? ""
-                    : t("gyrocoreQv2DetailGaps", [
-                          g.gapCount ?? "--",
-                          g.missingSamplesEstimate ?? "--",
-                          pct(g.missingFraction),
-                      ]),
-        },
-        {
-            id: "contamination",
-            label: "gyrocoreQv2RowContamination",
-            status: v.contamination.status,
-            tone:
-                v.contamination.status === "DETECTED"
-                    ? "warn"
-                    : v.contamination.status === "UNKNOWN"
-                      ? "unknown"
-                      : "good",
-            detail: "",
-        },
-        {
-            id: "saturation",
-            label: "gyrocoreQv2RowSaturation",
-            status: sat.status,
-            tone: sat.status === "DETECTED" ? "warn" : sat.status === "UNKNOWN" ? "unknown" : "good",
-            detail:
-                sat.status === "UNKNOWN"
-                    ? ""
-                    : t("gyrocoreQv2DetailSaturation", [
-                          sat.motorUpper.value?.samples ?? "--",
-                          sat.motorLower.value?.samples ?? "--",
-                      ]),
-        },
+        ),
+        row(
+            "usable-bins",
+            "usableBins",
+            "gyrocoreQv2RowUsableBins",
+            usable === null ? c.usableBinCount.availability : String(usable),
+            usable === null ? "" : t("gyrocoreQv2DetailUsableBins", [inBand]),
+        ),
+        row(
+            "sample-gaps",
+            "sampleGaps",
+            "gyrocoreQv2RowSampleGaps",
+            g.status,
+            g.status === "UNKNOWN"
+                ? ""
+                : t("gyrocoreQv2DetailGaps", [
+                      g.gapCount ?? "--",
+                      g.missingSamplesEstimate ?? "--",
+                      pct(g.missingFraction),
+                  ]),
+        ),
+        row("contamination", "contamination", "gyrocoreQv2RowContamination", v.contamination.status, ""),
+        row(
+            "saturation",
+            "saturation",
+            "gyrocoreQv2RowSaturation",
+            sat.status,
+            sat.status === "UNKNOWN"
+                ? ""
+                : t("gyrocoreQv2DetailSaturation", [
+                      sat.motorUpper.value?.samples ?? "--",
+                      sat.motorLower.value?.samples ?? "--",
+                  ]),
+        ),
     ];
+}
+
+function criterion(vd: TopicVerdictV2, t: Translate): string {
+    if (vd.basis !== "EXISTING_GATE" || vd.threshold === null || vd.comparator === null) {
+        return "";
+    }
+    return t(vd.comparator === "MIN" ? "gyrocoreQv2CriterionMin" : "gyrocoreQv2CriterionMax", [String(vd.threshold)]);
 }
 
 export const LEVEL_ORDER: (keyof EvidenceLevels)[] = [
