@@ -83,11 +83,14 @@ describe("Gyroflight branding", () => {
 
     it("uses the real Gyroflight logo PNG, in a sidebar and a hero size, with the version tooltip", () => {
         expect(fs.existsSync(path.join(root, "src/gyroflight/branding/logo-Gyrofly.png"))).toBe(true);
+        // The trimmed copy the app uses: PNG IHDR width/height 2106 x 421.
+        const png = fs.readFileSync(path.join(root, "src/gyroflight/branding/logo-gyroflight-trimmed.png"));
+        expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([2106, 421]);
         const sidebar = mount(GyroflightLogo, { configuratorVersion: "1.2.3" });
         const logo = sidebar.el.querySelector('[data-gyroflight="logo"]')!;
         expect(logo.getAttribute("data-variant")).toBe("sidebar");
         const img = logo.querySelector("img")!;
-        expect(img.getAttribute("src")).toMatch(/logo-Gyrofly/);
+        expect(img.getAttribute("src")).toMatch(/logo-gyroflight-trimmed/);
         expect(img.getAttribute("alt")).toBe("Gyroflight by Redline Dynamics");
         expect(logo.getAttribute("title")).toContain("1.2.3");
         // The artwork carries the wordmark: no separate text branding beside it.
@@ -97,6 +100,9 @@ describe("Gyroflight branding", () => {
         const style = read("src/gyroflight/branding/GyroflightLogo.vue").split("<style>")[1];
         expect(style).not.toMatch(/background(-color)?\s*:/);
         expect(style).not.toMatch(/border-radius\s*:/);
+        // Scaled to fit, never cropped (the compact sidebar crops to the whole emblem only).
+        expect(style).toMatch(/object-fit:\s*contain/);
+        expect(style).not.toMatch(/object-fit:\s*cover/);
         const hero = mount(GyroflightLogo, { variant: "hero" });
         expect(hero.el.querySelector('[data-gyroflight="logo"]')!.getAttribute("data-variant")).toBe("hero");
         hero.unmount();
