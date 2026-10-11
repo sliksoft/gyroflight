@@ -54,6 +54,10 @@ export interface SaveOutcome {
     skipped: { logIndex: number; reasons: string[] }[];
     /** Stored, but the same recording as a Flight already in the session. */
     notIndependent: AddFlightsResult["notIndependent"];
+    /** Flights of the analysis already in the open session (same locationId); nothing was saved. */
+    alreadyInSession: string[];
+    /** Whether the saved session was opened afterwards (not when the user opened or closed another meanwhile). */
+    opened: boolean;
     error: string | null;
 }
 
@@ -161,8 +165,13 @@ export function useFlightAbSelector(opts: { store?: TuneSessionStore; now?: () =
 
     /**
      * Store the analysed log's Flights, only when the user asks: as a new
-     * session, or into the open session (refused when none is open). A damaged
-     * record is never written over (the store refuses it).
+     * session, or into the open session (refused when none is open). Adding
+     * never replaces a stored Flight: when one of the analysis's Flights is
+     * already in the session under its locationId, nothing is written. A
+     * damaged record is never written over (the store refuses it).
+     *
+     * The save always completes, but the saved session is only opened when the
+     * user has not opened or closed a session in the meantime.
      */
     async function saveAnalysis(
         report: ChirpQualificationReport,
@@ -175,22 +184,38 @@ export function useFlightAbSelector(opts: { store?: TuneSessionStore; now?: () =
             sessionId: null,
             skipped,
             notIndependent: [],
+            alreadyInSession: [],
+            opened: false,
             error: null,
         };
         if (!fresh.length) {
             return outcome;
         }
         const open = loaded.value;
-        const openOk = open?.status === "ok" && open.session.id === sessionId.value;
-        if (target.intoOpenSession && !openOk) {
+        const openId = open?.status === "ok" && open.session.id === sessionId.value ? open.session.id : null;
+        if (target.intoOpenSession && openId === null) {
             // Never fall back to a new session: the user asked for this one.
             return { ...outcome, status: "error", error: "no_open_session" };
         }
+        const tokenAtStart = loadToken;
         saving.value = true;
         try {
             let saved: TuneSession;
-            if (target.intoOpenSession && open?.status === "ok") {
-                const added = addFlights(open.session, fresh, t);
+            if (target.intoOpenSession && openId !== null) {
+                // Checked against the record as stored now, not the copy loaded earlier.
+                const current = await getStore().load(openId);
+                if (current.status !== "ok" || current.rejected.length) {
+                    throw new TuneSessionStorageError(current.status === "not_found" ? "not_found" : "damaged_record");
+                }
+                const added = addFlights(current.session, fresh, t);
+                if (added.replaced.length) {
+                    return {
+                        ...outcome,
+                        status: "error",
+                        error: "flight_already_in_session",
+                        alreadyInSession: added.replaced,
+                    };
+                }
                 outcome.notIndependent = added.notIndependent;
                 saved = await getStore().save(added.session);
             } else {
@@ -205,7 +230,13 @@ export function useFlightAbSelector(opts: { store?: TuneSessionStore; now?: () =
             outcome.status = "saved";
             outcome.sessionId = saved.id;
             await refreshSessions();
-            await openSession(saved.id);
+            if (loadToken === tokenAtStart) {
+                await openSession(saved.id);
+                outcome.opened = true;
+            } else if (sessionId.value === saved.id) {
+                // The user opened this same session meantime: refresh its Flights, keeping their choices.
+                await reloadSession();
+            }
         } catch (err) {
             outcome.status = "error";
             outcome.error = errorCode(err);
