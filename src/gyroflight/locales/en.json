@@ -479,5 +479,11 @@
     "gyrocoreAbMissing": { "message": "Missing evidence" },
     "gyrocoreAbBlockers": { "message": "Blocking reasons" },
     "gyrocoreAbNone": { "message": "none" },
-    "gyrocoreAbCleared": { "message": "An earlier choice was cleared: $1" }
+    "gyrocoreAbCleared": { "message": "An earlier choice was cleared: $1" },
+    "gyrocoreAbSaveAlreadyPresent": {
+        "message": "Not saved: this analysis contains a Flight that is already in the open session ($1). The stored Flight was left unchanged. Use “Save analysis as new session” to keep this analysis separately."
+    },
+    "gyrocoreAbSaveNotOpened": {
+        "message": "It was not opened, because another session was opened or closed while saving."
+    }
 }

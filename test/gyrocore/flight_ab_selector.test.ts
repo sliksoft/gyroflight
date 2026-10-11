@@ -707,6 +707,205 @@ describe("saving an analysis (explicit only)", () => {
     });
 });
 
+describe("FIX 2: adding to the open session never replaces a stored Flight", () => {
+    async function stored(s: TuneSessionStore, id: string) {
+        const r = await s.load(id);
+        if (r.status !== "ok") {
+            throw new Error(r.status);
+        }
+        return json(r.session);
+    }
+
+    it("the same Flight again is refused, nothing is written, and the stored result is unchanged", async () => {
+        const s = store();
+        const one = await s.create("one", [flightA, flightB]);
+        const before = await stored(s, one.id);
+        const sel = useFlightAbSelector({ store: s, now: () => new Date("2026-10-11T01:00:00.000Z") });
+        await sel.openSession(one.id);
+        sel.select("a", flightA.key);
+        const out = await sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: true, name: "" });
+        expect(out).toMatchObject({
+            status: "error",
+            error: "flight_already_in_session",
+            alreadyInSession: [flightA.key],
+            sessionId: null,
+        });
+        expect(await stored(s, one.id)).toEqual(before);
+        expect(sel.selection.value.a).toBe(flightA.key);
+    });
+
+    it("one known Flight among new ones: nothing is saved (no partial save)", async () => {
+        const s = store();
+        const one = await s.create("one", [twoInOne[0]]);
+        const before = await stored(s, one.id);
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        const both = await report(concatLogs(log(45), log(35)), "two.bbl");
+        const out = await sel.saveAnalysis(both, { intoOpenSession: true, name: "" });
+        expect(out).toMatchObject({ status: "error", alreadyInSession: [twoInOne[0].key] });
+        expect(await stored(s, one.id)).toEqual(before);
+        expect((await s.list()).map((x) => x.flightCount)).toEqual([1]);
+    });
+
+    it("checks the record as stored, not the copy loaded earlier", async () => {
+        const s = store();
+        const one = await s.create("one", [flightB]);
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        // Changed elsewhere after it was opened here.
+        const elsewhere = addFlights(one, [flightA], T0).session;
+        await s.save(elsewhere);
+        const before = await stored(s, one.id);
+        const out = await sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: true, name: "" });
+        expect(out).toMatchObject({ status: "error", alreadyInSession: [flightA.key] });
+        expect(await stored(s, one.id)).toEqual(before);
+    });
+
+    it("saving the same analysis as a new session still works and leaves the first session alone", async () => {
+        const s = store();
+        const one = await s.create("one", [flightA]);
+        const before = await stored(s, one.id);
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        const out = await sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: false, name: "copy" });
+        expect(out.status).toBe("saved");
+        expect(out.sessionId).not.toBe(one.id);
+        expect(await stored(s, one.id)).toEqual(before);
+    });
+});
+
+describe("FIX 1: a slow save never overrides a newer session choice", () => {
+    /** Writes (create/save) wait until released; reads go straight through. */
+    function slowWrites(real: TuneSessionStore) {
+        const gates: (() => void)[] = [];
+        const hold = <T>(p: () => Promise<T>) =>
+            new Promise<T>((resolve, reject) => gates.push(() => void p().then(resolve, reject)));
+        const s: TuneSessionStore = {
+            ...real,
+            create: (name, flights) => hold(() => real.create(name, flights)),
+            save: (session, o) => hold(() => real.save(session, o)),
+        };
+        return { s, release: () => gates.shift()!(), pending: () => gates.length };
+    }
+    const until = async (cond: () => boolean) => {
+        for (let i = 0; i < 200 && !cond(); i++) {
+            await new Promise((r) => setTimeout(r, 5));
+        }
+        expect(cond()).toBe(true);
+    };
+
+    it("without a change meanwhile, the saved session is opened", async () => {
+        const { s, release, pending } = slowWrites(store());
+        const sel = useFlightAbSelector({ store: s });
+        const saving = sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: false, name: "new" });
+        await until(() => pending() === 1);
+        release();
+        const out = await saving;
+        expect(out).toMatchObject({ status: "saved", opened: true });
+        expect(sel.sessionId.value).toBe(out.sessionId);
+    });
+
+    it("a new session saved while the user opened another one does not take over", async () => {
+        const real = store();
+        const two = await real.create("two", [flightA, flightB]);
+        const { s, release, pending } = slowWrites(real);
+        const sel = useFlightAbSelector({ store: s });
+        const saving = sel.saveAnalysis(await report(log(33), "c.bbl"), { intoOpenSession: false, name: "new" });
+        await until(() => pending() === 1);
+        await sel.openSession(two.id);
+        sel.select("a", flightA.key);
+        sel.select("b", flightB.key);
+        release();
+        const out = await saving;
+        expect(out).toMatchObject({ status: "saved", opened: false });
+        expect(sel.sessionId.value).toBe(two.id);
+        expect(sel.selection.value).toMatchObject({ sessionId: two.id, a: flightA.key, b: flightB.key });
+        expect(sel.verification.value.status).toBe("ELIGIBLE");
+        expect(sel.sessions.value.map((x) => x.id)).toContain(out.sessionId);
+    });
+
+    it("a save while the user closed the session leaves it closed", async () => {
+        const real = store();
+        const one = await real.create("one", [flightB]);
+        const { s, release, pending } = slowWrites(real);
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        const saving = sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: true, name: "" });
+        await until(() => pending() === 1);
+        await sel.openSession(null);
+        release();
+        const out = await saving;
+        expect(out).toMatchObject({ status: "saved", opened: false, sessionId: one.id });
+        expect(sel.sessionId.value).toBeNull();
+        expect(sel.session.value).toBeNull();
+        // The save itself completed.
+        const r = await real.load(one.id);
+        expect(r.status === "ok" && r.session.flights.map((f) => f.key)).toEqual([flightB.key, flightA.key]);
+    });
+
+    it("adding to session one while the user switched to session two keeps session two", async () => {
+        const real = store();
+        const one = await real.create("one", [flightB]);
+        const two = await real.create("two", [flightA, flightB]);
+        const { s, release, pending } = slowWrites(real);
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        const saving = sel.saveAnalysis(await report(log(33), "c.bbl"), { intoOpenSession: true, name: "" });
+        await until(() => pending() === 1);
+        await sel.openSession(two.id);
+        sel.select("b", flightB.key);
+        release();
+        const out = await saving;
+        expect(out).toMatchObject({ status: "saved", opened: false, sessionId: one.id });
+        expect(sel.sessionId.value).toBe(two.id);
+        expect(sel.flights.value.options.map((o) => o.key)).toEqual([flightA.key, flightB.key]);
+        expect(sel.selection.value).toMatchObject({ sessionId: two.id, b: flightB.key });
+    });
+
+    it("a slow read before adding cannot override a newer choice either", async () => {
+        const real = store();
+        const one = await real.create("one", [flightB]);
+        const two = await real.create("two", [flightA]);
+        let releaseLoad: (() => void) | null = null;
+        const s: TuneSessionStore = {
+            ...real,
+            load: (id) =>
+                releaseLoad === null && id === one.id && sel.saving.value
+                    ? new Promise((resolve, reject) => {
+                          releaseLoad = () => void real.load(id).then(resolve, reject);
+                      })
+                    : real.load(id),
+        };
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        const saving = sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: true, name: "" });
+        await until(() => releaseLoad !== null);
+        await sel.openSession(two.id);
+        releaseLoad!();
+        const out = await saving;
+        expect(out).toMatchObject({ status: "saved", opened: false });
+        expect(sel.sessionId.value).toBe(two.id);
+    });
+
+    it("re-opening the same session during the save keeps the choices and shows the new Flight", async () => {
+        const real = store();
+        const one = await real.create("one", [flightB, twoInOne[0]]);
+        const { s, release, pending } = slowWrites(real);
+        const sel = useFlightAbSelector({ store: s });
+        await sel.openSession(one.id);
+        sel.select("a", twoInOne[0].key);
+        const saving = sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: true, name: "" });
+        await until(() => pending() === 1);
+        await sel.reloadSession();
+        sel.select("b", flightB.key);
+        release();
+        const out = await saving;
+        expect(out).toMatchObject({ status: "saved", opened: false });
+        expect(sel.selection.value).toMatchObject({ a: twoInOne[0].key, b: flightB.key });
+        expect(sel.flights.value.options.map((o) => o.key)).toContain(flightA.key);
+    });
+});
+
 describe("authorization, Safety and Apply are untouched", () => {
     const read = (p: string) => readFileSync(join(__dirname, "../..", p), "utf8");
     const NEW = [
@@ -849,6 +1048,22 @@ describe("the component", () => {
         expect(q(container, '[data-row="firmware"]')?.dataset.status).toBe("UNKNOWN");
         expect(q(container, '[data-row="missing"] [data-reason="firmware_unknown:apiVersion"]')).not.toBeNull();
         expect(q(container, '[data-gyrocore="ab-status"]')?.dataset.status).toBe("BLOCKED");
+        unmount();
+    });
+
+    it("shows that a Flight is already in the open session and saves nothing", async () => {
+        const s = store();
+        const one = await s.create("one", [flightA]);
+        const gate = useChirpQualificationStore();
+        gate.setReport((await report(base, "a.bbl")) as never);
+        const { container, unmount } = await mount(s);
+        await choose(container, '[data-gyrocore="ab-session-select"]', one.id);
+        q(container, '[data-gyrocore="ab-save-into"]')!.click();
+        await flush();
+        const msg = q(container, '[data-gyrocore="ab-save-result"]');
+        expect(msg?.dataset.reason).toBe("flight_already_in_session");
+        expect(msg?.textContent).toContain("gyrocoreAbSaveAlreadyPresent");
+        expect((await s.list()).map((x) => x.flightCount)).toEqual([1]);
         unmount();
     });
 

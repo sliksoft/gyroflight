@@ -118,6 +118,7 @@
                     class="text-sm"
                     data-gyrocore="ab-save-result"
                     :data-status="saveMessage.status"
+                    :data-reason="saveMessage.reason"
                     >{{ saveMessage.text }}</span
                 >
             </div>
@@ -437,7 +438,7 @@ function refresh() {
 }
 
 const saveName = ref("");
-const saveMessage = ref<{ status: SaveOutcome["status"]; text: string } | null>(null);
+const saveMessage = ref<{ status: SaveOutcome["status"]; text: string; reason?: string } | null>(null);
 
 async function save(intoOpenSession: boolean) {
     const report = gate.report;
@@ -449,6 +450,15 @@ async function save(intoOpenSession: boolean) {
         out.status === "error"
             ? (out.error ?? "")
             : [...out.skipped.flatMap((s) => s.reasons), ...out.notIndependent.flatMap((n) => n.reasons)].join(", ");
-    saveMessage.value = { status: out.status, text: t(`gyrocoreAbSave_${out.status}`, [detail]) };
+    if (out.error === "flight_already_in_session") {
+        saveMessage.value = {
+            status: out.status,
+            text: t("gyrocoreAbSaveAlreadyPresent", [out.alreadyInSession.join(", ")]),
+            reason: out.error,
+        };
+        return;
+    }
+    const opened = out.status === "saved" && !out.opened ? ` ${i18n.getMessage("gyrocoreAbSaveNotOpened")}` : "";
+    saveMessage.value = { status: out.status, text: t(`gyrocoreAbSave_${out.status}`, [detail]) + opened };
 }
 </script>
