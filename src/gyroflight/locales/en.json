@@ -419,5 +419,71 @@
     "gyrocoreQv2ColFrequency": { "message": "Frequency (Hz)" },
     "gyrocoreQv2ColBins": { "message": "Bins" },
     "gyrocoreQv2ColCoherence": { "message": "Coherence mean (min–max)" },
-    "gyrocoreQv2ColDiagnostic": { "message": "Diagnostic" }
+    "gyrocoreQv2ColDiagnostic": { "message": "Diagnostic" },
+    "gyrocoreAbTitle": { "message": "Flight A/B Selector" },
+    "gyrocoreAbIntro": {
+        "message": "Choose two Flights from a saved Tune Session and check whether they can be compared: independent recordings, the same firmware and the same Quality V2 analysis version. This only selects and checks the pair; it does not compare tuning results."
+    },
+    "gyrocoreAbNotVerifiedTune": {
+        "message": "An A/B selection is not a Verified Tune. It does not qualify CHIRPs, prove repeatability, approve PID settings or release Safety, and physical Apply stays locked ($1)."
+    },
+    "gyrocoreAbSessionHead": { "message": "Tune Session" },
+    "gyrocoreAbSessionLabel": { "message": "Saved session" },
+    "gyrocoreAbSessionNone": { "message": "— choose a session —" },
+    "gyrocoreAbSessionOption": { "message": "$1 · $2 Flights · $3 CHIRPs · $4" },
+    "gyrocoreAbSessionsLoading": { "message": "Reading saved sessions…" },
+    "gyrocoreAbSessionsError": { "message": "Saved sessions could not be read ($1)." },
+    "gyrocoreAbSessionsEmpty": {
+        "message": "No Tune Sessions saved on this device yet. Analyse a CHIRP log above and save it as a session."
+    },
+    "gyrocoreAbSessionCorrupt": { "message": "Session $1 is damaged and cannot be opened. It is left as it is." },
+    "gyrocoreAbSessionUnsupported": {
+        "message": "Session $1 was saved in a format this version does not support. It is left as it is."
+    },
+    "gyrocoreAbSessionLoading": { "message": "Opening session…" },
+    "gyrocoreAbSessionProblem": { "message": "This session cannot be used: $1 ($2). Nothing was repaired or removed." },
+    "gyrocoreAbRefresh": { "message": "Reload" },
+    "gyrocoreAbSaveName": { "message": "Session name" },
+    "gyrocoreAbSaveNew": { "message": "Save analysis as new session" },
+    "gyrocoreAbSaveInto": { "message": "Add analysis to open session" },
+    "gyrocoreAbSave_saved": { "message": "Saved locally. $1" },
+    "gyrocoreAbSave_nothing_to_save": {
+        "message": "Nothing to save: no log of this analysis has a valid Flight identity. $1"
+    },
+    "gyrocoreAbSave_error": { "message": "Not saved ($1)." },
+    "gyrocoreAbFlightsHead": { "message": "Flights in this session" },
+    "gyrocoreAbFlightsEmpty": { "message": "This session has no Flights." },
+    "gyrocoreAbFlightsTooFew": { "message": "Only $1 selectable Flight(s): an A/B pair needs two." },
+    "gyrocoreAbFlightOption": { "message": "$1 · Flight $2/$3 · $4 CHIRPs" },
+    "gyrocoreAbNotSelectable": { "message": "not selectable ($1)" },
+    "gyrocoreAbChirpsRejected": { "message": "$1 damaged CHIRP(s) left out" },
+    "gyrocoreAbFlightRejected": { "message": "Stored Flight $1 is damaged and not selectable ($2)." },
+    "gyrocoreAbFlightA": { "message": "Flight A — Baseline" },
+    "gyrocoreAbFlightB": { "message": "Flight B — Verification" },
+    "gyrocoreAbFlightNone": { "message": "— choose a Flight —" },
+    "gyrocoreAbFile": { "message": "BBL file" },
+    "gyrocoreAbFlightNumber": { "message": "Flight" },
+    "gyrocoreAbLogStart": { "message": "Date/time" },
+    "gyrocoreAbFirmware": { "message": "Firmware" },
+    "gyrocoreAbBoard": { "message": "Board" },
+    "gyrocoreAbChirps": { "message": "CHIRPs" },
+    "gyrocoreAbAxes": { "message": "Measured axes" },
+    "gyrocoreAbAnalysisVersion": { "message": "Analysis version" },
+    "gyrocoreAbUnknown": { "message": "unknown" },
+    "gyrocoreAbStatusHead": { "message": "A/B Verification Status" },
+    "gyrocoreAbPair_INCOMPLETE": { "message": "Choose Flight A and Flight B" },
+    "gyrocoreAbPair_BLOCKED": { "message": "Not comparable" },
+    "gyrocoreAbPair_ELIGIBLE": { "message": "Comparable pair (not a Verified Tune)" },
+    "gyrocoreAbIndependence": { "message": "Flight independence" },
+    "gyrocoreAbFirmwareCompat": { "message": "Firmware compatibility" },
+    "gyrocoreAbMissing": { "message": "Missing evidence" },
+    "gyrocoreAbBlockers": { "message": "Blocking reasons" },
+    "gyrocoreAbNone": { "message": "none" },
+    "gyrocoreAbCleared": { "message": "An earlier choice was cleared: $1" },
+    "gyrocoreAbSaveAlreadyPresent": {
+        "message": "Not saved: this analysis contains a Flight that is already in the open session ($1). The stored Flight was left unchanged. Use “Save analysis as new session” to keep this analysis separately."
+    },
+    "gyrocoreAbSaveNotOpened": {
+        "message": "It was not opened, because another session was opened or closed while saving."
+    }
 }
