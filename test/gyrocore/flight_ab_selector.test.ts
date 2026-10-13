@@ -784,6 +784,7 @@ describe("FIX 1: a slow save never overrides a newer session choice", () => {
             ...real,
             create: (name, flights) => hold(() => real.create(name, flights)),
             save: (session, o) => hold(() => real.save(session, o)),
+            addFlightsAtomic: (id, flights) => hold(() => real.addFlightsAtomic(id, flights)),
         };
         return { s, release: () => gates.shift()!(), pending: () => gates.length };
     }
@@ -862,26 +863,24 @@ describe("FIX 1: a slow save never overrides a newer session choice", () => {
         expect(sel.selection.value).toMatchObject({ sessionId: two.id, b: flightB.key });
     });
 
-    it("a slow read before adding cannot override a newer choice either", async () => {
+    it("a slow atomic add (read and write in one transaction) cannot override a newer choice either", async () => {
         const real = store();
         const one = await real.create("one", [flightB]);
         const two = await real.create("two", [flightA]);
-        let releaseLoad: (() => void) | null = null;
+        let releaseAdd: (() => void) | null = null;
         const s: TuneSessionStore = {
             ...real,
-            load: (id) =>
-                releaseLoad === null && id === one.id && sel.saving.value
-                    ? new Promise((resolve, reject) => {
-                          releaseLoad = () => void real.load(id).then(resolve, reject);
-                      })
-                    : real.load(id),
+            addFlightsAtomic: (id, flights) =>
+                new Promise((resolve, reject) => {
+                    releaseAdd = () => void real.addFlightsAtomic(id, flights).then(resolve, reject);
+                }),
         };
         const sel = useFlightAbSelector({ store: s });
         await sel.openSession(one.id);
         const saving = sel.saveAnalysis(await report(base, "a.bbl"), { intoOpenSession: true, name: "" });
-        await until(() => releaseLoad !== null);
+        await until(() => releaseAdd !== null);
         await sel.openSession(two.id);
-        releaseLoad!();
+        releaseAdd!();
         const out = await saving;
         expect(out).toMatchObject({ status: "saved", opened: false });
         expect(sel.sessionId.value).toBe(two.id);

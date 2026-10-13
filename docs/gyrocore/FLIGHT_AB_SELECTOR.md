@@ -77,17 +77,21 @@ and the raw `evidence` for WU5 to re-check.
 ## Saving
 
 The selector writes to the store only when the user clicks **Save analysis as new
-session** or **Add analysis to open session**. Both use WU3 `flightsFromReport`,
-`addFlights`, `create` and `save`: no BBL bytes, no authorization, no schema change.
-Nothing is uploaded.
+session** or **Add analysis to open session**. Both use WU3 `flightsFromReport` and
+`addFlights`: no BBL bytes, no authorization, no schema change. Nothing is uploaded.
 
-- **Add analysis to open session** re-reads the session as stored and refuses when
-  it is damaged, gone or none is open (`no_open_session`). When any Flight of the
-  analysis is already in the session under the same `locationId` (WU3 `addFlights`
-  `replaced`), nothing is written at all, not even the other Flights
-  (`flight_already_in_session`); the stored Flight and its results stay as they were.
-  The user is pointed to **Save analysis as new session** to keep the analysis
-  separately. WU4 has no replace action.
+- **Save analysis as new session** uses `create`.
+- **Add analysis to open session** uses only `addFlightsAtomic`: one IndexedDB
+  readwrite transaction reads the session as stored at that moment, checks it and
+  writes it back. Another window adding Flights at the same time is serialized by
+  IndexedDB, so neither write is lost and no stale Flight list or `updatedAt` is
+  written back. It refuses when the session is damaged (`damaged_record`), gone
+  (`not_found`, never recreated) or none is open (`no_open_session`). When any
+  Flight of the analysis is already in the session under the same `locationId`
+  (WU3 `addFlights` `replaced`), nothing is written at all, not even the other
+  Flights (`flight_already_in_session`); the stored Flight and its results stay as
+  they were. The user is pointed to **Save analysis as new session** to keep the
+  analysis separately. WU4 has no replace action.
 - A save always completes, but the saved session is opened afterwards only when the
   user has not opened, reopened or closed a session while it was being written. If
   the user reopened that same session meanwhile, it is reloaded (keeping the choices)

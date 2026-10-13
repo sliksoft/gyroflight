@@ -97,18 +97,19 @@ A new firmware or analysis version is therefore never silently comparable. The f
 `openTuneSessionStore({ indexedDB?, now?, newId?, migrations? })` opens database `gyroflight-gyrocore` (version 1),
 object store `tuneSessions` (key path `id`):
 
-| Call                     | Behaviour                                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------------ |
-| `create(name, flights?)` | new session; `already_exists` if the id is taken                                                 |
-| `load(id)`               | `ok` (with `rejected` parts and `migratedFrom`), `corrupt`, `unsupported_version` or `not_found` |
-| `list()`                 | a summary per record, including damaged ones (`corrupt`, `unsupported_version`)                  |
-| `save(session, opts?)`   | full write after validation; `not_found` for an unknown id                                       |
-| `remove(id)`             | delete                                                                                           |
+| Call                            | Behaviour                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `create(name, flights?)`        | new session; `already_exists` if the id is taken                                                 |
+| `load(id)`                      | `ok` (with `rejected` parts and `migratedFrom`), `corrupt`, `unsupported_version` or `not_found` |
+| `list()`                        | a summary per record, including damaged ones (`corrupt`, `unsupported_version`)                  |
+| `save(session, opts?)`          | full write after validation; `not_found` for an unknown id                                       |
+| `addFlightsAtomic(id, flights)` | add Flights in one readwrite transaction (see below)                                             |
+| `remove(id)`                    | delete                                                                                           |
 
 Every write is validated whole: an invalid session is refused (`invalid_session` with the problems) and nothing is
 written. Errors are `TuneSessionStorageError` with a `code`: `unavailable` (no IndexedDB, or opening it failed, as in
 some private modes), `blocked`, `quota_exceeded`, `io`, `invalid_session`, `already_exists`, `not_found`,
-`damaged_record`.
+`damaged_record`, `flight_already_in_session`.
 
 ## Validation and damaged data
 
@@ -162,6 +163,14 @@ Timestamps must be real UTC instants: `2026-02-30T00:00:00Z` is rejected rather 
 `save` refuses to overwrite a record that is corrupt, of an unsupported version, or that loaded with rejected parts
 (`damaged_record`), because that would silently drop data. `save(session, { replaceDamaged: true })` overwrites it on
 request.
+
+`addFlightsAtomic(id, flights)` reads the record, checks it, runs `addFlights` and writes it back inside one
+IndexedDB `readwrite` transaction, so a write from another window or store instance cannot land between the read and
+the write (IndexedDB runs readwrite transactions on the same store one after the other). It never replaces a Flight:
+when any `locationId` is already stored, the whole batch is refused (`flight_already_in_session`, with those keys) and
+nothing is written. A missing record is `not_found` and is not created; a corrupt, unsupported or partly rejected
+record is `damaged_record` and stays as it is. The promise resolves only after the transaction commits; an abort or
+request error rejects and rolls the transaction back.
 
 ## Schema migrations
 

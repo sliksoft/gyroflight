@@ -943,6 +943,7 @@ function controlled(base: TuneSessionStore) {
         load: (id) => gate("load", id, () => base.load(id)),
         list: () => gate("list", null, () => base.list()),
         save: (s, o) => base.save(s, o),
+        addFlightsAtomic: (id, flights) => base.addFlightsAtomic(id, flights),
         remove: (id) => base.remove(id),
         close: () => base.close(),
     };
