@@ -313,6 +313,8 @@
                     {{ t("gyrocoreAbCleared", [sel.selection.value.cleared.join(", ")]) }}
                 </p>
             </section>
+
+            <CrossFlightComparison :load="sel.loaded.value" :selection="sel.selection.value" />
         </template>
     </UiBox>
 </template>
@@ -330,6 +332,7 @@ import { EventBus } from "@/components/eventBus.js";
 import { i18n } from "@/js/localization";
 import { isExpertModeEnabled } from "@/js/utils/isExpertModeEnabled";
 import { useFlightAbSelector, type SaveOutcome } from "@/gyrocore/composables/useFlightAbSelector";
+import CrossFlightComparison from "./CrossFlightComparison.vue";
 import { PRODUCT_APPLY_PENDING } from "@/gyrocore/productLock/productApply";
 import type { MatchStatus, SessionSummary } from "@/gyrocore/session/contract";
 import type { AbSide, FlightOption, IndependenceStatus } from "@/gyrocore/session/selection";

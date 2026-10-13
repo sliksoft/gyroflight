@@ -72,7 +72,9 @@ and `BLOCKED` otherwise. UNKNOWN is never turned into a pass. A missing logged A
 version stays UNKNOWN (WU3: `provenance.apiVersion` is an assumed fallback, never
 firmware identity). The result always carries
 `authorization: { status: "NOT_AUTHORIZED", reasons: ["ab_selection_is_not_a_verified_tune", "full_safety_engine_pending"] }`
-and the raw `evidence` for WU5 to re-check.
+and the raw `evidence` for WU5 to re-check. The Cross-flight Comparison (WU5,
+[CROSS_FLIGHT_COMPARISON.md](CROSS_FLIGHT_COMPARISON.md)) sits under this status and runs `abVerification` again
+for the loaded session and selection before it compares anything.
 
 ## Saving
 
