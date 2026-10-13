@@ -229,6 +229,7 @@ export const CMP_REASONS = {
     provenanceUnknown: "provenance_unknown",
     gridMismatch: "frequency_grid_mismatch",
     noSharedBins: "no_shared_valid_bins",
+    deltaNotFinite: "delta_not_finite",
     configMismatch: "config_mismatch",
     configUnknown: "config_unknown",
     configHeadersUnavailable: "config_headers_unavailable",
