@@ -64,7 +64,9 @@ axis, occurrence, qualification state, analysis version), `quality` (side-by-sid
 `BinComparison` holds parallel arrays over the bins shared by both CHIRPs: `frequencyHz`, `magnitudeDbA/B`,
 `magnitudeDeltaDb`, `coherenceA/B`, `coherenceDelta`, `statusA/B`, and `unmatchedBinsA/B` (bins stored by one CHIRP
 only, never compared). `DeltaSummary` gives the count, range, minimum and maximum (with their frequency) and mean
-absolute value of a difference series. No tolerance, score or verdict is attached to them.
+absolute value of a difference series. Every value in it is finite: a non-finite difference is not counted, and the
+mean absolute value is a running mean (`mean += (|d| − mean) / n`), so it cannot overflow where a plain sum of large
+differences would. No tolerance, score or verdict is attached to them.
 
 The result is never stored: there is no IndexedDB write, and the Tune Session schema stays version 1.
 
@@ -136,6 +138,17 @@ Everywhere else the difference is `null`: a bin below the input-power floor (`NO
 outside the analysis band, or weakly coherent for the magnitude. `null` is never turned into 0, and a gap is never
 bridged in the chart. A pair whose difference series are both empty is `NOT_COMPARABLE` (`no_shared_valid_bins`); a
 pair with coherence but no magnitude differences carries the note `no_shared_usable_magnitude_bins`.
+
+A status must agree with the stored magnitude. Quality V2 marks an in-band bin `NO_INPUT_POWER` exactly when Betaflight
+gave it no magnitude (input below its floor), and `USABLE` or `WEAK_COHERENCE` exactly when it has one. A
+`WEAK_COHERENCE` bin with magnitude `null`, or a `NO_INPUT_POWER` bin with a magnitude, is no input-power evidence: the
+CHIRP's bins are invalid (`quality_v2_bins_invalid:input_power_contradiction:<side>`) and the pair is not compared. A
+consistent `WEAK_COHERENCE` bin keeps its coherence difference.
+
+A difference is computed as a finite number or not at all: when `B − A` overflows (for example `1e308 − (−1e308)`), that
+bin's difference is `null`, counted in the note `delta_not_finite:magnitude:<n>`. Nothing is clamped or set to 0; if no
+finite difference remains, the pair is `NOT_COMPARABLE` (`no_shared_valid_bins`). The chart scales its range before
+subtracting, so very large finite values still map to finite coordinates.
 
 ## Configuration comparison
 
@@ -293,6 +306,11 @@ without measurements, tune difference named as a possible explanation, no stale 
 without reading the engine: missing and invalid arrays, `NaN`/`Infinity`/`null`, unequal lengths, unsorted or
 duplicate frequencies, contradicting statuses and metadata, grid offsets, duplicate occurrences, contradicting
 header lines, and the chart geometry's gaps.
+
+`test/gyrocore/cross_flight_comparison_numeric.test.ts`: status/magnitude contradictions (`WEAK_COHERENCE` without a
+magnitude, `NO_INPUT_POWER` with one), a valid `WEAK_COHERENCE` bin keeping its coherence difference, `NO_INPUT_POWER`
+never giving a difference, an overflowing `B − A`, an overflowing sum of absolute differences, a normal mean, all
+differences invalid (`NOT_COMPARABLE`), mixed valid and invalid bins, and charts without `NaN` or `Infinity`.
 
 ## Open: AIR65 validation
 

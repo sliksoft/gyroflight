@@ -65,15 +65,20 @@ export function lineChart(
         lo = Math.min(lo, 0);
         hi = Math.max(hi, 0);
     }
-    if (hi - lo < 1e-9) {
-        lo -= 1;
-        hi += 1;
+    if (!(hi - lo >= 1e-9 * Math.max(1, Math.abs(lo), Math.abs(hi)))) {
+        const pad = Math.max(1, Math.abs(lo) * 1e-6, Math.abs(hi) * 1e-6);
+        lo -= pad;
+        hi += pad;
     }
+    // Scaled so that hi − lo cannot overflow for magnitudes near the float limit.
+    const scale = Math.max(1, Math.abs(lo), Math.abs(hi));
+    const sLo = lo / scale;
+    const sSpan = hi / scale - sLo;
     const fLo = frequencyHz[0];
     const fHi = frequencyHz[frequencyHz.length - 1];
     const span = Math.log10(fHi / fLo) || 1;
     const x = (f: number) => (Math.log10(f / fLo) / span) * width;
-    const y = (v: number) => height - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * height;
+    const y = (v: number) => height - ((Math.max(lo, Math.min(hi, v)) / scale - sLo) / sSpan) * height;
     const paths = series.map((s) => {
         let d = "";
         let pen = false;
@@ -99,7 +104,7 @@ export function lineChart(
             x: x(t),
             label: t >= 1000 ? `${t / 1000}k` : String(t),
         })),
-        ticksY: [hi, (lo + hi) / 2, lo].map((v) => ({ y: y(v), label: label(v, digits) })),
+        ticksY: [hi, lo / 2 + hi / 2, lo].map((v) => ({ y: y(v), label: label(v, digits) })),
         zeroY: lo < 0 && hi > 0 ? y(0) : null,
     };
 }

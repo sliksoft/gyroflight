@@ -274,6 +274,10 @@ export function binProblems(q: ChirpQualityV2 | undefined): string[] {
         } else if (s[i] === "USABLE" && (m[i] === null || !finite(usableMin) || !(c[i] >= usableMin))) {
             // A bin marked usable without a magnitude, or below the stored criterion, contradicts itself.
             out.add(`${R.binsInvalid}:status_contradiction`);
+        } else if ((s[i] === "WEAK_COHERENCE" && m[i] === null) || (s[i] === "NO_INPUT_POWER" && m[i] !== null)) {
+            // The producer marks an in-band bin NO_INPUT_POWER exactly when Betaflight gave it no
+            // magnitude (input below its floor); a status that disagrees is no input-power evidence.
+            out.add(`${R.binsInvalid}:input_power_contradiction`);
         }
     }
     return [...out];
@@ -366,7 +370,15 @@ function pairNotes(a: StoredChirp, b: StoredChirp): string[] {
 // ---------------------------------------------------------------------------
 // Per-bin differences
 
-const hasInput = (s: BinStatus) => s === "USABLE" || s === "WEAK_COHERENCE";
+/** In band with input power: the status says so and Betaflight gave the bin a finite magnitude. */
+const hasInput = (s: BinStatus, magnitudeDb: number | null) =>
+    (s === "USABLE" || s === "WEAK_COHERENCE") && finite(magnitudeDb);
+
+/** B − A, or null when the difference of two finite values is not finite (overflow). */
+function difference(a: number, b: number): number | null {
+    const d = b - a;
+    return finite(d) ? d : null;
+}
 
 function binComparison(qa: ChirpQualityV2, qb: ChirpQualityV2): BinComparison | string {
     const A = qa.coherence.bins;
@@ -395,10 +407,12 @@ function binComparison(qa: ChirpQualityV2, qb: ChirpQualityV2): BinComparison | 
         const ma = A.magnitudeDb[i];
         const mb = B.magnitudeDb[i];
         out.magnitudeDeltaDb.push(
-            A.status[i] === "USABLE" && B.status[i] === "USABLE" && finite(ma) && finite(mb) ? mb - ma : null,
+            A.status[i] === "USABLE" && B.status[i] === "USABLE" && finite(ma) && finite(mb)
+                ? difference(ma, mb)
+                : null,
         );
         out.coherenceDelta.push(
-            hasInput(A.status[i]) && hasInput(B.status[i]) ? B.coherence[i] - A.coherence[i] : null,
+            hasInput(A.status[i], ma) && hasInput(B.status[i], mb) ? difference(A.coherence[i], B.coherence[i]) : null,
         );
     }
     return out;
@@ -415,9 +429,10 @@ export function deltaSummary(frequencyHz: number[], delta: (number | null)[]): D
         maxAtHz: null,
         meanAbs: null,
     };
-    let sumAbs = 0;
+    // Running mean: never forms a sum of |d| that could overflow.
+    let meanAbs = 0;
     delta.forEach((d, i) => {
-        if (d === null) {
+        if (d === null || !finite(d)) {
             return;
         }
         s.binCount++;
@@ -431,9 +446,9 @@ export function deltaSummary(frequencyHz: number[], delta: (number | null)[]): D
             s.max = d;
             s.maxAtHz = frequencyHz[i];
         }
-        sumAbs += Math.abs(d);
+        meanAbs += (Math.abs(d) - meanAbs) / s.binCount;
     });
-    s.meanAbs = s.binCount ? sumAbs / s.binCount : null;
+    s.meanAbs = s.binCount ? meanAbs : null;
     return s;
 }
 
@@ -486,6 +501,13 @@ function comparePair(id: string, a: StoredChirp, b: StoredChirp, configReasons: 
     if (!magnitudeDelta.binCount && !coherenceDelta.binCount) {
         pair.reasons = [R.noSharedBins];
         return pair;
+    }
+    const overflowed = bins.magnitudeDeltaDb.filter(
+        (d, i) => d === null && bins.statusA[i] === "USABLE" && bins.statusB[i] === "USABLE",
+    ).length;
+    if (overflowed) {
+        // Both bins usable with finite magnitudes, yet B − A is not a finite number.
+        pair.notes.push(`${R.deltaNotFinite}:magnitude:${overflowed}`);
     }
     if (!magnitudeDelta.binCount) {
         pair.notes.push("no_shared_usable_magnitude_bins");
