@@ -148,7 +148,9 @@ consistent `WEAK_COHERENCE` bin keeps its coherence difference.
 A difference is computed as a finite number or not at all: when `B − A` overflows (for example `1e308 − (−1e308)`), that
 bin's difference is `null`, counted in the note `delta_not_finite:magnitude:<n>`. Nothing is clamped or set to 0; if no
 finite difference remains, the pair is `NOT_COMPARABLE` (`no_shared_valid_bins`). The chart scales its range before
-subtracting, so very large finite values still map to finite coordinates.
+subtracting, so very large finite values still map to finite coordinates. A flat range at the float limit is padded
+only on the side that stays finite, so the bounds still contain the data and every label is a real number; a range
+that cannot be drawn finitely gives no chart (`null`) rather than `NaN` coordinates.
 
 ## Configuration comparison
 
@@ -311,6 +313,10 @@ header lines, and the chart geometry's gaps.
 magnitude, `NO_INPUT_POWER` with one), a valid `WEAK_COHERENCE` bin keeping its coherence difference, `NO_INPUT_POWER`
 never giving a difference, an overflowing `B − A`, an overflowing sum of absolute differences, a normal mean, all
 differences invalid (`NOT_COMPARABLE`), mixed valid and invalid bins, and charts without `NaN` or `Infinity`.
+
+`test/gyrocore/cross_flight_chart_bounds.test.ts`: chart geometry at `±Number.MAX_VALUE` (constant, single point,
+next to the limit, mixed extremes, with and without `includeZero`), non-finite or unordered fixed ranges, and ordinary
+values keeping their geometry.
 
 ## Open: AIR65 validation
 

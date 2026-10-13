@@ -65,15 +65,29 @@ export function lineChart(
         lo = Math.min(lo, 0);
         hi = Math.max(hi, 0);
     }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(lo <= hi)) {
+        return null;
+    }
     if (!(hi - lo >= 1e-9 * Math.max(1, Math.abs(lo), Math.abs(hi)))) {
+        // A flat range gets padding; at the float limit the side that would overflow stays put
+        // and the other side takes both pads, so the bounds stay finite and still contain the data.
         const pad = Math.max(1, Math.abs(lo) * 1e-6, Math.abs(hi) * 1e-6);
-        lo -= pad;
-        hi += pad;
+        if (!Number.isFinite(hi + pad)) {
+            lo -= 2 * pad;
+        } else if (!Number.isFinite(lo - pad)) {
+            hi += 2 * pad;
+        } else {
+            lo -= pad;
+            hi += pad;
+        }
     }
     // Scaled so that hi − lo cannot overflow for magnitudes near the float limit.
     const scale = Math.max(1, Math.abs(lo), Math.abs(hi));
     const sLo = lo / scale;
     const sSpan = hi / scale - sLo;
+    if (!Number.isFinite(scale) || !(sSpan > 0) || !Number.isFinite(sSpan)) {
+        return null;
+    }
     const fLo = frequencyHz[0];
     const fHi = frequencyHz[frequencyHz.length - 1];
     const span = Math.log10(fHi / fLo) || 1;
