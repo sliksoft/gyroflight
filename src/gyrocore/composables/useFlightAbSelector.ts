@@ -202,22 +202,23 @@ export function useFlightAbSelector(opts: { store?: TuneSessionStore; now?: () =
         try {
             let saved: TuneSession;
             if (target.intoOpenSession && openId !== null) {
-                // Checked against the record as stored now, not the copy loaded earlier.
-                const current = await getStore().load(openId);
-                if (current.status !== "ok" || current.rejected.length) {
-                    throw new TuneSessionStorageError(current.status === "not_found" ? "not_found" : "damaged_record");
+                // One IndexedDB transaction reads the session as stored now, refuses a Flight
+                // already present and writes; another window's write cannot come in between.
+                try {
+                    const added = await getStore().addFlightsAtomic(openId, fresh);
+                    outcome.notIndependent = added.notIndependent;
+                    saved = added.session;
+                } catch (err) {
+                    if (err instanceof TuneSessionStorageError && err.code === "flight_already_in_session") {
+                        return {
+                            ...outcome,
+                            status: "error",
+                            error: "flight_already_in_session",
+                            alreadyInSession: err.problems,
+                        };
+                    }
+                    throw err;
                 }
-                const added = addFlights(current.session, fresh, t);
-                if (added.replaced.length) {
-                    return {
-                        ...outcome,
-                        status: "error",
-                        error: "flight_already_in_session",
-                        alreadyInSession: added.replaced,
-                    };
-                }
-                outcome.notIndependent = added.notIndependent;
-                saved = await getStore().save(added.session);
             } else {
                 // Copies within the new analysis itself are reported the same way.
                 outcome.notIndependent = addFlights(
