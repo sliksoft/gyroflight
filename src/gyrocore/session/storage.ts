@@ -25,7 +25,7 @@
  * and left as it is, never repaired or overwritten without being asked.
  */
 
-import { addFlights, newTuneSession, TuneSessionDataError } from "./build";
+import { addFlights, newTuneSession, TuneSessionDataError, type AddFlightsResult } from "./build";
 import type { LoadResult, SessionSummary, StoredFlight, TuneSession } from "./contract";
 import {
     migrateTuneSession,
@@ -47,7 +47,8 @@ export type TuneSessionStorageErrorCode =
     | "invalid_session"
     | "already_exists"
     | "not_found"
-    | "damaged_record";
+    | "damaged_record"
+    | "flight_already_in_session";
 
 export class TuneSessionStorageError extends Error {
     constructor(
@@ -67,12 +68,29 @@ export interface TuneSessionStoreOptions {
     migrations?: Readonly<Record<number, Migration>>;
 }
 
+export interface AtomicAddResult {
+    session: TuneSession;
+    added: string[];
+    /** Stored, but the same recording as a Flight already in the session (copy or repackaged). */
+    notIndependent: AddFlightsResult["notIndependent"];
+}
+
 export interface TuneSessionStore {
     create(name: string, flights?: StoredFlight[]): Promise<TuneSession>;
     load(id: string): Promise<LoadResult>;
     list(): Promise<SessionSummary[]>;
     /** Write a full session. Refuses an invalid one, and refuses to overwrite a damaged record unless asked. */
     save(session: TuneSession, opts?: { replaceDamaged?: boolean }): Promise<TuneSession>;
+    /**
+     * Add Flights to a stored session in one readwrite transaction: read,
+     * validate, add and write back, so concurrent writers (other windows) are
+     * serialized by IndexedDB and never overwrite each other. All or nothing:
+     * a Flight already stored under its locationId rejects the whole batch
+     * (flight_already_in_session, its keys in `problems`); a missing record is
+     * not_found and is never created; a damaged or unsupported one is
+     * damaged_record and is never written. Resolves only after the commit.
+     */
+    addFlightsAtomic(id: string, flights: StoredFlight[]): Promise<AtomicAddResult>;
     remove(id: string): Promise<void>;
     close(): void;
 }
@@ -277,6 +295,72 @@ export function openTuneSessionStore(opts: TuneSessionStoreOptions = {}): TuneSe
             }
             await write(next, "put");
             return next;
+        },
+
+        async addFlightsAtomic(id, flights) {
+            const database = await db();
+            return new Promise<AtomicAddResult>((resolve, reject) => {
+                let tx: IDBTransaction;
+                try {
+                    tx = database.transaction(TUNE_SESSION_STORE, "readwrite");
+                } catch (err) {
+                    reject(storageError(err));
+                    return;
+                }
+                let failure: TuneSessionStorageError | null = null;
+                let result: AtomicAddResult | null = null;
+                const fail = (err: TuneSessionStorageError) => {
+                    failure = err;
+                    tx.abort();
+                };
+                tx.oncomplete = () => (result ? resolve(result) : reject(failure ?? new TuneSessionStorageError("io")));
+                tx.onabort = () => reject(failure ?? storageError(tx.error));
+                const store = tx.objectStore(TUNE_SESSION_STORE);
+                const get = store.get(id);
+                // Everything up to put() runs synchronously in this callback, so the
+                // transaction stays active and no other writer can come in between.
+                get.onsuccess = () => {
+                    try {
+                        if (get.result === undefined) {
+                            fail(new TuneSessionStorageError("not_found"));
+                            return;
+                        }
+                        const current = readRecord(id, get.result, migrations);
+                        if (current.status !== "ok") {
+                            fail(
+                                new TuneSessionStorageError(
+                                    "damaged_record",
+                                    current.status === "corrupt" ? current.problems : [current.status],
+                                ),
+                            );
+                            return;
+                        }
+                        if (current.rejected.length) {
+                            fail(
+                                new TuneSessionStorageError(
+                                    "damaged_record",
+                                    current.rejected.flatMap((r) => r.problems.map((p) => `${r.path}:${p}`)),
+                                ),
+                            );
+                            return;
+                        }
+                        const next = addFlights(current.session, flights, now());
+                        if (next.replaced.length) {
+                            fail(new TuneSessionStorageError("flight_already_in_session", next.replaced));
+                            return;
+                        }
+                        const session = checked(next.session);
+                        store.put(session);
+                        result = { session, added: next.added, notIndependent: next.notIndependent };
+                    } catch (err) {
+                        fail(
+                            err instanceof TuneSessionDataError
+                                ? new TuneSessionStorageError("invalid_session", err.problems)
+                                : storageError(err),
+                        );
+                    }
+                };
+            });
         },
 
         async remove(id) {
