@@ -117,7 +117,7 @@ describe("quality panel", () => {
         expect(rows).toEqual([
             ["detection", "FOUND"],
             ["sweep", "MEASURED"],
-            ["coverage", "MEASURED"],
+            ["coverage", "DIAGNOSTIC"],
             ["excitation", "MEASURED"],
             ["coherence", "MEASURED"],
             ["usable-bins", expect.stringMatching(/^\d+$/)],

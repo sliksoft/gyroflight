@@ -3,11 +3,19 @@
         class="rounded-md border border-default p-3"
         :data-gyrocore="'chirp-quality-v2'"
         :data-measurement="v.identity.measurementId"
+        :data-qualified="v.levels.chirpQualified.status"
     >
         <h4 class="text-sm font-bold mb-1">
             {{ t("gyrocoreQv2Title", [axisLabel, v.identity.measurementId]) }}
         </h4>
         <p class="text-[11px] text-dimmed mb-2">{{ $t("gyrocoreQv2DiagnosticNote") }}</p>
+        <p
+            v-if="v.levels.chirpQualified.status === 'NO'"
+            class="text-[11px] text-warning mb-2"
+            data-gyrocore="qv2-rejected-note"
+        >
+            {{ $t("gyrocoreQv2RejectedNote") }}
+        </p>
 
         <table class="w-full text-xs mb-2" data-gyrocore="qv2-rows">
             <tbody>
@@ -43,6 +51,10 @@
                 </tr>
             </tbody>
         </table>
+
+        <p v-if="peakDetail" class="text-[11px] text-dimmed mb-2" data-gyrocore="qv2-peak-magnitude">
+            {{ peakDetail }}
+        </p>
 
         <div class="flex flex-wrap gap-1 mb-2" data-gyrocore="qv2-levels">
             <UBadge
@@ -81,6 +93,17 @@
                         stroke-width="1"
                         stroke-dasharray="4 3"
                     />
+                    <line
+                        v-if="plot.observedEndX !== null"
+                        :x1="plot.observedEndX"
+                        :x2="plot.observedEndX"
+                        :y1="0"
+                        :y2="H"
+                        class="stroke-current text-primary"
+                        stroke-width="1"
+                        stroke-dasharray="2 2"
+                        data-gyrocore="qv2-observed-end"
+                    />
                     <text
                         :x="-4"
                         :y="0"
@@ -100,10 +123,10 @@
                         0.5
                     </text>
                     <text :x="-4" :y="H" text-anchor="end" class="fill-current text-dimmed text-[9px]">0</text>
-                    <g v-for="t in plot.ticks" :key="t.label">
-                        <line :x1="t.x" :x2="t.x" :y1="H" :y2="H + 3" class="stroke-current text-dimmed" />
-                        <text :x="t.x" :y="H + 12" text-anchor="middle" class="fill-current text-dimmed text-[9px]">
-                            {{ t.label }}
+                    <g v-for="tick in plot.ticks" :key="tick.label">
+                        <line :x1="tick.x" :x2="tick.x" :y1="H" :y2="H + 3" class="stroke-current text-dimmed" />
+                        <text :x="tick.x" :y="H + 12" text-anchor="middle" class="fill-current text-dimmed text-[9px]">
+                            {{ tick.label }}
                         </text>
                     </g>
                     <line
@@ -115,24 +138,57 @@
                         :y2="b.y"
                         stroke-width="2"
                         stroke-linecap="round"
-                        :class="['stroke-current', statusClass(b.status)]"
+                        :class="['stroke-current', supportClassStyle(b.supportClass)]"
                         :data-status="b.status"
+                        :data-support="b.supportClass"
                     >
                         <title>{{ binTitle(b) }}</title>
                     </line>
                 </g>
             </svg>
             <figcaption class="flex flex-wrap gap-3 text-[11px] text-dimmed">
-                <span v-for="s in BIN_STATUS_ORDER" :key="s" class="inline-flex items-center gap-1">
-                    <span :class="['inline-block w-2.5 h-2.5 rounded-sm bg-current', statusClass(s)]" />
-                    {{ $t(`gyrocoreQv2Bin_${s}`) }}
+                <span class="font-medium">{{ $t("gyrocoreQv2SupportLegendTitle") }}</span>
+                <span v-for="s in SUPPORT_CLASS_ORDER" :key="s" class="inline-flex items-center gap-1">
+                    <span :class="['inline-block w-2.5 h-2.5 rounded-sm bg-current', supportClassStyle(s)]" />
+                    {{ $t(`gyrocoreQv2Support_${s}`) }}
                 </span>
+                <span v-if="plot.observedEndX !== null">{{ $t("gyrocoreQv2ObservedEndMarker") }}</span>
                 <span>{{ $t("gyrocoreQv2ChartAxes") }}</span>
             </figcaption>
         </figure>
         <p v-else class="text-xs text-dimmed mb-2" data-gyrocore="qv2-no-bins">{{ $t("gyrocoreQv2NoBins") }}</p>
 
         <details class="text-xs">
+            <summary class="cursor-pointer text-dimmed">{{ $t("gyrocoreQv2SupportRegionsTitle") }}</summary>
+            <table class="w-full mt-1" data-gyrocore="qv2-support-regions">
+                <thead>
+                    <tr class="text-dimmed">
+                        <th scope="col" class="text-start">{{ $t("gyrocoreQv2ColFrequency") }}</th>
+                        <th scope="col" class="text-start">{{ $t("gyrocoreQv2ColBins") }}</th>
+                        <th scope="col" class="text-start">{{ $t("gyrocoreQv2ColCoherence") }}</th>
+                        <th scope="col" class="text-start">{{ $t("gyrocoreQv2ColDiagnostic") }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="r in v.frequencyQuality.regions.items"
+                        :key="`${r.fromHz}-${r.supportClass}`"
+                        :data-support="r.supportClass"
+                    >
+                        <td>{{ hz(r.fromHz) }}–{{ hz(r.toHz) }}</td>
+                        <td>{{ r.binCount }}</td>
+                        <td>
+                            {{ r.meanCoherence.toFixed(2) }} ({{ r.minCoherence.toFixed(2) }}–{{
+                                r.maxCoherence.toFixed(2)
+                            }})
+                        </td>
+                        <td>{{ $t(`gyrocoreQv2Support_${r.supportClass}`) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </details>
+
+        <details class="text-xs mt-2">
             <summary class="cursor-pointer text-dimmed">{{ $t("gyrocoreQv2RegionsTitle") }}</summary>
             <table class="w-full mt-1" data-gyrocore="qv2-regions">
                 <thead>
@@ -167,11 +223,12 @@
 import { computed } from "vue";
 import { i18n } from "@/js/localization";
 import { PRODUCT_APPLY_PENDING } from "@/gyrocore/productLock/productApply";
-import type { BinStatus, ChirpQualityV2 } from "@/gyrocore/chirp/qualityV2/contract";
+import type { BinStatus, ChirpQualityV2, SupportClass } from "@/gyrocore/chirp/qualityV2/contract";
+import { displayQualityV2 } from "@/gyrocore/chirp/qualityV2/coverage";
 import {
-    BIN_STATUS_ORDER,
-    coherencePlot,
     LEVEL_ORDER,
+    SUPPORT_CLASS_ORDER,
+    coherencePlot,
     levelTone,
     qualityRows,
     type QualityRow,
@@ -187,11 +244,18 @@ const PAD_B = 14;
 
 const AXIS_LABEL_KEYS = { roll: "autotuneAxisRoll", pitch: "autotuneAxisPitch", yaw: "autotuneAxisYaw" } as const;
 
-const v = computed(() => props.quality);
+const v = computed(() => displayQualityV2(props.quality));
 const t = (key: string, args: (string | number)[] = []) => i18n.getMessage(key, args.map(String));
 const rows = computed(() => qualityRows(v.value, t));
 const plot = computed(() => coherencePlot(v.value, W, H));
 const axisLabel = computed(() => i18n.getMessage(AXIS_LABEL_KEYS[v.value.identity.axisName]).toUpperCase());
+const peakDetail = computed(() => {
+    const peak = v.value.frequencyQuality.peakSupportedMagnitude;
+    if (peak.availability !== "MEASURED" || !peak.value) {
+        return "";
+    }
+    return t("gyrocoreQv2DetailPeakMagnitude", [peak.value.magnitudeDb.toFixed(1), hz(peak.value.frequencyHz)]);
+});
 
 function toneColor(tone: RowTone) {
     return ({ good: "success", warn: "warning", bad: "error", neutral: "neutral" } as const)[tone];
@@ -203,20 +267,22 @@ function verdictLabel(row: QualityRow) {
         : i18n.getMessage(`gyrocoreQv2Verdict_${row.verdict}`);
 }
 
-function statusClass(status: BinStatus) {
+function supportClassStyle(support: SupportClass) {
     return {
-        USABLE: "text-success",
+        COHERENT: "text-success",
         WEAK_COHERENCE: "text-warning",
-        NO_INPUT_POWER: "text-error",
-        OUTSIDE_ANALYSIS_BAND: "text-dimmed",
-    }[status];
+        INSUFFICIENT_SPECTRAL_SUPPORT: "text-error",
+        OUTSIDE_OBSERVED_SWEEP: "text-dimmed opacity-40",
+        OUTSIDE_ANALYSIS_BAND: "text-dimmed opacity-30",
+        UNKNOWN: "text-dimmed",
+    }[support];
 }
 
 function hz(f: number) {
     return f < 10 ? f.toFixed(1) : String(Math.round(f));
 }
 
-function binTitle(b: { frequencyHz: number; coherence: number; status: BinStatus }) {
-    return `${b.frequencyHz.toFixed(1)} Hz: ${b.coherence.toFixed(2)} (${i18n.getMessage(`gyrocoreQv2Bin_${b.status}`)})`;
+function binTitle(b: { frequencyHz: number; coherence: number; status: BinStatus; supportClass: SupportClass }) {
+    return `${b.frequencyHz.toFixed(1)} Hz: ${b.coherence.toFixed(2)} (${i18n.getMessage(`gyrocoreQv2Support_${b.supportClass}`)})`;
 }
 </script>

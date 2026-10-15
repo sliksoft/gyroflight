@@ -1003,14 +1003,16 @@ describe("flightPairEvidence", () => {
     });
 
     it("analysisVersionStatus knows exactly the documented versions", () => {
-        expect(analysisVersionStatus("2.1.0")).toBe("CURRENT");
+        expect(analysisVersionStatus("2.2.0")).toBe("CURRENT");
+        expect(analysisVersionStatus("2.1.0")).toBe("OUTDATED");
         expect(analysisVersionStatus("2.0.0")).toBe("OUTDATED");
         for (const v of [
-            "2.2.0",
             "1.0.0",
             "2.1.0 ",
             "v2.1.0",
             "2.1.0-beta",
+            "2.2.0 ",
+            "v2.2.0",
             "",
             null,
             undefined,
