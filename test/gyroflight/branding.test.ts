@@ -326,9 +326,21 @@ describe("Gyroflight status tab", () => {
             safety_foundation: "implemented",
             safety_full: "incomplete",
             physical_apply: "locked",
-            tune_session: "not_started",
+            tune_session: "implemented",
         });
         expect(JSON.stringify(messages)).not.toMatch(/migration pending/i);
+    });
+
+    it("marks tune session implemented while keeping diagnostic and safety limits visible", () => {
+        const byKey = Object.fromEntries(gyroflightCapabilities.map((c) => [c.key, c]));
+        expect(byKey.tune_session.status).toBe("implemented");
+        expect(byKey.tune_session.detail).toBe("gyroflightCapTuneSessionDetail");
+        expect(messages.gyroflightCapTuneSession).toMatch(/local storage|Flight A\/B|cross-flight comparison/i);
+        expect(messages.gyroflightCapTuneSessionDetail).toMatch(/diagnostic only/i);
+        expect(messages.gyroflightCapTuneSessionDetail).toMatch(/repeatability is not proven/i);
+        expect(messages.gyroflightCapTuneSessionDetail).toMatch(/Verified Tuning|physical Apply/i);
+        expect(byKey.safety_full.status).toBe("incomplete");
+        expect(byKey.physical_apply.status).toBe("locked");
     });
 });
 
