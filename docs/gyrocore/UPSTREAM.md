@@ -21,7 +21,8 @@ this fork back upstream (no upstream PRs, no pushes to upstream).
 | Fork base commit         | `d85e797e8674e3059cc3172e38df831e46a5250c` (upstream `master`, 2026-10-09)                                           |
 | Upstream version at base | `2026.12.0-alpha` (package.json)                                                                                     |
 | Fork repository          | https://github.com/sliksoft/gyroflight (GitHub fork of the upstream repo; renamed from `gyrocore-app` on 2026-10-09) |
-| Fork default branch      | `master`: an exact mirror of upstream, never committed to directly                                                   |
+| Fork default branch      | `gyroflight/main` — Gyroflight development head and GitHub default (set 2026-10-15)                                  |
+| Upstream mirror branch   | `master` — exact mirror of upstream Betaflight App; never commit Gyroflight work here                                |
 | Work branches            | `gyroflight/*` and `gyrocore/*`; first: `gyrocore/pwa-foundation`                                                    |
 | Local checkout           | `~/Gyroflight` (convention)                                                                                          |
 | Licence                  | GPL-3.0-or-later, inherited from upstream (`LICENSE`, `DEFAULT_LICENSE.md`)                                          |
@@ -135,20 +136,21 @@ carry no user or usage data beyond what any HTTP request carries (IP address, us
 
 ## Updating from upstream
 
-Merge, don't rebase: our branches are shared and long-lived, and rebasing ~100 upstream commits a
-month re-resolves the same conflicts repeatedly.
+Upstream sync is **controlled**: update the `master` mirror first, then merge into a Gyroflight work
+branch (or into `gyroflight/main` via PR). Merge, don't rebase: our branches are shared and long-lived,
+and rebasing ~100 upstream commits a month re-resolves the same conflicts repeatedly.
 
 ```bash
 git config rerere.enabled true            # once per clone
 nvm use                                   # Node from .nvmrc
 git fetch upstream --tags
 
-# 1. keep master an exact mirror
+# 1. keep master an exact upstream mirror (no Gyroflight commits on master)
 git switch master
 git merge --ff-only upstream/master
 git push origin master
 
-# 2. merge into the work branch (or a release tag, e.g. 2026.12.0, for release builds)
+# 2. merge into a Gyroflight work branch (or a release tag, e.g. 2026.12.0)
 git switch gyroflight/<branch>
 git merge upstream/master                 # or: git merge <tag>
 
@@ -156,6 +158,8 @@ git merge upstream/master                 # or: git merge <tag>
 npm ci
 npm run typecheck && npx eslint src scripts *.mjs && npx vitest run && npm run build
 ```
+
+Open a PR into `gyroflight/main` (the GitHub default). Do not push Gyroflight product work to `master`.
 
 Then smoke the PWA (`npm run preview`): Firmware Flasher, Blackbox Viewer, Autotune (Expert mode) and the
 Gyroflight tab load with no page errors; the manifest still says Gyroflight.
@@ -175,16 +179,32 @@ code depends on, and update the base commit in the provenance table.
 
 ## CI on the fork
 
-`.github/workflows/gyroflight-ci.yml` (ours) runs typecheck, eslint, Vitest and the production build on
-pushes to `gyroflight/**` and `gyrocore/**` and on pull requests into `master`, `gyroflight/**` or
-`gyrocore/**`. It has read-only permissions, uses no secrets and uploads or publishes nothing.
+GitHub default branch is `gyroflight/main`. New pull requests target that branch by default.
 
-Upstream workflows are kept unmodified so they never conflict. GitHub Actions is **enabled** on this
-repository (verified 2026-10-09: the first push of `gyroflight-ci.yml` ran immediately). Upstream
-workflows are not registered yet because none of their triggers has fired, but the next push to
-`master` (an upstream sync) will fire `deploy.yml` and `translations-upload.yml`. Without Betaflight's
-secrets they fail and cannot deploy anything, but they should not run at all. Right after the first
-`master` sync (or once they appear in `gh workflow list --all`), disable the upstream automation:
+### Active workflows
+
+| Workflow | Role |
+| -------- | ---- |
+| `gyroflight-ci.yml` | Our CI: typecheck, eslint, Vitest, production build on pushes to `gyroflight/**` / `gyrocore/**` and PRs into `master`, `gyroflight/**` or `gyrocore/**`. Read-only permissions; no secrets; uploads or publishes nothing. |
+| `test.yml` | Upstream Test workflow (lint/lockfile/test). Harmless; no publishing. |
+| `build.yml` | Reusable Build workflow, called only when another workflow invokes it. |
+
+Normal Gyroflight CI does **not** need Betaflight Cloudflare, Crowdin, Play Store or code-signing secrets.
+This repository has none of those secrets; do not add them.
+
+### Disabled upstream automation
+
+Workflow files from Betaflight remain in `.github/workflows/` (do not delete them — that would fight
+upstream merges) but are **disabled manually** in GitHub Actions so the fork does not run Betaflight
+deployments, nightly/release builds, Crowdin sync, stale-issue closing or auto-close of PRs:
+
+`deploy.yml`, `deploy_cloudflare.yml`, `build-release.yml`, `tauri-nightly.yml`,
+`tauri-release-assets.yml`, `android-play-release.yml`, `translations-pr.yml`,
+`translations-upload.yml`, `stale.yaml`, `auto-close.yml`, `hide-artifact-links.yml`,
+`manual-build.yml`.
+
+Verify with `gh workflow list --all --repo sliksoft/gyroflight`. If an upstream sync re-enables one,
+disable it again:
 
 ```bash
 for w in deploy.yml deploy_cloudflare.yml build-release.yml tauri-nightly.yml tauri-release-assets.yml \
@@ -193,9 +213,6 @@ for w in deploy.yml deploy_cloudflare.yml build-release.yml tauri-nightly.yml ta
   gh workflow disable "$w" --repo sliksoft/gyroflight
 done
 ```
-
-`test.yml` and `build.yml` are harmless (no secrets, no publishing) and may stay enabled. Never add
-upstream's secrets (Cloudflare, Crowdin, signing keys) to this repository.
 
 The local pre-commit hook (husky → lint-staged) runs prettier, `eslint --fix` and `vue-tsc` with whatever
 Node is on `PATH`; use Node 24.
