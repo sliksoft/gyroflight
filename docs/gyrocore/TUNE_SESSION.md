@@ -89,8 +89,9 @@ fail-closed blockers:
   `analysis_version_differs`, `firmware_inconsistent:<field>:<a|b>`, `firmware_mismatch:<field>`,
   `firmware_unknown:<field>` and `flight_not_in_session:<a|b>`.
 
-A new firmware or analysis version is therefore never silently comparable. The full configuration comparison
-(MATCH / MISMATCH / UNKNOWN per setting) and repeatability are WU5.
+A new firmware or analysis version is therefore never silently comparable. The configuration comparison
+(MATCH / MISMATCH / UNKNOWN per setting) is WU5 ([CROSS_FLIGHT_COMPARISON.md](CROSS_FLIGHT_COMPARISON.md));
+repeatability is not established there.
 
 ## Storage
 

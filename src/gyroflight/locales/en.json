@@ -485,5 +485,95 @@
     },
     "gyrocoreAbSaveNotOpened": {
         "message": "It was not opened, because another session was opened or closed while saving."
+    },
+    "gyrocoreCfcTitle": { "message": "Cross-flight Comparison" },
+    "gyrocoreCfcNotVerifiedTune": {
+        "message": "Diagnostic comparison only. This is not a Verified Tune: it proves no repeatability, approves no PID or filter values, grants no tuning authorization and releases no Apply ($1 stays in force)."
+    },
+    "gyrocoreCfcFlightA": { "message": "Flight A — baseline" },
+    "gyrocoreCfcFlightB": { "message": "Flight B — comparison" },
+    "gyrocoreCfcFlightLabel": { "message": "$1, flight $2 / $3" },
+    "gyrocoreCfcNotChosen": { "message": "not chosen" },
+    "gyrocoreCfcStatus_INCOMPLETE": { "message": "Choose Flight A and Flight B" },
+    "gyrocoreCfcStatus_BLOCKED": { "message": "Blocked: no comparison" },
+    "gyrocoreCfcStatus_NOT_COMPARABLE": { "message": "No CHIRP pair can be compared" },
+    "gyrocoreCfcStatus_COMPARED": { "message": "Compared (diagnostic only)" },
+    "gyrocoreCfcIncomplete": {
+        "message": "Choose Flight A and Flight B in an open Tune Session to compare their measurements."
+    },
+    "gyrocoreCfcBlocked": {
+        "message": "The A/B pair is blocked, so no measurement of these Flights is compared. Blocking reasons:"
+    },
+    "gyrocoreCfcDataProblem": { "message": "Incomplete stored data: $1" },
+    "gyrocoreCfcConfigHead": { "message": "Logged configuration" },
+    "gyrocoreCfcConfigNote": {
+        "message": "Compared as logged in the BBL headers. A setting that was not logged stays UNKNOWN; no firmware default is filled in. Any logged difference, or a setting logged by one Flight only, keeps the numeric differences closed."
+    },
+    "gyrocoreCfcConfigCat_MEASUREMENT": { "message": "Measurement settings (loop, logging, CHIRP)" },
+    "gyrocoreCfcConfigCat_TUNING": { "message": "Tune settings (PID, sliders, filters)" },
+    "gyrocoreCfcConfigCat_OTHER": { "message": "Other logged settings" },
+    "gyrocoreCfcConfigKey": { "message": "Setting" },
+    "gyrocoreCfcConfigStatus": { "message": "Status" },
+    "gyrocoreCfcConfigBlocks": { "message": "closes the numeric difference" },
+    "gyrocoreCfcConfigMatching": { "message": "$1 matching settings" },
+    "gyrocoreCfcConfigConfounder": {
+        "message": "Logged settings differ ($1). This may explain differences between the measurements, or confound them; it does not prove cause and effect."
+    },
+    "gyrocoreCfcConfigNotConditions": {
+        "message": "Matching settings do not show that motors, propellers, battery, weather or other flight conditions were the same."
+    },
+    "gyrocoreCfcColA": { "message": "Flight A" },
+    "gyrocoreCfcColB": { "message": "Flight B" },
+    "gyrocoreCfcNotLogged": { "message": "not logged" },
+    "gyrocoreCfcAxisCounts": { "message": "(CHIRPs: A $1, B $2)" },
+    "gyrocoreCfcAxisNone": { "message": "No CHIRP of this axis in either Flight." },
+    "gyrocoreCfcPairHead": { "message": "$1 CHIRP $2" },
+    "gyrocoreCfcPair_COMPARED": { "message": "Differences shown" },
+    "gyrocoreCfcPair_NOT_COMPARABLE": { "message": "Not comparable" },
+    "gyrocoreCfcPair_UNPAIRED": { "message": "In one Flight only" },
+    "gyrocoreCfcQualityHead": { "message": "Measurement quality" },
+    "gyrocoreCfcQ_qualification": { "message": "CHIRP qualification" },
+    "gyrocoreCfcQ_analysisVersion": { "message": "Quality V2 analysis version" },
+    "gyrocoreCfcQ_meanBandCoherence": { "message": "Mean coherence (5–100 Hz)" },
+    "gyrocoreCfcQ_usableBins": { "message": "Usable frequency bins" },
+    "gyrocoreCfcQ_usableStartHz": { "message": "Usable range from" },
+    "gyrocoreCfcQ_usableEndHz": { "message": "Usable range to" },
+    "gyrocoreCfcQ_sampleGaps": { "message": "Sample gaps" },
+    "gyrocoreCfcQ_missingSamples": { "message": "Missing samples" },
+    "gyrocoreCfcQ_missingFraction": { "message": "Missing fraction" },
+    "gyrocoreCfcQ_setpointRms": { "message": "Setpoint RMS (excitation)" },
+    "gyrocoreCfcQ_sweep": { "message": "Observed sweep" },
+    "gyrocoreCfcQ_saturation": { "message": "Motor saturation" },
+    "gyrocoreCfcQ_contamination": { "message": "Pilot interference" },
+    "gyrocoreCfcQ_warningGates": { "message": "Qualification warnings" },
+    "gyrocoreCfcQ_sampleRateHz": { "message": "Sample rate" },
+    "gyrocoreCfcQ_welchSegments": { "message": "Welch segments" },
+    "gyrocoreCfcChartMagnitude": { "message": "Magnitude (dB), usable bins, Flight A and Flight B" },
+    "gyrocoreCfcChartMagnitudeDelta": { "message": "Magnitude difference (dB) = Flight B − Flight A" },
+    "gyrocoreCfcChartCoherence": { "message": "Coherence, bins with input power, Flight A and Flight B" },
+    "gyrocoreCfcChartCoherenceDelta": { "message": "Coherence difference = Flight B − Flight A" },
+    "gyrocoreCfcChartAxesDb": { "message": "x: frequency (Hz, log) · y: magnitude (dB)" },
+    "gyrocoreCfcChartAxesDeltaDb": { "message": "x: frequency (Hz, log) · y: B − A (dB); dashed: 0" },
+    "gyrocoreCfcChartAxesCoherence": { "message": "x: frequency (Hz, log) · y: coherence (0–1)" },
+    "gyrocoreCfcChartAxesDeltaCoherence": { "message": "x: frequency (Hz, log) · y: B − A; dashed: 0" },
+    "gyrocoreCfcChartEmpty": { "message": "No shared valid bins to draw." },
+    "gyrocoreCfcSeriesA": { "message": "Flight A (baseline)" },
+    "gyrocoreCfcSeriesB": { "message": "Flight B (comparison)" },
+    "gyrocoreCfcSeriesDelta": { "message": "B − A, only where both bins are valid; gaps are not compared" },
+    "gyrocoreCfcSummary": {
+        "message": "$1 bins, $2–$3 Hz: lowest $4 at $5 Hz, highest $6 at $7 Hz, mean absolute $8."
+    },
+    "gyrocoreCfcSummaryNone": { "message": "No shared valid bins: no difference." },
+    "gyrocoreCfcUnmatchedBins": { "message": "Bins stored by one CHIRP only (A $1, B $2) are not compared." },
+    "gyrocoreCfcDiagnosticsHead": { "message": "What this comparison does and does not show" },
+    "gyrocoreCfcDiagCompared": { "message": "Compared CHIRP pairs" },
+    "gyrocoreCfcDiagNotComparable": { "message": "Not compared" },
+    "gyrocoreCfcDiagAxesMissing": { "message": "Axes not measured in both" },
+    "gyrocoreCfcDiagQualityLimits": { "message": "Quality V2 limits" },
+    "gyrocoreCfcDiagMissing": { "message": "Missing for stronger conclusions" },
+    "gyrocoreCfcDiagRepeatability": { "message": "Repeatability" },
+    "gyrocoreCfcNone": { "message": "none" },
+    "gyrocoreCfcInterpretation": {
+        "message": "Differences are facts, not verdicts: a lower magnitude or a higher coherence is not better by itself. Relative spectral power is not compared between Flights (it is not a calibrated PSD). No PID values are recommended here."
     }
 }
