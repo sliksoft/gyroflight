@@ -5,10 +5,11 @@ threshold and no authorization. The existing qualification ([CHIRP_QUALIFICATION
 decides alone whether a measurement is valid for tuning. Which V2 values may later become gates is decided only after
 calibration on real repeated flights.
 
-Code: `src/gyrocore/chirp/qualityV2/` (`contract.ts`, `analyze.ts`, `identity.ts`, `view.ts`). UI:
+Code: `src/gyrocore/chirp/qualityV2/` (`contract.ts`, `analyze.ts`, `coverage.ts`, `identity.ts`, `view.ts`). UI:
 `src/gyrocore/components/ChirpQualityV2Card.vue`, shown in the GyroCore qualification panel on the Autotune tab.
 Tests: `test/gyrocore/chirp_quality_v2.test.ts`, `chirp_quality_v2_ui.test.ts`,
-`chirp_quality_v2_adversarial.test.ts` and `chirp_quality_v2_review.test.ts`.
+`chirp_quality_v2_adversarial.test.ts`, `chirp_quality_v2_review.test.ts` and
+`chirp_quality_v2_wu6_s1.test.ts` (synthetic AIR65-shaped coverage cases).
 
 ## Where the numbers come from
 
@@ -29,7 +30,10 @@ per-bin signal-to-noise estimate `10·log10(c / (1 − c))`, from Betaflight's c
 ## Data contract
 
 `ChirpMeasurement.qualityV2` is a `ChirpQualityV2` object, schema `gyrocore.chirp-quality.v2`, analysis version
-`2.1.0` (2.1.0 added `verdicts`, renamed the power fields to relative power and removes the spectrogram floor). It is plain JSON: no typed arrays, no `Infinity` or `NaN`, no file bytes. The same file gives the same JSON.
+`2.2.0`. Version history: 2.1.0 added `verdicts` and relative power; **2.2.0** adds diagnostic
+`measurementCoverage` and `frequencyQuality` (WU6-S1). Stored 2.1.0 sessions stay readable under their frozen shape;
+the UI fills missing 2.2.0 sections as `UNAVAILABLE`/`UNKNOWN` for display only and never invents a PASS. It is plain
+JSON: no typed arrays, no `Infinity` or `NaN`, no file bytes. The same file gives the same JSON.
 Every value carries:
 
 - `availability`:
@@ -81,11 +85,13 @@ The verdict copies the gate outcome; it never re-applies or adds a threshold.
 | `verdicts`      | one verdict per card topic (above)                                                                                                                                                                                                   |
 | `sweep`         | `requested`, `observed` and `usable` ranges, the analysis band, and three coverage fractions                                                                                                                                         |
 | `excitation`    | setpoint RMS (`ACTIVE_GATE`), peak, mean square and energy; gyro RMS and peak; requested amplitude; the firmware excitation's RMS and peak; the in-band input relative power peak; and the count of in-band bins without input power |
-| `coherence`     | mean band coherence and usable bin count (`ACTIVE_GATE`), the existing criteria quoted, **every real bin** and **summary regions**                                                                                                   |
-| `sampleGaps`    | `NONE`, `DETECTED` or `UNKNOWN`, the counts of the existing spacing analysis, and the gaps themselves                                                                                                                                |
-| `contamination` | pilot interference: always `UNKNOWN` in this version (see below)                                                                                                                                                                     |
-| `saturation`    | `DETECTED`, `NOT_DETECTED` or `UNKNOWN` from motor outputs; gyro clipping `UNKNOWN`                                                                                                                                                  |
-| `reasons`       | every reason code in the report, once, in section order                                                                                                                                                                              |
+| `coherence`            | mean band coherence and usable bin count (`ACTIVE_GATE`), the existing criteria quoted, **every real bin** and **summary regions**                                                                                          |
+| `measurementCoverage`  | **diagnostic (2.2.0):** requested vs observed range, swept/spectrally-supported fractions of the analysis band, missing bands, sweep restarts. Never a gate.                                                          |
+| `frequencyQuality`     | **diagnostic (2.2.0):** per-bin `SupportClass`, support regions, mean coherence over spectrally supported bins, peak supported magnitude (observation only). Does not replace the 5–100 Hz gate.                          |
+| `sampleGaps`           | `NONE`, `DETECTED` or `UNKNOWN`, the counts of the existing spacing analysis, and the gaps themselves                                                                                                                     |
+| `contamination`        | pilot interference: always `UNKNOWN` in this version (see below)                                                                                                                                                          |
+| `saturation`           | `DETECTED`, `NOT_DETECTED` or `UNKNOWN` from motor outputs; gyro clipping `UNKNOWN`                                                                                                                                       |
+| `reasons`              | every reason code in the report, once, in section order                                                                                                                                                                   |
 
 ## Evidence levels
 
@@ -133,6 +139,26 @@ Coverage fractions:
   (linear Hz);
 - `durationOfRequested`: the segment duration over `chirp_time_seconds`;
 - `usableOfAnalysisBand`: usable bins over all bins of the analysis band.
+
+## Measurement coverage and support (2.2.0, diagnostic only)
+
+Reaching a frequency is not the same as identifying it. `measurementCoverage` and `frequencyQuality` report what was
+requested, what DEBUG_CHIRP observed, and which Welch bins have proven spectral support. They never authorize tuning and
+do not change existing gates or thresholds.
+
+`SupportClass` per bin (parallel to `coherence.bins`):
+
+| Class                            | Meaning                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `COHERENT`                       | inside the observed sweep, input above Betaflight's floor, coherence ≥ usable min                            |
+| `WEAK_COHERENCE`                 | same spectral support, coherence below the usable min                                                        |
+| `INSUFFICIENT_SPECTRAL_SUPPORT`  | inside the observed sweep but no proven spectral input                                                       |
+| `OUTSIDE_OBSERVED_SWEEP`         | beyond the firmware-observed min–max (residual spectrum is not support)                                      |
+| `OUTSIDE_ANALYSIS_BAND`          | outside the existing analysis window                                                                         |
+| `UNKNOWN`                        | observed sweep metadata is not reliable enough to classify                                                   |
+
+`meanSupportedCoherence` is diagnostic over spectrally supported bins; it does **not** replace `meanBandCoherence`
+(5–100 Hz gate). Peak supported magnitude is an observation only — never labelled as resonance or PID instability.
 
 ## Frequency-dependent coherence
 

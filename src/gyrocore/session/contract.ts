@@ -35,7 +35,7 @@ export const TUNE_SESSION_SCHEMA = "gyrocore.tune-session";
 export const TUNE_SESSION_SCHEMA_VERSION = 1;
 
 /** Quality V2 analysis versions this code knows; anything else is UNKNOWN_VERSION. */
-export const KNOWN_QUALITY_V2_ANALYSIS_VERSIONS = ["2.0.0", "2.1.0"] as const;
+export const KNOWN_QUALITY_V2_ANALYSIS_VERSIONS = ["2.0.0", "2.1.0", "2.2.0"] as const;
 
 /** Header lines kept as firmware identity (WU1 FlightRef header fields plus the API version). */
 export interface FirmwareIdentity {

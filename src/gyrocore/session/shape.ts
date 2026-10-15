@@ -92,6 +92,14 @@ const metric = (value: Shape) =>
     obj({ availability, role, value: nullable(value), unit: nullable(str), reasons: strs });
 const level = obj({ status: lit("YES", "NO", "UNKNOWN"), role, reasons: strs });
 const binStatus = lit("USABLE", "WEAK_COHERENCE", "NO_INPUT_POWER", "OUTSIDE_ANALYSIS_BAND");
+const supportClass = lit(
+    "COHERENT",
+    "WEAK_COHERENCE",
+    "INSUFFICIENT_SPECTRAL_SUPPORT",
+    "OUTSIDE_OBSERVED_SWEEP",
+    "OUTSIDE_ANALYSIS_BAND",
+    "UNKNOWN",
+);
 const evidenceStatus = lit("DETECTED", "NOT_DETECTED", "UNKNOWN");
 const verdict = obj({
     verdict: lit("PASS", "FAIL", "WARNING", "NOT_EVALUATED"),
@@ -293,6 +301,203 @@ const qualityV2_2_1_0: Shape = obj({
     reasons: strs,
 });
 
+/** Parallel supportClass array matches frequencyHz from coherence.bins. */
+const parallelSupport: Shape = (v) => {
+    const o = v as { supportClass: unknown[]; regions: { items: unknown[] } };
+    return Array.isArray(o.supportClass);
+};
+
+const measurementCoverageShape: Shape = obj({
+    role: lit("DIAGNOSTIC"),
+    metadataReliable: bool,
+    analysisBandHz: nullable(tuple(num, num)),
+    requestedRangeHz: nullable(tuple(num, num)),
+    observedRangeHz: nullable(tuple(num, num)),
+    durationOfRequested: metric(num),
+    sweptOfAnalysisBand: metric(num),
+    spectrallySupportedOfAnalysisBand: metric(num),
+    missingAnalysisBand: arr(obj({ fromHz: num, toHz: num })),
+    sweepRestarts: nullable(num),
+    reasons: strs,
+});
+
+const frequencyQualityShape: Shape = (v) =>
+    obj({
+        role: lit("DIAGNOSTIC"),
+        availability,
+        supportClass: arr(supportClass),
+        regions: obj({
+            kind: lit("SUMMARY"),
+            items: arr(
+                obj({
+                    fromHz: num,
+                    toHz: num,
+                    binCount: int,
+                    supportClass,
+                    meanCoherence: num,
+                    minCoherence: num,
+                    maxCoherence: num,
+                    meanInputRelativePowerDb: nullable(num),
+                }),
+            ),
+        }),
+        meanSupportedCoherence: metric(num),
+        supportedBinCount: metric(num),
+        coherentSupportedBinCount: metric(num),
+        peakSupportedMagnitude: metric(obj({ frequencyHz: num, magnitudeDb: num })),
+        reasons: strs,
+    })(v) && parallelSupport(v);
+
+/**
+ * 2.2.0 = 2.1.0 plus diagnostic measurementCoverage and frequencyQuality.
+ * Stored 2.1.0 sessions remain readable under their frozen shape.
+ */
+const qualityV2_2_2_0: Shape = obj({
+    schema: lit(CHIRP_QUALITY_V2_SCHEMA),
+    analysisVersion: lit("2.2.0"),
+    identity: obj({
+        measurementId: str,
+        logIndex: int,
+        chirpIndex: int,
+        axisOccurrence: int,
+        axis: int,
+        axisName: lit(...AXIS_NAMES),
+        startTimeUs: num,
+        endTimeUs: num,
+        durationS: num,
+        sampleCount: int,
+        file: obj({ availability, sha256: nullable(sha256), byteLength: nullable(int), reasons: strs }),
+        flight: obj({ availability, ref: nullable(flightRefShape), reasons: strs }),
+    }),
+    provenance: obj({
+        decoder: lit("betaflight-blackbox-viewer"),
+        transferFunction: lit("betaflight spectral_analysis.welchTransferFunction"),
+        relativePowerSpectrum: lit("betaflight spectral_analysis.computeSpectrogram"),
+        sweepFrequencySource: lit("firmware DEBUG_CHIRP debug[2] (0.1 Hz)"),
+        excitationSource: lit("firmware DEBUG_CHIRP debug[3] (x1000)"),
+        inputField: str,
+        outputField: str,
+        firmwareRevision: nullable(str),
+        apiVersion: nullable(str),
+        flagGating: lit("none", "flight_mode_flags", "debug_axis_only"),
+        highResolutionScale: num,
+        sampleRateHz: nullable(num),
+        sampleRateSource: str,
+        sampleRateStatus: str,
+        segmentSize: nullable(num),
+        welchOverlap: num,
+        welchSegments: nullable(num),
+        binWidthHz: nullable(num),
+    }),
+    levels: obj({
+        bblValid: level,
+        flightValid: level,
+        blackboxDataUsable: level,
+        chirpDetected: level,
+        chirpQualityAvailable: level,
+        chirpQualified: level,
+        tuningAuthorized: level,
+    }),
+    verdicts: obj(Object.fromEntries(topics.map((t) => [t, verdict]))),
+    sweep: obj({
+        requested: obj({
+            availability,
+            ...sweepRange,
+            durationS: nullable(num),
+            amplitude: nullable(num),
+            reasons: strs,
+        }),
+        observed: obj({
+            availability,
+            ...sweepRange,
+            minHz: nullable(num),
+            maxHz: nullable(num),
+            runs: nullable(num),
+            reasons: strs,
+        }),
+        usable: obj({ availability, role, ...sweepRange, binCount: nullable(num), reasons: strs }),
+        analysisBandHz: nullable(tuple(num, num)),
+        observedOfRequested: metric(num),
+        durationOfRequested: metric(num),
+        usableOfAnalysisBand: metric(num),
+    }),
+    excitation: obj({
+        setpointRms: metric(num),
+        setpointPeakAbs: metric(num),
+        setpointMeanSquare: metric(num),
+        setpointEnergy: metric(num),
+        gyroRms: metric(num),
+        gyroPeakAbs: metric(num),
+        requestedAmplitude: metric(num),
+        firmwareExcitation: metric(obj({ rms: num, peakAbs: num })),
+        inputRelativePowerPeakDb: metric(num),
+        noInputPowerBins: metric(num),
+    }),
+    coherence: obj({
+        meanBandCoherence: metric(num),
+        usableBinCount: metric(num),
+        criteria: obj({
+            usableBinCoherenceMin: num,
+            meanBandCoherenceMin: num,
+            meanBandHz: tuple(num, num),
+            minUsableBins: num,
+            inputPowerFloor: num,
+        }),
+        bins: (v) => binsShape(v) && parallelBins(v),
+        regions: obj({
+            kind: lit("SUMMARY"),
+            items: arr(
+                obj({
+                    fromHz: num,
+                    toHz: num,
+                    binCount: int,
+                    status: binStatus,
+                    meanCoherence: num,
+                    minCoherence: num,
+                    maxCoherence: num,
+                    meanInputRelativePowerDb: nullable(num),
+                    meanOutputRelativePowerDb: nullable(num),
+                }),
+            ),
+        }),
+    }),
+    measurementCoverage: measurementCoverageShape,
+    frequencyQuality: frequencyQualityShape,
+    sampleGaps: obj({
+        status: lit("NONE", "DETECTED", "UNKNOWN"),
+        availability,
+        role,
+        expectedDtUs: nullable(num),
+        medianDtUs: nullable(num),
+        gapCount: nullable(num),
+        missingSamplesEstimate: nullable(num),
+        missingFraction: nullable(num),
+        maxGapSamples: nullable(num),
+        nonPositiveDeltas: nullable(num),
+        gaps: arr(
+            obj({
+                atTimeUs: num,
+                afterSampleIndex: num,
+                gapUs: num,
+                missingSamples: num,
+                sweepFrequencyHz: nullable(num),
+            }),
+        ),
+        gapsTruncated: bool,
+        reasons: strs,
+    }),
+    contamination: obj({ status: evidenceStatus, availability, role, reasons: strs }),
+    saturation: obj({
+        status: evidenceStatus,
+        role,
+        motorUpper: sampleFraction,
+        motorLower: sampleFraction,
+        gyroClipping: sampleFraction,
+        reasons: strs,
+    }),
+    reasons: strs,
+});
+
 /**
  * The stored Quality V2 shape per analysis version. A version's shape is frozen
  * once released: when the analysis changes, add the new version here and keep
@@ -302,4 +507,5 @@ const qualityV2_2_1_0: Shape = obj({
  */
 export const STORED_QUALITY_V2_SHAPES: Readonly<Record<string, Shape>> = {
     "2.1.0": qualityV2_2_1_0,
+    "2.2.0": qualityV2_2_2_0,
 };
