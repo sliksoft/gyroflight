@@ -57,7 +57,12 @@ export const gyroflightCapabilities: readonly GyroflightCapability[] = [
         status: "locked",
         detail: "gyroflightCapPhysicalApplyDetail",
     },
-    { key: "tune_session", label: "gyroflightCapTuneSession", status: "not_started" },
+    {
+        key: "tune_session",
+        label: "gyroflightCapTuneSession",
+        status: "implemented",
+        detail: "gyroflightCapTuneSessionDetail",
+    },
 ];
 
 export const CAPABILITY_STATUS_ICON: Record<CapabilityStatus, string> = {
