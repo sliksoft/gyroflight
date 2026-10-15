@@ -1313,6 +1313,60 @@ describe("validateTuneSession / readRecord: damage is classified, never repaired
         expect(flightAnalysisStatus(s.flights[1])).toBe("OUTDATED");
     });
 
+    it("rejects 2.2.0 reports whose supportClass length disagrees with coherence bins", () => {
+        const s = base();
+        const q = s.flights[1].chirps[0].qualityV2;
+        expect(q.analysisVersion).toBe("2.2.0");
+        expect(q.frequencyQuality.supportClass.length).toBe(q.coherence.bins.frequencyHz.length);
+        q.frequencyQuality.supportClass.pop();
+        const r = validateTuneSession(s);
+        expect(r.ok && r.rejected.some((x) => x.problems.includes("quality_v2_shape"))).toBe(true);
+    });
+
+    it("rejects 2.2.0 reports with inconsistent support regions or coverage metadata", () => {
+        const s = base();
+        s.flights[1].chirps[0].qualityV2.frequencyQuality.regions.items = [];
+        const r = validateTuneSession(s);
+        expect(r.ok).toBe(true);
+        expect(r.ok && r.rejected.some((x) => x.problems.includes("quality_v2_shape"))).toBe(true);
+
+        const s2 = base();
+        s2.flights[1].chirps[0].qualityV2.measurementCoverage.metadataReliable = true;
+        s2.flights[1].chirps[0].qualityV2.measurementCoverage.observedRangeHz = null;
+        const r2 = validateTuneSession(s2);
+        expect(r2.ok && r2.rejected.some((x) => x.problems.includes("quality_v2_shape"))).toBe(true);
+
+        const s3 = base();
+        const fq = s3.flights[1].chirps[0].qualityV2.frequencyQuality;
+        fq.supportedBinCount = {
+            availability: "MEASURED",
+            role: "DIAGNOSTIC",
+            value: 3,
+            unit: "bins",
+            reasons: [],
+        };
+        fq.coherentSupportedBinCount = {
+            availability: "MEASURED",
+            role: "DIAGNOSTIC",
+            value: 8,
+            unit: "bins",
+            reasons: [],
+        };
+        const r3 = validateTuneSession(s3);
+        expect(r3.ok && r3.rejected.some((x) => x.problems.includes("quality_v2_shape"))).toBe(true);
+    });
+
+    it("keeps the frozen 2.1.0 shape readable without 2.2.0 diagnostic sections", async () => {
+        const { STORED_QUALITY_V2_SHAPES } = await import("../../src/gyrocore/session/shape");
+        const s = base();
+        const q = clone(s.flights[1].chirps[0].qualityV2) as Loose;
+        delete q.measurementCoverage;
+        delete q.frequencyQuality;
+        q.analysisVersion = "2.1.0";
+        expect(STORED_QUALITY_V2_SHAPES["2.1.0"](q)).toBe(true);
+        expect(STORED_QUALITY_V2_SHAPES["2.2.0"](q)).toBe(false);
+    });
+
     it("readRecord reports the same split", () => {
         const s = base();
         s.flights[1].chirps[0].qualityV2.levels.tuningAuthorized.status = "YES";

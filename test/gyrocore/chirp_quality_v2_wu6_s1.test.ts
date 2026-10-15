@@ -34,7 +34,7 @@ import {
     QV2_REASONS,
     type SupportClass,
 } from "../../src/gyrocore/chirp/qualityV2/contract";
-import { classifyBinSupport } from "../../src/gyrocore/chirp/qualityV2/coverage";
+import { classifyBinSupport, frequencyQualityReport } from "../../src/gyrocore/chirp/qualityV2/coverage";
 import { qualityRows } from "../../src/gyrocore/chirp/qualityV2/view";
 import { FULL_TUNE_HEADERS, encodeChirpLog, simulateChirp, withHeader } from "./harness/chirpSim";
 
@@ -75,18 +75,35 @@ describe("WU6-S1 existing gates unchanged", () => {
             reasons: [],
         };
         // Residual spectrum at 90 Hz with high coherence is still outside the observed sweep.
-        expect(classifyBinSupport(90, "USABLE", 0.95, -10, observed)).toBe("OUTSIDE_OBSERVED_SWEEP");
-        expect(classifyBinSupport(40, "USABLE", 0.95, -10, observed)).toBe("COHERENT");
-        expect(classifyBinSupport(40, "WEAK_COHERENCE", 0.4, -10, observed)).toBe("WEAK_COHERENCE");
-        expect(classifyBinSupport(40, "NO_INPUT_POWER", 0, null, observed)).toBe("INSUFFICIENT_SPECTRAL_SUPPORT");
+        expect(classifyBinSupport(90, "USABLE", 0.95, -10, -20, observed)).toBe("OUTSIDE_OBSERVED_SWEEP");
+        expect(classifyBinSupport(40, "USABLE", 0.95, -10, -20, observed)).toBe("COHERENT");
+        expect(classifyBinSupport(40, "WEAK_COHERENCE", 0.4, -10, -20, observed)).toBe("WEAK_COHERENCE");
+        expect(classifyBinSupport(40, "NO_INPUT_POWER", 0, null, null, observed)).toBe("INSUFFICIENT_SPECTRAL_SUPPORT");
+        // Welch magnitude + high coherence without input relative power is UNKNOWN, not COHERENT.
+        expect(classifyBinSupport(40, "USABLE", 0.95, -10, null, observed)).toBe("UNKNOWN");
         expect(
-            classifyBinSupport(40, "USABLE", 0.95, -10, {
+            classifyBinSupport(40, "USABLE", 0.95, -10, -20, {
                 ...observed,
                 availability: "UNKNOWN",
                 minHz: null,
                 maxHz: null,
             }),
         ).toBe("UNKNOWN");
+    });
+
+    it("does not claim COHERENT from in-sweep frequency and coherence alone", () => {
+        const observed = {
+            availability: "MEASURED" as const,
+            startHz: 0.2,
+            endHz: 60,
+            minHz: 0.2,
+            maxHz: 60,
+            runs: 1,
+            reasons: [],
+        };
+        // Finite magnitude (above Betaflight floor) is still not enough without relative power.
+        expect(classifyBinSupport(25, "USABLE", 0.99, 0, null, observed)).toBe("UNKNOWN");
+        expect(classifyBinSupport(25, "USABLE", 0.99, 0, Number.NaN, observed)).toBe("UNKNOWN");
     });
 });
 
@@ -256,7 +273,7 @@ describe("CASE D — adversarial / unknown never becomes PASS (synthetic)", () =
                 ["UNAVAILABLE", null, null],
             ] as const
         ).map(([availability, minHz, maxHz]) =>
-            classifyBinSupport(20, "USABLE", 0.99, 0, {
+            classifyBinSupport(20, "USABLE", 0.99, 0, -15, {
                 availability,
                 startHz: null,
                 endHz: null,
@@ -267,5 +284,32 @@ describe("CASE D — adversarial / unknown never becomes PASS (synthetic)", () =
             }),
         );
         expect(classes).toEqual(["UNKNOWN", "UNKNOWN"]);
+    });
+
+    it("Welch without input relative power yields UNKNOWN support and a diagnostic reason", () => {
+        const observed = {
+            availability: "MEASURED" as const,
+            startHz: 2,
+            endHz: 100,
+            minHz: 2,
+            maxHz: 100,
+            runs: 1,
+            reasons: [],
+        };
+        // Simulate bins: Welch magnitude present, spectrogram relative power missing.
+        const fq = frequencyQualityReport(
+            {
+                frequencyHz: [10, 20, 40],
+                coherence: [0.9, 0.85, 0.8],
+                magnitudeDb: [-5, -6, -7],
+                inputRelativePowerDb: [null, null, null],
+                status: ["USABLE", "USABLE", "USABLE"],
+            },
+            observed,
+        );
+        expect(fq.supportClass).toEqual(["UNKNOWN", "UNKNOWN", "UNKNOWN"]);
+        expect(fq.meanSupportedCoherence.availability).toBe("UNKNOWN");
+        expect(fq.reasons).toContain(QV2_REASONS.supportNeedsInputEvidence);
+        expect(fq.reasons).toContain(QV2_REASONS.supportNoSupportedBins);
     });
 });

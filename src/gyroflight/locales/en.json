@@ -404,12 +404,20 @@
         "message": "This CHIRP failed existing qualification gates. Bode and support data below remain for inspection and are not a validated plant response."
     },
     "gyrocoreQv2SupportLegendTitle": { "message": "Measurement support (diagnostic)" },
-    "gyrocoreQv2Support_COHERENT": { "message": "Measured and coherent" },
-    "gyrocoreQv2Support_WEAK_COHERENCE": { "message": "Measured but weak coherence" },
-    "gyrocoreQv2Support_INSUFFICIENT_SPECTRAL_SUPPORT": { "message": "Insufficient spectral evidence" },
+    "gyrocoreQv2Support_COHERENT": {
+        "message": "In sweep · input relative power · coherent (diagnostic, not proven ID)"
+    },
+    "gyrocoreQv2Support_WEAK_COHERENCE": {
+        "message": "In sweep · input relative power · weak coherence (diagnostic)"
+    },
+    "gyrocoreQv2Support_INSUFFICIENT_SPECTRAL_SUPPORT": {
+        "message": "In sweep but Welch reports no input"
+    },
     "gyrocoreQv2Support_OUTSIDE_OBSERVED_SWEEP": { "message": "Outside observed sweep" },
     "gyrocoreQv2Support_OUTSIDE_ANALYSIS_BAND": { "message": "Outside analysis band" },
-    "gyrocoreQv2Support_UNKNOWN": { "message": "Unknown / not measured" },
+    "gyrocoreQv2Support_UNKNOWN": {
+        "message": "Unknown — missing observed sweep or input-power evidence"
+    },
     "gyrocoreQv2ObservedEndMarker": { "message": "Observed sweep end" },
     "gyrocoreQv2SupportRegionsTitle": { "message": "Diagnostic support regions" },
     "gyrocoreQv2Level_bblValid": { "message": "BBL valid" },

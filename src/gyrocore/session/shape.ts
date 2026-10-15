@@ -301,12 +301,6 @@ const qualityV2_2_1_0: Shape = obj({
     reasons: strs,
 });
 
-/** Parallel supportClass array matches frequencyHz from coherence.bins. */
-const parallelSupport: Shape = (v) => {
-    const o = v as { supportClass: unknown[]; regions: { items: unknown[] } };
-    return Array.isArray(o.supportClass);
-};
-
 const measurementCoverageShape: Shape = obj({
     role: lit("DIAGNOSTIC"),
     metadataReliable: bool,
@@ -321,38 +315,105 @@ const measurementCoverageShape: Shape = obj({
     reasons: strs,
 });
 
-const frequencyQualityShape: Shape = (v) =>
-    obj({
-        role: lit("DIAGNOSTIC"),
-        availability,
-        supportClass: arr(supportClass),
-        regions: obj({
-            kind: lit("SUMMARY"),
-            items: arr(
-                obj({
-                    fromHz: num,
-                    toHz: num,
-                    binCount: int,
-                    supportClass,
-                    meanCoherence: num,
-                    minCoherence: num,
-                    maxCoherence: num,
-                    meanInputRelativePowerDb: nullable(num),
-                }),
-            ),
-        }),
-        meanSupportedCoherence: metric(num),
-        supportedBinCount: metric(num),
-        coherentSupportedBinCount: metric(num),
-        peakSupportedMagnitude: metric(obj({ frequencyHz: num, magnitudeDb: num })),
-        reasons: strs,
-    })(v) && parallelSupport(v);
+const frequencyQualityFields: Shape = obj({
+    role: lit("DIAGNOSTIC"),
+    availability,
+    supportClass: arr(supportClass),
+    regions: obj({
+        kind: lit("SUMMARY"),
+        items: arr(
+            obj({
+                fromHz: num,
+                toHz: num,
+                binCount: int,
+                supportClass,
+                meanCoherence: num,
+                minCoherence: num,
+                maxCoherence: num,
+                meanInputRelativePowerDb: nullable(num),
+            }),
+        ),
+    }),
+    meanSupportedCoherence: metric(num),
+    supportedBinCount: metric(num),
+    coherentSupportedBinCount: metric(num),
+    peakSupportedMagnitude: metric(obj({ frequencyHz: num, magnitudeDb: num })),
+    reasons: strs,
+});
+
+/**
+ * Fail-closed 2.2.0 cross-field checks: supportClass length must match
+ * coherence.bins.frequencyHz; support regions must cover every support bin;
+ * measurementCoverage.observedRangeHz must agree with metadataReliable.
+ */
+export function qualityV2_2_2_0_consistent(v: unknown): boolean {
+    if (!isPlainObject(v)) {
+        return false;
+    }
+    const coherence = v.coherence;
+    const fq = v.frequencyQuality;
+    const mc = v.measurementCoverage;
+    const sweep = v.sweep;
+    if (!isPlainObject(coherence) || !isPlainObject(fq) || !isPlainObject(mc) || !isPlainObject(sweep)) {
+        return false;
+    }
+    const bins = coherence.bins;
+    if (!isPlainObject(bins) || !Array.isArray(bins.frequencyHz) || !Array.isArray(fq.supportClass)) {
+        return false;
+    }
+    if (fq.supportClass.length !== bins.frequencyHz.length) {
+        return false;
+    }
+    const regions = fq.regions;
+    if (!isPlainObject(regions) || !Array.isArray(regions.items)) {
+        return false;
+    }
+    const regionSum = (regions.items as { binCount?: unknown }[]).reduce(
+        (s, r) => s + (typeof r.binCount === "number" ? r.binCount : NaN),
+        0,
+    );
+    if (!Number.isFinite(regionSum) || regionSum !== fq.supportClass.length) {
+        return false;
+    }
+    if (typeof mc.metadataReliable !== "boolean") {
+        return false;
+    }
+    const observed = sweep.observed;
+    if (!isPlainObject(observed)) {
+        return false;
+    }
+    if (mc.metadataReliable) {
+        if (observed.availability !== "MEASURED" || mc.observedRangeHz === null) {
+            return false;
+        }
+        if (!Array.isArray(mc.observedRangeHz) || mc.observedRangeHz.length !== 2) {
+            return false;
+        }
+    } else if (mc.observedRangeHz !== null || observed.availability === "MEASURED") {
+        // metadataReliable must agree with a MEASURED observed sweep and its range.
+        return false;
+    }
+    const supported = fq.supportedBinCount;
+    const coherent = fq.coherentSupportedBinCount;
+    if (
+        isPlainObject(supported) &&
+        isPlainObject(coherent) &&
+        supported.availability === "MEASURED" &&
+        coherent.availability === "MEASURED" &&
+        typeof supported.value === "number" &&
+        typeof coherent.value === "number" &&
+        coherent.value > supported.value
+    ) {
+        return false;
+    }
+    return true;
+}
 
 /**
  * 2.2.0 = 2.1.0 plus diagnostic measurementCoverage and frequencyQuality.
  * Stored 2.1.0 sessions remain readable under their frozen shape.
  */
-const qualityV2_2_2_0: Shape = obj({
+const qualityV2_2_2_0_fields: Shape = obj({
     schema: lit(CHIRP_QUALITY_V2_SCHEMA),
     analysisVersion: lit("2.2.0"),
     identity: obj({
@@ -462,7 +523,7 @@ const qualityV2_2_2_0: Shape = obj({
         }),
     }),
     measurementCoverage: measurementCoverageShape,
-    frequencyQuality: frequencyQualityShape,
+    frequencyQuality: frequencyQualityFields,
     sampleGaps: obj({
         status: lit("NONE", "DETECTED", "UNKNOWN"),
         availability,
@@ -497,6 +558,8 @@ const qualityV2_2_2_0: Shape = obj({
     }),
     reasons: strs,
 });
+
+const qualityV2_2_2_0: Shape = (v) => qualityV2_2_2_0_fields(v) && qualityV2_2_2_0_consistent(v);
 
 /**
  * The stored Quality V2 shape per analysis version. A version's shape is frozen

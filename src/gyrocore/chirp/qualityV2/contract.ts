@@ -235,12 +235,17 @@ export type BinStatus = "USABLE" | "WEAK_COHERENCE" | "NO_INPUT_POWER" | "OUTSID
  * Diagnostic per-bin support class (WU6-S1). Distinct from BinStatus: reaching a
  * frequency is not proof of spectral identification. Never used by a gate.
  *
- * - COHERENT: inside the observed sweep, input above Betaflight's floor, coh ≥ usable min
- * - WEAK_COHERENCE: same spectral support, but coherence below the usable min
- * - INSUFFICIENT_SPECTRAL_SUPPORT: inside the observed sweep but no proven spectral input
+ * Layers checked separately: in observed sweep → Welch magnitude present → measured
+ * input relative spectral power present → coherence vs usable min. The Betaflight
+ * input-power floor only zeroes bins; it is not a validated SNR or excitation gate.
+ *
+ * - COHERENT: in observed sweep, measured input relative power present, coh ≥ usable min
+ *   (diagnostic only — not proven reliable plant identification)
+ * - WEAK_COHERENCE: same evidence, coherence below the usable min
+ * - INSUFFICIENT_SPECTRAL_SUPPORT: in observed sweep but Welch reports no input (floor/zeroed)
  * - OUTSIDE_OBSERVED_SWEEP: beyond the firmware-observed sweep (residual power is not support)
  * - OUTSIDE_ANALYSIS_BAND: outside the existing analysis window
- * - UNKNOWN: observed sweep metadata is not reliable enough to classify
+ * - UNKNOWN: observed sweep unreliable, or Welch present without demonstrable input relative power
  */
 export type SupportClass =
     | "COHERENT"
@@ -485,4 +490,6 @@ export const QV2_REASONS = {
     supportNoSupportedBins: "frequency_support_none:no_spectrally_supported_bins",
     supportOutsideObserved: "frequency_support:outside_observed_sweep",
     supportInsufficientInput: "frequency_support:insufficient_spectral_input",
+    /** Welch/coherence present but no measured input relative power to underpin support. */
+    supportNeedsInputEvidence: "frequency_support_unknown:no_input_relative_power",
 } as const;
