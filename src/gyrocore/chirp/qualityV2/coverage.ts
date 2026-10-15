@@ -66,15 +66,17 @@ function dbMean(values: (number | null)[]): number | null {
 }
 
 /**
- * Classify one Welch bin. Inside the observed sweep + input above Betaflight's
- * floor is the only path to COHERENT / WEAK_COHERENCE. Residual spectrum beyond
- * the observed end is OUTSIDE_OBSERVED_SWEEP, never support.
+ * Classify one Welch bin. COHERENT / WEAK_COHERENCE require all of: frequency in
+ * the observed sweep, Welch magnitude present, and measured input relative
+ * spectral power. The Betaflight floor alone is not excitation-quality evidence.
+ * Residual spectrum beyond the observed end is OUTSIDE_OBSERVED_SWEEP, never support.
  */
 export function classifyBinSupport(
     frequencyHz: number,
     status: BinStatus,
     coherence: number,
     magnitudeDb: number | null,
+    inputRelativePowerDb: number | null,
     observed: SweepV2["observed"],
 ): SupportClass {
     if (status === "OUTSIDE_ANALYSIS_BAND") {
@@ -86,9 +88,13 @@ export function classifyBinSupport(
     if (frequencyHz < observed.minHz || frequencyHz > observed.maxHz) {
         return "OUTSIDE_OBSERVED_SWEEP";
     }
-    // magnitudeDb null means welchTransferFunction zeroed the bin (no input power).
+    // Welch zeroed the bin (Sxx below its floor). Floor is a zeroing rule, not a quality gate.
     if (magnitudeDb === null || status === "NO_INPUT_POWER") {
         return "INSUFFICIENT_SPECTRAL_SUPPORT";
+    }
+    // Magnitude/coherence without demonstrable relative input power → cannot claim support.
+    if (inputRelativePowerDb === null || !Number.isFinite(inputRelativePowerDb)) {
+        return "UNKNOWN";
     }
     return coherence >= USABLE_COHERENCE_MIN ? "COHERENT" : "WEAK_COHERENCE";
 }
@@ -271,7 +277,14 @@ export function frequencyQualityReport(
     }
 
     const supportClass = bins.frequencyHz.map((f, k) =>
-        classifyBinSupport(f, bins.status[k], bins.coherence[k], bins.magnitudeDb[k], observed),
+        classifyBinSupport(
+            f,
+            bins.status[k],
+            bins.coherence[k],
+            bins.magnitudeDb[k],
+            bins.inputRelativePowerDb[k],
+            observed,
+        ),
     );
 
     const reasons: string[] = [...baseReasons];
@@ -283,6 +296,14 @@ export function frequencyQualityReport(
     }
     if (supportClass.some((c) => c === "INSUFFICIENT_SPECTRAL_SUPPORT")) {
         reasons.push(R.supportInsufficientInput);
+    }
+    if (
+        observed.availability === "MEASURED" &&
+        supportClass.some(
+            (c, k) => c === "UNKNOWN" && bins.magnitudeDb[k] !== null && bins.status[k] !== "OUTSIDE_ANALYSIS_BAND",
+        )
+    ) {
+        reasons.push(R.supportNeedsInputEvidence);
     }
 
     const supportedIdx = supportClass

@@ -146,19 +146,23 @@ Reaching a frequency is not the same as identifying it. `measurementCoverage` an
 requested, what DEBUG_CHIRP observed, and which Welch bins have proven spectral support. They never authorize tuning and
 do not change existing gates or thresholds.
 
-`SupportClass` per bin (parallel to `coherence.bins`):
+`SupportClass` per bin (parallel to `coherence.bins`). Classification layers are separate: in the observed sweep →
+Welch magnitude present → **measured input relative spectral power** present → coherence vs the existing usable min.
+The Betaflight input-power floor only zeroes bins; it is **not** a validated SNR or excitation-quality threshold, so
+in-sweep frequency plus coherence ≥ 0.5 alone never yields `COHERENT`.
 
-| Class                            | Meaning                                                                                                      |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `COHERENT`                       | inside the observed sweep, input above Betaflight's floor, coherence ≥ usable min                            |
-| `WEAK_COHERENCE`                 | same spectral support, coherence below the usable min                                                        |
-| `INSUFFICIENT_SPECTRAL_SUPPORT`  | inside the observed sweep but no proven spectral input                                                       |
-| `OUTSIDE_OBSERVED_SWEEP`         | beyond the firmware-observed min–max (residual spectrum is not support)                                      |
-| `OUTSIDE_ANALYSIS_BAND`          | outside the existing analysis window                                                                         |
-| `UNKNOWN`                        | observed sweep metadata is not reliable enough to classify                                                   |
+| Class                            | Meaning                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `COHERENT`                       | in observed sweep, measured input relative power present, coherence ≥ usable min (diagnostic — not proven plant ID)   |
+| `WEAK_COHERENCE`                 | same evidence, coherence below the usable min                                                                          |
+| `INSUFFICIENT_SPECTRAL_SUPPORT`  | in observed sweep but Welch reports no input (magnitude zeroed / `NO_INPUT_POWER`)                                     |
+| `OUTSIDE_OBSERVED_SWEEP`         | beyond the firmware-observed min–max (residual spectrum is not support)                                                |
+| `OUTSIDE_ANALYSIS_BAND`          | outside the existing analysis window                                                                                   |
+| `UNKNOWN`                        | observed sweep unreliable, or Welch/coherence without demonstrable input relative power                                |
 
 `meanSupportedCoherence` is diagnostic over spectrally supported bins; it does **not** replace `meanBandCoherence`
 (5–100 Hz gate). Peak supported magnitude is an observation only — never labelled as resonance or PID instability.
+Stored 2.2.0 reports must keep `frequencyQuality.supportClass.length === coherence.bins.frequencyHz.length` (fail-closed).
 
 ## Frequency-dependent coherence
 
