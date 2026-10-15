@@ -35,7 +35,12 @@
     },
     "gyroflightCapPhysicalApply": { "message": "Writing a tune to the flight controller" },
     "gyroflightCapPhysicalApplyDetail": { "message": "Deliberately disabled until Safety is complete." },
-    "gyroflightCapTuneSession": { "message": "Tune session: cross-flight verification" },
+    "gyroflightCapTuneSession": {
+        "message": "Tune session: local storage, Flight A/B selection and cross-flight comparison"
+    },
+    "gyroflightCapTuneSessionDetail": {
+        "message": "Tune Sessions can be saved locally. Flight A/B selection and cross-flight comparison are implemented; comparisons are diagnostic only. Repeatability is not proven; Verified Tuning and physical Apply remain locked."
+    },
     "gyroflightStatus_available": { "message": "Available" },
     "gyroflightStatus_implemented": { "message": "Implemented" },
     "gyroflightStatus_incomplete": { "message": "Not complete" },
