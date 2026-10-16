@@ -160,7 +160,13 @@ in-sweep frequency plus coherence ≥ 0.5 alone never yields `COHERENT`.
 | `OUTSIDE_ANALYSIS_BAND`          | outside the existing analysis window                                                                                   |
 | `UNKNOWN`                        | observed sweep unreliable, or Welch/coherence without demonstrable input relative power                                |
 
-`meanSupportedCoherence` is diagnostic over spectrally supported bins; it does **not** replace `meanBandCoherence`
+"Spectrally supported" (`spectrallySupportedOfAnalysisBand`, `supportedBinCount`, `meanSupportedCoherence`,
+`peakSupportedMagnitude`) means bins inside the observed sweep **with input-power evidence**: `COHERENT` **and**
+`WEAK_COHERENCE`. The UI labels these "input-power evidence" and says weak-coherence bins are included. Input power is
+not proof that a frequency was reliably identified, and this diagnostic measurement quality never authorizes automatic
+tuning. Field names are unchanged for 2.2.0 storage compatibility.
+
+`meanSupportedCoherence` is diagnostic over these bins; it does **not** replace `meanBandCoherence`
 (5–100 Hz gate). Peak supported magnitude is an observation only — never labelled as resonance or PID instability.
 Stored 2.2.0 reports must keep `frequencyQuality.supportClass.length === coherence.bins.frequencyHz.length` (fail-closed).
 
