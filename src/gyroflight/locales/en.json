@@ -387,23 +387,31 @@
     "gyrocoreQv2DetailRuns": { "message": "$1 runs" },
     "gyrocoreQv2DetailCoverage": { "message": "usable $1 · observed share of requested $2" },
     "gyrocoreQv2DetailSweptBand": { "message": "swept of analysis band $1" },
-    "gyrocoreQv2DetailSpectralSupport": { "message": "spectrally supported $1" },
+    "gyrocoreQv2DetailSpectralSupport": {
+        "message": "in observed sweep with input-power evidence $1 (includes weak-coherence bins; not proof of identification)"
+    },
     "gyrocoreQv2DetailMissingBand": { "message": "missing $1" },
     "gyrocoreQv2DetailExcitation": { "message": "setpoint RMS $1 · gyro RMS $2" },
     "gyrocoreQv2DetailNoInput": { "message": "$1 bins without input" },
     "gyrocoreQv2DetailCoherence": { "message": "gate mean $1 over $2–$3 Hz" },
-    "gyrocoreQv2DetailSupportedCoherence": { "message": "supported-band mean $1 (diagnostic)" },
-    "gyrocoreQv2DetailSupportedBins": { "message": "$1 coherent / $2 supported bins (diagnostic)" },
+    "gyrocoreQv2DetailSupportedCoherence": {
+        "message": "mean over input-power bins $1 (includes weak coherence; diagnostic)"
+    },
+    "gyrocoreQv2DetailSupportedBins": {
+        "message": "$1 coherent / $2 bins with input-power evidence (diagnostic)"
+    },
     "gyrocoreQv2DetailUsableBins": { "message": "of $1 in the analysis band" },
     "gyrocoreQv2DetailGaps": { "message": "$1 gaps, about $2 samples missing ($3)" },
     "gyrocoreQv2DetailSaturation": { "message": "motors at maximum: $1 samples, at minimum: $2 samples" },
     "gyrocoreQv2DetailPeakMagnitude": {
-        "message": "peak supported magnitude $1 dB at $2 Hz (observation only, not a resonance diagnosis)"
+        "message": "peak magnitude over input-power bins (includes weak coherence) $1 dB at $2 Hz (observation only, not a resonance diagnosis)"
     },
     "gyrocoreQv2RejectedNote": {
         "message": "This CHIRP failed existing qualification gates. Bode and support data below remain for inspection and are not a validated plant response."
     },
-    "gyrocoreQv2SupportLegendTitle": { "message": "Measurement support (diagnostic)" },
+    "gyrocoreQv2SupportLegendTitle": {
+        "message": "Input-power evidence in the observed sweep (diagnostic; weak-coherence bins included; input power is not proof of reliable identification and does not authorize automatic tuning)"
+    },
     "gyrocoreQv2Support_COHERENT": {
         "message": "In sweep · input relative power · coherent (diagnostic, not proven ID)"
     },
