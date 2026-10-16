@@ -138,7 +138,10 @@
                         :y2="b.y"
                         stroke-width="2"
                         stroke-linecap="round"
-                        :class="['stroke-current', supportClassStyle(b.supportClass)]"
+                        :class="[
+                            'stroke-current',
+                            b.supportClass ? supportClassStyle(b.supportClass) : statusClass(b.status),
+                        ]"
                         :data-status="b.status"
                         :data-support="b.supportClass"
                     >
@@ -146,12 +149,20 @@
                     </line>
                 </g>
             </svg>
-            <figcaption class="flex flex-wrap gap-3 text-[11px] text-dimmed">
-                <span class="font-medium">{{ $t("gyrocoreQv2SupportLegendTitle") }}</span>
-                <span v-for="s in SUPPORT_CLASS_ORDER" :key="s" class="inline-flex items-center gap-1">
-                    <span :class="['inline-block w-2.5 h-2.5 rounded-sm bg-current', supportClassStyle(s)]" />
-                    {{ $t(`gyrocoreQv2Support_${s}`) }}
-                </span>
+            <figcaption class="flex flex-wrap gap-3 text-[11px] text-dimmed" :data-legend="plot.colorBy">
+                <template v-if="plot.colorBy === 'support'">
+                    <span class="font-medium">{{ $t("gyrocoreQv2SupportLegendTitle") }}</span>
+                    <span v-for="s in SUPPORT_CLASS_ORDER" :key="s" class="inline-flex items-center gap-1">
+                        <span :class="['inline-block w-2.5 h-2.5 rounded-sm bg-current', supportClassStyle(s)]" />
+                        {{ $t(`gyrocoreQv2Support_${s}`) }}
+                    </span>
+                </template>
+                <template v-else>
+                    <span v-for="s in BIN_STATUS_ORDER" :key="s" class="inline-flex items-center gap-1">
+                        <span :class="['inline-block w-2.5 h-2.5 rounded-sm bg-current', statusClass(s)]" />
+                        {{ $t(`gyrocoreQv2Bin_${s}`) }}
+                    </span>
+                </template>
                 <span v-if="plot.observedEndX !== null">{{ $t("gyrocoreQv2ObservedEndMarker") }}</span>
                 <span>{{ $t("gyrocoreQv2ChartAxes") }}</span>
             </figcaption>
@@ -226,6 +237,7 @@ import { PRODUCT_APPLY_PENDING } from "@/gyrocore/productLock/productApply";
 import type { BinStatus, ChirpQualityV2, SupportClass } from "@/gyrocore/chirp/qualityV2/contract";
 import { displayQualityV2 } from "@/gyrocore/chirp/qualityV2/coverage";
 import {
+    BIN_STATUS_ORDER,
     LEVEL_ORDER,
     SUPPORT_CLASS_ORDER,
     coherencePlot,
@@ -278,11 +290,22 @@ function supportClassStyle(support: SupportClass) {
     }[support];
 }
 
+/** BinStatus colours, kept for stored 2.1.0 reports that carry no support classes. */
+function statusClass(status: BinStatus) {
+    return {
+        USABLE: "text-success",
+        WEAK_COHERENCE: "text-warning",
+        NO_INPUT_POWER: "text-error",
+        OUTSIDE_ANALYSIS_BAND: "text-dimmed",
+    }[status];
+}
+
 function hz(f: number) {
     return f < 10 ? f.toFixed(1) : String(Math.round(f));
 }
 
-function binTitle(b: { frequencyHz: number; coherence: number; status: BinStatus; supportClass: SupportClass }) {
-    return `${b.frequencyHz.toFixed(1)} Hz: ${b.coherence.toFixed(2)} (${i18n.getMessage(`gyrocoreQv2Support_${b.supportClass}`)})`;
+function binTitle(b: { frequencyHz: number; coherence: number; status: BinStatus; supportClass: SupportClass | null }) {
+    const label = b.supportClass ? `gyrocoreQv2Support_${b.supportClass}` : `gyrocoreQv2Bin_${b.status}`;
+    return `${b.frequencyHz.toFixed(1)} Hz: ${b.coherence.toFixed(2)} (${i18n.getMessage(label)})`;
 }
 </script>

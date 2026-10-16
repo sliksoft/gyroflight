@@ -162,7 +162,8 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
             "coverage",
             "coverage",
             "gyrocoreQv2RowCoverage",
-            mc.metadataReliable ? "DIAGNOSTIC" : s.usable.availability,
+            // A missing transfer function / usable range must stay visible behind the diagnostic label.
+            s.usable.availability === "MEASURED" && mc.metadataReliable ? "DIAGNOSTIC" : s.usable.availability,
             coverageParts.join(" · "),
         ),
         row(
@@ -257,15 +258,18 @@ export function coherencePlot(v: ChirpQualityV2, width: number, height: number) 
     const y = (c: number) => height - Math.max(0, Math.min(1, c)) * height;
     const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000].filter((t) => t >= lo && t <= hi);
     const support = v.frequencyQuality.supportClass;
+    // Stored 2.1.0 reports carry no support classes: colour by their own BinStatus, invent none.
+    const colorBy: "support" | "status" = support.length === b.frequencyHz.length ? "support" : "status";
     const observedEnd = v.measurementCoverage.observedRangeHz?.[1] ?? null;
     return {
+        colorBy,
         bars: b.frequencyHz.map((f, i) => ({
             x: x(f),
             y: y(b.coherence[i]),
             frequencyHz: f,
             coherence: b.coherence[i],
             status: b.status[i],
-            supportClass: support[i] ?? ("UNKNOWN" as SupportClass),
+            supportClass: colorBy === "support" ? support[i] : (null as SupportClass | null),
         })),
         ticks: ticks.map((t) => ({ x: x(t), label: t >= 1000 ? `${t / 1000}k` : String(t) })),
         thresholdY: y(v.coherence.criteria.usableBinCoherenceMin),

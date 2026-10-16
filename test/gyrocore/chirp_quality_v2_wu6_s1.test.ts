@@ -34,8 +34,13 @@ import {
     QV2_REASONS,
     type SupportClass,
 } from "../../src/gyrocore/chirp/qualityV2/contract";
-import { classifyBinSupport, frequencyQualityReport } from "../../src/gyrocore/chirp/qualityV2/coverage";
-import { qualityRows } from "../../src/gyrocore/chirp/qualityV2/view";
+import {
+    classifyBinSupport,
+    displayQualityV2,
+    frequencyQualityReport,
+    measurementCoverageReport,
+} from "../../src/gyrocore/chirp/qualityV2/coverage";
+import { coherencePlot, qualityRows } from "../../src/gyrocore/chirp/qualityV2/view";
 import { FULL_TUNE_HEADERS, encodeChirpLog, simulateChirp, withHeader } from "./harness/chirpSim";
 
 vi.mock("../../src/js/localization", async (importOriginal) => ({
@@ -310,6 +315,117 @@ describe("CASE D — adversarial / unknown never becomes PASS (synthetic)", () =
         expect(fq.supportClass).toEqual(["UNKNOWN", "UNKNOWN", "UNKNOWN"]);
         expect(fq.meanSupportedCoherence.availability).toBe("UNKNOWN");
         expect(fq.reasons).toContain(QV2_REASONS.supportNeedsInputEvidence);
-        expect(fq.reasons).toContain(QV2_REASONS.supportNoSupportedBins);
+        // Undetermined support is not "no supported bins".
+        expect(fq.reasons).not.toContain(QV2_REASONS.supportNoSupportedBins);
+    });
+});
+
+describe("WU6-S1 review fixes", () => {
+    const m = only(
+        encodeChirpLog(
+            simulateChirp({ firmwareDebug: true, axis: 2, startHz: 0.2, endHz: 38, seconds: 20, crossoverHz: 25 }),
+            AIR65_HEADERS,
+        ),
+    );
+    const v2 = m.qualityV2;
+    const observed = {
+        availability: "MEASURED" as const,
+        startHz: 2,
+        endHz: 100,
+        minHz: 2,
+        maxHz: 100,
+        runs: 1,
+        reasons: [],
+    };
+    const t = (k: string, a: (string | number)[] = []) => `${k}:${a.join(",")}`;
+
+    it("FIX 1: undetermined input evidence makes every support aggregate UNKNOWN, never a measured 0", () => {
+        const fq = frequencyQualityReport(
+            {
+                frequencyHz: [10, 20, 40],
+                coherence: [0.9, 0.85, 0.8],
+                magnitudeDb: [-5, -6, -7],
+                inputRelativePowerDb: [null, null, -30],
+                status: ["USABLE", "USABLE", "USABLE"],
+            },
+            observed,
+        );
+        expect(fq.supportClass).toEqual(["UNKNOWN", "UNKNOWN", "COHERENT"]);
+        for (const metric of [
+            fq.supportedBinCount,
+            fq.coherentSupportedBinCount,
+            fq.meanSupportedCoherence,
+            fq.peakSupportedMagnitude,
+        ]) {
+            expect(metric.availability).toBe("UNKNOWN");
+            expect(metric.value).toBeNull();
+            expect(metric.reasons).toEqual([QV2_REASONS.supportNeedsInputEvidence]);
+        }
+
+        const inBand = v2.coherence.bins.status.map(() => "UNKNOWN" as SupportClass);
+        const mc = measurementCoverageReport(
+            v2.sweep,
+            inBand.map((c, k) =>
+                v2.coherence.bins.status[k] === "OUTSIDE_ANALYSIS_BAND" ? "OUTSIDE_ANALYSIS_BAND" : c,
+            ),
+            v2.coherence.bins.status,
+        );
+        expect(mc.metadataReliable).toBe(true);
+        expect(mc.spectrallySupportedOfAnalysisBand.availability).toBe("UNKNOWN");
+        expect(mc.spectrallySupportedOfAnalysisBand.value).toBeNull();
+        expect(mc.spectrallySupportedOfAnalysisBand.reasons).toEqual([QV2_REASONS.supportNeedsInputEvidence]);
+        expect(mc.reasons).toContain(QV2_REASONS.supportNeedsInputEvidence);
+
+        const rows = qualityRows({ ...v2, measurementCoverage: mc }, t);
+        const coverage = rows.find((r) => r.id === "coverage")!;
+        expect(coverage.detail).toContain("gyrocoreQv2DetailSpectralSupport:--");
+        expect(coverage.detail).not.toContain("gyrocoreQv2DetailSpectralSupport:0 %");
+    });
+
+    it("FIX 1: demonstrably zero supported bins stays a MEASURED 0", () => {
+        const fq = frequencyQualityReport(
+            {
+                frequencyHz: [10, 20],
+                coherence: [0.9, 0.9],
+                magnitudeDb: [null, null],
+                inputRelativePowerDb: [null, null],
+                status: ["NO_INPUT_POWER", "NO_INPUT_POWER"],
+            },
+            observed,
+        );
+        expect(fq.supportClass).toEqual(["INSUFFICIENT_SPECTRAL_SUPPORT", "INSUFFICIENT_SPECTRAL_SUPPORT"]);
+        expect(fq.supportedBinCount).toMatchObject({ availability: "MEASURED", value: 0 });
+        expect(fq.coherentSupportedBinCount).toMatchObject({ availability: "MEASURED", value: 0 });
+        expect(fq.reasons).not.toContain(QV2_REASONS.supportNeedsInputEvidence);
+
+        const mc = measurementCoverageReport(v2.sweep, fq.supportClass, ["NO_INPUT_POWER", "NO_INPUT_POWER"]);
+        expect(mc.spectrallySupportedOfAnalysisBand).toMatchObject({ availability: "MEASURED", value: 0 });
+    });
+
+    it("FIX 3: the coverage row shows a missing usable range instead of DIAGNOSTIC", () => {
+        expect(v2.measurementCoverage.metadataReliable).toBe(true);
+        expect(qualityRows(v2, t).find((r) => r.id === "coverage")!.status).toBe("DIAGNOSTIC");
+        for (const availability of ["UNAVAILABLE", "UNKNOWN"] as const) {
+            const noTf = { ...v2, sweep: { ...v2.sweep, usable: { ...v2.sweep.usable, availability } } };
+            expect(qualityRows(noTf, t).find((r) => r.id === "coverage")!.status).toBe(availability);
+        }
+    });
+
+    it("FIX 4: a stored 2.1.0 report is plotted by its own BinStatus, with no invented support class", () => {
+        const legacy = structuredClone(v2) as unknown as Record<string, unknown>;
+        delete legacy.measurementCoverage;
+        delete legacy.frequencyQuality;
+        legacy.analysisVersion = "2.1.0";
+        const shown = displayQualityV2(legacy as unknown as typeof v2);
+        const plot = coherencePlot(shown, 100, 50)!;
+        expect(plot.colorBy).toBe("status");
+        expect(plot.bars.map((b) => b.supportClass)).toEqual(plot.bars.map(() => null));
+        expect(plot.bars.map((b) => b.status)).toEqual(v2.coherence.bins.status);
+        expect(shown.levels).toEqual(v2.levels);
+        expect(shown.verdicts).toEqual(v2.verdicts);
+
+        const current = coherencePlot(v2, 100, 50)!;
+        expect(current.colorBy).toBe("support");
+        expect(current.bars.map((b) => b.supportClass)).toEqual(v2.frequencyQuality.supportClass);
     });
 });

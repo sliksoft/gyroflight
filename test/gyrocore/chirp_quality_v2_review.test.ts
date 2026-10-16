@@ -357,6 +357,28 @@ describe("the card", () => {
         expect(container.querySelector('[data-level="chirpDetected"]')!.getAttribute("data-tone")).toBe("neutral");
         unmount();
     });
+
+    it("colours a stored 2.1.0 report by BinStatus with its legend (no support classes)", () => {
+        const legacy = structuredClone(good.qualityV2) as unknown as Record<string, unknown>;
+        delete legacy.measurementCoverage;
+        delete legacy.frequencyQuality;
+        legacy.analysisVersion = "2.1.0";
+        const { container, unmount } = mount(legacy as unknown as ChirpQualityV2);
+        const bars = [...container.querySelectorAll("line[data-status]")];
+        expect(bars).toHaveLength(good.qualityV2.coherence.bins.frequencyHz.length);
+        expect(bars.some((b) => b.hasAttribute("data-support"))).toBe(false);
+        const usable = bars.find((b) => b.getAttribute("data-status") === "USABLE")!;
+        expect(usable.getAttribute("class")).toContain("text-success");
+        const legend = container.querySelector("figcaption[data-legend]")!;
+        expect(legend.getAttribute("data-legend")).toBe("status");
+        expect(legend.textContent).toContain("gyrocoreQv2Bin_USABLE");
+        expect(legend.textContent).not.toContain("gyrocoreQv2Support_");
+        unmount();
+
+        const current = mount(good.qualityV2);
+        expect(current.container.querySelector("figcaption[data-legend]")!.getAttribute("data-legend")).toBe("support");
+        current.unmount();
+    });
 });
 
 // ---------------------------------------------------------------------------
