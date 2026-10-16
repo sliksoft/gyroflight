@@ -1356,6 +1356,104 @@ describe("validateTuneSession / readRecord: damage is classified, never repaired
         expect(r3.ok && r3.rejected.some((x) => x.problems.includes("quality_v2_shape"))).toBe(true);
     });
 
+    describe("2.2.0 support consistency (review fixes)", () => {
+        // A firmware DEBUG_CHIRP log: reliable sweep metadata and real support classes.
+        let fwSession: Loose;
+        beforeAll(async () => {
+            const bytes = encodeChirpLog(simulateChirp({ axis: 0, seconds: 6, firmwareDebug: true }), FW_HEADERS);
+            fwSession = clone(
+                sessionWith(...flightsFromReport(await analyze(bytes, "fw.bbl"), opts("fw.bbl")).flights),
+            );
+            expect(fwSession.flights[0].chirps[0].qualityV2.measurementCoverage.metadataReliable).toBe(true);
+        });
+        const fw = () => clone(fwSession);
+        const shapeRejected = (s: ReturnType<typeof base>) => {
+            const r = validateTuneSession(s);
+            return r.ok && r.rejected.some((x) => x.problems.includes("quality_v2_shape"));
+        };
+        const supportedIndex = (q: Loose) =>
+            (q.frequencyQuality.supportClass as string[]).findIndex((c) => c === "COHERENT" || c === "WEAK_COHERENCE");
+
+        it("accepts the unmodified generated reports, with and without reliable sweep metadata", () => {
+            for (const s of [base(), fw()]) {
+                const r = validateTuneSession(s);
+                expect(r.ok && r.rejected).toEqual([]);
+            }
+        });
+
+        it("rejects support counts that disagree with supportClass", () => {
+            const s = fw();
+            const fq = s.flights[0].chirps[0].qualityV2.frequencyQuality;
+            expect(fq.supportedBinCount.availability).toBe("MEASURED");
+            fq.supportedBinCount.value = (fq.supportedBinCount.value ?? 0) + 1;
+            expect(shapeRejected(s)).toBe(true);
+
+            const s2 = fw();
+            const fq2 = s2.flights[0].chirps[0].qualityV2.frequencyQuality;
+            fq2.coherentSupportedBinCount.value = Math.max(0, (fq2.coherentSupportedBinCount.value ?? 0) - 1);
+            expect(fq2.coherentSupportedBinCount.value).not.toBe(
+                fq2.supportClass.filter((c: string) => c === "COHERENT").length,
+            );
+            expect(shapeRejected(s2)).toBe(true);
+
+            const s3 = fw();
+            const mc = s3.flights[0].chirps[0].qualityV2.measurementCoverage;
+            expect(mc.spectrallySupportedOfAnalysisBand.availability).toBe("MEASURED");
+            const frac = mc.spectrallySupportedOfAnalysisBand.value ?? 0;
+            mc.spectrallySupportedOfAnalysisBand.value = frac > 0.5 ? frac - 0.25 : frac + 0.25;
+            expect(shapeRejected(s3)).toBe(true);
+        });
+
+        it("rejects regions whose order or class disagrees with supportClass, even with the right total", () => {
+            const s = fw();
+            const items = s.flights[0].chirps[0].qualityV2.frequencyQuality.regions.items;
+            expect(items.length).toBeGreaterThan(1);
+            items.reverse();
+            expect(shapeRejected(s)).toBe(true);
+
+            const s2 = fw();
+            const item = s2.flights[0].chirps[0].qualityV2.frequencyQuality.regions.items[0];
+            item.supportClass = item.supportClass === "UNKNOWN" ? "COHERENT" : "UNKNOWN";
+            expect(shapeRejected(s2)).toBe(true);
+        });
+
+        it("rejects supportClass that disagrees with the bins, including OUTSIDE_ANALYSIS_BAND", () => {
+            const s = fw();
+            const q = s.flights[0].chirps[0].qualityV2 as Loose;
+            const k = (q.coherence.bins.status as string[]).indexOf("OUTSIDE_ANALYSIS_BAND");
+            expect(k).toBeGreaterThanOrEqual(0);
+            expect(q.frequencyQuality.supportClass[k]).toBe("OUTSIDE_ANALYSIS_BAND");
+            q.coherence.bins.status[k] = "WEAK_COHERENCE";
+            expect(shapeRejected(s)).toBe(true);
+
+            const s2 = fw();
+            const q2 = s2.flights[0].chirps[0].qualityV2 as Loose;
+            const j = supportedIndex(q2);
+            expect(j).toBeGreaterThanOrEqual(0);
+            q2.coherence.bins.inputRelativePowerDb[j] = null;
+            expect(shapeRejected(s2)).toBe(true);
+        });
+
+        it("rejects measured support or COHERENT classes without reliable sweep metadata", () => {
+            const s = fw();
+            const q = s.flights[0].chirps[0].qualityV2 as Loose;
+            expect(supportedIndex(q)).toBeGreaterThanOrEqual(0);
+            q.sweep.observed.availability = "UNKNOWN";
+            q.measurementCoverage.metadataReliable = false;
+            q.measurementCoverage.observedRangeHz = null;
+            q.measurementCoverage.sweepRestarts = null;
+            q.measurementCoverage.sweptOfAnalysisBand = {
+                availability: "UNKNOWN",
+                role: "DIAGNOSTIC",
+                value: null,
+                unit: "fraction",
+                reasons: [],
+            };
+            // supportClass still carries COHERENT/WEAK and the counts stay MEASURED.
+            expect(shapeRejected(s)).toBe(true);
+        });
+    });
+
     it("keeps the frozen 2.1.0 shape readable without 2.2.0 diagnostic sections", async () => {
         const { STORED_QUALITY_V2_SHAPES } = await import("../../src/gyrocore/session/shape");
         const s = base();

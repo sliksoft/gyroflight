@@ -185,9 +185,15 @@ export function measurementCoverageReport(
     } else {
         const inBand = supportClass.filter((_, k) => binStatus[k] !== "OUTSIDE_ANALYSIS_BAND");
         const supported = inBand.filter((c) => c === "COHERENT" || c === "WEAK_COHERENCE").length;
-        spectrallySupportedOfAnalysisBand = inBand.length
-            ? metric("MEASURED", supported / inBand.length, "fraction")
-            : metric("UNKNOWN", null, "fraction", [R.supportNoSupportedBins]);
+        if (!inBand.length) {
+            spectrallySupportedOfAnalysisBand = metric("UNKNOWN", null, "fraction", [R.supportNoSupportedBins]);
+        } else if (inBand.includes("UNKNOWN")) {
+            // Bins whose support cannot be decided make the fraction unknown, not a measured lower bound.
+            spectrallySupportedOfAnalysisBand = metric("UNKNOWN", null, "fraction", [R.supportNeedsInputEvidence]);
+            reasons.push(R.supportNeedsInputEvidence);
+        } else {
+            spectrallySupportedOfAnalysisBand = metric("MEASURED", supported / inBand.length, "fraction");
+        }
     }
 
     const observedRangeHz: [number, number] | null =
@@ -297,12 +303,13 @@ export function frequencyQualityReport(
     if (supportClass.some((c) => c === "INSUFFICIENT_SPECTRAL_SUPPORT")) {
         reasons.push(R.supportInsufficientInput);
     }
-    if (
+    // With a MEASURED observed sweep, an in-band UNKNOWN bin is one whose support cannot be
+    // decided (Welch present, no input relative power). Aggregates over the supported bins are
+    // then UNKNOWN too: zero demonstrated support is not the same as undetermined support.
+    const undetermined =
         observed.availability === "MEASURED" &&
-        supportClass.some(
-            (c, k) => c === "UNKNOWN" && bins.magnitudeDb[k] !== null && bins.status[k] !== "OUTSIDE_ANALYSIS_BAND",
-        )
-    ) {
+        supportClass.some((c, k) => c === "UNKNOWN" && bins.status[k] !== "OUTSIDE_ANALYSIS_BAND");
+    if (undetermined) {
         reasons.push(R.supportNeedsInputEvidence);
     }
 
@@ -310,10 +317,20 @@ export function frequencyQualityReport(
         .map((c, k) => (c === "COHERENT" || c === "WEAK_COHERENCE" ? k : -1))
         .filter((k) => k >= 0);
     const coherentIdx = supportClass.map((c, k) => (c === "COHERENT" ? k : -1)).filter((k) => k >= 0);
+    const countMetric = (count: number): Metric<number> => {
+        if (observed.availability !== "MEASURED") {
+            return metric("UNKNOWN", null, "bins", [R.supportNeedsObserved]);
+        }
+        return undetermined
+            ? metric("UNKNOWN", null, "bins", [R.supportNeedsInputEvidence])
+            : metric("MEASURED", count, "bins");
+    };
 
     let meanSupportedCoherence: Metric<number>;
     if (observed.availability !== "MEASURED") {
         meanSupportedCoherence = metric("UNKNOWN", null, "coherence", [R.supportNeedsObserved]);
+    } else if (undetermined) {
+        meanSupportedCoherence = metric("UNKNOWN", null, "coherence", [R.supportNeedsInputEvidence]);
     } else if (!supportedIdx.length) {
         meanSupportedCoherence = metric("UNKNOWN", null, "coherence", [R.supportNoSupportedBins]);
         reasons.push(R.supportNoSupportedBins);
@@ -324,6 +341,8 @@ export function frequencyQualityReport(
     let peakSupportedMagnitude: Metric<{ frequencyHz: number; magnitudeDb: number }>;
     if (observed.availability !== "MEASURED") {
         peakSupportedMagnitude = metric("UNKNOWN", null, "dB", [R.supportNeedsObserved]);
+    } else if (undetermined) {
+        peakSupportedMagnitude = metric("UNKNOWN", null, "dB", [R.supportNeedsInputEvidence]);
     } else {
         let bestK = -1;
         let bestMag = -Infinity;
@@ -349,14 +368,8 @@ export function frequencyQualityReport(
             items: summarizeSupportRegions(bins.frequencyHz, bins.coherence, bins.inputRelativePowerDb, supportClass),
         },
         meanSupportedCoherence,
-        supportedBinCount:
-            observed.availability !== "MEASURED"
-                ? metric("UNKNOWN", null, "bins", [R.supportNeedsObserved])
-                : metric("MEASURED", supportedIdx.length, "bins"),
-        coherentSupportedBinCount:
-            observed.availability !== "MEASURED"
-                ? metric("UNKNOWN", null, "bins", [R.supportNeedsObserved])
-                : metric("MEASURED", coherentIdx.length, "bins"),
+        supportedBinCount: countMetric(supportedIdx.length),
+        coherentSupportedBinCount: countMetric(coherentIdx.length),
         peakSupportedMagnitude,
         reasons: [...new Set(reasons)],
     };

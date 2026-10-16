@@ -341,10 +341,85 @@ const frequencyQualityFields: Shape = obj({
     reasons: strs,
 });
 
+type Raw = Record<string, unknown>;
+
+const SUPPORTED = (c: unknown) => c === "COHERENT" || c === "WEAK_COHERENCE";
+const isMeasured = (m: unknown): m is Raw => isPlainObject(m) && m.availability === "MEASURED";
+const close = (a: unknown, b: number) => typeof a === "number" && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+
 /**
- * Fail-closed 2.2.0 cross-field checks: supportClass length must match
- * coherence.bins.frequencyHz; support regions must cover every support bin;
- * measurementCoverage.observedRangeHz must agree with metadataReliable.
+ * The WU6-S1 support class a 2.2.0 bin must carry, frozen with this version (the
+ * coherence threshold is the report's own stored criterion, not a live constant).
+ */
+function expectedSupport(
+    f: number,
+    status: unknown,
+    coherence: unknown,
+    magnitudeDb: unknown,
+    inputDb: unknown,
+    observedRange: [number, number] | null,
+    usableMin: number,
+): string {
+    if (status === "OUTSIDE_ANALYSIS_BAND") {
+        return "OUTSIDE_ANALYSIS_BAND";
+    }
+    if (!observedRange) {
+        return "UNKNOWN";
+    }
+    if (f < observedRange[0] || f > observedRange[1]) {
+        return "OUTSIDE_OBSERVED_SWEEP";
+    }
+    if (magnitudeDb === null || status === "NO_INPUT_POWER") {
+        return "INSUFFICIENT_SPECTRAL_SUPPORT";
+    }
+    if (typeof inputDb !== "number" || !Number.isFinite(inputDb)) {
+        return "UNKNOWN";
+    }
+    return typeof coherence === "number" && coherence >= usableMin ? "COHERENT" : "WEAK_COHERENCE";
+}
+
+/** Support regions must be the maximal runs of supportClass, in order, with their own bin stats. */
+function regionsMatch(
+    items: unknown[],
+    supportClass: unknown[],
+    frequencyHz: unknown[],
+    coherence: unknown[],
+): boolean {
+    let pos = 0;
+    let prev: unknown = undefined;
+    for (const item of items) {
+        if (!isPlainObject(item)) {
+            return false;
+        }
+        const n = item.binCount;
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || pos + n > supportClass.length) {
+            return false;
+        }
+        const end = pos + n - 1;
+        if (item.supportClass === prev || item.fromHz !== frequencyHz[pos] || item.toHz !== frequencyHz[end]) {
+            return false;
+        }
+        const coh = coherence.slice(pos, end + 1) as number[];
+        if (
+            supportClass.slice(pos, end + 1).some((c) => c !== item.supportClass) ||
+            item.minCoherence !== Math.min(...coh) ||
+            item.maxCoherence !== Math.max(...coh) ||
+            !close(item.meanCoherence, coh.reduce((a, c) => a + c, 0) / coh.length)
+        ) {
+            return false;
+        }
+        prev = item.supportClass;
+        pos = end + 1;
+    }
+    return pos === supportClass.length;
+}
+
+/**
+ * Fail-closed 2.2.0 cross-field checks. supportClass must be the per-bin class of
+ * coherence.bins (including OUTSIDE_ANALYSIS_BAND exactly where BinStatus says so);
+ * support regions must be its runs in order; every MEASURED support aggregate must
+ * agree with supportClass; and without reliable sweep metadata nothing may claim
+ * measured support. Any contradiction rejects the stored report.
  */
 export function qualityV2_2_2_0_consistent(v: unknown): boolean {
     if (!isPlainObject(v)) {
@@ -358,51 +433,123 @@ export function qualityV2_2_2_0_consistent(v: unknown): boolean {
         return false;
     }
     const bins = coherence.bins;
-    if (!isPlainObject(bins) || !Array.isArray(bins.frequencyHz) || !Array.isArray(fq.supportClass)) {
+    const criteria = coherence.criteria;
+    if (!isPlainObject(bins) || !isPlainObject(criteria) || !Array.isArray(fq.supportClass)) {
         return false;
     }
-    if (fq.supportClass.length !== bins.frequencyHz.length) {
+    const { frequencyHz, status, coherence: coh, magnitudeDb, inputRelativePowerDb } = bins;
+    const supportClass = fq.supportClass as unknown[];
+    const n = supportClass.length;
+    if (
+        !Array.isArray(frequencyHz) ||
+        !Array.isArray(status) ||
+        !Array.isArray(coh) ||
+        !Array.isArray(magnitudeDb) ||
+        !Array.isArray(inputRelativePowerDb) ||
+        [frequencyHz, status, coh, magnitudeDb, inputRelativePowerDb].some((a) => a.length !== n) ||
+        typeof criteria.usableBinCoherenceMin !== "number"
+    ) {
         return false;
     }
-    const regions = fq.regions;
-    if (!isPlainObject(regions) || !Array.isArray(regions.items)) {
+    // Support classes exist exactly when the transfer-function bins do.
+    if ((fq.availability === "MEASURED") !== (bins.availability === "MEASURED")) {
         return false;
     }
-    const regionSum = (regions.items as { binCount?: unknown }[]).reduce(
-        (s, r) => s + (typeof r.binCount === "number" ? r.binCount : NaN),
-        0,
-    );
-    if (!Number.isFinite(regionSum) || regionSum !== fq.supportClass.length) {
-        return false;
-    }
+
     if (typeof mc.metadataReliable !== "boolean") {
         return false;
     }
+    const reliable = mc.metadataReliable;
     const observed = sweep.observed;
     if (!isPlainObject(observed)) {
         return false;
     }
-    if (mc.metadataReliable) {
-        if (observed.availability !== "MEASURED" || mc.observedRangeHz === null) {
+    let observedRange: [number, number] | null = null;
+    if (reliable) {
+        if (
+            observed.availability !== "MEASURED" ||
+            typeof observed.minHz !== "number" ||
+            typeof observed.maxHz !== "number" ||
+            !Array.isArray(mc.observedRangeHz) ||
+            mc.observedRangeHz.length !== 2 ||
+            mc.observedRangeHz[0] !== observed.minHz ||
+            mc.observedRangeHz[1] !== observed.maxHz ||
+            mc.sweepRestarts !== observed.runs
+        ) {
             return false;
         }
-        if (!Array.isArray(mc.observedRangeHz) || mc.observedRangeHz.length !== 2) {
-            return false;
-        }
-    } else if (mc.observedRangeHz !== null || observed.availability === "MEASURED") {
+        observedRange = [observed.minHz, observed.maxHz];
+    } else if (
         // metadataReliable must agree with a MEASURED observed sweep and its range.
+        mc.observedRangeHz !== null ||
+        observed.availability === "MEASURED" ||
+        mc.sweepRestarts !== null ||
+        isMeasured(mc.sweptOfAnalysisBand)
+    ) {
         return false;
     }
-    const supported = fq.supportedBinCount;
-    const coherent = fq.coherentSupportedBinCount;
+
+    for (let k = 0; k < n; k++) {
+        const want = expectedSupport(
+            frequencyHz[k] as number,
+            status[k],
+            coh[k],
+            magnitudeDb[k],
+            inputRelativePowerDb[k],
+            observedRange,
+            criteria.usableBinCoherenceMin,
+        );
+        if (supportClass[k] !== want) {
+            return false;
+        }
+    }
+
+    const regions = fq.regions;
+    if (!isPlainObject(regions) || !Array.isArray(regions.items)) {
+        return false;
+    }
+    if (!regionsMatch(regions.items, supportClass, frequencyHz, coh)) {
+        return false;
+    }
+
+    // Measured aggregates need reliable metadata and no undecidable in-band bin.
+    const inBand = supportClass.filter((c) => c !== "OUTSIDE_ANALYSIS_BAND");
+    const decidable = reliable && !inBand.includes("UNKNOWN");
+    const supportedIdx = supportClass.flatMap((c, k) => (SUPPORTED(c) ? [k] : []));
+    const coherentCount = supportClass.filter((c) => c === "COHERENT").length;
+    const { supportedBinCount, coherentSupportedBinCount, meanSupportedCoherence, peakSupportedMagnitude } = fq;
+    const spectral = mc.spectrallySupportedOfAnalysisBand;
+    if (isMeasured(supportedBinCount) && (!decidable || supportedBinCount.value !== supportedIdx.length)) {
+        return false;
+    }
+    if (isMeasured(coherentSupportedBinCount) && (!decidable || coherentSupportedBinCount.value !== coherentCount)) {
+        return false;
+    }
     if (
-        isPlainObject(supported) &&
-        isPlainObject(coherent) &&
-        supported.availability === "MEASURED" &&
-        coherent.availability === "MEASURED" &&
-        typeof supported.value === "number" &&
-        typeof coherent.value === "number" &&
-        coherent.value > supported.value
+        isMeasured(meanSupportedCoherence) &&
+        (!decidable ||
+            !supportedIdx.length ||
+            !close(
+                meanSupportedCoherence.value,
+                supportedIdx.reduce((a, k) => a + (coh[k] as number), 0) / supportedIdx.length,
+            ))
+    ) {
+        return false;
+    }
+    if (isMeasured(peakSupportedMagnitude)) {
+        const peak = peakSupportedMagnitude.value as Raw | null;
+        const k = peak ? frequencyHz.indexOf(peak.frequencyHz) : -1;
+        if (!decidable || !peak || k < 0 || !SUPPORTED(supportClass[k]) || magnitudeDb[k] !== peak.magnitudeDb) {
+            return false;
+        }
+        const peakDb = peak.magnitudeDb as number;
+        if (supportedIdx.some((j) => typeof magnitudeDb[j] === "number" && (magnitudeDb[j] as number) > peakDb)) {
+            return false;
+        }
+    }
+    if (
+        isMeasured(spectral) &&
+        (!decidable || !inBand.length || !close(spectral.value, supportedIdx.length / inBand.length))
     ) {
         return false;
     }
