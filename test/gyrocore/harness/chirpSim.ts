@@ -48,6 +48,11 @@ export interface SimOptions {
     firmwareDebug?: boolean;
     /** Motor outputs to log per sample (see encodeLog motorCount). */
     motors?: (i: number) => number[];
+    /**
+     * Replace the closed-loop gyro with a deterministic signal uncorrelated to
+     * the setpoint (WU6-S1 CASE C: long sweep, poor coherence).
+     */
+    uncorrelatedGyro?: boolean;
 }
 
 export function simulateChirp(o: SimOptions = {}): SyntheticFrame[] {
@@ -76,7 +81,8 @@ export function simulateChirp(o: SimOptions = {}): SyntheticFrame[] {
         const r = Math.round(amp * excitation);
         sp.push(r);
         y += (i >= d ? u[i - d] : 0) / fs;
-        const yi = Math.round(y);
+        // Uncorrelated: fixed-frequency tone unrelated to the logarithmic sweep.
+        const yi = o.uncorrelatedGyro ? Math.round(amp * Math.sin(2 * Math.PI * 37 * t)) : Math.round(y);
         gy.push(yi);
         u.push(k * (r - y));
         const setpoint: [number, number, number] = [0, 0, 0];

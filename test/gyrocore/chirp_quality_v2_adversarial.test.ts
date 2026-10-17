@@ -136,6 +136,8 @@ const SECTIONS = [
     "sweep",
     "excitation",
     "coherence",
+    "measurementCoverage",
+    "frequencyQuality",
     "sampleGaps",
     "contamination",
     "saturation",
@@ -143,7 +145,7 @@ const SECTIONS = [
 
 function checkInvariants(q: ChirpQualityV2) {
     expect(q.schema).toBe("gyrocore.chirp-quality.v2");
-    expect(q.analysisVersion).toBe("2.1.0");
+    expect(q.analysisVersion).toBe("2.2.0");
     const problems: string[] = [];
     walk(q, "q", (v, path) => {
         if (typeof v === "number" && !Number.isFinite(v)) {
@@ -368,7 +370,7 @@ function checkRegions(q: ChirpQualityV2) {
 describe("contract", () => {
     it("exports the documented schema and version", () => {
         expect(CHIRP_QUALITY_V2_SCHEMA).toBe("gyrocore.chirp-quality.v2");
-        expect(CHIRP_QUALITY_V2_ANALYSIS_VERSION).toBe("2.1.0");
+        expect(CHIRP_QUALITY_V2_ANALYSIS_VERSION).toBe("2.2.0");
         expect(new Set(Object.values(QV2_REASONS)).size).toBe(Object.values(QV2_REASONS).length);
     });
 

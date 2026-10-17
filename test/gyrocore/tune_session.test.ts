@@ -253,7 +253,8 @@ describe("Flights in a session", () => {
         expect(e.blockers).toEqual(expect.arrayContaining(["analysis_version_outdated:b", "analysis_version_differs"]));
         expect(analysisVersionStatus("9.9.9")).toBe("UNKNOWN_VERSION");
         expect(analysisVersionStatus(undefined)).toBe("UNKNOWN_VERSION");
-        expect(analysisVersionStatus("2.1.0")).toBe("CURRENT");
+        expect(analysisVersionStatus("2.2.0")).toBe("CURRENT");
+        expect(analysisVersionStatus("2.1.0")).toBe("OUTDATED");
     });
 
     it("firmware differences and unknowns block a pair; MATCH needs both values", async () => {

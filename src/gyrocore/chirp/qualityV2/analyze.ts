@@ -61,6 +61,7 @@ import {
     type SaturationV2,
     type SweepV2,
 } from "./contract";
+import { frequencyQualityReport, measurementCoverageReport } from "./coverage";
 
 /** Betaflight's input-power floor: below it welchTransferFunction zeroes the bin. */
 export const BETAFLIGHT_INPUT_POWER_FLOOR = 1e-20;
@@ -785,6 +786,15 @@ function collectReasons(r: Omit<ChirpQualityV2, "reasons">): string[] {
     add(r.coherence.meanBandCoherence.reasons);
     add(r.coherence.usableBinCount.reasons);
     add(r.coherence.bins.reasons);
+    add(r.measurementCoverage.reasons);
+    add(r.measurementCoverage.durationOfRequested.reasons);
+    add(r.measurementCoverage.sweptOfAnalysisBand.reasons);
+    add(r.measurementCoverage.spectrallySupportedOfAnalysisBand.reasons);
+    add(r.frequencyQuality.reasons);
+    add(r.frequencyQuality.meanSupportedCoherence.reasons);
+    add(r.frequencyQuality.supportedBinCount.reasons);
+    add(r.frequencyQuality.coherentSupportedBinCount.reasons);
+    add(r.frequencyQuality.peakSupportedMagnitude.reasons);
     add(r.sampleGaps.reasons);
     add(r.contamination.reasons);
     add(r.saturation.reasons);
@@ -804,6 +814,13 @@ export function buildChirpQualityV2(inp: QualityV2Input): ChirpQualityV2 {
     const { sweep: observed, hz } = observedSweep(inp.chirpFrequencyDeciHz, inp.requestedRangeHz);
     const notAttached = [R.identityNotAttached];
     const saturation = saturationReport(inp);
+    const sweep = sweepReport(inp, observed, bins);
+    const frequencyQuality = frequencyQualityReport(bins, observed);
+    const measurementCoverage = measurementCoverageReport(
+        sweep,
+        frequencyQuality.availability === "MEASURED" ? frequencyQuality.supportClass : null,
+        bins?.status ?? null,
+    );
 
     const report: Omit<ChirpQualityV2, "reasons"> = {
         schema: CHIRP_QUALITY_V2_SCHEMA,
@@ -844,9 +861,11 @@ export function buildChirpQualityV2(inp: QualityV2Input): ChirpQualityV2 {
         },
         levels: levels(inp),
         verdicts: verdicts(inp.quality, saturation),
-        sweep: sweepReport(inp, observed, bins),
+        sweep,
         excitation: excitationReport(inp, bins),
         coherence: coherenceReport(inp, bins, binWidthHz),
+        measurementCoverage,
+        frequencyQuality,
         sampleGaps: gapReport(inp, hz),
         contamination: {
             status: "UNKNOWN",
