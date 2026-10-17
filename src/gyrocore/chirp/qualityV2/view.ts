@@ -30,6 +30,7 @@ import type {
     EvidenceLevels,
     Level,
     QualityTopic,
+    SupportClass,
     TopicVerdictV2,
     Verdict,
 } from "./contract";
@@ -87,6 +88,8 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
     const s = v.sweep;
     const e = v.excitation;
     const c = v.coherence;
+    const mc = v.measurementCoverage;
+    const fq = v.frequencyQuality;
     const g = v.sampleGaps;
     const sat = v.saturation;
     const usable = c.usableBinCount.value;
@@ -94,10 +97,42 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
 
     const sweepParts = [
         t("gyrocoreQv2DetailRequested", [range(s.requested.startHz, s.requested.endHz)]),
-        t("gyrocoreQv2DetailObserved", [range(s.observed.startHz, s.observed.endHz)]),
+        t("gyrocoreQv2DetailObserved", [
+            range(s.observed.minHz ?? s.observed.startHz, s.observed.maxHz ?? s.observed.endHz),
+        ]),
     ];
     if (s.observed.runs !== null && s.observed.runs > 1) {
         sweepParts.push(t("gyrocoreQv2DetailRuns", [s.observed.runs]));
+    }
+
+    const coverageParts = [
+        t("gyrocoreQv2DetailCoverage", [range(s.usable.startHz, s.usable.endHz), pct(s.observedOfRequested.value)]),
+        t("gyrocoreQv2DetailSweptBand", [pct(mc.sweptOfAnalysisBand.value)]),
+        t("gyrocoreQv2DetailSpectralSupport", [pct(mc.spectrallySupportedOfAnalysisBand.value)]),
+    ];
+    if (mc.missingAnalysisBand.length) {
+        coverageParts.push(
+            t("gyrocoreQv2DetailMissingBand", [mc.missingAnalysisBand.map((b) => range(b.fromHz, b.toHz)).join(", ")]),
+        );
+    }
+
+    const coherenceParts = [
+        t("gyrocoreQv2DetailCoherence", [
+            fmt(c.meanBandCoherence.value),
+            c.criteria.meanBandHz[0],
+            c.criteria.meanBandHz[1],
+        ]),
+    ];
+    if (fq.meanSupportedCoherence.availability === "MEASURED") {
+        coherenceParts.push(t("gyrocoreQv2DetailSupportedCoherence", [fmt(fq.meanSupportedCoherence.value)]));
+    }
+    if (fq.coherentSupportedBinCount.availability === "MEASURED") {
+        coherenceParts.push(
+            t("gyrocoreQv2DetailSupportedBins", [
+                fq.coherentSupportedBinCount.value ?? 0,
+                fq.supportedBinCount.value ?? 0,
+            ]),
+        );
     }
 
     const row = (id: string, topic: QualityTopic, label: string, status: string, detail: string): QualityRow => {
@@ -127,8 +162,9 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
             "coverage",
             "coverage",
             "gyrocoreQv2RowCoverage",
-            s.usable.availability,
-            t("gyrocoreQv2DetailCoverage", [range(s.usable.startHz, s.usable.endHz), pct(s.observedOfRequested.value)]),
+            // A missing transfer function / usable range must stay visible behind the diagnostic label.
+            s.usable.availability === "MEASURED" && mc.metadataReliable ? "DIAGNOSTIC" : s.usable.availability,
+            coverageParts.join(" · "),
         ),
         row(
             "excitation",
@@ -143,11 +179,7 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
             "coherence",
             "gyrocoreQv2RowCoherence",
             c.meanBandCoherence.availability,
-            t("gyrocoreQv2DetailCoherence", [
-                fmt(c.meanBandCoherence.value),
-                c.criteria.meanBandHz[0],
-                c.criteria.meanBandHz[1],
-            ]),
+            coherenceParts.join(" · "),
         ),
         row(
             "usable-bins",
@@ -204,6 +236,15 @@ export const LEVEL_ORDER: (keyof EvidenceLevels)[] = [
 
 export const BIN_STATUS_ORDER: BinStatus[] = ["USABLE", "WEAK_COHERENCE", "NO_INPUT_POWER", "OUTSIDE_ANALYSIS_BAND"];
 
+export const SUPPORT_CLASS_ORDER: SupportClass[] = [
+    "COHERENT",
+    "WEAK_COHERENCE",
+    "INSUFFICIENT_SPECTRAL_SUPPORT",
+    "OUTSIDE_OBSERVED_SWEEP",
+    "OUTSIDE_ANALYSIS_BAND",
+    "UNKNOWN",
+];
+
 /** Log-frequency plot geometry for the coherence chart; null without measured bins. */
 export function coherencePlot(v: ChirpQualityV2, width: number, height: number) {
     const b = v.coherence.bins;
@@ -216,15 +257,22 @@ export function coherencePlot(v: ChirpQualityV2, width: number, height: number) 
     const x = (f: number) => (Math.log10(f / lo) / span) * width;
     const y = (c: number) => height - Math.max(0, Math.min(1, c)) * height;
     const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000].filter((t) => t >= lo && t <= hi);
+    const support = v.frequencyQuality.supportClass;
+    // Stored 2.1.0 reports carry no support classes: colour by their own BinStatus, invent none.
+    const colorBy: "support" | "status" = support.length === b.frequencyHz.length ? "support" : "status";
+    const observedEnd = v.measurementCoverage.observedRangeHz?.[1] ?? null;
     return {
+        colorBy,
         bars: b.frequencyHz.map((f, i) => ({
             x: x(f),
             y: y(b.coherence[i]),
             frequencyHz: f,
             coherence: b.coherence[i],
             status: b.status[i],
+            supportClass: colorBy === "support" ? support[i] : (null as SupportClass | null),
         })),
         ticks: ticks.map((t) => ({ x: x(t), label: t >= 1000 ? `${t / 1000}k` : String(t) })),
         thresholdY: y(v.coherence.criteria.usableBinCoherenceMin),
+        observedEndX: observedEnd !== null && observedEnd >= lo && observedEnd <= hi ? x(observedEnd) : null,
     };
 }

@@ -32,8 +32,12 @@ import type { FlightRef } from "@/gyrocore/flight/identity";
 import type { ChirpAxisName } from "../constants";
 
 export const CHIRP_QUALITY_V2_SCHEMA = "gyrocore.chirp-quality.v2";
-/** Bump when any computed value or rule changes, so stored reports can be told apart. */
-export const CHIRP_QUALITY_V2_ANALYSIS_VERSION = "2.1.0";
+/**
+ * Bump when any computed value or rule changes, so stored reports can be told apart.
+ * 2.2.0 adds diagnostic measurement coverage and frequency-support classification; it
+ * does not change existing qualification gates or BinStatus meanings.
+ */
+export const CHIRP_QUALITY_V2_ANALYSIS_VERSION = "2.2.0";
 
 /**
  * MEASURED: derived from this log's data or headers.
@@ -227,6 +231,30 @@ export interface RelativePowerScaleV2 {
 
 export type BinStatus = "USABLE" | "WEAK_COHERENCE" | "NO_INPUT_POWER" | "OUTSIDE_ANALYSIS_BAND";
 
+/**
+ * Diagnostic per-bin support class (WU6-S1). Distinct from BinStatus: reaching a
+ * frequency is not proof of spectral identification. Never used by a gate.
+ *
+ * Layers checked separately: in observed sweep → Welch magnitude present → measured
+ * input relative spectral power present → coherence vs usable min. The Betaflight
+ * input-power floor only zeroes bins; it is not a validated SNR or excitation gate.
+ *
+ * - COHERENT: in observed sweep, measured input relative power present, coh ≥ usable min
+ *   (diagnostic only — not proven reliable plant identification)
+ * - WEAK_COHERENCE: same evidence, coherence below the usable min
+ * - INSUFFICIENT_SPECTRAL_SUPPORT: in observed sweep but Welch reports no input (floor/zeroed)
+ * - OUTSIDE_OBSERVED_SWEEP: beyond the firmware-observed sweep (residual power is not support)
+ * - OUTSIDE_ANALYSIS_BAND: outside the existing analysis window
+ * - UNKNOWN: observed sweep unreliable, or Welch present without demonstrable input relative power
+ */
+export type SupportClass =
+    | "COHERENT"
+    | "WEAK_COHERENCE"
+    | "INSUFFICIENT_SPECTRAL_SUPPORT"
+    | "OUTSIDE_OBSERVED_SWEEP"
+    | "OUTSIDE_ANALYSIS_BAND"
+    | "UNKNOWN";
+
 /** Parallel arrays, one entry per Betaflight transfer-function bin. Real bins, not summaries. */
 export interface CoherenceBinsV2 {
     availability: Availability;
@@ -328,6 +356,69 @@ export interface SaturationV2 {
     reasons: string[];
 }
 
+/** Contiguous Hz range that the observed sweep did not cover inside the analysis band. */
+export interface MissingBandV2 {
+    fromHz: number;
+    toHz: number;
+}
+
+/**
+ * Diagnostic measurement coverage (WU6-S1). Reports what was requested, observed
+ * and spectrally supported. Never authorizes tuning.
+ */
+export interface MeasurementCoverageV2 {
+    role: "DIAGNOSTIC";
+    /** True only when the observed DEBUG_CHIRP frequency channel is MEASURED. */
+    metadataReliable: boolean;
+    analysisBandHz: [number, number] | null;
+    requestedRangeHz: [number, number] | null;
+    observedRangeHz: [number, number] | null;
+    /** Observed duration / requested chirp_time_seconds (same as sweep.durationOfRequested). */
+    durationOfRequested: Metric<number>;
+    /** Fraction of the analysis band overlapped by the observed min–max range. */
+    sweptOfAnalysisBand: Metric<number>;
+    /** Fraction of analysis-band bins with COHERENT or WEAK_COHERENCE support. */
+    spectrallySupportedOfAnalysisBand: Metric<number>;
+    /** Contiguous unswept parts of the analysis band when observed is MEASURED. */
+    missingAnalysisBand: MissingBandV2[];
+    /** Observed sweep runs (1 = single pass); null when unknown. */
+    sweepRestarts: number | null;
+    reasons: string[];
+}
+
+export interface SupportRegionV2 {
+    fromHz: number;
+    toHz: number;
+    binCount: number;
+    supportClass: SupportClass;
+    meanCoherence: number;
+    minCoherence: number;
+    maxCoherence: number;
+    meanInputRelativePowerDb: number | null;
+}
+
+/**
+ * Frequency-dependent diagnostic quality (WU6-S1). Parallel to coherence.bins.
+ * Does not replace meanBandCoherence (5–100 Hz gate).
+ */
+export interface FrequencyQualityV2 {
+    role: "DIAGNOSTIC";
+    availability: Availability;
+    /** Parallel to coherence.bins.frequencyHz. */
+    supportClass: SupportClass[];
+    regions: { kind: "SUMMARY"; items: SupportRegionV2[] };
+    /** Mean coherence over spectrally supported bins in the analysis band — diagnostic only. */
+    meanSupportedCoherence: Metric<number>;
+    supportedBinCount: Metric<number>;
+    coherentSupportedBinCount: Metric<number>;
+    /**
+     * Peak closed-loop magnitude among supported bins (observational). Never labelled
+     * as resonance or instability.
+     */
+    peakSupportedMagnitude: Metric<{ frequencyHz: number; magnitudeDb: number }>;
+    reasons: string[];
+}
+
 export interface ChirpQualityV2 {
     schema: typeof CHIRP_QUALITY_V2_SCHEMA;
     analysisVersion: typeof CHIRP_QUALITY_V2_ANALYSIS_VERSION;
@@ -339,6 +430,10 @@ export interface ChirpQualityV2 {
     sweep: SweepV2;
     excitation: ExcitationV2;
     coherence: CoherenceV2;
+    /** WU6-S1: which of the analysis band was swept and spectrally supported. */
+    measurementCoverage: MeasurementCoverageV2;
+    /** WU6-S1: per-bin diagnostic support classification. */
+    frequencyQuality: FrequencyQualityV2;
     sampleGaps: SampleGapsV2;
     contamination: ContaminationV2;
     saturation: SaturationV2;
@@ -388,4 +483,13 @@ export const QV2_REASONS = {
     motorLowerDetected: "saturation_detected:motor_at_minimum",
     saturationMotorsOnly: "saturation_scope:motor_outputs_only",
     gyroClippingUnknown: "gyro_clipping_unknown:sensor_range_not_logged",
+    /** WU6-S1 diagnostic coverage / support (never a qualification gate). */
+    coverageDiagnosticOnly: "coverage_diagnostic_only:not_a_gate",
+    supportNeedsObserved: "frequency_support_unknown:observed_sweep_unreliable",
+    supportNeedsBins: "frequency_support_unavailable:no_transfer_function",
+    supportNoSupportedBins: "frequency_support_none:no_spectrally_supported_bins",
+    supportOutsideObserved: "frequency_support:outside_observed_sweep",
+    supportInsufficientInput: "frequency_support:insufficient_spectral_input",
+    /** Welch/coherence present but no measured input relative power to underpin support. */
+    supportNeedsInputEvidence: "frequency_support_unknown:no_input_relative_power",
 } as const;
