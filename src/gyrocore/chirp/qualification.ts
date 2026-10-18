@@ -157,8 +157,13 @@ export interface ChirpMeasurement<G = unknown> {
     axisOccurrence: number;
     startTimeUs: number;
     endTimeUs: number;
+    /** Active generator duration used for Welch/Bode/gates. */
     durationS: number;
     sampleCount: number;
+    /** Full BOXCHIRP mode duration (diagnostic; may exceed durationS after post-sweep trim). */
+    modeDurationS: number;
+    modeSampleCount: number;
+    boundSource: "firmware_debug_chirp" | "mode_flag_only";
     sampleRate: SampleRateEvidence;
     spacing: TimestampSpacing;
     /** What Betaflight Autotune's header-only formula gives for this log. */
@@ -292,7 +297,9 @@ function sampleRateContract(rate: SampleRateEvidence, betaflightRateHz: number):
  * and nothing is discarded here.
  */
 export function logWarningsFor(extractionWarnings: string[]): string[] {
-    return extractionWarnings.filter((w) => w !== "repeated_axis_segments_all_kept");
+    // Informational extraction notes — not measurement-quality warnings.
+    const ignore = new Set(["repeated_axis_segments_all_kept", "chirp_post_sweep_tail_excluded"]);
+    return extractionWarnings.filter((w) => !ignore.has(w));
 }
 
 function measurementState(
@@ -416,6 +423,9 @@ function qualifySegment<G>(
         endTimeUs: seg.endTimeUs,
         durationS: seg.durationS,
         sampleCount: seg.sampleCount,
+        modeDurationS: seg.modeDurationS,
+        modeSampleCount: seg.modeSampleCount,
+        boundSource: seg.boundSource,
         sampleRate: rate,
         spacing,
         betaflightRateHz: ctx.math.computeSampleRate(ctx.sysConfig),

@@ -121,6 +121,7 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
             fmt(c.meanBandCoherence.value),
             c.criteria.meanBandHz[0],
             c.criteria.meanBandHz[1],
+            fmt(c.criteria.meanBandCoherenceMin),
         ]),
     ];
     if (fq.meanSupportedCoherence.availability === "MEASURED") {
@@ -186,7 +187,13 @@ export function qualityRows(v: ChirpQualityV2, t: Translate): QualityRow[] {
             "usableBins",
             "gyrocoreQv2RowUsableBins",
             usable === null ? c.usableBinCount.availability : String(usable),
-            usable === null ? "" : t("gyrocoreQv2DetailUsableBins", [inBand]),
+            usable === null
+                ? ""
+                : t("gyrocoreQv2DetailUsableBins", [
+                      inBand,
+                      fmt(c.criteria.usableBinCoherenceMin),
+                      c.criteria.minUsableBins,
+                  ]),
         ),
         row(
             "sample-gaps",
