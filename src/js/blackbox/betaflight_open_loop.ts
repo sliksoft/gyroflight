@@ -81,6 +81,11 @@ export interface StabilityLoopResponse {
     startIndex: number;
     /** True when C_ref ≈ C_fb over evaluated bins (yaw-style unity structure). */
     unityFeedbackEquivalent: boolean;
+    /**
+     * True when phase unwrap was reset because one or more non-ok bins interrupted
+     * the ok-bin sequence (missing / low-coherence / singular gaps).
+     */
+    phaseUnwrapInterrupted: boolean;
 }
 
 export interface GainCrossoverResult {
@@ -89,14 +94,17 @@ export interface GainCrossoverResult {
     /** Coherence on the two bins that bracket |L|=1. */
     coherenceLow: number;
     coherenceHigh: number;
-    status: "ok" | "no_crossing" | "unreliable_neighbourhood";
+    status: "ok" | "no_crossing" | "unreliable_neighbourhood" | "ambiguous_multiple";
     reason?: string;
 }
 
 export type PhaseMarginValidationStatus = "VALIDATED" | "NOT_VALIDATED" | "UNAVAILABLE";
 
 export interface StructureAwarePhaseMargin {
+    /** Primary (lowest-frequency downward) crossing, or null when none. */
     crossover: GainCrossoverResult | null;
+    /** Every downward |L|=1 crossing on ok bins (diagnostic; may be >1). */
+    crossovers: GainCrossoverResult[];
     status: PhaseMarginValidationStatus;
     blockReasons: string[];
     unityFeedbackEquivalent: boolean;
@@ -131,6 +139,8 @@ export function reconstructStabilityLoop(
 
     let offset = 0;
     let previousRaw: number | null = null;
+    let sawOkBin = false;
+    let phaseUnwrapInterrupted = false;
     let unityOk = true;
     let unityChecks = 0;
 
@@ -154,6 +164,12 @@ export function reconstructStabilityLoop(
         if (!(coherence >= coherenceMin)) {
             base.status = "low_coherence";
             bins[k] = base;
+            // Gap in the ok sequence: do not continue unwrap across unreliable bins.
+            if (sawOkBin && previousRaw !== null) {
+                phaseUnwrapInterrupted = true;
+                previousRaw = null;
+                offset = 0;
+            }
             continue;
         }
 
@@ -161,6 +177,11 @@ export function reconstructStabilityLoop(
         if (!Number.isFinite(T.re) || !Number.isFinite(T.im)) {
             base.status = "non_finite_T";
             bins[k] = base;
+            if (sawOkBin && previousRaw !== null) {
+                phaseUnwrapInterrupted = true;
+                previousRaw = null;
+                offset = 0;
+            }
             continue;
         }
 
@@ -180,6 +201,11 @@ export function reconstructStabilityLoop(
         if (!(denomMag / scale >= denomRelMin)) {
             base.status = "singular_denominator";
             bins[k] = base;
+            if (sawOkBin && previousRaw !== null) {
+                phaseUnwrapInterrupted = true;
+                previousRaw = null;
+                offset = 0;
+            }
             continue;
         }
 
@@ -191,6 +217,7 @@ export function reconstructStabilityLoop(
             else if (delta < -180) offset += 360;
         }
         previousRaw = raw;
+        sawOkBin = true;
 
         base.L = L;
         base.magnitude = cmag(L);
@@ -202,59 +229,88 @@ export function reconstructStabilityLoop(
         bins,
         startIndex,
         unityFeedbackEquivalent: unityChecks > 0 && unityOk,
+        phaseUnwrapInterrupted,
     };
 }
 
-/**
- * Gain crossover: first downward crossing of |L| through 1 on coherent OK bins.
- * Neighbourhood reliability: both bracket bins ok + coherent (already enforced).
- */
-export function findGainCrossover(loop: StabilityLoopResponse): GainCrossoverResult {
-    const { bins, startIndex } = loop;
-    for (let k = startIndex + 1; k < bins.length; k++) {
-        const a = bins[k - 1];
-        const b = bins[k];
-        if (a.status !== "ok" || b.status !== "ok") continue;
-        if (!(a.magnitude > 1 && b.magnitude <= 1)) continue;
+function crossingAt(
+    bins: StabilityLoopBin[],
+    k: number,
+): GainCrossoverResult | null {
+    const a = bins[k - 1];
+    const b = bins[k];
+    if (a.status !== "ok" || b.status !== "ok") return null;
+    if (!(a.magnitude > 1 && b.magnitude <= 1)) return null;
 
-        // Require a small coherent neighbourhood (one bin either side when present).
-        const left = bins[k - 2];
-        const right = bins[k + 1];
-        if (left && left.frequencyHz >= MIN_OPEN_LOOP_HZ && left.status !== "ok" && left.status !== "below_min_hz") {
+    const left = bins[k - 2];
+    const right = bins[k + 1];
+    if (left && left.frequencyHz >= MIN_OPEN_LOOP_HZ && left.status !== "ok" && left.status !== "below_min_hz") {
+        return {
+            frequencyHz: Number.NaN,
+            phaseMarginDeg: Number.NaN,
+            coherenceLow: a.coherence,
+            coherenceHigh: b.coherence,
+            status: "unreliable_neighbourhood",
+            reason: `neighbour_bin_status:${left.status}`,
+        };
+    }
+    if (right && right.status !== "ok" && right.status !== "low_coherence") {
+        if (right.status === "singular_denominator" || right.status === "non_finite_T") {
             return {
                 frequencyHz: Number.NaN,
                 phaseMarginDeg: Number.NaN,
                 coherenceLow: a.coherence,
                 coherenceHigh: b.coherence,
                 status: "unreliable_neighbourhood",
-                reason: `neighbour_bin_status:${left.status}`,
+                reason: `neighbour_bin_status:${right.status}`,
             };
         }
-        if (right && right.status !== "ok" && right.status !== "low_coherence") {
-            // trailing low_coherence after crossing is common at high f — only fail hard statuses
-            if (right.status === "singular_denominator" || right.status === "non_finite_T") {
-                return {
-                    frequencyHz: Number.NaN,
-                    phaseMarginDeg: Number.NaN,
-                    coherenceLow: a.coherence,
-                    coherenceHigh: b.coherence,
-                    status: "unreliable_neighbourhood",
-                    reason: `neighbour_bin_status:${right.status}`,
-                };
-            }
-        }
+    }
 
-        const frac = (1 - a.magnitude) / (b.magnitude - a.magnitude);
-        const frequencyHz = a.frequencyHz + frac * (b.frequencyHz - a.frequencyHz);
-        const phaseDeg = a.phaseDeg + frac * (b.phaseDeg - a.phaseDeg);
+    const frac = (1 - a.magnitude) / (b.magnitude - a.magnitude);
+    const frequencyHz = a.frequencyHz + frac * (b.frequencyHz - a.frequencyHz);
+    const phaseDeg = a.phaseDeg + frac * (b.phaseDeg - a.phaseDeg);
+    return {
+        frequencyHz,
+        phaseMarginDeg: 180 + phaseDeg,
+        coherenceLow: a.coherence,
+        coherenceHigh: b.coherence,
+        status: "ok",
+    };
+}
+
+/**
+ * Every downward |L|=1 crossing on coherent OK bins (diagnostic for ambiguity).
+ */
+export function findAllGainCrossovers(loop: StabilityLoopResponse): GainCrossoverResult[] {
+    const { bins, startIndex } = loop;
+    const out: GainCrossoverResult[] = [];
+    for (let k = startIndex + 1; k < bins.length; k++) {
+        const xo = crossingAt(bins, k);
+        if (xo) out.push(xo);
+    }
+    return out;
+}
+
+/**
+ * Gain crossover: first downward crossing of |L| through 1 on coherent OK bins.
+ * When multiple ok crossings exist, returns ambiguous_multiple (fail-closed).
+ */
+export function findGainCrossover(loop: StabilityLoopResponse): GainCrossoverResult {
+    const all = findAllGainCrossovers(loop);
+    const ok = all.filter((c) => c.status === "ok");
+    if (ok.length > 1) {
         return {
-            frequencyHz,
-            phaseMarginDeg: 180 + phaseDeg,
-            coherenceLow: a.coherence,
-            coherenceHigh: b.coherence,
-            status: "ok",
+            frequencyHz: ok[0].frequencyHz,
+            phaseMarginDeg: ok[0].phaseMarginDeg,
+            coherenceLow: ok[0].coherenceLow,
+            coherenceHigh: ok[0].coherenceHigh,
+            status: "ambiguous_multiple",
+            reason: `multiple_gain_crossovers:${ok.length}`,
         };
     }
+    if (ok.length === 1) return ok[0];
+    if (all.length) return all[0];
     return {
         frequencyHz: Number.NaN,
         phaseMarginDeg: Number.NaN,
@@ -270,11 +326,16 @@ export interface PhaseMarginPolicy {
     externalBlockReasons?: string[];
     /** If true, unity-feedback equivalence is required for VALIDATED. */
     requireUnityFeedbackEquivalent?: boolean;
+    /**
+     * Opt-in only: allow status VALIDATED when every other gate passes.
+     * Default false — M2 stays fail-closed until an explicit, reviewable attestation.
+     */
+    attestValidated?: boolean;
 }
 
 /**
- * Offline phase-margin verdict. Never promotes VALIDATED when external blockers
- * (unknown dyn filters, D_max, …) are present.
+ * Offline phase-margin verdict. Fail-closed: defaults to NOT_VALIDATED.
+ * VALIDATED only when policy.attestValidated is set and no blockers remain.
  */
 export function evaluateStructureAwarePhaseMargin(
     tf: TransferFunction,
@@ -282,18 +343,27 @@ export function evaluateStructureAwarePhaseMargin(
     policy: PhaseMarginPolicy = {},
 ): StructureAwarePhaseMargin {
     const loop = reconstructStabilityLoop(tf, cfg);
+    const crossovers = findAllGainCrossovers(loop);
     const crossover = findGainCrossover(loop);
     const blockReasons = [...(policy.externalBlockReasons ?? [])];
 
     if (policy.requireUnityFeedbackEquivalent && !loop.unityFeedbackEquivalent) {
         blockReasons.push("controller_not_unity_feedback_equivalent");
     }
+    if (loop.phaseUnwrapInterrupted) {
+        blockReasons.push("phase_unwrap_interrupted_by_bin_gaps");
+    }
+    const okCount = crossovers.filter((c) => c.status === "ok").length;
+    if (okCount > 1) {
+        blockReasons.push(`ambiguous_multiple_gain_crossovers:${okCount}`);
+    }
 
     if (crossover.status !== "ok") {
         blockReasons.push(`crossover:${crossover.status}${crossover.reason ? `:${crossover.reason}` : ""}`);
         return {
             crossover,
-            status: blockReasons.length ? "NOT_VALIDATED" : "UNAVAILABLE",
+            crossovers,
+            status: "NOT_VALIDATED",
             blockReasons,
             unityFeedbackEquivalent: loop.unityFeedbackEquivalent,
             loop,
@@ -303,6 +373,7 @@ export function evaluateStructureAwarePhaseMargin(
     if (blockReasons.length) {
         return {
             crossover,
+            crossovers,
             status: "NOT_VALIDATED",
             blockReasons,
             unityFeedbackEquivalent: loop.unityFeedbackEquivalent,
@@ -310,8 +381,21 @@ export function evaluateStructureAwarePhaseMargin(
         };
     }
 
+    // Clean math alone is not product validation — require explicit attestation.
+    if (!policy.attestValidated) {
+        return {
+            crossover,
+            crossovers,
+            status: "NOT_VALIDATED",
+            blockReasons: ["validation_not_attested"],
+            unityFeedbackEquivalent: loop.unityFeedbackEquivalent,
+            loop,
+        };
+    }
+
     return {
         crossover,
+        crossovers,
         status: "VALIDATED",
         blockReasons: [],
         unityFeedbackEquivalent: loop.unityFeedbackEquivalent,

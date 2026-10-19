@@ -69,6 +69,14 @@ Agreement of yaw with `T/(1−T)` proves structure cancellation, **not** that th
 
 Method runs offline; status remains `NOT_VALIDATED` with explicit blockers.
 
+## Fail-closed policy (M2)
+
+- `evaluateStructureAwarePhaseMargin()` defaults to **`NOT_VALIDATED`** (`validation_not_attested`) even when math finds a clean single crossover.
+- **`VALIDATED` only** with explicit `policy.attestValidated: true` and no blockers.
+- Multiple downward `|L|=1` crossings → `ambiguous_multiple` / `ambiguous_multiple_gain_crossovers` (diagnostic list retained).
+- Phase unwrap **resets** across non-ok bins; interrupted unwrap blocks promotion (`phase_unwrap_interrupted_by_bin_gaps`).
+- AIR65 practical tests report **`EXECUTED`** vs **`SKIPPED`** when the known BBL is absent.
+
 ## Implementation
 
 | Path | Role |
