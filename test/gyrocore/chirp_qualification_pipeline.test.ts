@@ -155,7 +155,9 @@ describe("every embedded log and every segment is analysed", () => {
         );
         for (const m of report.measurements) {
             expect(m.state).toBe("usable");
-            expect(m.apply.allowed).toBe(true);
+            // GF-1: usable system-ID is not Apply authorization while PM is unvalidated.
+            expect(m.apply.allowed).toBe(false);
+            expect(m.apply.blocked).toContain("phase_margin_not_validated");
         }
     });
 
@@ -300,7 +302,7 @@ describe("global tune panel (WU3)", () => {
         await runImport(MERGE_E2E_CASES.three_axis_agree());
         const { container, unmount } = await mountGlobal();
         expect(container.textContent).toContain("gyrocoreGlobalIntro");
-        expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("yes");
+        expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("no");
         const pi = container.querySelector('[data-slider="slider_pi_gain"]')!;
         const cells = [...pi.querySelectorAll("td")].map((td) => td.textContent?.trim());
         expect(cells[1]).toBe("100");
@@ -308,7 +310,11 @@ describe("global tune panel (WU3)", () => {
         expect(cells.slice(2, 5).map((c) => c?.split(" ")[0])).toEqual(["100", "100", "100"]);
         expect(pi.querySelector('[data-gyrocore="final"]')?.textContent?.trim()).toBe("100");
         expect(container.querySelectorAll('[data-role="participating"]')).toHaveLength(3);
-        expect(container.querySelector('[data-gyrocore="global-blocked"]')).toBeNull();
+        expect(
+            container.querySelector(
+                '[data-gyrocore="global-blocked"] [data-reason="phase_margin_not_validated"]',
+            ),
+        ).not.toBeNull();
         unmount();
     });
 
@@ -360,7 +366,8 @@ describe("explicit choice among repeated sweeps, through the panel", () => {
         radio.click();
         await new Promise((r) => setTimeout(r, 0));
         expect(gate.explicitAxes.roll).toBe(true);
-        expect(gate.composite!.authorized).toBe(true);
+        expect(gate.composite!.blocked).toContain("phase_margin_not_validated");
+        expect(gate.composite!.authorized).toBe(false);
         app.unmount();
         container.remove();
     });

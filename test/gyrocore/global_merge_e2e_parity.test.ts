@@ -76,29 +76,28 @@ const EXPECTED: Record<
     }
 > = {
     three_axis_agree: {
-        authorized: true,
+        authorized: false,
         participating: ["roll", "pitch", "yaw"],
         proposed: HELD_DEFAULT,
-        warningsContains: ["roll:phase_margin_not_validated"],
+        blockedContains: ["phase_margin_not_validated"],
     },
     rp_mode_yaw_excluded: {
-        authorized: true,
+        authorized: false,
         participating: ["roll", "pitch"],
         proposed: HELD_DEFAULT,
-        warningsContains: ["roll:phase_margin_not_validated"],
+        blockedContains: ["phase_margin_not_validated"],
     },
     single_roll: {
         authorized: false,
         participating: ["roll"],
         proposed: HELD_DEFAULT,
-        blockedContains: ["missing_axis_evidence:pitch"],
+        blockedContains: ["missing_axis_evidence:pitch", "phase_margin_not_validated"],
     },
     roll_pitch_conflict: {
         authorized: false,
         participating: ["roll", "pitch"],
         proposed: HELD_DEFAULT,
-        blockedContains: ["missing_axis_evidence:yaw"],
-        warningsContains: ["roll:phase_margin_not_validated"],
+        blockedContains: ["missing_axis_evidence:yaw", "phase_margin_not_validated"],
     },
     pids_mode_off: {
         authorized: false,
@@ -110,14 +109,16 @@ const EXPECTED: Record<
         authorized: false,
         participating: ["roll"],
         proposed: HELD_DEFAULT,
-        blockedContains: ["system_id_unusable"],
+        blockedContains: ["system_id_unusable", "phase_margin_not_validated"],
     },
     ff_floor_three_axis: {
         authorized: false,
         participating: ["roll", "pitch", "yaw"],
         proposed: HELD_FF_FLOOR,
-        blockedContains: ["composite_clamp_changes_direction:slider_feedforward_gain"],
-        warningsContains: ["roll:phase_margin_not_validated"],
+        blockedContains: [
+            "composite_clamp_changes_direction:slider_feedforward_gain",
+            "phase_margin_not_validated",
+        ],
     },
 };
 

@@ -31,7 +31,8 @@ import { describe, expect, it, vi } from "vitest";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { CHIRP_QUALITY_V2_ANALYSIS_VERSION, QV2_REASONS } from "../../src/gyrocore/chirp/qualityV2/contract";
-import { attachChirpFlightIdentity } from "../../src/gyrocore/chirp/qualityV2/identity";
+import { attachChirpFlightIdentity, refreshAuthorizationLevel } from "../../src/gyrocore/chirp/qualityV2/identity";
+import { clearPhaseMarginFromReport } from "./harness/clearPhaseMarginBlock";
 import { catalogBbl, type FlightRef } from "../../src/gyrocore/flight/identity";
 import {
     addFlights,
@@ -145,6 +146,10 @@ describe("building a session from an analysis", () => {
         const bytes = encodeChirpLog(simulateChirp({ firmwareDebug: true }));
         const report = qualifyChirpFile(bytes, "a.bbl", 60, AUTOTUNE_MATH);
         await attachChirpFlightIdentity(report, bytes);
+        // GF-1 blocks Apply for unvalidated phase margin; strip it here to exercise
+        // the persistence rule against a measurement that would otherwise be YES.
+        clearPhaseMarginFromReport(report);
+        refreshAuthorizationLevel(report.measurements[0]);
         expect(report.measurements[0].apply.allowed).toBe(true);
         expect(report.measurements[0].qualityV2.levels.tuningAuthorized.status).toBe("YES");
         const [f] = flightsFromReport(report, { fileName: "a.bbl", analyzedAt: T0 }).flights;

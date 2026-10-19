@@ -249,10 +249,16 @@ beforeEach(() => setActivePinia(createPinia()));
 
 describe("GyroCore Safety on the global recommendation (product entry)", () => {
     it("safe fixture with real Betaflight header lines: MERGE, COVERAGE pass; SAFETY BLOCK missing_required_analysis", async () => {
-        const { gate, composite } = await load(bfLog([0, 1, 2]));
+        const { gate, composite: blockedByPm } = await load(bfLog([0, 1, 2]));
         expect(gate.report!.measurements.every((m) => m.state === "usable")).toBe(true);
-        expect(composite.merge.status).toBe("merged");
-        expect(composite.coverage.missingAxes).toEqual([]);
+        expect(blockedByPm.merge.status).toBe("merged");
+        expect(blockedByPm.coverage.missingAxes).toEqual([]);
+        expect(blockedByPm.blocked).toContain("phase_margin_not_validated");
+        expect(blockedByPm.authorized).toBe(false);
+        // Isolate Safety: strip GF-1 phase-margin hold so upstream authorizes.
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         expect(composite.authorized).toBe(true);
         expect(composite.final).toEqual(WU3_POSITIVE);
 
@@ -296,16 +302,23 @@ describe("GyroCore Safety on the global recommendation (product entry)", () => {
     });
 
     it("follows the composite: a new target gives a new composite and a new Safety binding", async () => {
-        const { gate, composite } = await load(bfLog([0, 1, 2]));
+        const { gate } = await load(bfLog([0, 1, 2]));
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         const before = safetyForComposite(gate.gateState(), composite);
         useAutotune().recomputeGains(PHASE_MARGIN_PRESETS.CONSERVATIVE);
+        clearPhaseMarginForGate(gate);
         const after = safetyForComposite(gate.gateState(), gate.composite);
         expect(after.compositeId).not.toBe(before.compositeId);
         expect(after.compositeId).toBe(gate.composite!.id);
     });
 
     it("blocks when the log's header lines are missing or disagree with the composite's baseline", async () => {
-        const { gate, composite } = await load(bfLog([0, 1, 2]));
+        const { gate } = await load(bfLog([0, 1, 2]));
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         const log = gate.report!.logs[0];
         const pairs = log.headerPairs;
         log.headerPairs = [];
@@ -316,7 +329,10 @@ describe("GyroCore Safety on the global recommendation (product entry)", () => {
     });
 
     it("the WU3 synthetic log (no ff_weight/filter lines) also fails on its incomplete baseline", async () => {
-        const { gate, composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const { gate } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         const s = safetyForComposite(gate.gateState(), composite);
         expect(s.status).toBe("BLOCK");
         expect(s.blocks).toEqual(
@@ -342,14 +358,26 @@ describe("GyroCore Safety on the global recommendation (product entry)", () => {
     });
 
     it("RP log: yaw is shown unchanged, roll+pitch mapped", async () => {
-        const { gate, composite } = await load(
+        const { gate } = await load(
             bfLog([0, 1, 2], withHeader(BETAFLIGHT_TUNE_HEADERS, "simplified_pids_mode:1")),
         );
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         expect(composite.authorized).toBe(true);
         const s = safetyForComposite(gate.gateState(), composite);
         expect(s.status).toBe("BLOCK");
         expect(s.blocks).toEqual(ANALYSIS_BLOCKS);
         expect(PID.map((f) => s.proposed!.yaw[f].value)).toEqual([45, 80, 0, 120, 0]);
         expect(s.proposed!.roll.p.value).toBe(45);
+    });
+
+    it("phase_margin_not_validated keeps Safety NOT_EVALUATED (no verdict from unauthorized hold)", async () => {
+        const { gate, composite } = await load(bfLog([0, 1, 2]));
+        expect(composite.authorized).toBe(false);
+        expect(composite.blocked).toContain("phase_margin_not_validated");
+        const s = safetyForComposite(gate.gateState(), composite);
+        expect(s.status).toBe("NOT_EVALUATED");
+        expect(s.blocks).toEqual([SAFETY_NOT_EVALUATED_UPSTREAM]);
     });
 });
