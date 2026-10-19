@@ -27,10 +27,15 @@
  * decoder (chirp_bbl_parser.ts) is not used: it mis-decodes predicted fields
  * after every I-frame (docs/gyrocore/BLACKBOX_CHIRP_PARITY.md).
  *
- * Segment detection follows Betaflight's rule (BOXCHIRP set in the merged
+ * Segment detection starts from Betaflight's rule (BOXCHIRP set in the merged
  * S-frame flags, axis in debug[1]) as ported by GyroCore (frames.ts /
- * extraction.ts at d2e60f7). Unlike both, every segment is kept: a later
- * segment on the same axis does not replace an earlier one.
+ * extraction.ts at d2e60f7). The measurement window is then tightened with
+ * DEBUG_CHIRP evidence (debug[2] frequency, debug[3] excitation): after the
+ * generator finishes, firmware keeps BOXCHIRP set while fchirp/excitation are
+ * zero — that post-completion tail is excluded from Welch/Bode/gates. Missing
+ * or constant DEBUG_CHIRP leaves the mode-flag window unchanged. Unlike both
+ * upstream ports, every segment is kept: a later segment on the same axis does
+ * not replace an earlier one.
  */
 
 import { BOXCHIRP_BIT } from "./constants";
@@ -187,7 +192,21 @@ export interface ChirpSegmentInfo {
     sampleCount: number;
     startTimeUs: number;
     endTimeUs: number;
+    /** Active generator duration (DEBUG_CHIRP-bounded when evidence allows). */
     durationS: number;
+    /**
+     * Full BOXCHIRP mode-flag duration before post-completion trimming.
+     * Equal to durationS when firmware evidence did not justify a tighter bound.
+     */
+    modeDurationS: number;
+    /** Samples while BOXCHIRP was set, before trimming. */
+    modeSampleCount: number;
+    /**
+     * How the active window was chosen:
+     * - firmware_debug_chirp: trimmed using DEBUG_CHIRP frequency/excitation
+     * - mode_flag_only: BOXCHIRP (+ axis) only — no reliable generator evidence
+     */
+    boundSource: "firmware_debug_chirp" | "mode_flag_only";
 }
 
 export interface ChirpExtraction {
@@ -237,6 +256,54 @@ function emptyExtraction(frames: ChirpFrames, kw: Partial<ChirpExtraction>): Chi
         errors: [],
         ...kw,
     };
+}
+
+/**
+ * Within one BOXCHIRP/axis segment, find the active generator sample range using
+ * DEBUG_CHIRP. Returns null when the channels do not support a tighter bound
+ * (missing, constant, or never active) — callers keep the mode-flag window.
+ *
+ * Completion (not a restart): after the sweep has progressed, frequency and
+ * excitation drop to zero and stay zero until the segment end. A real restart
+ * resumes with non-zero frequency/excitation after that settle, so lastActive
+ * stays past the intermediate zeros and observedSweep still sees runs > 1.
+ */
+export function activeGeneratorRange(
+    frequencyDeciHz: ArrayLike<number>,
+    excitationMilli: ArrayLike<number>,
+    startIdx: number,
+    endIdx: number,
+): { startIdx: number; endIdx: number } | null {
+    if (endIdx < startIdx) {
+        return null;
+    }
+    let minF = Infinity;
+    let maxF = -Infinity;
+    let firstActive = -1;
+    let lastActive = -1;
+    for (let i = startIdx; i <= endIdx; i++) {
+        const f = frequencyDeciHz[i];
+        const e = excitationMilli[i];
+        if (!Number.isFinite(f) || f < 0 || !Number.isFinite(e)) {
+            return null;
+        }
+        minF = Math.min(minF, f);
+        maxF = Math.max(maxF, f);
+        if (f > 0 || e !== 0) {
+            if (firstActive < 0) {
+                firstActive = i;
+            }
+            lastActive = i;
+        }
+    }
+    // Constant or never-active channel: no firmware evidence to override BOXCHIRP.
+    if (firstActive < 0 || maxF === minF) {
+        return null;
+    }
+    if (firstActive === startIdx && lastActive === endIdx) {
+        return null;
+    }
+    return { startIdx: firstActive, endIdx: lastActive };
 }
 
 export function extractChirp(
@@ -340,18 +407,38 @@ export function extractChirp(
         timeUs[i] = frames.timeUs[rows[i]];
     }
 
+    const chirpFrequencyDeciHz = pick(frames.debug[2], 1);
+    const chirpExcitationMilli = pick(frames.debug[3], 1);
+
+    let trimmedAny = false;
     const segments = bounds.map(([axis, start, end], i): ChirpSegmentInfo => {
-        const startTimeUs = timeUs[start];
-        const endTimeUs = timeUs[end];
+        const modeStart = start;
+        const modeEnd = end;
+        const modeStartTimeUs = timeUs[modeStart];
+        const modeEndTimeUs = timeUs[modeEnd];
+        const modeDurationS = Math.max(0, (modeEndTimeUs - modeStartTimeUs) / 1e6);
+        const modeSampleCount = modeEnd - modeStart + 1;
+
+        const active = activeGeneratorRange(chirpFrequencyDeciHz, chirpExcitationMilli, modeStart, modeEnd);
+        const startIdx = active?.startIdx ?? modeStart;
+        const endIdx = active?.endIdx ?? modeEnd;
+        if (active) {
+            trimmedAny = true;
+        }
+        const startTimeUs = timeUs[startIdx];
+        const endTimeUs = timeUs[endIdx];
         return {
             index: i,
             axis,
-            startIdx: start,
-            endIdx: end,
-            sampleCount: end - start + 1,
+            startIdx,
+            endIdx,
+            sampleCount: endIdx - startIdx + 1,
             startTimeUs,
             endTimeUs,
             durationS: Math.max(0, (endTimeUs - startTimeUs) / 1e6),
+            modeDurationS,
+            modeSampleCount,
+            boundSource: active ? "firmware_debug_chirp" : "mode_flag_only",
         };
     });
     if (dropped) {
@@ -360,6 +447,9 @@ export function extractChirp(
     if (new Set(segments.map((s) => s.axis)).size < segments.length) {
         warnings.push("repeated_axis_segments_all_kept");
     }
+    if (trimmedAny) {
+        warnings.push("chirp_post_sweep_tail_excluded");
+    }
 
     return {
         detected: segments.length > 0,
@@ -367,8 +457,8 @@ export function extractChirp(
         setpoint: [pick(frames.setpoint[0]), pick(frames.setpoint[1]), pick(frames.setpoint[2])],
         gyro: [pick(frames.gyroAdc[0]), pick(frames.gyroAdc[1]), pick(frames.gyroAdc[2])],
         timeUs,
-        chirpFrequencyDeciHz: pick(frames.debug[2], 1),
-        chirpExcitationMilli: pick(frames.debug[3], 1),
+        chirpFrequencyDeciHz,
+        chirpExcitationMilli,
         motorMax: frames.motorMax ? pick(frames.motorMax, 1) : null,
         motorMin: frames.motorMin ? pick(frames.motorMin, 1) : null,
         totalFrames: n,

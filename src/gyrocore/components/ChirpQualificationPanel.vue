@@ -77,7 +77,21 @@
                         </td>
                         <td>{{ m.logIndex + 1 }}</td>
                         <td>{{ axisLabel(m.axisName) }} #{{ m.axisOccurrence }}</td>
-                        <td>{{ seconds(m.startTimeUs) }}–{{ seconds(m.endTimeUs) }} ({{ m.durationS.toFixed(2) }})</td>
+                        <td>
+                            {{ seconds(m.startTimeUs) }}–{{ seconds(m.endTimeUs) }} ({{ m.durationS.toFixed(2) }} s)
+                            <div
+                                v-if="m.modeDurationS - m.durationS > 0.05"
+                                class="text-[10px] text-dimmed"
+                                data-mode-duration
+                            >
+                                {{
+                                    i18n.getMessage("gyrocoreQv2DetailModeDuration", [
+                                        m.modeDurationS.toFixed(2),
+                                        m.modeSampleCount,
+                                    ])
+                                }}
+                            </div>
+                        </td>
                         <td>{{ m.sampleCount }}</td>
                         <td>{{ m.sampleRate.effectiveRateHz ? Math.round(m.sampleRate.effectiveRateHz) : "--" }}</td>
                         <td>{{ coherence(m.quality.meanBandCoherence) }}</td>
