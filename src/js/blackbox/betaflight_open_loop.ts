@@ -351,7 +351,7 @@ export function plantFrf(freqHz: number, opts: { K: number; motorHz: number; del
     if (w === 0) return { re: 0, im: 0 };
     const jw = { re: 0, im: w };
     const motor = cadd({ re: 1, im: 0 }, cscale(jw, 1 / (2 * Math.PI * opts.motorHz)));
-    let G = cdiv({ re: opts.K, im: 0 }, cmul(jw, motor));
+    const G = cdiv({ re: opts.K, im: 0 }, cmul(jw, motor));
     const d = { re: Math.cos(-w * opts.delayS), im: Math.sin(-w * opts.delayS) };
     return cmul(G, d);
 }
