@@ -45,6 +45,7 @@ import {
     AIR65_EXTERNAL_BLOCKERS,
     closedLoopFromPlant,
     evaluateStructureAwarePhaseMargin,
+    findAllGainCrossovers,
     findGainCrossover,
     plantFrf,
     reconstructStabilityLoop,
@@ -52,6 +53,7 @@ import {
     syntheticTransferFunctionWithCoherence,
     trueStabilityLoop,
     unityFeedbackL,
+    type StabilityLoopResponse,
 } from "../../src/js/blackbox/betaflight_open_loop";
 
 /** Pre-declared acceptance for clean analytic grids. */
@@ -336,5 +338,92 @@ describe("GF-1 M2 AIR65 yaw policy", () => {
         expect(pm.unityFeedbackEquivalent).toBe(false);
         expect(pm.status).toBe("NOT_VALIDATED");
         expect(pm.blockReasons).toEqual(expect.arrayContaining(["d_max_state_dependent"]));
+    });
+});
+
+describe("GF-1 M2 fail-closed policy", () => {
+    const plant = { K: 2 * Math.PI * 30, motorHz: 80, delayS: 0.002 };
+    const cfg: DigitalControllerConfig = {
+        gyroDt: 250e-6,
+        pidDt: 250e-6,
+        axis: { p: 50, i: 40, d: 0, f: 0 },
+    };
+
+    it("defaults to NOT_VALIDATED without explicit attestation (even with a clean crossover)", () => {
+        const freqs = freqGrid(2, 120, 0.5);
+        const tf = makeTf(cfg, plant, freqs);
+        const pm = evaluateStructureAwarePhaseMargin(tf, cfg);
+        expect(pm.crossover?.status).toBe("ok");
+        expect(pm.status).toBe("NOT_VALIDATED");
+        expect(pm.blockReasons).toContain("validation_not_attested");
+    });
+
+    it("promotes VALIDATED only when attestValidated is set and no other blockers", () => {
+        const freqs = freqGrid(2, 120, 0.5);
+        const tf = makeTf(cfg, plant, freqs);
+        const pm = evaluateStructureAwarePhaseMargin(tf, cfg, { attestValidated: true });
+        expect(pm.status).toBe("VALIDATED");
+        expect(pm.blockReasons).toEqual([]);
+    });
+
+    it("marks multiple gain crossovers as ambiguous (not a single validated margin)", () => {
+        // Hand-built |L| that crosses unity downward twice on ok bins.
+        const bins = [
+            { frequencyHz: 5, status: "ok" as const, L: null, magnitude: 2.0, phaseDeg: -40, coherence: 1 },
+            { frequencyHz: 10, status: "ok" as const, L: null, magnitude: 0.8, phaseDeg: -90, coherence: 1 },
+            { frequencyHz: 20, status: "ok" as const, L: null, magnitude: 1.5, phaseDeg: -100, coherence: 1 },
+            { frequencyHz: 30, status: "ok" as const, L: null, magnitude: 0.7, phaseDeg: -140, coherence: 1 },
+            { frequencyHz: 40, status: "ok" as const, L: null, magnitude: 0.4, phaseDeg: -160, coherence: 1 },
+        ];
+        const loop: StabilityLoopResponse = {
+            bins,
+            startIndex: 0,
+            unityFeedbackEquivalent: true,
+            phaseUnwrapInterrupted: false,
+        };
+        const all = findAllGainCrossovers(loop);
+        expect(all.filter((c) => c.status === "ok")).toHaveLength(2);
+        expect(all.map((c) => c.frequencyHz)).toEqual([
+            expect.any(Number),
+            expect.any(Number),
+        ]);
+        expect(all[0].frequencyHz).toBeLessThan(all[1].frequencyHz);
+
+        const primary = findGainCrossover(loop);
+        expect(primary.status).toBe("ambiguous_multiple");
+        expect(primary.reason).toMatch(/multiple_gain_crossovers:2/);
+        // Diagnostic crossings remain available; none alone authorizes a margin.
+        expect(all.every((c) => Number.isFinite(c.frequencyHz))).toBe(true);
+        expect(all.map((c) => ({ fcHz: c.frequencyHz, pmDeg: c.phaseMarginDeg }))).toHaveLength(2);
+    });
+
+    it("does not invent a continuous phase unwrap across low-coherence gaps", () => {
+        const freqs = freqGrid(2, 100, 1);
+        const tf = syntheticTransferFunctionWithCoherence(
+            freqs,
+            (f) => {
+                const frf = evaluateControllerFrf(cfg, f);
+                return closedLoopFromPlant(plantFrf(f, plant), frf.cReference, frf.cFeedback);
+            },
+            (f) => (f >= 25 && f <= 45 ? 0.1 : 1),
+        );
+        const loop = reconstructStabilityLoop(tf, cfg);
+        expect(loop.phaseUnwrapInterrupted).toBe(true);
+        for (const bin of loop.bins) {
+            if (bin.frequencyHz >= 25 && bin.frequencyHz <= 45) {
+                expect(bin.status).toBe("low_coherence");
+                expect(bin.L).toBeNull();
+                expect(Number.isNaN(bin.phaseDeg)).toBe(true);
+            }
+        }
+        // First ok bin after the gap restarts unwrap (principal value, offset reset).
+        const afterGap = loop.bins.find((b) => b.status === "ok" && b.frequencyHz > 45)!;
+        expect(afterGap).toBeDefined();
+        expect(Number.isFinite(afterGap.phaseDeg)).toBe(true);
+        expect(Math.abs(afterGap.phaseDeg)).toBeLessThanOrEqual(180 + 1e-6);
+
+        const pm = evaluateStructureAwarePhaseMargin(tf, cfg, { attestValidated: true });
+        expect(pm.status).toBe("NOT_VALIDATED");
+        expect(pm.blockReasons).toContain("phase_unwrap_interrupted_by_bin_gaps");
     });
 });
