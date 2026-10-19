@@ -86,12 +86,13 @@ const AXES = ["roll", "pitch", "yaw"] as const;
 const PID = ["p", "i", "d", "f", "d_max"] as const;
 const FILT = ["lpf1_dyn_min_hz", "lpf1_dyn_max_hz", "lpf1_static_hz", "lpf2_static_hz"] as const;
 const GOOD = { crossoverHz: 40, delaySamples: 2, seconds: 8 };
+// GF-1: L=T/(1-T) unvalidated → recommendGains holds every slider at logged current.
 const WU3_POSITIVE = {
     slider_master_multiplier: 100,
-    slider_pi_gain: 138,
+    slider_pi_gain: 100,
     slider_i_gain: 100,
     slider_d_gain: 100,
-    slider_feedforward_gain: 138,
+    slider_feedforward_gain: 100,
     slider_dterm_filter_multiplier: 100,
 };
 const ANALYSIS_BLOCKS = ["mechanical_hard_block", "missing_required_analysis", "safe_tune_candidate_blocked"];
@@ -263,13 +264,13 @@ describe("GyroCore Safety on the global recommendation (product entry)", () => {
         expect(s.compositeId).toBe(composite.id);
         expect(s.sliders).toEqual(composite.final);
         expect(s.firmwareRevision).toBe(composite.firmwareRevision);
-        // Current vs proposed absolute values (firmware mapping, not authoritative on a real craft).
+        // GF-1 hold: proposed absolute PID equals the logged current mapping.
         expect(AXES.map((a) => [s.current![a].p.value, s.proposed![a].p.value])).toEqual([
-            [45, 62],
-            [47, 64],
-            [45, 62],
+            [45, 45],
+            [47, 47],
+            [45, 45],
         ]);
-        expect(s.deltas["pitch.f"]).toEqual({ current: 125, proposed: 172, delta: 47 });
+        expect(s.deltas["pitch.f"]).toEqual({ current: 125, proposed: 125, delta: 0 });
         expect(s.pipeline!.mechanical.blocking_reasons).toEqual(["missing_required_analysis"]);
         expect(s.pipeline!.candidate.clamped_config).toBeNull();
 
@@ -349,6 +350,6 @@ describe("GyroCore Safety on the global recommendation (product entry)", () => {
         expect(s.status).toBe("BLOCK");
         expect(s.blocks).toEqual(ANALYSIS_BLOCKS);
         expect(PID.map((f) => s.proposed!.yaw[f].value)).toEqual([45, 80, 0, 120, 0]);
-        expect(s.proposed!.roll.p.value).toBe(62);
+        expect(s.proposed!.roll.p.value).toBe(45);
     });
 });
