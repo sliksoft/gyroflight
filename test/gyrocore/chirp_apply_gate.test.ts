@@ -183,12 +183,14 @@ beforeEach(() => {
 });
 
 describe("safe positive fixture: three agreeing axes -> one global tune -> exact payload", () => {
+    // GF-1: open-loop L = T/(1-T) is unvalidated for Betaflight structure, so
+    // recommendGains holds every slider at the logged current (100).
     const EXPECTED_FINAL = {
         slider_master_multiplier: 100,
-        slider_pi_gain: 138,
+        slider_pi_gain: 100,
         slider_i_gain: 100,
         slider_d_gain: 100,
-        slider_feedforward_gain: 138,
+        slider_feedforward_gain: 100,
         slider_dterm_filter_multiplier: 100,
     };
 
@@ -207,6 +209,13 @@ describe("safe positive fixture: three agreeing axes -> one global tune -> exact
             ["log1-seg3", "participating"],
         ]);
         expect(composite.blocked).toEqual([]);
+        expect(composite.warnings).toEqual(
+            expect.arrayContaining([
+                "roll:phase_margin_not_validated",
+                "pitch:phase_margin_not_validated",
+                "yaw:phase_margin_not_validated",
+            ]),
+        );
         expect(composite.authorized).toBe(true);
         expect(composite.final).toEqual(EXPECTED_FINAL);
 
@@ -290,14 +299,20 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
     });
 
     it("an unsafe merge conflict", async () => {
+        // GF-1 hold collapses per-axis PI disagreement; roll+pitch under RPY
+        // still lacks yaw evidence, so Apply stays blocked.
         const { composite } = await load(MERGE_E2E_CASES.roll_pitch_conflict());
-        expect(composite.merge.status).toBe("MERGE_REQUIRES_REVIEW");
-        expect(composite.final).toBeNull();
-        expect(composite.blocked).toEqual(
-            expect.arrayContaining(["unresolved_merge_requires_review", "slider_disagreement:slider_pi_gain"]),
-        );
-        const roll = composite.sources[0].proposed!;
-        await expectBlocked(useAutotune().applyGains(roll, composite.id), "unresolved_merge_requires_review");
+        expect(composite.merge.status).toBe("merged");
+        expect(composite.final).toEqual({
+            slider_master_multiplier: 100,
+            slider_pi_gain: 100,
+            slider_i_gain: 100,
+            slider_d_gain: 100,
+            slider_feedforward_gain: 100,
+            slider_dterm_filter_multiplier: 100,
+        });
+        expect(composite.blocked).toEqual(expect.arrayContaining(["missing_axis_evidence:yaw"]));
+        await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "missing_axis_evidence:yaw");
         expect(msp.calls).toEqual([]);
     });
 
@@ -315,13 +330,16 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
     });
 
     it("feed-forward cut reversed by the slider floor, re-checked on the global value", async () => {
+        // GF-1 holds scales at 1, but buildProposedSliders still clamps FF to
+        // [25,250]; a logged 15 becomes 25 and the direction guard blocks Apply.
         const { composite } = await load(MERGE_E2E_CASES.ff_floor_three_axis());
         expect(composite.merge.status).toBe("merged");
         expect(composite.final!.slider_feedforward_gain).toBe(25);
         const ff = composite.sliders.find((s) => s.key === "slider_feedforward_gain")!;
         expect(ff.current).toBe(15);
         expect(ff.finalDirection).toBe("increase");
-        expect(Object.values(ff.requestedByAxis).every((r) => r < 15)).toBe(true);
+        // Pre-clamp request matches the logged current; the [25,250] floor alone raises final to 25.
+        expect(Object.values(ff.requestedByAxis).every((r) => r === 15)).toBe(true);
         expect(composite.blocked).toEqual(
             expect.arrayContaining([
                 "slider_clamp_changes_direction:slider_feedforward_gain",
@@ -336,6 +354,8 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
     });
 
     it("feed-forward increase inflated by the slider floor beyond rounding", async () => {
+        // Under GF-1 hold the only FF move is the [25,250] floor bump 15→25,
+        // which the direction guard treats as a clamp that changes direction.
         const { composite } = await load(
             encodeChirpLog(
                 simulateChirpSequence([
@@ -348,13 +368,13 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
         expect(composite.final!.slider_feedforward_gain).toBe(25);
         expect(composite.blocked).toEqual(
             expect.arrayContaining([
-                "slider_clamp_material:slider_feedforward_gain",
-                "composite_clamp_material:slider_feedforward_gain",
+                "slider_clamp_changes_direction:slider_feedforward_gain",
+                "composite_clamp_changes_direction:slider_feedforward_gain",
             ]),
         );
         await expectBlocked(
             useAutotune().applyGains(composite.final!, composite.id),
-            "composite_clamp_material:slider_feedforward_gain",
+            "composite_clamp_changes_direction:slider_feedforward_gain",
         );
         expect(msp.calls).toEqual([]);
     });

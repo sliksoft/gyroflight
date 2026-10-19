@@ -290,6 +290,25 @@ export const PHASE_MARGIN_PRESETS = {
 };
 
 /**
+ * How open-loop quantities are obtained from the measured closed loop T.
+ *
+ * - `unity_feedback`: L = T/(1-T) is exact for T = L/(1+L). Used by the
+ *   synthetic Autotune tests and any plant that really is unity feedback.
+ * - `unvalidated`: Betaflight rate PID uses P/I on the error, D on the gyro and
+ *   feedforward on the setpoint, so L = T/(1-T) is not the stability loop.
+ *   Structure-aware recovery needs a validated continuous controller+filter
+ *   model that this module does not yet apply; phase margin is therefore
+ *   reported as not validated and margin-based PID proposals are held.
+ */
+export type OpenLoopModel = "unity_feedback" | "unvalidated";
+
+export type PhaseMarginStatus = "VALIDATED" | "NOT_VALIDATED" | "UNAVAILABLE";
+
+export interface RecommendGainsOptions {
+    openLoopModel?: OpenLoopModel;
+}
+
+/**
  * Recommend simplified tuning slider adjustments based on the measured
  * closed-loop transfer function.
  *
@@ -311,18 +330,83 @@ export const PHASE_MARGIN_PRESETS = {
  *
  * @param currentSliders - Current simplified tuning slider values as decimals (1.0 = 100)
  * @param [targetPhaseMarginDeg] - Desired open-loop phase margin in degrees
+ * @param [options.openLoopModel] - defaults to `unity_feedback` for Autotune
+ *   synthetic parity; Gyroflight CHIRP qualification passes `unvalidated`
  */
 export function recommendGains(
     tf: TransferFunction,
     currentSliders: CurrentSliders,
     targetPhaseMarginDeg = PHASE_MARGIN_PRESETS.NORMAL,
+    options: RecommendGainsOptions = {},
 ) {
+    const openLoopModel = options.openLoopModel ?? "unity_feedback";
+    if (openLoopModel === "unvalidated") {
+        return unvalidatedRecommendation(tf, currentSliders, targetPhaseMarginDeg);
+    }
     const openLoop = openLoopResponse(tf);
     const metrics = extractMetrics(tf, openLoop, targetPhaseMarginDeg);
     const scales = computeGainScales(metrics, tf, openLoop);
     const proposed = buildProposedSliders(currentSliders, scales);
-    const analysis = { ...metrics, ...scales };
+    const analysis = {
+        ...metrics,
+        ...scales,
+        openLoopModel,
+        phaseMarginStatus: (Number.isFinite(metrics.phaseMarginDeg)
+            ? "VALIDATED"
+            : "UNAVAILABLE") as PhaseMarginStatus,
+    };
     return { proposed, analysis };
+}
+
+/** Hold every slider and refuse to quote a phase margin from L = T/(1-T). */
+function unvalidatedRecommendation(
+    tf: TransferFunction,
+    currentSliders: CurrentSliders,
+    targetPhaseMarginDeg: number,
+) {
+    // Closed-loop-only diagnostics stay available; open-loop shaping does not.
+    const bandwidthHz = findBandwidth(tf.frequencies, tf.magnitude, tf.coherence);
+    const { resonantPeakDb, resonantFreqHz } = findResonantPeak(tf.frequencies, tf.magnitude, tf.coherence);
+    const lowFreqErrorDb = computeLowFreqError(tf.frequencies, tf.magnitude, tf.coherence);
+    const noiseFloorHz = findNoiseFloor(tf.frequencies, tf.coherence);
+    const meanCoherence = computeMeanCoherence(tf.frequencies, tf.coherence);
+    const scales = {
+        piScale: 1,
+        requestedGain: 1,
+        iScale: 1,
+        dScale: 1,
+        ffScale: 1,
+        filterScale: 1,
+        sensitivityBinds: false,
+        gainClamped: false,
+        gainClampLimit: Number.NaN,
+        sensitivityUnreachable: false,
+        predictedSensitivityPeakDb: Number.NaN,
+    };
+    const proposed = buildProposedSliders(currentSliders, scales as GainScales);
+    return {
+        proposed,
+        analysis: {
+            bandwidthHz,
+            resonantPeakDb,
+            resonantFreqHz,
+            maxAchievablePhaseMarginDeg: Number.NaN,
+            sensitivityLimitedGain: Number.NaN,
+            openLoopCrossoverHz: Number.NaN,
+            phaseMarginDeg: Number.NaN,
+            targetCrossoverHz: Number.NaN,
+            gainToTarget: Number.NaN,
+            lowFreqErrorDb,
+            noiseFloorHz,
+            meanCoherence,
+            loopDelayMs: Number.NaN,
+            targetPhaseMarginDeg,
+            ...scales,
+            openLoopModel: "unvalidated" as OpenLoopModel,
+            phaseMarginStatus: "NOT_VALIDATED" as PhaseMarginStatus,
+            phaseMarginBlockReason: "open_loop_model_unvalidated:L_equals_T_over_1_minus_T",
+        },
+    };
 }
 
 function extractMetrics(tf: TransferFunction, openLoop: OpenLoopResponse, targetPhaseMarginDeg: number) {

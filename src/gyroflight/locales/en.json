@@ -176,6 +176,9 @@
         "message": "The phase-margin target is not reachable; the gain is held."
     },
     "gyrocoreReason_autotune_no_open_loop_crossover": { "message": "No open-loop crossover inside the coherent band." },
+    "gyrocoreReason_phase_margin_not_validated": {
+        "message": "Phase margin is not validated: L = T/(1−T) assumes unity feedback, but Betaflight uses D on the gyro and feedforward on the setpoint. PID recommendations from that margin are blocked."
+    },
     "gyrocoreReason_autotune_gain_clamped_per_pass": { "message": "The gain change is limited by the per-pass range." },
     "gyrocoreReason_apply_no_qualified_analysis": { "message": "No Gyroflight-qualified analysis is loaded." },
     "gyrocoreReason_apply_unknown_measurement": { "message": "The selected axis has no qualified measurement." },
