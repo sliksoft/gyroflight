@@ -117,6 +117,7 @@ import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQuali
 import { encodeChirpLog, FULL_TUNE_HEADERS, simulateChirpSequence, withHeader } from "./harness/chirpSim";
 import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { readFixtureBytes } from "./harness/fixtures";
+import { clearPhaseMarginForGate } from "./harness/clearPhaseMarginBlock";
 
 const WRITES = new Set([MSPCodes.MSP_SET_SIMPLIFIED_TUNING, MSPCodes.MSP_EEPROM_WRITE]);
 const GOOD = { crossoverHz: 40, delaySamples: 2, seconds: 8 };
@@ -183,8 +184,8 @@ beforeEach(() => {
 });
 
 describe("safe positive fixture: three agreeing axes -> one global tune -> exact payload", () => {
-    // GF-1: open-loop L = T/(1-T) is unvalidated for Betaflight structure, so
-    // recommendGains holds every slider at the logged current (100).
+    // GF-1: open-loop L = T/(1-T) is unvalidated; proposals are held at current
+    // and phase_margin_not_validated blocks Apply (even for a no-op write).
     const EXPECTED_FINAL = {
         slider_master_multiplier: 100,
         slider_pi_gain: 100,
@@ -194,12 +195,12 @@ describe("safe positive fixture: three agreeing axes -> one global tune -> exact
         slider_dterm_filter_multiplier: 100,
     };
 
-    it("passes every gate, merges and writes exactly the global sliders", async () => {
+    it("merges held sliders but does not authorize Apply (phase margin not validated)", async () => {
         const { gate, composite } = await load(MERGE_E2E_CASES.three_axis_agree());
         expect(gate.report!.measurements.map((m) => [m.axisName, m.state, m.apply.allowed])).toEqual([
-            ["roll", "usable", true],
-            ["pitch", "usable", true],
-            ["yaw", "usable", true],
+            ["roll", "usable", false],
+            ["pitch", "usable", false],
+            ["yaw", "usable", false],
         ]);
         expect(composite.merge.status).toBe("merged");
         expect(composite.merge.participating_axes).toEqual(["roll", "pitch", "yaw"]);
@@ -208,37 +209,31 @@ describe("safe positive fixture: three agreeing axes -> one global tune -> exact
             ["log1-seg2", "participating"],
             ["log1-seg3", "participating"],
         ]);
-        expect(composite.blocked).toEqual([]);
-        expect(composite.warnings).toEqual(
-            expect.arrayContaining([
-                "roll:phase_margin_not_validated",
-                "pitch:phase_margin_not_validated",
-                "yaw:phase_margin_not_validated",
-            ]),
-        );
-        expect(composite.authorized).toBe(true);
+        expect(composite.blocked).toContain("phase_margin_not_validated");
+        expect(composite.authorized).toBe(false);
         expect(composite.final).toEqual(EXPECTED_FINAL);
 
-        await useAutotune().applyGains(composite.final!, composite.id);
-        expect(codes()).toEqual([
-            MSPCodes.MSP_SIMPLIFIED_TUNING,
-            MSPCodes.MSP_SET_SIMPLIFIED_TUNING,
-            MSPCodes.MSP_EEPROM_WRITE,
-        ]);
-        const set = msp.calls.find((c) => c.code === MSPCodes.MSP_SET_SIMPLIFIED_TUNING)!;
-        expect(set.data).toEqual(expectedPayload({ ...LOGGED_LIVE, ...EXPECTED_FINAL }, LIVE_FILTERS));
-        expect(set.data).toHaveLength(53);
+        await expectBlocked(
+            useAutotune().applyGains(composite.final!, composite.id),
+            "phase_margin_not_validated",
+        );
+        noWrites();
+        expect(msp.calls).toEqual([]);
     });
 
-    it("roll+pitch under RP mode: yaw left out by the merge, the global tune still applies", async () => {
+    it("roll+pitch under RP mode: merge excludes yaw; Apply still blocked by phase margin", async () => {
         msp.live = { ...LOGGED_LIVE, slider_pids_mode: 1 };
         const { composite } = await load(MERGE_E2E_CASES.rp_mode_yaw_excluded());
         expect(composite.merge.participating_axes).toEqual(["roll", "pitch"]);
         expect(composite.sources.find((s) => s.axisName === "yaw")?.role).toBe("excluded_by_axis_gate");
         expect(composite.warnings).toContain("axis_excluded:yaw:yaw_not_under_slider_control");
-        expect(composite.authorized).toBe(true);
-        await useAutotune().applyGains(composite.final!, composite.id);
-        expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
+        expect(composite.authorized).toBe(false);
+        expect(composite.blocked).toContain("phase_margin_not_validated");
+        await expectBlocked(
+            useAutotune().applyGains(composite.final!, composite.id),
+            "phase_margin_not_validated",
+        );
+        noWrites();
     });
 });
 
@@ -246,7 +241,8 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
     it("the old single-measurement apply", async () => {
         const { gate } = await load(MERGE_E2E_CASES.three_axis_agree());
         const m = gate.report!.measurements[0];
-        expect(m.apply.allowed).toBe(true);
+        expect(m.apply.allowed).toBe(false);
+        expect(m.apply.blocked).toContain("phase_margin_not_validated");
         await expectBlocked(
             useAutotune().applyGains(m.recommendation!.result.proposed, m.id),
             "apply:single_measurement_apply_not_allowed",
@@ -280,7 +276,9 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
     });
 
     it("tampered merged sliders", async () => {
-        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const { gate } = await load(MERGE_E2E_CASES.three_axis_agree());
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         const tampered = { ...composite.final!, slider_pi_gain: composite.final!.slider_pi_gain + 1 };
         await expectBlocked(useAutotune().applyGains(tampered, composite.id), "apply:sliders_differ_from_composite");
         expect(msp.calls).toEqual([]);
@@ -431,7 +429,10 @@ describe("live flight-controller recheck (one read, then no write)", () => {
     ];
     for (const [name, live, reason] of cases) {
         it(name, async () => {
-            const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+            const { gate } = await load(MERGE_E2E_CASES.three_axis_agree());
+            clearPhaseMarginForGate(gate);
+            const composite = gate.composite!;
+            expect(composite.authorized).toBe(true);
             msp.live = { ...LOGGED_LIVE, ...live };
             await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), reason);
             expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
@@ -453,7 +454,10 @@ describe("repeated sweeps on one axis", () => {
 
     it("two qualified roll sweeps need an explicit choice; the default display choice does not count", async () => {
         const { gate, composite } = await load(repeated());
-        expect(gate.report!.measurements.filter((m) => m.axisName === "roll" && m.apply.allowed)).toHaveLength(2);
+        const rolls = gate.report!.measurements.filter((m) => m.axisName === "roll");
+        expect(rolls).toHaveLength(2);
+        expect(rolls.every((m) => m.state === "usable")).toBe(true);
+        expect(rolls.every((m) => m.apply.blocked.includes("phase_margin_not_validated"))).toBe(true);
         expect(composite.authorized).toBe(false);
         expect(composite.blocked).toContain("repeated_axis_requires_selection:roll");
         // An unselected repeated axis is not covered.
@@ -465,6 +469,7 @@ describe("repeated sweeps on one axis", () => {
         );
 
         gate.selectMeasurement("log1-seg2", true);
+        clearPhaseMarginForGate(gate);
         const chosen = gate.composite!;
         expect(chosen.sources.map((s) => [s.measurementId, s.role])).toEqual([
             ["log1-seg1", "not_selected"],
@@ -498,7 +503,8 @@ describe("repeated sweeps on one axis", () => {
         ]);
         expect(composite.coverage.sourceByAxis.roll).toBe("log1-seg2");
         expect(composite.warnings).toContain("rejected_repeat_not_used:log1-seg1");
-        expect(composite.authorized).toBe(true);
+        expect(composite.authorized).toBe(false);
+        expect(composite.blocked).toContain("phase_margin_not_validated");
     });
 });
 
@@ -533,7 +539,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
         const verdict = missing.length ? "blocked" : "coverage pass";
         it(`${modeName} + ${axes.join("+")} -> ${verdict}`, async () => {
             msp.live = { ...LOGGED_LIVE, slider_pids_mode: mode };
-            const { composite } = await load(flight(axes, mode));
+            const { gate, composite } = await load(flight(axes, mode));
             const required: Axis[] = mode === 2 ? ["roll", "pitch", "yaw"] : ["roll", "pitch"];
             expect(composite.coverage.modeName).toBe(modeName);
             expect(composite.coverage.pidsMode).toBe(mode);
@@ -565,9 +571,12 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
                 );
                 expect(msp.calls).toEqual([]);
             } else {
-                expect(composite.blocked).toEqual([]);
-                expect(composite.authorized).toBe(true);
-                await useAutotune().applyGains(composite.final!, composite.id);
+                // Strip GF-1 phase-margin hold so this matrix isolates axis coverage.
+                clearPhaseMarginForGate(gate);
+                const cleared = gate.composite!;
+                expect(cleared.blocked).toEqual([]);
+                expect(cleared.authorized).toBe(true);
+                await useAutotune().applyGains(cleared.final!, cleared.id);
                 expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
             }
         });
@@ -617,10 +626,12 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
     });
 
     it("a tampered composite is still blocked when coverage passes", async () => {
-        const { composite } = await load(flight(["roll", "pitch", "yaw"], 2));
+        const { gate, composite } = await load(flight(["roll", "pitch", "yaw"], 2));
         expect(composite.coverage.missingAxes).toEqual([]);
-        const tampered = { ...composite.final!, slider_d_gain: composite.final!.slider_d_gain + 5 };
-        await expectBlocked(useAutotune().applyGains(tampered, composite.id), "apply:sliders_differ_from_composite");
+        clearPhaseMarginForGate(gate);
+        const cleared = gate.composite!;
+        const tampered = { ...cleared.final!, slider_d_gain: cleared.final!.slider_d_gain + 5 };
+        await expectBlocked(useAutotune().applyGains(tampered, cleared.id), "apply:sliders_differ_from_composite");
         expect(msp.calls).toEqual([]);
     });
 
@@ -636,11 +647,13 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
     });
 
     it("live recheck: analysis RP (roll+pitch valid), craft now RPY -> blocked, yaw evidence missing", async () => {
-        const { composite } = await load(MERGE_E2E_CASES.rp_mode_yaw_excluded());
-        expect(composite.authorized).toBe(true);
+        const { gate, composite } = await load(MERGE_E2E_CASES.rp_mode_yaw_excluded());
+        clearPhaseMarginForGate(gate);
+        const cleared = gate.composite!;
+        expect(cleared.authorized).toBe(true);
         msp.live = { ...LOGGED_LIVE, slider_pids_mode: 2 };
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id),
+            useAutotune().applyGains(cleared.final!, cleared.id),
             "fc:missing_axis_evidence:yaw",
             "fc:simplified_pids_mode_changed",
         );
@@ -649,10 +662,12 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
     });
 
     it("live recheck: analysis RPY, craft now RP -> blocked by the current contract (mode changed, yaw contributed)", async () => {
-        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        const { gate } = await load(MERGE_E2E_CASES.three_axis_agree());
+        clearPhaseMarginForGate(gate);
+        const cleared = gate.composite!;
         msp.live = { ...LOGGED_LIVE, slider_pids_mode: 1 };
         const err = await useAutotune()
-            .applyGains(composite.final!, composite.id)
+            .applyGains(cleared.final!, cleared.id)
             .catch((e: ApplyBlockedError) => e);
         expect(err).toBeInstanceOf(ApplyBlockedError);
         // RP needs only roll+pitch, which are covered; the mode change itself still blocks.
@@ -661,6 +676,31 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
             "fc:yaw_not_under_slider_control",
         ]);
         expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
+        noWrites();
+    });
+});
+
+describe("GF-1: phase_margin_not_validated blocks Apply even when proposals equal current", () => {
+    it("held-at-current three-axis merge never authorizes and never MSP-writes", async () => {
+        const { gate, composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        expect(composite.final).toEqual({
+            slider_master_multiplier: 100,
+            slider_pi_gain: 100,
+            slider_i_gain: 100,
+            slider_d_gain: 100,
+            slider_feedforward_gain: 100,
+            slider_dterm_filter_multiplier: 100,
+        });
+        expect(gate.report!.measurements.every((m) => m.apply.blocked.includes("phase_margin_not_validated"))).toBe(
+            true,
+        );
+        expect(composite.blocked).toContain("phase_margin_not_validated");
+        expect(composite.authorized).toBe(false);
+        await expectBlocked(
+            useAutotune().applyGains(composite.final!, composite.id),
+            "phase_margin_not_validated",
+        );
+        expect(msp.calls).toEqual([]);
         noWrites();
     });
 });
