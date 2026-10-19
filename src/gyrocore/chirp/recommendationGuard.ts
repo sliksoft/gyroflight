@@ -140,11 +140,11 @@ export function guardRecommendation(
     if (a.gainClamped) {
         warnings.push("autotune_gain_clamped_per_pass");
     }
-    // GF-1: L = T/(1-T) is not the Betaflight stability loop. recommendGains
-    // already holds every slider when openLoopModel is unvalidated; surface that
-    // so Apply UI and reports do not present a phase-margin figure as truth.
+    // GF-1: L = T/(1-T) is not the Betaflight stability loop. Holding sliders at
+    // the logged current is not authorization — Apply must stay blocked until a
+    // validated open-loop model is attested.
     if (a.phaseMarginStatus === "NOT_VALIDATED" || a.openLoopModel === "unvalidated") {
-        warnings.push("phase_margin_not_validated");
+        blocked.push("phase_margin_not_validated");
     }
     return { blocked, warnings, sliders };
 }

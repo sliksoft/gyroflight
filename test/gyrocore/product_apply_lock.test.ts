@@ -93,6 +93,10 @@ describe("product Apply lock (production default)", () => {
         picked.bytes = MERGE_E2E_CASES.three_axis_agree();
         await useAutotune().importAndAnalyze();
         const gate = useChirpQualificationStore();
+        expect(gate.composite!.blocked).toContain("phase_margin_not_validated");
+        // Isolate Safety/product layers from the GF-1 phase-margin hold.
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
         const composite = gate.composite!;
         expect(composite.merge.status).toBe("merged");
         expect(composite.coverage.missingAxes).toEqual([]);
