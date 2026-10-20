@@ -658,5 +658,11 @@
     "gyrocoreM4ColSource": { "message": "Signal" },
     "gyrocoreM4ColVerdict": { "message": "Verdict" },
     "gyrocoreM4ColWindows": { "message": "Usable windows" },
-    "gyrocoreM4ColReliability": { "message": "Reliability" }
+    "gyrocoreM4ColReliability": { "message": "Reliability" },
+    "gyrocoreM4FfChirpExcluded": {
+        "message": "CHIRP sweeps in this log (plus a guard band) are excluded from feedforward: only CHIRP-free acro stick segments are used."
+    },
+    "gyrocoreM4Segments": { "message": "Flight segments (inferred from arm box + throttle; motor output is not used)" },
+    "gyrocoreM4Unsegmented": { "message": "Flight segmentation not possible — no stick, spectrum or eRPM measurement" },
+    "gyrocoreM4Gaps": { "message": "timestamp gaps" }
 }

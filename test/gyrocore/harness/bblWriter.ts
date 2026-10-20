@@ -92,6 +92,10 @@ export function encodeLog(
         debugMode?: number;
         /** Additional main fields after the motors, e.g. axisD[0] or eRPM[0]. */
         extraFields?: string[];
+        /** Further S-frames (flight-mode flags, failsafe phase) written before the given main frame. */
+        sFrames?: { atFrame: number; flightModeFlags: number; failsafePhase?: number }[];
+        /** false: no S-frame field definitions and no S-frames (no flightModeFlags column). */
+        slowFields?: boolean;
     },
 ) {
     const motorCount = opts.motorCount ?? 0;
@@ -122,21 +126,35 @@ export function encodeLog(
         `H Field P encoding:9,${Array(n - 1)
             .fill(0)
             .join(",")}`,
-        "H Field S name:flightModeFlags,stateFlags,failsafePhase",
-        "H Field S signed:0,0,0",
-        "H Field S predictor:0,0,0",
-        "H Field S encoding:1,1,1",
+        ...(opts.slowFields === false
+            ? []
+            : [
+                  "H Field S name:flightModeFlags,stateFlags,failsafePhase",
+                  "H Field S signed:0,0,0",
+                  "H Field S predictor:0,0,0",
+                  "H Field S encoding:1,1,1",
+              ]),
     ];
     const out: number[] = Array.from(new TextEncoder().encode(`${header.join("\n")}\n`));
 
-    out.push("S".charCodeAt(0));
-    unsignedVB(out, opts.flightModeFlags);
-    unsignedVB(out, 0);
-    unsignedVB(out, 0);
+    if (opts.slowFields !== false) {
+        out.push("S".charCodeAt(0));
+        unsignedVB(out, opts.flightModeFlags);
+        unsignedVB(out, 0);
+        unsignedVB(out, 0);
+    }
 
     let prev: number[] = [];
     let prev2: number[] = [];
+    const slowAt = new Map((opts.sFrames ?? []).map((f) => [f.atFrame, f]));
     frames.forEach((frame, iteration) => {
+        const slow = slowAt.get(iteration);
+        if (slow && opts.slowFields !== false) {
+            out.push("S".charCodeAt(0));
+            unsignedVB(out, slow.flightModeFlags);
+            unsignedVB(out, 0);
+            unsignedVB(out, slow.failsafePhase ?? 0);
+        }
         const cur = values(iteration, frame, motorCount, extraFields.length);
         if (iteration % opts.iInterval === 0) {
             out.push("I".charCodeAt(0));

@@ -38,12 +38,15 @@
                 </UBadge>
                 <span class="text-dimmed">{{ log.chirp.evidence.join(", ") }}</span>
             </div>
-            <p
-                v-if="log.chirp.status !== 'no_chirp'"
-                class="font-bold text-orange-500"
-                data-gyrocore="m4-ff-chirp-blocked"
-            >
+            <p v-if="chirpBlocksFf(log)" class="font-bold text-orange-500" data-gyrocore="m4-ff-chirp-blocked">
                 {{ $t("gyrocoreM4FfChirpBlocked") }}
+            </p>
+            <p
+                v-else-if="log.result?.feedforward.chirpSamplesExcluded"
+                class="font-bold text-orange-500"
+                data-gyrocore="m4-ff-chirp-excluded"
+            >
+                {{ $t("gyrocoreM4FfChirpExcluded") }}
             </p>
 
             <p v-if="log.signals.missing.length || log.signals.missingHeaders.length" data-gyrocore="m4-missing">
@@ -60,14 +63,33 @@
             </p>
 
             <template v-if="log.result">
-                <p class="text-dimmed">
+                <p class="text-dimmed" data-gyrocore="m4-rate">
                     {{ log.frameCount }} frames · {{ fmt(log.durationS, 1) }} s ·
-                    {{ fmt(log.result.sampleRateHz, 0) }} Hz
+                    {{ fmt(log.result.sampleRateHz, 1) }} Hz ({{ log.sampleRate?.analysisRateSource }}, header
+                    {{ fmt(log.sampleRate?.headerRateHz, 0) }} Hz) · {{ $t("gyrocoreM4Gaps") }}:
+                    {{ log.timestampSpacing?.gapCount ?? "—" }}
+                </p>
+
+                <h5 class="font-bold">{{ $t("gyrocoreM4Segments") }}</h5>
+                <p
+                    v-if="log.segmentation?.status !== 'segmented'"
+                    class="font-bold text-orange-500"
+                    role="alert"
+                    data-gyrocore="m4-unsegmented"
+                >
+                    {{ $t("gyrocoreM4Unsegmented") }}: {{ log.segmentation?.reasons.join(", ") }}
+                </p>
+                <p v-else class="text-dimmed" data-gyrocore="m4-segments">
+                    <span v-for="k in SEGMENT_KINDS" :key="k" :data-kind="k">
+                        {{ k }} {{ fmt(log.segmentation.durationsS[k], 1) }} s;
+                    </span>
                 </p>
 
                 <h5 class="font-bold">{{ $t("gyrocoreM4Feedforward") }}</h5>
                 <p data-gyrocore="m4-ff" :data-advice="log.result.feedforward.advice">
-                    {{ log.result.feedforward.advice }} · {{ log.result.feedforward.reason }}
+                    {{ log.result.feedforward.advice }} · {{ log.result.feedforward.reason }} ·
+                    {{ log.result.feedforward.stickSource }}: {{ log.result.feedforward.stickSegmentCount }} ×,
+                    {{ fmt(log.result.feedforward.stickDurationS, 1) }} s
                 </p>
                 <div v-if="log.result.feedforward.axes.length" class="overflow-x-auto">
                     <table class="autotune-table w-full" data-gyrocore="m4-ff-table">
@@ -120,6 +142,19 @@
                 </div>
 
                 <h5 class="font-bold">{{ $t("gyrocoreM4Filters") }}</h5>
+                <p
+                    class="text-dimmed"
+                    data-gyrocore="m4-spectrum"
+                    :data-reliability="log.result.filters.gyroLpf.measurement.reliability"
+                >
+                    FFT: {{ log.result.filters.gyroLpf.measurement.source }} ·
+                    {{ fmt(log.result.filters.gyroLpf.measurement.durationS, 1) }} s ·
+                    {{ log.result.filters.gyroLpf.measurement.welchSegments }} Welch ×
+                    {{ log.result.filters.gyroLpf.measurement.segmentSize }} ·
+                    {{ fmt(log.result.filters.gyroLpf.measurement.binWidthHz, 1) }} Hz/bin ·
+                    {{ log.result.filters.gyroLpf.measurement.reliability }} ·
+                    {{ log.result.filters.gyroLpf.notes.join(", ") }}
+                </p>
                 <ul class="list-disc pl-5" data-gyrocore="m4-filters">
                     <li data-filter="gyro-lpf">
                         Gyro LPF: {{ hz(log.result.filters.gyroLpf.configuredHz.lpf1) }} /
@@ -171,7 +206,8 @@
 // Apply, copy-to-CLI or recommendation control.
 import { computed } from "vue";
 import UiBox from "@/components/elements/UiBox.vue";
-import type { M4ChirpStatus } from "@/js/blackbox/m4_bbl_integration";
+import type { M4ChirpStatus, M4LogReport } from "@/js/blackbox/m4_bbl_integration";
+import type { SegmentKind } from "@/js/blackbox/m4_segmentation";
 import { useM4FlightMetricsStore } from "@/gyrocore/stores/m4FlightMetrics";
 
 const CHIRP_KEYS: Record<M4ChirpStatus, string> = {
@@ -180,7 +216,24 @@ const CHIRP_KEYS: Record<M4ChirpStatus, string> = {
     unknown: "gyrocoreM4ChirpUnknown",
 };
 
+const SEGMENT_KINDS: SegmentKind[] = [
+    "stick",
+    "flight_no_stick_input",
+    "flight_self_level",
+    "chirp",
+    "chirp_guard",
+    "flight_transition",
+    "armed_low_throttle",
+    "ground_or_disarmed",
+    "invalid",
+];
+
 const m4 = useM4FlightMetricsStore();
+
+/** FF blocked because CHIRP could not be kept out (not when CHIRP rows were isolated). */
+function chirpBlocksFf(log: M4LogReport): boolean {
+    return log.result ? log.result.feedforward.chirpRejectedForStickFf : log.chirp.status !== "no_chirp";
+}
 const busy = computed(() => m4.state === "importing" || m4.state === "analyzing");
 
 function fmt(v: number | null | undefined, digits: number): string {

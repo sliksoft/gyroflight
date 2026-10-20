@@ -34,6 +34,8 @@
 
 import { ComplexFFT } from "./fft";
 import { AIR65_EXTERNAL_BLOCKERS } from "./betaflight_open_loop";
+import { welchPowerSpectrum } from "./spectral_analysis";
+import type { SampleRange } from "./m4_segmentation";
 
 export type AxisName = "roll" | "pitch" | "yaw";
 export const AXIS_NAMES: AxisName[] = ["roll", "pitch", "yaw"];
@@ -73,6 +75,20 @@ export interface FlightMetricsInput {
     /** Optional feedforward debug / axisF when present. */
     axisF?: [ArrayLike<number> | null, ArrayLike<number> | null, ArrayLike<number> | null];
     meta?: FlightMetricsMeta;
+    /**
+     * M4.2 segmentation. When present, FF / D read only `stick`, the gyro
+     * spectrum only `spectrum`, eRPM only `flight`; nothing bridges two ranges.
+     * Absent: legacy whole-log behaviour.
+     */
+    segments?: FlightMetricsSegments;
+}
+
+export interface FlightMetricsSegments {
+    flight: SampleRange[];
+    stick: SampleRange[];
+    spectrum: SampleRange[];
+    /** The caller verified every stick range is outside CHIRP (+ guard band). */
+    stickChirpFree: boolean;
 }
 
 export interface MetricField<T> {
@@ -98,7 +114,13 @@ export interface FeedforwardAnalysis {
     advice: AdviceKind;
     reliability: Reliability;
     reason: string;
+    /** FF blocked because CHIRP could not be separated from stick data. */
     chirpRejectedForStickFf: boolean;
+    /** CHIRP samples were present in the log and kept out of the FF input. */
+    chirpSamplesExcluded: boolean;
+    stickSource: "whole_log" | "isolated_segments";
+    stickSegmentCount: number;
+    stickDurationS: number;
     missingStickSignals: boolean;
     axes: AxisTrackingMetrics[];
     aggregate: {
@@ -142,7 +164,25 @@ export interface DTermEffectivenessAnalysis {
 
 export interface SpectralPeak {
     frequencyHz: number;
+    /** Legacy: |FFT|/N. Segmented: RMS amplitude in the peak bin (sqrt(PSD x bin width)). */
     amplitude: number;
+    /** Segmented only: peak PSD over the local median (±25 Hz), dB. */
+    prominenceDb?: number;
+}
+
+export interface SpectrumMeasurement {
+    source: "segments" | "last_2048_samples";
+    rangeCount: number;
+    usedRangeCount: number;
+    /** Ranges shorter than one Welch segment (not zero-padded, not used). */
+    shortRangesSkipped: number;
+    durationS: number;
+    welchSegments: number;
+    segmentSize: number;
+    binWidthHz: number;
+    reliability: Reliability;
+    /** Peaks are listed only at medium/high reliability. */
+    peaksReported: boolean;
 }
 
 export interface AxisFilterSpectrum {
@@ -157,6 +197,7 @@ export interface FilterAnalysis {
     gyroLpf: {
         configuredHz: { lpf1?: number; lpf2?: number };
         spectrum: AxisFilterSpectrum[];
+        measurement: SpectrumMeasurement;
         advice: AdviceKind;
         notes: string[];
     };
@@ -470,9 +511,55 @@ function analyzeAxisTracking(
     };
 }
 
+/** Shortest total CHIRP-free stick time for FF measurement_only (M4.2 gate). */
+export const MIN_STICK_FF_S = 3;
+
+function rangeSlice(x: ArrayLike<number>, r: SampleRange): Float64Array {
+    return asArray(x).subarray(r.start, r.end);
+}
+
+/** Sample-weighted combination of per-segment tracking metrics (no segment bridges another). */
+function combineTracking(axis: AxisName, parts: AxisTrackingMetrics[]): AxisTrackingMetrics {
+    const total = parts.reduce((s, p) => s + p.sampleCount, 0);
+    const wmean = (get: (p: AxisTrackingMetrics) => number | null) => {
+        let sum = 0;
+        let w = 0;
+        for (const p of parts) {
+            const v = get(p);
+            if (v === null || !Number.isFinite(v)) continue;
+            sum += v * p.sampleCount;
+            w += p.sampleCount;
+        }
+        return w ? sum / w : null;
+    };
+    const limitations = [...new Set(parts.flatMap((p) => p.meanAbsError.limitations))];
+    limitations.push(`combined_over_${parts.length}_segments`);
+    const rel: Reliability = total >= 2000 ? "high" : total >= 200 ? "medium" : total >= 8 ? "low" : "insufficient";
+    const small = wmean((p) => p.smallStickMeanAbsError.value);
+    const large = wmean((p) => p.largeStickMeanAbsError.value);
+    return {
+        axis,
+        meanAbsError: field(wmean((p) => p.meanAbsError.value) ?? 0, rel, "setpoint_minus_gyro", limitations),
+        trackingScore: field(wmean((p) => p.trackingScore.value) ?? 50, rel, "normalized_mean_abs_error", limitations),
+        latencyMs: field(wmean((p) => p.latencyMs.value) ?? 0, rel, "cross_correlation_lag", limitations),
+        leadingEdgeOvershoot: field(
+            wmean((p) => p.leadingEdgeOvershoot.value) ?? 0,
+            rel,
+            "setpoint_edge_excess",
+            limitations,
+        ),
+        smallStickMeanAbsError: field(small, small === null ? "insufficient" : rel, "percentile_split", limitations),
+        largeStickMeanAbsError: field(large, large === null ? "insufficient" : rel, "percentile_split", limitations),
+        sampleCount: total,
+    };
+}
+
 function analyzeFeedforward(input: FlightMetricsInput, fs: number): FeedforwardAnalysis {
     const meta = input.meta ?? {};
-    const chirpRejected = meta.chirpActive === true || meta.debugMode === 96;
+    const seg = input.segments;
+    const chirpInLog = meta.chirpActive === true || meta.debugMode === 96;
+    const isolated = seg !== undefined && seg.stickChirpFree;
+    const chirpRejected = chirpInLog && !isolated;
     const sp0 = input.setpoint[0];
     const missingStick = !sp0 || sp0.length < 8;
 
@@ -480,14 +567,23 @@ function analyzeFeedforward(input: FlightMetricsInput, fs: number): FeedforwardA
         "optimal_ff_not_computed_without_sufficient_stick_evidence",
         "ff_uses_rc_route_not_chirp_injection_path",
     ];
+    const base = {
+        chirpSamplesExcluded: false,
+        stickSource: "whole_log" as const,
+        stickSegmentCount: 0,
+        stickDurationS: 0,
+        optimalFeedforward: null,
+    };
 
     if (chirpRejected) {
         informationalNotes.push("chirp_log_not_suitable_for_stick_feedforward_tuning");
-        // Still report tracking vs chirp setpoint as diagnostic measurement_only.
-        const axes = AXIS_NAMES.map((ax, i) =>
-            analyzeAxisTracking(ax, input.setpoint[i], input.gyro[i], fs),
-        );
+        // Legacy: tracking vs chirp setpoint as a whole-log diagnostic. With segmentation
+        // requested but unverifiable, no whole-log numbers (they would include ground time).
+        const axes = seg
+            ? []
+            : AXIS_NAMES.map((ax, i) => analyzeAxisTracking(ax, input.setpoint[i], input.gyro[i], fs));
         return {
+            ...base,
             executable: true,
             advice: "blocked",
             reliability: "insufficient",
@@ -496,13 +592,13 @@ function analyzeFeedforward(input: FlightMetricsInput, fs: number): FeedforwardA
             missingStickSignals: missingStick,
             axes,
             aggregate: null,
-            optimalFeedforward: null,
             informationalNotes,
         };
     }
 
     if (missingStick) {
         return {
+            ...base,
             executable: false,
             advice: "blocked",
             reliability: "insufficient",
@@ -511,7 +607,71 @@ function analyzeFeedforward(input: FlightMetricsInput, fs: number): FeedforwardA
             missingStickSignals: true,
             axes: [],
             aggregate: null,
-            optimalFeedforward: null,
+            informationalNotes,
+        };
+    }
+
+    if (seg) {
+        const segBase = { ...base, stickSource: "isolated_segments" as const, chirpSamplesExcluded: chirpInLog };
+        if (!seg.stickChirpFree) {
+            return {
+                ...segBase,
+                executable: false,
+                advice: "blocked",
+                reliability: "insufficient",
+                reason: "stick_segments_not_verified_chirp_free",
+                chirpRejectedForStickFf: chirpInLog,
+                missingStickSignals: false,
+                axes: [],
+                aggregate: null,
+                informationalNotes,
+            };
+        }
+        const stick = seg.stick.filter((r) => r.end - r.start >= 8);
+        const total = stick.reduce((s, r) => s + (r.end - r.start), 0);
+        const durationS = total / fs;
+        if (!stick.length) {
+            informationalNotes.push("no_chirp_free_acro_stick_segment");
+            return {
+                ...segBase,
+                executable: false,
+                advice: "blocked",
+                reliability: "insufficient",
+                reason: "no_valid_stick_segments",
+                chirpRejectedForStickFf: false,
+                missingStickSignals: false,
+                axes: [],
+                aggregate: null,
+                informationalNotes,
+            };
+        }
+        const axes = AXIS_NAMES.map((ax, i) =>
+            combineTracking(
+                ax,
+                stick.map((r) =>
+                    analyzeAxisTracking(ax, rangeSlice(input.setpoint[i], r), rangeSlice(input.gyro[i], r), fs),
+                ),
+            ),
+        );
+        const enough = durationS >= MIN_STICK_FF_S && axes.every((a) => a.sampleCount >= 200);
+        if (!enough) informationalNotes.push(`stick_time_below_${MIN_STICK_FF_S}s`);
+        return {
+            ...segBase,
+            stickSegmentCount: stick.length,
+            stickDurationS: durationS,
+            executable: true,
+            advice: enough ? "measurement_only" : "not_advised",
+            reliability: enough ? "medium" : "low",
+            reason: enough ? "tracking_metrics_computed_no_optimal_ff" : "insufficient_stick_segment_duration_for_ff",
+            chirpRejectedForStickFf: false,
+            missingStickSignals: false,
+            axes,
+            aggregate: {
+                meanError: mean(axes.map((a) => a.meanAbsError.value)),
+                latencyMs: mean(axes.map((a) => a.latencyMs.value)),
+                overshoot: mean(axes.map((a) => a.leadingEdgeOvershoot.value)),
+                score: mean(axes.map((a) => a.trackingScore.value)),
+            },
             informationalNotes,
         };
     }
@@ -525,6 +685,7 @@ function analyzeFeedforward(input: FlightMetricsInput, fs: number): FeedforwardA
     };
     const enoughManeuvers = axes.every((a) => a.sampleCount >= 200);
     return {
+        ...base,
         executable: true,
         advice: enoughManeuvers ? "measurement_only" : "not_advised",
         reliability: enoughManeuvers ? "medium" : "low",
@@ -535,7 +696,6 @@ function analyzeFeedforward(input: FlightMetricsInput, fs: number): FeedforwardA
         missingStickSignals: false,
         axes,
         aggregate: agg,
-        optimalFeedforward: null,
         informationalNotes,
     };
 }
@@ -586,6 +746,8 @@ function analyzeAxisD(
     dIn: ArrayLike<number> | null | undefined,
     motors: ArrayLike<number>[] | undefined,
     timeUs: ArrayLike<number>,
+    /** M4.2: windows only inside these ranges, each window clipped to its range. */
+    ranges?: SampleRange[],
 ): AxisDEffectiveness {
     const sp = finiteCopy(spIn);
     const gy = finiteCopy(gyIn);
@@ -625,7 +787,18 @@ function analyzeAxisD(
 
     const dtMs = dtMsFromTime(timeUs);
     const dtS = Math.max(1e-4, dtMs / 1000);
-    const windows = windowCandidates(sp, dtMs);
+    const windowLimit = new Map<number, number>();
+    const windows = ranges
+        ? ranges.flatMap((r) => {
+              const lim = Math.min(n, r.end);
+              if (lim - r.start < 80) return [];
+              return windowCandidates(sp.subarray(r.start, lim), dtMs).map((i) => {
+                  windowLimit.set(i + r.start, lim);
+                  return i + r.start;
+              });
+          })
+        : windowCandidates(sp, dtMs);
+    if (ranges && !ranges.length) limitations.push("no_stick_segments");
     if (!windows.length) {
         return {
             axis,
@@ -690,7 +863,7 @@ function analyzeAxisD(
     const evalWin = Math.max(45, Math.round(165 / Math.max(dtMs, 0.25)));
 
     for (const idx of windows) {
-        const end = Math.min(n, idx + evalWin);
+        const end = Math.min(windowLimit.get(idx) ?? n, idx + evalWin);
         if (end - idx < 24) continue;
         const dSeg = dSig.subarray(idx, end);
         const eSeg = errRate.subarray(idx, end);
@@ -807,6 +980,7 @@ function analyzeDTerm(input: FlightMetricsInput): DTermEffectivenessAnalysis {
             input.dTerm?.[i],
             input.motors,
             input.timeUs,
+            input.segments?.stick,
         ),
     );
     const anyUsable = axes.some((a) => a.usableWindowCount > 0 && a.confidence > 0);
@@ -896,13 +1070,185 @@ function axisSpectrum(series: ArrayLike<number>, fs: number): AxisFilterSpectrum
     };
 }
 
+/** M4.2 spectrum gates. */
+export const SPECTRUM_GATES = {
+    peakMinHz: 30,
+    peakMaxHz: 1000,
+    /** Local-median window half-width and excluded centre half-width for prominence. */
+    prominenceWindowHz: 25,
+    prominenceExcludeBins: 3,
+    minProminenceDb: 6,
+    /** medium: >= 8 Welch segments and >= 1.5 s; high: >= 32 segments and >= 4 s. */
+    mediumSegments: 8,
+    mediumSeconds: 1.5,
+    highSegments: 32,
+    highSeconds: 4,
+} as const;
+
+/** 2-4 Hz bins at any log rate: largest power of two <= fs/2, clamped to 256..8192. */
+export function spectrumSegmentSize(fs: number): number {
+    let p = nextPow2(Math.max(1, Math.round(fs / 2)));
+    if (p > fs / 2) p >>= 1;
+    return Math.max(256, Math.min(8192, p));
+}
+
+function emptySpectrum(axis: AxisName): AxisFilterSpectrum {
+    return {
+        axis,
+        noiseFloorDb: null,
+        bandEnergy: { low: 0, resonance: 0, high: 0 },
+        peaks: [],
+        reliability: "insufficient",
+    };
+}
+
+/**
+ * Welch PSD of one axis over the given ranges. Each range is detrended and
+ * windowed on its own (no range bridges another); the per-range averages are
+ * combined weighted by Welch segment count, which equals one Welch average
+ * over all segments of all ranges.
+ */
+function segmentedAxisSpectrum(
+    axis: AxisName,
+    series: ArrayLike<number>,
+    ranges: SampleRange[],
+    fs: number,
+): { spectrum: AxisFilterSpectrum; measurement: SpectrumMeasurement } {
+    const G = SPECTRUM_GATES;
+    const segmentSize = spectrumSegmentSize(fs);
+    const measurement: SpectrumMeasurement = {
+        source: "segments",
+        rangeCount: ranges.length,
+        usedRangeCount: 0,
+        shortRangesSkipped: 0,
+        durationS: 0,
+        welchSegments: 0,
+        segmentSize,
+        binWidthHz: fs > 0 ? fs / segmentSize : 0,
+        reliability: "insufficient",
+        peaksReported: false,
+    };
+    if (!(fs > 0)) return { spectrum: emptySpectrum(axis), measurement };
+    const x = finiteCopy(series);
+    let sum: Float64Array | null = null;
+    let freqs: Float64Array | null = null;
+    for (const r of ranges) {
+        const end = Math.min(r.end, x.length);
+        const len = end - r.start;
+        if (len < segmentSize) {
+            measurement.shortRangesSkipped++;
+            continue;
+        }
+        const part = x.slice(r.start, end);
+        const m = mean(part);
+        for (let i = 0; i < part.length; i++) part[i] -= m;
+        const ps = welchPowerSpectrum(part, fs, segmentSize, 0.5);
+        if (!ps) {
+            measurement.shortRangesSkipped++;
+            continue;
+        }
+        sum ??= new Float64Array(ps.psd.length);
+        freqs ??= ps.frequencies;
+        for (let k = 0; k < ps.psd.length; k++) sum[k] += ps.psd[k] * ps.numSegments;
+        measurement.welchSegments += ps.numSegments;
+        measurement.usedRangeCount++;
+        measurement.durationS += len / fs;
+    }
+    if (!sum || !freqs || !measurement.welchSegments) return { spectrum: emptySpectrum(axis), measurement };
+    const psd = sum.map((v) => v / measurement.welchSegments);
+    const df = measurement.binWidthHz;
+    const reliability: Reliability =
+        measurement.welchSegments >= G.highSegments && measurement.durationS >= G.highSeconds
+            ? "high"
+            : measurement.welchSegments >= G.mediumSegments && measurement.durationS >= G.mediumSeconds
+              ? "medium"
+              : "low";
+    measurement.reliability = reliability;
+
+    const fMax = Math.min(G.peakMaxHz, 0.45 * fs);
+    let low = 0;
+    let res = 0;
+    let high = 0;
+    const inBand: number[] = [];
+    for (let k = 1; k < psd.length; k++) {
+        const f = freqs[k];
+        const e = psd[k] * df;
+        if (f < 80) low += e;
+        else if (f < 300) res += e;
+        else high += e;
+        if (f >= G.peakMinHz && f <= fMax) inBand.push(psd[k]);
+    }
+    inBand.sort((a, b) => a - b);
+    const floor = inBand.length ? inBand[Math.floor(0.2 * (inBand.length - 1))] : 0;
+
+    const peaks: SpectralPeak[] = [];
+    const half = Math.max(1, Math.round(G.prominenceWindowHz / df));
+    for (let k = 2; k < psd.length - 2; k++) {
+        const f = freqs[k];
+        if (f < G.peakMinHz || f > fMax) continue;
+        const v = psd[k];
+        if (!(v > psd[k - 1] && v > psd[k + 1] && v >= psd[k - 2] && v >= psd[k + 2])) continue;
+        const local: number[] = [];
+        for (let j = Math.max(1, k - half); j <= Math.min(psd.length - 1, k + half); j++) {
+            if (Math.abs(j - k) > G.prominenceExcludeBins) local.push(psd[j]);
+        }
+        if (!local.length) continue;
+        local.sort((a, b) => a - b);
+        const med = local[Math.floor(local.length / 2)];
+        const prominenceDb = med > 0 ? 10 * Math.log10(v / med) : Infinity;
+        if (prominenceDb >= G.minProminenceDb) {
+            peaks.push({ frequencyHz: f, amplitude: Math.sqrt(v * df), prominenceDb });
+        }
+    }
+    peaks.sort((a, b) => b.amplitude - a.amplitude);
+    const report = reliability === "medium" || reliability === "high";
+    measurement.peaksReported = report;
+    return {
+        spectrum: {
+            axis,
+            noiseFloorDb: floor > 0 ? 10 * Math.log10(floor) : null,
+            bandEnergy: { low, resonance: res, high },
+            peaks: report ? peaks.slice(0, 5) : [],
+            reliability,
+        },
+        measurement,
+    };
+}
+
 function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
     const meta = input.meta ?? {};
-    const spectra = AXIS_NAMES.map((ax, i) => {
-        const s = axisSpectrum(input.gyro[i], fs);
-        s.axis = ax;
-        return s;
-    });
+    const seg = input.segments;
+    let spectra: AxisFilterSpectrum[];
+    let measurement: SpectrumMeasurement;
+    const gyroNotes = ["gyro_spectrum_from_logged_gyroADC", "no_automatic_lpf_cli"];
+    if (seg) {
+        const per = AXIS_NAMES.map((ax, i) => segmentedAxisSpectrum(ax, input.gyro[i], seg.spectrum, fs));
+        spectra = per.map((p) => p.spectrum);
+        measurement = per[0].measurement;
+        gyroNotes.push("welch_over_chirp_free_flight_segments");
+        if (!measurement.welchSegments) gyroNotes.push("no_flight_segment_long_enough_for_fft");
+        else if (!measurement.peaksReported) gyroNotes.push("peaks_withheld_low_spectral_reliability");
+    } else {
+        spectra = AXIS_NAMES.map((ax, i) => {
+            const s = axisSpectrum(input.gyro[i], fs);
+            s.axis = ax;
+            return s;
+        });
+        const N = Math.min(2048, nextPow2(Math.min(input.gyro[0].length, 2048)));
+        measurement = {
+            source: "last_2048_samples",
+            rangeCount: 1,
+            usedRangeCount: 1,
+            shortRangesSkipped: 0,
+            durationS: fs > 0 ? N / fs : 0,
+            welchSegments: 1,
+            segmentSize: N,
+            binWidthHz: fs > 0 ? fs / N : 0,
+            reliability: spectra[0].reliability,
+            peaksReported: true,
+        };
+        gyroNotes.push("unsegmented_last_samples_may_include_ground_time");
+    }
 
     const erpmPresent = Boolean(input.erpm && input.erpm.some((e) => e && e.length > 16));
     let estimatedFundamentalHz: number | null = null;
@@ -913,11 +1259,15 @@ function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
         // Betaflight logs eRPM / 100; mechanical Hz = logged * 100 / 60 / (poles / 2),
         // the Blackbox Viewer's own conversion (flightlog_fields_presenter.js).
         const vals: number[] = [];
+        // With segmentation only inferred-flight samples count (ground idle excluded).
+        const ranges = seg ? seg.flight : [{ start: 0, end: Number.MAX_SAFE_INTEGER }];
         for (const ch of input.erpm) {
             if (!ch) continue;
-            for (let i = 0; i < ch.length; i++) {
-                const v = Number(ch[i]);
-                if (Number.isFinite(v) && v > 0) vals.push((v * 200) / 60 / poles);
+            for (const r of ranges) {
+                for (let i = r.start; i < Math.min(r.end, ch.length); i++) {
+                    const v = Number(ch[i]);
+                    if (Number.isFinite(v) && v > 0) vals.push((v * 200) / 60 / poles);
+                }
             }
         }
         if (vals.length >= 32) {
@@ -948,8 +1298,9 @@ function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
         gyroLpf: {
             configuredHz: { lpf1: meta.gyroLpf1Hz, lpf2: meta.gyroLpf2Hz },
             spectrum: spectra,
-            advice: "measurement_only",
-            notes: ["gyro_spectrum_from_logged_gyroADCf", "no_automatic_lpf_cli"],
+            measurement,
+            advice: measurement.welchSegments ? "measurement_only" : "not_advised",
+            notes: gyroNotes,
         },
         dtermLpf: {
             configuredHz: { lpf1: meta.dtermLpf1Hz, lpf2: meta.dtermLpf2Hz },
@@ -966,9 +1317,16 @@ function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
             advice: erpmPresent ? "measurement_only" : "blocked",
             notes: !erpmPresent
                 ? ["erpm_missing"]
-                : polesKnown
-                  ? ["rpm_fundamental_is_median_mechanical_hz_over_spinning_samples", "harmonic_schedule_not_measured"]
-                  : ["motor_poles_missing_no_hz_estimate"],
+                : !polesKnown
+                  ? ["motor_poles_missing_no_hz_estimate"]
+                  : estimatedFundamentalHz === null
+                    ? ["too_few_spinning_flight_samples_for_hz_estimate"]
+                    : [
+                          seg
+                              ? "rpm_fundamental_is_median_mechanical_hz_over_flight_segments"
+                              : "rpm_fundamental_is_median_mechanical_hz_over_spinning_samples",
+                          "harmonic_schedule_not_measured",
+                      ],
             scheduleUnknown: true,
         },
         dynamicNotch: {
@@ -1000,12 +1358,14 @@ export function extractOptionalBlackboxChannels(
         getMaxTime(): number;
         getChunksInTimeRange(min: number, max: number): { frames: ArrayLike<number | null | undefined>[] }[];
     },
-    opts: { alignWith?: readonly string[] } = {},
+    opts: { alignWith?: readonly string[]; fields?: readonly string[] } = {},
 ): {
     present: { axisD: boolean; erpm: boolean; motors: boolean; axisDAxes: [boolean, boolean, boolean] };
     dTerm: [Float64Array, Float64Array, Float64Array] | null;
     erpm: Float64Array[] | null;
     motors: Float64Array[] | null;
+    /** `fields` by requested name; null when absent. Non-finite values become NaN. */
+    named: Record<string, Float64Array | null>;
 } {
     const names = log.getMainFieldNames();
     const lower = names.map((n) => n.trim().toLowerCase());
@@ -1026,12 +1386,16 @@ export function extractOptionalBlackboxChannels(
     const hasErpm = erpmIdx.some((i) => i !== undefined);
     const hasMotors = motorIdx.length > 0;
     const axisDAxes = dIdx.map((i) => i !== undefined) as [boolean, boolean, boolean];
-    if (timeIdx === undefined || (!hasD && !hasErpm && !hasMotors)) {
+    const namedIdx = (opts.fields ?? []).map((f) => [f, find(f)] as const);
+    const named: Record<string, Float64Array | null> = Object.fromEntries(namedIdx.map(([f]) => [f, null]));
+    const hasNamed = namedIdx.some(([, i]) => i !== undefined);
+    if (timeIdx === undefined || (!hasD && !hasErpm && !hasMotors && !hasNamed)) {
         return {
             present: { axisD: hasD, erpm: hasErpm, motors: hasMotors, axisDAxes },
             dTerm: null,
             erpm: null,
             motors: null,
+            named,
         };
     }
     const min = log.getMinTime();
@@ -1048,12 +1412,19 @@ export function extractOptionalBlackboxChannels(
         : null;
     const erpmCols = hasErpm ? erpmIdx.map((i) => (i !== undefined ? new Float64Array(total) : null)) : null;
     const motorCols = hasMotors ? motorIdx.map(() => new Float64Array(total)) : null;
+    const namedCols = namedIdx.map(([, i]) => (i !== undefined ? new Float64Array(total) : null));
     const finite = (v: unknown) => typeof v === "number" && Number.isFinite(v);
     let n = 0;
     for (const chunk of chunks) {
         for (const frame of chunk.frames) {
             if (!finite(frame[timeIdx])) continue;
             if (alignIdx.some((i) => !finite(frame[i]))) continue;
+            for (let k = 0; k < namedCols.length; k++) {
+                const col = namedCols[k];
+                if (!col) continue;
+                const v = frame[namedIdx[k][1]!];
+                col[n] = typeof v === "number" && Number.isFinite(v) ? v : Number.NaN;
+            }
             if (motorCols) {
                 for (let m = 0; m < motorCols.length; m++) {
                     const v = frame[motorIdx[m]];
@@ -1087,6 +1458,7 @@ export function extractOptionalBlackboxChannels(
         dTerm: dTerm ? [cut(dTerm[0]), cut(dTerm[1]), cut(dTerm[2])] : null,
         erpm: erpmCols ? erpmCols.flatMap((c) => (c ? [cut(c)] : [])) : null,
         motors: motorCols ? motorCols.map(cut) : null,
+        named: Object.fromEntries(namedIdx.map(([f], k) => [f, namedCols[k] ? cut(namedCols[k]!) : null])),
     };
 }
 

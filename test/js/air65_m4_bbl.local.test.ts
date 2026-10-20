@@ -20,7 +20,7 @@
  */
 
 /*
- * LOCAL ONLY: the two private AIR65 CHIRP flights through BBL -> FlightLog -> M4.
+ * LOCAL ONLY: the two private AIR65 CHIRP flights through BBL -> FlightLog -> M4 (M4.2 segmentation).
  * Skipped unless GYROFLIGHT_AIR65_BBL18 / GYROFLIGHT_AIR65_BBL19 point at the
  * files. GYROFLIGHT_QUAL_OUT receives a JSON summary per file.
  */
@@ -55,6 +55,30 @@ function summary(r: M4BblReport) {
             missingSignals: l.signals.missing,
             missingHeaders: l.signals.missingHeaders,
             warnings: l.warnings,
+            sampleRate: l.sampleRate && {
+                header: l.sampleRate.headerRateHz,
+                timestamp: l.sampleRate.timestampRateHz,
+                analysis: l.sampleRate.analysisRateHz,
+                source: l.sampleRate.analysisRateSource,
+            },
+            timestampSpacing: l.timestampSpacing,
+            segmentation: l.segmentation && {
+                status: l.segmentation.status,
+                reasons: l.segmentation.reasons,
+                durationsS: l.segmentation.durationsS,
+                counts: {
+                    flight: l.segmentation.flight.length,
+                    chirp: l.segmentation.chirp.length,
+                    stick: l.segmentation.stick.length,
+                    spectrum: l.segmentation.spectrum.length,
+                },
+                segments: l.segmentation.segments.map((s) => ({
+                    kind: s.kind,
+                    t0: Math.round(((s.startTimeUs - l.segmentation!.segments[0].startTimeUs) / 1e6) * 100) / 100,
+                    durationS: Math.round(s.durationS * 100) / 100,
+                    reasons: s.reasons,
+                })),
+            },
             sampleRateHz: l.result?.sampleRateHz,
             meta: l.result?.meta,
             feedforward: l.result && {
@@ -62,6 +86,10 @@ function summary(r: M4BblReport) {
                 advice: l.result.feedforward.advice,
                 reason: l.result.feedforward.reason,
                 chirpRejectedForStickFf: l.result.feedforward.chirpRejectedForStickFf,
+                chirpSamplesExcluded: l.result.feedforward.chirpSamplesExcluded,
+                stickSource: l.result.feedforward.stickSource,
+                stickSegmentCount: l.result.feedforward.stickSegmentCount,
+                stickDurationS: l.result.feedforward.stickDurationS,
                 optimalFeedforward: l.result.feedforward.optimalFeedforward,
                 axes: l.result.feedforward.axes.map((a) => ({
                     axis: a.axis,
@@ -83,12 +111,21 @@ function summary(r: M4BblReport) {
             },
             filters: l.result && {
                 gyroLpf: l.result.filters.gyroLpf.configuredHz,
+                spectrumMeasurement: l.result.filters.gyroLpf.measurement,
+                gyroNotes: l.result.filters.gyroLpf.notes,
                 gyroPeaks: l.result.filters.gyroLpf.spectrum.map((s) => ({
                     axis: s.axis,
-                    peaksHz: s.peaks.slice(0, 3).map((p) => Math.round(p.frequencyHz * 10) / 10),
+                    reliability: s.reliability,
+                    noiseFloorDb: s.noiseFloorDb,
+                    peaks: s.peaks.map((p) => ({
+                        hz: Math.round(p.frequencyHz * 10) / 10,
+                        prominenceDb: p.prominenceDb === undefined ? null : Math.round(p.prominenceDb * 10) / 10,
+                        amplitude: Math.round(p.amplitude * 1000) / 1000,
+                    })),
                 })),
                 dtermLpf: l.result.filters.dtermLpf.configuredHz,
                 rpm: {
+                    notes: l.result.filters.rpmFilter.notes,
                     advice: l.result.filters.rpmFilter.advice,
                     erpmPresent: l.result.filters.rpmFilter.erpmPresent,
                     estimatedFundamentalHz: l.result.filters.rpmFilter.estimatedFundamentalHz,
@@ -104,7 +141,7 @@ function summary(r: M4BblReport) {
 for (const [key, path] of Object.entries(FILES)) {
     const present = Boolean(path && existsSync(path));
     describe.skipIf(!present)(`AIR65 ${key}: BBL -> FlightLog -> M4 (local only)`, () => {
-        it("analyses every embedded log with CHIRP blocking stick FF and no apply path", () => {
+        it("segments flight, isolates CHIRP from stick FF, Welch over flight, no apply path", () => {
             const bytes = new Uint8Array(readFileSync(path!));
             const report = analyzeM4BblFile(bytes, basename(path!));
             writeReport(`air65_m4_${key}`, summary(report));
@@ -120,15 +157,33 @@ for (const [key, path] of Object.entries(FILES)) {
             expect(analysed.length).toBeGreaterThan(0);
             for (const log of analysed) {
                 const r = log.result!;
+                const seg = log.segmentation!;
                 expect(log.chirp.status).toBe("chirp");
                 expect(r.meta.chirpActive).toBe(true);
-                expect(r.feedforward.chirpRejectedForStickFf).toBe(true);
+                // M4.2: segmented; ground time (armed idle at the start) outside every analysis range.
+                expect(seg.status).toBe("segmented");
+                expect(seg.durationsS.armed_low_throttle).toBeGreaterThan(1);
+                const firstFlight = seg.segments.find((s) => s.kind !== "invalid" && s.kind !== "armed_low_throttle");
+                for (const range of [...seg.flight, ...seg.spectrum, ...seg.stick]) {
+                    expect(range.start).toBeGreaterThanOrEqual(firstFlight!.start);
+                }
+                // CHIRP samples never reach stick FF; AIR65 flies ANGLE, so no acro stick segment exists.
+                expect(seg.chirp.length).toBeGreaterThan(0);
+                expect(seg.stick).toEqual([]);
+                expect(r.feedforward.stickSource).toBe("isolated_segments");
+                expect(r.feedforward.chirpSamplesExcluded).toBe(true);
                 expect(r.feedforward.advice).toBe("blocked");
+                expect(r.feedforward.reason).toBe("no_valid_stick_segments");
                 expect(r.feedforward.optimalFeedforward).toBeNull();
+                // Full-flight Welch spectrum over CHIRP-free flight.
+                expect(r.filters.gyroLpf.measurement.source).toBe("segments");
+                expect(r.filters.gyroLpf.measurement.durationS).toBeGreaterThan(2);
+                expect(["medium", "high"]).toContain(r.filters.gyroLpf.measurement.reliability);
                 expect(r.m2m3Safety.applyAllowed).toBe(false);
                 expect(r.m2m3Safety.recommendationsEnabled).toBe(false);
                 expect(r.m2m3Safety.independentPidValidation).toBe("BLOCKED");
                 expect(r.filters.dynamicNotch.advice).toBe("blocked");
+                expect(r.filters.rpmFilter.scheduleUnknown).toBe(true);
                 // AIR65 logs no yaw D: reported missing, not filled with zeros.
                 expect(log.signals.missing).toContain("axisD[2]");
                 expect(r.dTerm.axes[2].signalSource).toBe("missing");
