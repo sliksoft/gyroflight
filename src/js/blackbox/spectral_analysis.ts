@@ -125,6 +125,50 @@ export function welchTransferFunction(
     return buildTransferFunction(spectra, sampleRate, segmentSize, numBins, numSegments);
 }
 
+/** Welch auto-spectrum of one contiguous signal (same windowing / accumulation as welchTransferFunction). */
+export interface PowerSpectrum {
+    frequencies: Float64Array;
+    /** One-sided power spectral density, signal units² / Hz, averaged over `numSegments`. */
+    psd: Float64Array;
+    numSegments: number;
+    segmentSize: number;
+}
+
+/**
+ * Welch power spectral density with a Hanning window. Returns null when the
+ * signal is shorter than one segment: no zero-padding, no partial segment.
+ */
+export function welchPowerSpectrum(
+    signal: Signal,
+    sampleRate: number,
+    segmentSize = 1024,
+    overlap = 0.5,
+): PowerSpectrum | null {
+    const N = signal.length;
+    if (N < segmentSize || segmentSize < 4 || !(sampleRate > 0)) {
+        return null;
+    }
+    const hopSize = Math.max(1, Math.round(segmentSize * (1 - overlap)));
+    const numSegments = Math.floor((N - segmentSize) / hopSize) + 1;
+    const numBins = Math.floor(segmentSize / 2) + 1;
+    const window = hanningWindow(segmentSize);
+    const { Sxx } = accumulateSpectra(signal, signal, window, segmentSize, numSegments, numBins, hopSize);
+    let wSq = 0;
+    for (const w of window) {
+        wSq += w * w;
+    }
+    const scale = 1 / (sampleRate * wSq * numSegments);
+    const frequencies = new Float64Array(numBins);
+    const psd = new Float64Array(numBins);
+    for (let k = 0; k < numBins; k++) {
+        frequencies[k] = (k * sampleRate) / segmentSize;
+        // One-sided: double every bin except DC and Nyquist.
+        const oneSided = k === 0 || (segmentSize % 2 === 0 && k === numBins - 1) ? 1 : 2;
+        psd[k] = Sxx[k] * scale * oneSided;
+    }
+    return { frequencies, psd, numSegments, segmentSize };
+}
+
 function clampSegmentSize(segmentSize: number, N: number) {
     if (segmentSize <= N) {
         return segmentSize;

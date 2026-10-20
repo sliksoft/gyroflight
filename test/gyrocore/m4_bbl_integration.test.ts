@@ -83,10 +83,11 @@ const FILTER_HEADERS = [
 const D_FIELDS = ["axisD[0]", "axisD[1]", "axisD[2]"];
 const ERPM_FIELDS = ["eRPM[0]", "eRPM[1]", "eRPM[2]", "eRPM[3]"];
 const LOGGED_ERPM = 1500; // Betaflight logs eRPM / 100
+const ARM_FLAG = 1; // flightModeFlags bit 0 = ARM box
 
-/** 4 s of 1 kHz stick flight: square-wave sticks, first-order gyro lag, a D-like signal. */
-function stickFrames(withD: boolean[] = [true, true, true], withErpm = true): SyntheticFrame[] {
-    const n = 4000;
+/** 6 s of 1 kHz armed acro stick flight: square-wave sticks, first-order gyro lag, a D-like signal. */
+function stickFrames(withD: boolean[] = [true, true, true], withErpm = true, rateScale = 1): SyntheticFrame[] {
+    const n = 6000;
     const frames: SyntheticFrame[] = [];
     let y = 0;
     let prevY = 0;
@@ -100,10 +101,11 @@ function stickFrames(withD: boolean[] = [true, true, true], withErpm = true): Sy
         if (withErpm) {
             extra.push(LOGGED_ERPM, LOGGED_ERPM + 10, LOGGED_ERPM - 10, LOGGED_ERPM + 20);
         }
+        extra.push(1400); // rcCommand[3]: throttle up for the whole log
         frames.push({
             time: 1_000_000 + i * 1000,
-            setpoint: [sp, sp, Math.round(sp / 3)],
-            gyro: [Math.round(y), Math.round(y), Math.round(y / 3)],
+            setpoint: [sp * rateScale, sp * rateScale, Math.round(sp / 3) * rateScale],
+            gyro: [Math.round(y) * rateScale, Math.round(y) * rateScale, Math.round(y / 3) * rateScale],
             debug: [0, 0, 0, 0],
             motors: [1200, 1210, 1190, 1205],
             extra,
@@ -113,17 +115,24 @@ function stickFrames(withD: boolean[] = [true, true, true], withErpm = true): Sy
 }
 
 function stickLog(
-    o: { withD?: boolean[]; withErpm?: boolean; headers?: string[]; flags?: number; debugMode?: number } = {},
+    o: {
+        withD?: boolean[];
+        withErpm?: boolean;
+        headers?: string[];
+        flags?: number;
+        debugMode?: number;
+        rateScale?: number;
+    } = {},
 ) {
     const withD = o.withD ?? [true, true, true];
     const withErpm = o.withErpm ?? true;
-    return encodeLog(stickFrames(withD, withErpm), {
+    return encodeLog(stickFrames(withD, withErpm, o.rateScale ?? 1), {
         iInterval: 32,
-        flightModeFlags: o.flags ?? 0,
+        flightModeFlags: o.flags ?? ARM_FLAG,
         debugMode: o.debugMode ?? 0,
         motorCount: 4,
         extraHeaders: o.headers ?? FILTER_HEADERS,
-        extraFields: [...D_FIELDS.filter((_, i) => withD[i]), ...(withErpm ? ERPM_FIELDS : [])],
+        extraFields: [...D_FIELDS.filter((_, i) => withD[i]), ...(withErpm ? ERPM_FIELDS : []), "rcCommand[3]"],
     });
 }
 
@@ -142,7 +151,9 @@ describe("normal BBL import", () => {
         expect(report.logCount).toBe(1);
         const log = report.logs[0];
         expect(log.error).toBeNull();
-        expect(log.frameCount).toBe(4000);
+        expect(log.frameCount).toBe(6000);
+        // 0.5 s take-off and landing trims; the rest is one acro stick segment.
+        expect(log.segmentation!.stick).toEqual([{ start: 500, end: 5500 }]);
         expect(log.chirp.status).toBe("no_chirp");
         expect(log.signals.missing).toEqual(["axisF[0]", "axisF[1]", "axisF[2]"]);
         expect(log.signals.missingHeaders).toEqual([]);
@@ -182,13 +193,14 @@ describe("normal BBL import", () => {
     });
 
     it("scales setpoint and gyro by the high-resolution factor like CHIRP extraction", () => {
+        // High resolution logs deg/s x 10: the same flight logged x10 must measure the same.
         const lo = analyzeM4BblFile(stickLog(), "a.bbl").logs[0].result!;
-        const hi = analyzeM4BblFile(stickLog({ headers: [...FILTER_HEADERS, "blackbox_high_resolution:1"] }), "b.bbl")
-            .logs[0].result!;
-        expect(hi.feedforward.axes[0].meanAbsError.value).toBeCloseTo(
-            lo.feedforward.axes[0].meanAbsError.value / 10,
-            6,
-        );
+        const hi = analyzeM4BblFile(
+            stickLog({ headers: [...FILTER_HEADERS, "blackbox_high_resolution:1"], rateScale: 10 }),
+            "b.bbl",
+        ).logs[0].result!;
+        expect(hi.feedforward.stickSegmentCount).toBe(1);
+        expect(hi.feedforward.axes[0].meanAbsError.value).toBeCloseTo(lo.feedforward.axes[0].meanAbsError.value, 6);
     });
 });
 
@@ -205,17 +217,27 @@ describe("CHIRP detection keeps stick feedforward blocked", () => {
     });
 
     it("treats a BOXCHIRP flag as CHIRP even when debug_mode is not DEBUG_CHIRP", () => {
-        const log = analyzeM4BblFile(stickLog({ flags: CHIRP_FLAG, debugMode: 0 }), "f.bbl").logs[0];
+        const log = analyzeM4BblFile(stickLog({ flags: ARM_FLAG | CHIRP_FLAG, debugMode: 0 }), "f.bbl").logs[0];
         expect(log.chirp.status).toBe("chirp");
         expect(log.chirp.evidence).toContain("boxchirp_flag_seen");
-        expect(log.result!.feedforward.chirpRejectedForStickFf).toBe(true);
+        // Every flight row is CHIRP: nothing is left for stick FF.
+        expect(log.segmentation!.chirp.length).toBeGreaterThan(0);
+        expect(log.segmentation!.stick).toEqual([]);
+        expect(log.result!.feedforward.advice).toBe("blocked");
+        expect(log.result!.feedforward.reason).toBe("no_valid_stick_segments");
+        expect(log.result!.feedforward.chirpSamplesExcluded).toBe(true);
+        expect(log.result!.feedforward.axes).toEqual([]);
     });
 
-    it("treats debug_mode CHIRP without any BOXCHIRP flag as CHIRP (fail-closed)", () => {
+    it("debug_mode CHIRP without any BOXCHIRP row: log flagged CHIRP, stick rows still isolated", () => {
+        // The generator runs only while BOXCHIRP is active; per-row flags prove it never did.
         const log = analyzeM4BblFile(stickLog({ debugMode: 96 }), "d.bbl").logs[0];
         expect(log.chirp.status).toBe("chirp");
         expect(log.chirp.evidence).toEqual(["debug_mode_chirp"]);
-        expect(log.result!.feedforward.advice).toBe("blocked");
+        expect(log.segmentation!.chirp).toEqual([]);
+        expect(log.result!.feedforward.stickSource).toBe("isolated_segments");
+        expect(log.result!.feedforward.chirpRejectedForStickFf).toBe(false);
+        expect(log.result!.feedforward.advice).toBe("measurement_only");
     });
 
     it("judges every embedded log on its own", () => {
@@ -299,7 +321,7 @@ describe("invalid BBL", () => {
         const log = report.logs[0];
         expect(log.error !== null || log.result !== null).toBe(true);
         if (log.result) {
-            expect(log.frameCount).toBeLessThan(4000);
+            expect(log.frameCount).toBeLessThan(6000);
         }
     });
 });

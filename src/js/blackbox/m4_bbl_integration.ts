@@ -27,7 +27,9 @@
  *     -> chirpFramesFromFlightLog            (time, setpoint, gyroADC, debug, flags)
  *     -> extractOptionalBlackboxChannels     (axisD, eRPM, motor; row-aligned)
  *     -> extractChirp + BOXCHIRP flag scan   (CHIRP detection, fail-closed)
- *     -> analyzeM4FlightMetrics              (measurement only)
+ *     -> resolveChirpSampleRate / analyzeTimestampSpacing (rate, gaps)
+ *     -> segmentFlightLog                    (M4.2: flight / CHIRP / stick / excluded)
+ *     -> analyzeM4FlightMetrics              (measurement only, per segment set)
  *
  * No decoding or analysis math lives here. A log whose CHIRP state cannot be
  * ruled out is analysed as CHIRP, so stick feedforward stays blocked for it.
@@ -54,8 +56,16 @@ import {
     normalizeFieldKey,
     parseLoggedHeaders,
     readHeaderPairs,
+    sampleRateInputs,
     validateChirpDebugMode,
 } from "@/gyrocore/chirp/headers";
+import {
+    analyzeTimestampSpacing,
+    resolveChirpSampleRate,
+    type SampleRateEvidence,
+    type TimestampSpacing,
+} from "@/gyrocore/chirp/sampleRate";
+import { segmentFlightLog, type Segmentation } from "./m4_segmentation";
 import {
     analyzeM4FlightMetrics,
     extractOptionalBlackboxChannels,
@@ -92,6 +102,10 @@ export interface M4LogReport {
     chirp: M4ChirpDetection;
     signals: M4SignalReport;
     warnings: string[];
+    /** Header vs timestamp rate (gyrocore); `analysisRateHz` is what M4 used. */
+    sampleRate: (SampleRateEvidence & { analysisRateHz: number | null; analysisRateSource: string }) | null;
+    timestampSpacing: TimestampSpacing | null;
+    segmentation: Segmentation | null;
     result: M4FlightAnalysisResult | null;
 }
 
@@ -123,6 +137,8 @@ const OPTIONAL_SIGNALS = [
     "motor[2]",
     "motor[3]",
     "flightModeFlags",
+    "rcCommand[3]",
+    "failsafePhase",
 ] as const;
 
 /** Header keys (normalised) M4 echoes, first match wins; older firmware names last. */
@@ -266,6 +282,9 @@ function analyzeLog(
         chirp: emptyChirp(),
         signals: { present: [], missing: [], missingHeaders: [] },
         warnings: [],
+        sampleRate: null,
+        timestampSpacing: null,
+        segmentation: null,
         result: null,
     };
     const start = index.getLogBeginOffset(logIndex);
@@ -323,24 +342,71 @@ function analyzeLog(
         return report;
     }
 
-    const optional = extractOptionalBlackboxChannels(flightLog, { alignWith: ["time", ...REQUIRED_FIELDS] });
+    const optional = extractOptionalBlackboxChannels(flightLog, {
+        alignWith: ["time", ...REQUIRED_FIELDS],
+        fields: ["rcCommand[3]", "failsafePhase"],
+    });
     const aligned = (cols: Float64Array[] | null) =>
         cols && cols.every((c) => c.length === frames.timeUs.length) ? cols : null;
+    const alignedOne = (col: Float64Array | null) => (col && col.length === frames.timeUs.length ? col : null);
     const dCols = aligned(optional.dTerm);
     const erpm = aligned(optional.erpm);
     const motors = aligned(optional.motors);
-    if ((optional.dTerm && !dCols) || (optional.erpm && !erpm) || (optional.motors && !motors)) {
+    const throttle = alignedOne(optional.named["rcCommand[3]"]);
+    const failsafe = alignedOne(optional.named["failsafePhase"]);
+    if (
+        (optional.dTerm && !dCols) ||
+        (optional.erpm && !erpm) ||
+        (optional.motors && !motors) ||
+        (optional.named["rcCommand[3]"] && !throttle) ||
+        (optional.named["failsafePhase"] && !failsafe)
+    ) {
         report.warnings.push("optional_channels_not_row_aligned_dropped");
     }
 
+    // Sample rate: the FC-clock timestamp rate when spacing is uniform (it is what the
+    // samples really are); otherwise gyrocore's header/timestamp resolution.
+    const spacing = analyzeTimestampSpacing(frames.timeUs);
+    const rate = resolveChirpSampleRate(sampleRateInputs(headers), frames.timeUs);
+    let analysisRateHz: number | null = null;
+    let analysisRateSource = "none";
+    if (spacing.uniform && rate.timestampRateHz) {
+        analysisRateHz = rate.timestampRateHz;
+        analysisRateSource = "timestamps_uniform";
+    } else if (rate.usable && rate.effectiveRateHz) {
+        analysisRateHz = rate.effectiveRateHz;
+        analysisRateSource = `gyrocore_${rate.source}`;
+    }
+    report.sampleRate = { ...rate, analysisRateHz, analysisRateSource };
+    report.timestampSpacing = spacing;
+    if (analysisRateHz === null) {
+        report.error = "sample_rate_unusable";
+        return report;
+    }
+    if (spacing.gapCount) {
+        report.warnings.push(`timestamp_gaps:${spacing.gapCount}`);
+    }
+
     const scale = highResolutionScale(headers);
+    const setpoint: [Float64Array, Float64Array, Float64Array] = [
+        scaled(frames.setpoint[0], scale),
+        scaled(frames.setpoint[1], scale),
+        scaled(frames.setpoint[2], scale),
+    ];
+    const segmentation = segmentFlightLog({
+        timeUs: frames.timeUs,
+        flightModeFlags: frames.flightModeFlags,
+        throttle,
+        failsafePhase: failsafe,
+        setpoint,
+        sampleRateHz: analysisRateHz,
+    });
+    report.segmentation = segmentation;
+    const segmented = segmentation.status === "segmented";
+
     const result = analyzeM4FlightMetrics({
         timeUs: frames.timeUs,
-        setpoint: [
-            scaled(frames.setpoint[0], scale),
-            scaled(frames.setpoint[1], scale),
-            scaled(frames.setpoint[2], scale),
-        ],
+        setpoint,
         gyro: [scaled(frames.gyroAdc[0], scale), scaled(frames.gyroAdc[1], scale), scaled(frames.gyroAdc[2], scale)],
         // An axis without its own axisD column is passed as absent, never as zeros.
         dTerm: dCols
@@ -352,11 +418,21 @@ function analyzeLog(
             : undefined,
         motors: motors ?? undefined,
         erpm: erpm ?? undefined,
+        // Unclassifiable: empty ranges, so FF / D / spectrum / eRPM all report insufficient data.
+        segments: segmented
+            ? {
+                  flight: segmentation.flight,
+                  stick: segmentation.stick,
+                  spectrum: segmentation.spectrum,
+                  stickChirpFree: true,
+              }
+            : { flight: [], stick: [], spectrum: [], stickChirpFree: false },
         meta: {
             ...filters.meta,
             firmwareVersion: headers.firmwareRevision ?? undefined,
             debugMode: report.debugMode ?? undefined,
             chirpActive: report.chirp.status !== "no_chirp",
+            sampleRateHz: analysisRateHz,
         },
     });
     report.result = result;
@@ -408,6 +484,9 @@ export function analyzeM4BblFile(
                 chirp: emptyChirp(),
                 signals: { present: [], missing: [], missingHeaders: [] },
                 warnings: [],
+                sampleRate: null,
+                timestampSpacing: null,
+                segmentation: null,
                 result: null,
             });
         }
