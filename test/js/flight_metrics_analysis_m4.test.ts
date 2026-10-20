@@ -179,6 +179,42 @@ describe("M4 optional channel helper", () => {
         expect(ch.present.erpm).toBe(false);
         expect(ch.dTerm).toBeNull();
         expect(ch.erpm).toBeNull();
+        expect(ch.motors).toBeNull();
+    });
+
+    it("skips the rows alignWith marks malformed, so columns stay row-aligned", () => {
+        const names = ["time", "setpoint[0]", "axisD[0]", "eRPM[0]", "motor[0]"];
+        const frames = [
+            [0, 1, 10, 100, 1000],
+            [1, null, 11, 101, 1001],
+            [2, 3, 12, 102, 1002],
+        ];
+        const log = {
+            getMainFieldNames: () => names,
+            getMinTime: () => 0,
+            getMaxTime: () => 2,
+            getChunksInTimeRange: () => [{ frames }],
+        };
+        const ch = extractOptionalBlackboxChannels(log, { alignWith: ["setpoint[0]"] });
+        expect(Array.from(ch.dTerm![0])).toEqual([10, 12]);
+        expect(Array.from(ch.erpm![0])).toEqual([100, 102]);
+        expect(Array.from(ch.motors![0])).toEqual([1000, 1002]);
+        expect(ch.present.axisDAxes).toEqual([true, false, false]);
+        expect(extractOptionalBlackboxChannels(log).dTerm![0].length).toBe(3);
+    });
+});
+
+describe("M4 RPM frequency from logged eRPM", () => {
+    it("uses the Viewer's eRPM/100 + motor_poles conversion, and none without motor_poles", () => {
+        const base = validStickFlight();
+        base.erpm = [makeSeries(base.timeUs.length, () => 1200)];
+        const without = analyzeM4FlightMetrics(base);
+        expect(without.filters.rpmFilter.estimatedFundamentalHz).toBeNull();
+        expect(without.filters.rpmFilter.notes).toContain("motor_poles_missing_no_hz_estimate");
+        base.meta = { ...base.meta, motorPoles: 14 };
+        const withPoles = analyzeM4FlightMetrics(base);
+        expect(withPoles.filters.rpmFilter.estimatedFundamentalHz).toBeCloseTo((1200 * 100) / 60 / 7, 6);
+        expect(withPoles.filters.rpmFilter.scheduleUnknown).toBe(true);
     });
 });
 
