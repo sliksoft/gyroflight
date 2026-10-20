@@ -26,19 +26,22 @@
  * pid_init.c). Not wired into recommendGains / phase-margin product path.
  *
  * Signal definitions (rate loop, sticks centred, CHIRP on):
- *   r_chirp  — amplitude * phaseComp(exc); exc is DEBUG_CHIRP debug[3]/1000
+ *   exc      — DEBUG_CHIRP debug[3]/1000 (raw excitation, before phaseComp)
+ *   r_chirp  — amplitude * phaseComp(exc); added to the rate setpoint in pid.c
  *   y        — gyroADCf (after gyro filters)
  *   e        — r_chirp - y
  *   u        — P + I + D + F   (motor command contribution before mixer)
  *
- *   C_reference(z) = u / r |_{y=0}   for the CHIRP injection path
- *                    = Ce(z) * H_phase(z)   (P+I on chirp; FF excluded)
- *   C_feedback(z)  = -u / y |_{r=0}
- *                    = Ce(z) + Cd(z)        (P+I on -y; D on filtered gyro)
- *   T_chirp(z)     = y / r_chirp           (measured)
+ * Blackbox logs the chirp-augmented setpoint, so measured T = y / r_chirp already
+ * includes phaseComp. For that T:
+ *   C_reference(z) = Ce(z)                 (P+I on shaped setpoint; FF excluded)
+ *   C_feedback(z)  = Ce(z) + Cd(z)         (P+I on -y; D on filtered gyro)
+ * Do NOT multiply C_reference by H_phase again — that would double-count phaseComp.
+ * H_phase is exposed separately as cExcitationShaping (exc → shaped r only).
+ *
  *   L_stability(z) = C_feedback * G
  *                  = C_feedback * T / (C_reference - T * C_feedback)
- *     (M2; not evaluated here)
+ *     (M2 / M3 plant path)
  *
  * Feedforward Kf uses getFeedforward() from the RC route in rc.c — it does
  * not see the CHIRP-added setpoint. C_reference for chirp therefore excludes F.
@@ -216,7 +219,8 @@ export interface ControllerFrf {
  *
  * y is defined as gyroADCf (after gyro LPFs). Ce acts on (r − y). Cd is the
  * D-term path on y (D-term LPFs + discrete derivative). Chirp phaseComp shapes
- * exc→r and is folded into cReference when lag/lead are set.
+ * exc→r only: it is returned as cExcitationShaping and is NOT folded into
+ * cReference. Measured Blackbox T already includes phaseComp in the setpoint.
  */
 export function evaluateControllerFrf(cfg: DigitalControllerConfig, freqHz: number): ControllerFrf {
     const { Kp, Ki, Kd, Kf } = pidCoefficients(cfg);
@@ -525,6 +529,21 @@ export function air65RollConfig(): DigitalControllerConfig {
         gyroDt: AIR65_BBL_CONTROLLER.gyroDt,
         pidDt: AIR65_BBL_CONTROLLER.pidDt,
         axis: AIR65_BBL_CONTROLLER.roll,
+        yawKiBoost: false,
+        gyroLpf1Hz: AIR65_BBL_CONTROLLER.gyroLpf1Hz,
+        gyroLpf2Hz: AIR65_BBL_CONTROLLER.gyroLpf2Hz,
+        dtermLpf1Hz: AIR65_BBL_CONTROLLER.dtermLpf1Hz,
+        dtermLpf2Hz: AIR65_BBL_CONTROLLER.dtermLpf2Hz,
+        chirpLagHz: AIR65_BBL_CONTROLLER.chirpLagHz,
+        chirpLeadHz: AIR65_BBL_CONTROLLER.chirpLeadHz,
+    };
+}
+
+export function air65PitchConfig(): DigitalControllerConfig {
+    return {
+        gyroDt: AIR65_BBL_CONTROLLER.gyroDt,
+        pidDt: AIR65_BBL_CONTROLLER.pidDt,
+        axis: AIR65_BBL_CONTROLLER.pitch,
         yawKiBoost: false,
         gyroLpf1Hz: AIR65_BBL_CONTROLLER.gyroLpf1Hz,
         gyroLpf2Hz: AIR65_BBL_CONTROLLER.gyroLpf2Hz,

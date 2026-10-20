@@ -20,16 +20,19 @@
  */
 
 /*
- * GF-1 M2: structure-aware open-loop / phase-margin reconstruction (offline).
+ * GF-1 M2 / M3: structure-aware open-loop / plant-fixed what-if (offline).
  *
  *   L(z) = C_feedback(z) · T(z) / (C_reference(z) − T(z) · C_feedback(z))
+ *   G(z) = T(z) / (C_reference(z) − T(z) · C_feedback(z))   (M3 plant extract)
+ *   T_candidate = (C_ref_c · G) / (1 + C_fb_c · G)           (M3 plant-fixed)
  *
  * T is the measured closed-loop FRF y/r from Welch on Blackbox setpoint→gyroADCf.
  * Blackbox setpoint already includes chirp phaseComp — do not fold H_phase into
  * C_reference again (C_reference = Ce from M1).
  *
  * Not wired into recommendGains / Apply. Product path stays NOT_VALIDATED until
- * a separate ack promotes a validated openLoopModel.
+ * a separate ack promotes a validated openLoopModel. Algebraic self-consistency
+ * of G↔T is NOT independent gain-change validation.
  */
 
 import type { TransferFunction } from "./spectral_analysis";
@@ -483,3 +486,414 @@ export const AIR65_EXTERNAL_BLOCKERS = [
     "dyn_notch_centres_unknown",
     "rpm_filter_schedule_unknown",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// GF-1 M3: plant extraction + plant-fixed what-if (offline; no Apply)
+// ---------------------------------------------------------------------------
+
+/** Distinct validation kinds — never conflate algebraic identity with flight proof. */
+export type PlantValidationKind =
+    | "ALGEBRAIC_CONSISTENCY"
+    | "CONTROLLER_PARITY"
+    | "CROSS_LOG_REPRODUCIBILITY"
+    | "INDEPENDENT_GAIN_CHANGE_VALIDATION";
+
+export type PlantValidationVerdict = "PASS" | "PARTIAL" | "FAIL" | "BLOCKED" | "UNTESTED";
+
+export interface PlantValidationReport {
+    ALGEBRAIC_CONSISTENCY: PlantValidationVerdict;
+    /** M1 discrete BF model used; not full stock parity (notches / TPA / …). */
+    CONTROLLER_PARITY: PlantValidationVerdict;
+    /** Set by caller when two logs are compared; default UNTESTED. */
+    CROSS_LOG_REPRODUCIBILITY: PlantValidationVerdict;
+    /** Stays BLOCKED until a real CHIRP with known changed PIDs is compared. */
+    INDEPENDENT_GAIN_CHANGE_VALIDATION: "BLOCKED";
+}
+
+export type PlantBinStatus =
+    | "ok"
+    | "low_coherence"
+    | "below_min_hz"
+    | "above_max_hz"
+    | "singular_denominator"
+    | "non_finite_T";
+
+export interface PlantBin {
+    frequencyHz: number;
+    status: PlantBinStatus;
+    coherence: number;
+    /** Measured closed-loop T when status is evaluable. */
+    T: Complex | null;
+    /** Plant G = T / (C_ref − T·C_fb) when status === "ok". */
+    G: Complex | null;
+    /** |C_ref − T·C_fb| / max(|C_ref|, |T·C_fb|, ε). */
+    denomRel: number;
+    /** |T − closedLoopFromPlant(G, C_ref, C_fb)| when status === "ok". */
+    algebraicAbsErr: number;
+}
+
+export interface SampleRateChecks {
+    gyroDt: number;
+    pidDt: number;
+    ok: boolean;
+    reasons: string[];
+}
+
+export interface IdentifiedPlant {
+    bins: PlantBin[];
+    okCount: number;
+    measurementCfg: DigitalControllerConfig;
+    missingFilterInfo: readonly string[];
+    sampleRateChecks: SampleRateChecks;
+    algebraicMeanAbsErr: number;
+    algebraicRmsAbsErr: number;
+    validation: PlantValidationReport;
+    /** Always false — M3 never enables automatic PID recommendations. */
+    recommendationsEnabled: false;
+    /** Always false — Apply stays locked. */
+    applyAllowed: false;
+}
+
+export interface ExtractPlantOptions {
+    coherenceMin?: number;
+    minHz?: number;
+    maxHz?: number;
+    denomRelMin?: number;
+    /**
+     * Explicit unknown / time-varying filter schedules (dyn_notch, rpm, …).
+     * Defaults to AIR65_EXTERNAL_BLOCKERS. Pass [] only when schedules are known.
+     */
+    missingFilterInfo?: readonly string[];
+    /**
+     * Optional CONTROLLER_PARITY override. Default PARTIAL (M1 discrete model,
+     * not independently flight-proven).
+     */
+    controllerParity?: PlantValidationVerdict;
+    crossLogReproducibility?: PlantValidationVerdict;
+}
+
+function checkSampleRates(cfg: DigitalControllerConfig): SampleRateChecks {
+    const reasons: string[] = [];
+    if (!(cfg.gyroDt > 0) || !Number.isFinite(cfg.gyroDt)) {
+        reasons.push("gyroDt_invalid");
+    }
+    if (!(cfg.pidDt > 0) || !Number.isFinite(cfg.pidDt)) {
+        reasons.push("pidDt_invalid");
+    }
+    if (cfg.gyroDt > 0 && cfg.pidDt > 0 && cfg.pidDt + 1e-12 < cfg.gyroDt) {
+        reasons.push("pidDt_faster_than_gyroDt");
+    }
+    // AIR65 / common BF: PID rate is an integer multiple of gyro period.
+    if (cfg.gyroDt > 0 && cfg.pidDt > 0) {
+        const ratio = cfg.pidDt / cfg.gyroDt;
+        if (Math.abs(ratio - Math.round(ratio)) > 1e-6) {
+            reasons.push("pidDt_not_integer_multiple_of_gyroDt");
+        }
+    }
+    return { gyroDt: cfg.gyroDt, pidDt: cfg.pidDt, ok: reasons.length === 0, reasons };
+}
+
+function meanAbs(xs: number[]): number {
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : Number.NaN;
+}
+
+function rmsAbs(xs: number[]): number {
+    return xs.length ? Math.sqrt(xs.reduce((a, b) => a + b * b, 0) / xs.length) : Number.NaN;
+}
+
+/**
+ * Extract nonparametric plant G from measured closed-loop T and the M1 discrete
+ * controller. Uses Ce / (Ce+Cd) only — never a continuous ideal PID fallback.
+ *
+ * Algebraic residual ≈ 0 on ok bins proves consistency of the invert, not
+ * independent predictive accuracy.
+ */
+export function extractPlantFromClosedLoop(
+    tf: TransferFunction,
+    cfg: DigitalControllerConfig,
+    opts: ExtractPlantOptions = {},
+): IdentifiedPlant {
+    const coherenceMin = opts.coherenceMin ?? OPEN_LOOP_COHERENCE_MIN;
+    const minHz = opts.minHz ?? MIN_OPEN_LOOP_HZ;
+    const maxHz = opts.maxHz ?? Number.POSITIVE_INFINITY;
+    const denomRelMin = opts.denomRelMin ?? DENOMINATOR_REL_MIN;
+    const missingFilterInfo = opts.missingFilterInfo ?? AIR65_EXTERNAL_BLOCKERS;
+    const sampleRateChecks = checkSampleRates(cfg);
+
+    const n = tf.frequencies.length;
+    const bins: PlantBin[] = new Array(n);
+    const algErrs: number[] = [];
+
+    for (let k = 0; k < n; k++) {
+        const frequencyHz = tf.frequencies[k];
+        const coherence = tf.coherence[k];
+        const base: PlantBin = {
+            frequencyHz,
+            status: "ok",
+            coherence,
+            T: null,
+            G: null,
+            denomRel: Number.NaN,
+            algebraicAbsErr: Number.NaN,
+        };
+
+        if (frequencyHz < minHz) {
+            base.status = "below_min_hz";
+            bins[k] = base;
+            continue;
+        }
+        if (!(frequencyHz <= maxHz)) {
+            base.status = "above_max_hz";
+            bins[k] = base;
+            continue;
+        }
+        if (!(coherence >= coherenceMin)) {
+            base.status = "low_coherence";
+            bins[k] = base;
+            continue;
+        }
+
+        const T = tAt(tf, k);
+        base.T = T;
+        if (!Number.isFinite(T.re) || !Number.isFinite(T.im)) {
+            base.status = "non_finite_T";
+            bins[k] = base;
+            continue;
+        }
+
+        // Discrete M1 controller only (no continuous-PID branch).
+        const frf = evaluateControllerFrf(cfg, frequencyHz);
+        const Cref = frf.cReference;
+        const Cfb = frf.cFeedback;
+        const TCfb = cmul(T, Cfb);
+        const denom = csub(Cref, TCfb);
+        const denomMag = cmag(denom);
+        const scale = Math.max(cmag(Cref), cmag(TCfb), 1e-12);
+        const denomRel = denomMag / scale;
+        base.denomRel = denomRel;
+
+        if (!(denomRel >= denomRelMin)) {
+            base.status = "singular_denominator";
+            bins[k] = base;
+            continue;
+        }
+
+        const G = cdiv(T, denom);
+        const Trecon = closedLoopFromPlant(G, Cref, Cfb);
+        const algebraicAbsErr = cmag(csub(T, Trecon));
+        base.G = G;
+        base.algebraicAbsErr = algebraicAbsErr;
+        bins[k] = base;
+        algErrs.push(algebraicAbsErr);
+    }
+
+    const algebraicMeanAbsErr = meanAbs(algErrs);
+    const algebraicRmsAbsErr = rmsAbs(algErrs);
+    const okCount = algErrs.length;
+
+    let algebraic: PlantValidationVerdict = "FAIL";
+    if (okCount === 0) algebraic = "FAIL";
+    else if (algebraicMeanAbsErr < 1e-9) algebraic = "PASS";
+    else if (algebraicMeanAbsErr < 1e-3) algebraic = "PARTIAL";
+    else algebraic = "FAIL";
+
+    return {
+        bins,
+        okCount,
+        measurementCfg: cfg,
+        missingFilterInfo,
+        sampleRateChecks,
+        algebraicMeanAbsErr,
+        algebraicRmsAbsErr,
+        validation: {
+            ALGEBRAIC_CONSISTENCY: algebraic,
+            CONTROLLER_PARITY: opts.controllerParity ?? "PARTIAL",
+            CROSS_LOG_REPRODUCIBILITY: opts.crossLogReproducibility ?? "UNTESTED",
+            INDEPENDENT_GAIN_CHANGE_VALIDATION: "BLOCKED",
+        },
+        recommendationsEnabled: false,
+        applyAllowed: false,
+    };
+}
+
+export interface PlantWhatIfBin {
+    frequencyHz: number;
+    status: PlantBinStatus;
+    coherence: number;
+    T_measured: Complex | null;
+    G: Complex | null;
+    T_current: Complex | null;
+    T_candidate: Complex | null;
+    /** |T_measured − T_current| (algebraic identity when currentCfg matches extract). */
+    currentAbsErr: number;
+    /** |T_candidate − T_current| magnitude delta (not a validation metric). */
+    candidateDeltaMag: number;
+}
+
+export interface PlantWhatIfResult {
+    plant: IdentifiedPlant;
+    currentCfg: DigitalControllerConfig;
+    candidateCfg: DigitalControllerConfig;
+    bins: PlantWhatIfBin[];
+    okCount: number;
+    /** Diagnostic PM from plant-fixed predicted T — still subject to M2 blockers. */
+    currentPhaseMargin: StructureAwarePhaseMargin;
+    candidatePhaseMargin: StructureAwarePhaseMargin;
+    validation: PlantValidationReport;
+    limitations: string[];
+    recommendationsEnabled: false;
+    applyAllowed: false;
+}
+
+export interface PlantWhatIfOptions {
+    externalBlockReasons?: string[];
+    maxHz?: number;
+}
+
+function predictedTfFromPlant(
+    plant: IdentifiedPlant,
+    cfg: DigitalControllerConfig,
+    maxHz: number,
+): TransferFunction {
+    const ok = plant.bins.filter((b) => b.status === "ok" && b.G && b.frequencyHz <= maxHz);
+    // Leading DC pad so reconstructStabilityLoop startIndex / minHz gating works.
+    const n = ok.length + 1;
+    const frequencies = new Float64Array(n);
+    const magnitude = new Float64Array(n);
+    const phase = new Float64Array(n);
+    const coherence = new Float64Array(n);
+    const hReal = new Float64Array(n);
+    const hImag = new Float64Array(n);
+    frequencies[0] = 0;
+    hReal[0] = 1;
+    hImag[0] = 0;
+    magnitude[0] = 0;
+    phase[0] = 0;
+    coherence[0] = 1;
+    for (let i = 0; i < ok.length; i++) {
+        const b = ok[i];
+        const frf = evaluateControllerFrf(cfg, b.frequencyHz);
+        const T = closedLoopFromPlant(b.G!, frf.cReference, frf.cFeedback);
+        const k = i + 1;
+        frequencies[k] = b.frequencyHz;
+        hReal[k] = T.re;
+        hImag[k] = T.im;
+        magnitude[k] = 20 * Math.log10(Math.max(cmag(T), 1e-15));
+        phase[k] = cphaseDeg(T);
+        coherence[k] = b.coherence;
+    }
+    return { frequencies, magnitude, phase, coherence, hReal, hImag, numSegments: 32 };
+}
+
+/**
+ * Hold identified plant G fixed; predict closed-loop T for current and candidate
+ * discrete controllers (P/I/D only — FF/filters unchanged by caller).
+ *
+ * Does not enable recommendations or Apply. Independent gain-change validation
+ * remains BLOCKED.
+ */
+export function plantFixedWhatIf(
+    plant: IdentifiedPlant,
+    currentCfg: DigitalControllerConfig,
+    candidateCfg: DigitalControllerConfig,
+    opts: PlantWhatIfOptions = {},
+): PlantWhatIfResult {
+    const maxHz = opts.maxHz ?? Number.POSITIVE_INFINITY;
+    const external = [...(opts.externalBlockReasons ?? plant.missingFilterInfo)];
+
+    const bins: PlantWhatIfBin[] = plant.bins.map((b) => {
+        if (b.status !== "ok" || !b.G || b.frequencyHz > maxHz) {
+            return {
+                frequencyHz: b.frequencyHz,
+                status: b.status === "ok" && b.frequencyHz > maxHz ? "above_max_hz" : b.status,
+                coherence: b.coherence,
+                T_measured: b.T,
+                G: b.G,
+                T_current: null,
+                T_candidate: null,
+                currentAbsErr: Number.NaN,
+                candidateDeltaMag: Number.NaN,
+            };
+        }
+        const cur = evaluateControllerFrf(currentCfg, b.frequencyHz);
+        const cand = evaluateControllerFrf(candidateCfg, b.frequencyHz);
+        const T_current = closedLoopFromPlant(b.G, cur.cReference, cur.cFeedback);
+        const T_candidate = closedLoopFromPlant(b.G, cand.cReference, cand.cFeedback);
+        return {
+            frequencyHz: b.frequencyHz,
+            status: "ok",
+            coherence: b.coherence,
+            T_measured: b.T,
+            G: b.G,
+            T_current,
+            T_candidate,
+            currentAbsErr: b.T ? cmag(csub(b.T, T_current)) : Number.NaN,
+            candidateDeltaMag: cmag(csub(T_candidate, T_current)),
+        };
+    });
+
+    const okCount = bins.filter((b) => b.status === "ok").length;
+    const currentTf = predictedTfFromPlant(plant, currentCfg, maxHz);
+    const candidateTf = predictedTfFromPlant(plant, candidateCfg, maxHz);
+
+    const currentPhaseMargin = evaluateStructureAwarePhaseMargin(currentTf, currentCfg, {
+        externalBlockReasons: external,
+    });
+    const candidatePhaseMargin = evaluateStructureAwarePhaseMargin(candidateTf, candidateCfg, {
+        externalBlockReasons: external,
+    });
+
+    const limitations = [
+        "INDEPENDENT_GAIN_CHANGE_VALIDATION=BLOCKED",
+        "algebraic_T_recon_is_not_predictive_proof",
+        "feedforward_and_filters_unchanged_in_this_phase",
+        ...plant.missingFilterInfo,
+        ...(!plant.sampleRateChecks.ok ? plant.sampleRateChecks.reasons : []),
+    ];
+
+    return {
+        plant,
+        currentCfg,
+        candidateCfg,
+        bins,
+        okCount,
+        currentPhaseMargin,
+        candidatePhaseMargin,
+        validation: {
+            ...plant.validation,
+            INDEPENDENT_GAIN_CHANGE_VALIDATION: "BLOCKED",
+        },
+        limitations,
+        recommendationsEnabled: false,
+        applyAllowed: false,
+    };
+}
+
+/**
+ * Compare two identified plants on shared ok frequencies (cross-log reproducibility).
+ * Does not lift INDEPENDENT_GAIN_CHANGE_VALIDATION.
+ */
+export function assessCrossLogPlantReproducibility(
+    a: IdentifiedPlant,
+    b: IdentifiedPlant,
+    opts: { maxMeanAbsGRel?: number } = {},
+): { status: PlantValidationVerdict; meanAbsGRel: number; n: number } {
+    const maxMean = opts.maxMeanAbsGRel ?? 0.35;
+    const mapB = new Map<number, PlantBin>();
+    for (const bin of b.bins) {
+        if (bin.status === "ok" && bin.G) mapB.set(bin.frequencyHz, bin);
+    }
+    const rels: number[] = [];
+    for (const bin of a.bins) {
+        if (bin.status !== "ok" || !bin.G) continue;
+        const other = mapB.get(bin.frequencyHz);
+        if (!other?.G) continue;
+        const scale = Math.max(cmag(bin.G), cmag(other.G), 1e-12);
+        rels.push(cmag(csub(bin.G, other.G)) / scale);
+    }
+    const meanAbsGRel = meanAbs(rels);
+    if (rels.length < 4) return { status: "FAIL", meanAbsGRel, n: rels.length };
+    if (meanAbsGRel <= maxMean) return { status: "PASS", meanAbsGRel, n: rels.length };
+    if (meanAbsGRel <= maxMean * 2) return { status: "PARTIAL", meanAbsGRel, n: rels.length };
+    return { status: "FAIL", meanAbsGRel, n: rels.length };
+}
