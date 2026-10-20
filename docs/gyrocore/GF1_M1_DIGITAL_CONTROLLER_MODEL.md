@@ -47,6 +47,8 @@ u            = P + I + D + F_rc (+ S / spa; out of M1 scope)
 | `T_chirp(z)` | measured `y / r_chirp` from CHIRP (product Quality V2) |
 | `L_stability(z)` | `C_feedback · G` with `G = T / (C_reference − T·C_feedback)` — **M2** |
 
+Blackbox setpoint already includes `phaseComp`. **Do not** fold `H_phase` into `C_reference` when reconstructing `G`/`L` from measured `T` (that would double-count). `evaluateControllerFrf` returns `cExcitationShaping` separately.
+
 When `Cd = 0` and `C_reference = C_feedback`, this collapses to `L = T/(1−T)`. That identity is **not** valid for roll/pitch with D-on-gyro.
 
 ### CHIRP vs feedforward (verified in firmware)
