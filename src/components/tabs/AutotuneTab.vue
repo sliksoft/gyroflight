@@ -10,6 +10,9 @@
             <!-- Gyroflight: choose Flight A/B from a saved Tune Session (selection only, no tuning) -->
             <FlightAbSelector />
 
+            <!-- Gyroflight GF-1 M4.1: offline FF / D-term / filter measurement of any BBL (no Apply) -->
+            <M4FlightMetricsPanel />
+
             <!-- Analysis Results (visible after successful analysis) -->
             <template v-if="store.analysisState === 'done' && store.analysisResult">
                 <!-- Gyroflight: rejected measurements are plotted as diagnostics only -->
@@ -34,6 +37,7 @@ import ChirpQualificationPanel from "@/gyrocore/components/ChirpQualificationPan
 import DiagnosticOnlyBanner from "@/gyrocore/components/DiagnosticOnlyBanner.vue";
 import GlobalTunePanel from "@/gyrocore/components/GlobalTunePanel.vue";
 import FlightAbSelector from "@/gyrocore/components/FlightAbSelector.vue";
+import M4FlightMetricsPanel from "@/gyrocore/components/M4FlightMetricsPanel.vue";
 import { useAutotuneStore } from "@/stores/autotune";
 
 const store = useAutotuneStore();

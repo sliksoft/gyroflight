@@ -624,5 +624,39 @@
     "gyrocoreCfcNone": { "message": "none" },
     "gyrocoreCfcInterpretation": {
         "message": "Differences are facts, not verdicts: a lower magnitude or a higher coherence is not better by itself. Relative spectral power is not compared between Flights (it is not a calibrated PSD). No PID values are recommended here."
-    }
+    },
+    "gyrocoreM4Title": { "message": "Gyroflight M4 — feedforward, D-term and filters (measurement only)" },
+    "gyrocoreM4Intro": {
+        "message": "Open any blackbox log (.bbl) to measure stick tracking, D-term effectiveness and gyro / RPM / notch filter evidence. The file is decoded with the Blackbox Viewer parser, every embedded log is analysed separately, and missing signals are listed instead of being filled in."
+    },
+    "gyrocoreM4NoApply": {
+        "message": "Measurement only: no PID, feedforward or filter values are recommended, nothing is written to the flight controller, and Apply stays disabled."
+    },
+    "gyrocoreM4Open": { "message": "Open BBL for M4 analysis" },
+    "gyrocoreM4Analyzing": { "message": "Analysing…" },
+    "gyrocoreM4Error": { "message": "M4 analysis failed" },
+    "gyrocoreM4Log": { "message": "Log" },
+    "gyrocoreM4LogError": { "message": "Log not analysed" },
+    "gyrocoreM4ChirpDetected": { "message": "CHIRP" },
+    "gyrocoreM4ChirpNone": { "message": "NO CHIRP" },
+    "gyrocoreM4ChirpUnknown": { "message": "CHIRP UNKNOWN" },
+    "gyrocoreM4FfChirpBlocked": {
+        "message": "This log contains (or may contain) a CHIRP sweep: it is not used for stick feedforward evaluation. Tracking numbers below are diagnostics against the sweep setpoint only."
+    },
+    "gyrocoreM4MissingSignals": { "message": "Missing signals" },
+    "gyrocoreM4MissingHeaders": { "message": "Missing headers" },
+    "gyrocoreM4NoMissing": { "message": "All signals and filter headers read by M4 are present." },
+    "gyrocoreM4Warnings": { "message": "Warnings" },
+    "gyrocoreM4Feedforward": { "message": "Feedforward / stick tracking" },
+    "gyrocoreM4DTerm": { "message": "D-term effectiveness" },
+    "gyrocoreM4Filters": { "message": "Filters" },
+    "gyrocoreM4ColAxis": { "message": "Axis" },
+    "gyrocoreM4ColMeanError": { "message": "Mean |error| (°/s)" },
+    "gyrocoreM4ColTracking": { "message": "Tracking score" },
+    "gyrocoreM4ColLatency": { "message": "Latency (ms)" },
+    "gyrocoreM4ColOvershoot": { "message": "Overshoot (°/s)" },
+    "gyrocoreM4ColSource": { "message": "Signal" },
+    "gyrocoreM4ColVerdict": { "message": "Verdict" },
+    "gyrocoreM4ColWindows": { "message": "Usable windows" },
+    "gyrocoreM4ColReliability": { "message": "Reliability" }
 }

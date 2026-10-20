@@ -53,6 +53,8 @@ export interface FlightMetricsMeta {
     dtermLpf2Hz?: number;
     dynNotchCount?: number;
     rpmFilterHarmonics?: number;
+    /** `motor_poles` header; without it no RPM frequency is estimated. */
+    motorPoles?: number;
     /** Override sample rate when timeUs is unavailable / irregular. */
     sampleRateHz?: number;
     betaflightMajorMinor?: string;
@@ -776,7 +778,7 @@ function analyzeAxisD(
 
     return {
         axis,
-        applied: hasD,
+        applied: Boolean(hasD),
         signalSource,
         score,
         responseCorrelation: correlation,
@@ -905,14 +907,17 @@ function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
     const erpmPresent = Boolean(input.erpm && input.erpm.some((e) => e && e.length > 16));
     let estimatedFundamentalHz: number | null = null;
     const harmonicPeaksHz: number[] = [];
-    if (erpmPresent && input.erpm) {
-        // eRPM / 60 = electrical Hz; / pole-pairs unknown → report raw electrical estimate median
+    const poles = meta.motorPoles;
+    const polesKnown = typeof poles === "number" && Number.isFinite(poles) && poles >= 2;
+    if (erpmPresent && input.erpm && polesKnown) {
+        // Betaflight logs eRPM / 100; mechanical Hz = logged * 100 / 60 / (poles / 2),
+        // the Blackbox Viewer's own conversion (flightlog_fields_presenter.js).
         const vals: number[] = [];
         for (const ch of input.erpm) {
             if (!ch) continue;
             for (let i = 0; i < ch.length; i++) {
                 const v = Number(ch[i]);
-                if (Number.isFinite(v) && v > 100) vals.push(v / 60); // electrical Hz if eRPM
+                if (Number.isFinite(v) && v > 0) vals.push((v * 200) / 60 / poles);
             }
         }
         if (vals.length >= 32) {
@@ -959,9 +964,11 @@ function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
             estimatedFundamentalHz,
             harmonicPeaksHz,
             advice: erpmPresent ? "measurement_only" : "blocked",
-            notes: erpmPresent
-                ? ["erpm_fundamental_is_electrical_hz_estimate", "pole_pairs_unknown"]
-                : ["erpm_missing"],
+            notes: !erpmPresent
+                ? ["erpm_missing"]
+                : polesKnown
+                  ? ["rpm_fundamental_is_median_mechanical_hz_over_spinning_samples", "harmonic_schedule_not_measured"]
+                  : ["motor_poles_missing_no_hz_estimate"],
             scheduleUnknown: true,
         },
         dynamicNotch: {
@@ -979,18 +986,26 @@ function analyzeFilters(input: FlightMetricsInput, fs: number): FilterAnalysis {
 }
 
 /**
- * Optional blackbox channels (axisD / eRPM) not included in chirp frame extraction.
+ * Optional blackbox channels (axisD / eRPM / motor) not included in chirp frame extraction.
  * Same Viewer FlightLog chunk walk as chirp extraction; returns null series when absent.
+ *
+ * `alignWith`: field names whose non-finite values make chirpFramesFromFlightLog
+ * skip a row. Passing its REQUIRED_FIELDS skips the same rows here, so both
+ * column sets stay row-aligned on logs with malformed frames.
  */
-export function extractOptionalBlackboxChannels(log: {
-    getMainFieldNames(): string[];
-    getMinTime(): number;
-    getMaxTime(): number;
-    getChunksInTimeRange(min: number, max: number): { frames: ArrayLike<number | null | undefined>[] }[];
-}): {
-    present: { axisD: boolean; erpm: boolean };
+export function extractOptionalBlackboxChannels(
+    log: {
+        getMainFieldNames(): string[];
+        getMinTime(): number;
+        getMaxTime(): number;
+        getChunksInTimeRange(min: number, max: number): { frames: ArrayLike<number | null | undefined>[] }[];
+    },
+    opts: { alignWith?: readonly string[] } = {},
+): {
+    present: { axisD: boolean; erpm: boolean; motors: boolean; axisDAxes: [boolean, boolean, boolean] };
     dTerm: [Float64Array, Float64Array, Float64Array] | null;
     erpm: Float64Array[] | null;
+    motors: Float64Array[] | null;
 } {
     const names = log.getMainFieldNames();
     const lower = names.map((n) => n.trim().toLowerCase());
@@ -1002,11 +1017,22 @@ export function extractOptionalBlackboxChannels(log: {
     // AIR65 / many BF logs omit axisD[2] when yaw D = 0.
     const dIdx = [find("axisD[0]"), find("axisD[1]"), find("axisD[2]")];
     const erpmIdx = [0, 1, 2, 3].map((i) => find(`eRPM[${i}]`) ?? find(`erpm[${i}]`));
+    const motorIdx = Array.from({ length: 8 }, (_, i) => find(`motor[${i}]`)).filter(
+        (i): i is number => i !== undefined,
+    );
     const timeIdx = find("time");
+    const alignIdx = (opts.alignWith ?? []).map(find).filter((i): i is number => i !== undefined);
     const hasD = dIdx.some((i) => i !== undefined);
     const hasErpm = erpmIdx.some((i) => i !== undefined);
-    if (timeIdx === undefined || (!hasD && !hasErpm)) {
-        return { present: { axisD: hasD, erpm: hasErpm }, dTerm: null, erpm: null };
+    const hasMotors = motorIdx.length > 0;
+    const axisDAxes = dIdx.map((i) => i !== undefined) as [boolean, boolean, boolean];
+    if (timeIdx === undefined || (!hasD && !hasErpm && !hasMotors)) {
+        return {
+            present: { axisD: hasD, erpm: hasErpm, motors: hasMotors, axisDAxes },
+            dTerm: null,
+            erpm: null,
+            motors: null,
+        };
     }
     const min = log.getMinTime();
     const max = log.getMaxTime();
@@ -1021,11 +1047,19 @@ export function extractOptionalBlackboxChannels(log: {
           ]
         : null;
     const erpmCols = hasErpm ? erpmIdx.map((i) => (i !== undefined ? new Float64Array(total) : null)) : null;
+    const motorCols = hasMotors ? motorIdx.map(() => new Float64Array(total)) : null;
+    const finite = (v: unknown) => typeof v === "number" && Number.isFinite(v);
     let n = 0;
     for (const chunk of chunks) {
         for (const frame of chunk.frames) {
-            const t = frame[timeIdx];
-            if (typeof t !== "number" || !Number.isFinite(t)) continue;
+            if (!finite(frame[timeIdx])) continue;
+            if (alignIdx.some((i) => !finite(frame[i]))) continue;
+            if (motorCols) {
+                for (let m = 0; m < motorCols.length; m++) {
+                    const v = frame[motorIdx[m]];
+                    motorCols[m][n] = typeof v === "number" && Number.isFinite(v) ? v : 0;
+                }
+            }
             if (dTerm) {
                 for (let a = 0; a < 3; a++) {
                     if (dIdx[a] === undefined) {
@@ -1049,11 +1083,10 @@ export function extractOptionalBlackboxChannels(log: {
     }
     const cut = (a: Float64Array) => (n === total ? a : a.subarray(0, n));
     return {
-        present: { axisD: hasD, erpm: hasErpm },
+        present: { axisD: hasD, erpm: hasErpm, motors: hasMotors, axisDAxes },
         dTerm: dTerm ? [cut(dTerm[0]), cut(dTerm[1]), cut(dTerm[2])] : null,
-        erpm: erpmCols
-            ? (erpmCols.filter((c): c is Float64Array => c !== null).map(cut) as Float64Array[])
-            : null,
+        erpm: erpmCols ? erpmCols.flatMap((c) => (c ? [cut(c)] : [])) : null,
+        motors: motorCols ? motorCols.map(cut) : null,
     };
 }
 
