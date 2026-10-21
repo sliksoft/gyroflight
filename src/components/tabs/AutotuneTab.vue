@@ -23,6 +23,9 @@
                 <GlobalTunePanel />
                 <GainRecommendation />
             </template>
+
+            <!-- Gyroflight: analyze -> calculate -> compare -> apply -> verify -> restore -->
+            <TuneWorkflowPanel />
         </div>
     </BaseTab>
 </template>
@@ -38,6 +41,7 @@ import DiagnosticOnlyBanner from "@/gyrocore/components/DiagnosticOnlyBanner.vue
 import GlobalTunePanel from "@/gyrocore/components/GlobalTunePanel.vue";
 import FlightAbSelector from "@/gyrocore/components/FlightAbSelector.vue";
 import M4FlightMetricsPanel from "@/gyrocore/components/M4FlightMetricsPanel.vue";
+import TuneWorkflowPanel from "@/gyrocore/components/TuneWorkflowPanel.vue";
 import { useAutotuneStore } from "@/stores/autotune";
 
 const store = useAutotuneStore();

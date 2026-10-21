@@ -670,5 +670,81 @@
     },
     "gyrocoreM4Segments": { "message": "Flight segments (inferred from arm box + throttle; motor output is not used)" },
     "gyrocoreM4Unsegmented": { "message": "Flight segmentation not possible — no stick, spectrum or eRPM measurement" },
-    "gyrocoreM4Gaps": { "message": "timestamp gaps" }
+    "gyrocoreM4Gaps": { "message": "timestamp gaps" },
+    "gyroflightWorkflowTitle": { "message": "Tune workflow: analyze, calculate, compare, apply, verify, restore" },
+    "gyroflightWorkflowIntro": {
+        "message": "What the analysis produced for each part of the tune, what is still missing, and the exact change Apply would write. Nothing is written until you confirm the full change; every write is read back and only saved when it matches."
+    },
+    "gyroflightStepAnalyze": { "message": "Analyze" },
+    "gyroflightStepCalculate": { "message": "Calculate" },
+    "gyroflightStepCompare": { "message": "Compare" },
+    "gyroflightStepApply": { "message": "Apply" },
+    "gyroflightStepVerify": { "message": "Verify" },
+    "gyroflightStepRestore": { "message": "Restore" },
+    "gyroflightAnalyzeChirp": { "message": "CHIRP qualification" },
+    "gyroflightAnalyzeMissing": { "message": "no CHIRP log imported yet (Import Blackbox Log above)" },
+    "gyroflightAnalyzeM4": { "message": "Flight metrics (feedforward, D-term, filters, FFT)" },
+    "gyroflightAnalyzeM4Missing": { "message": "not analysed yet (Open BBL for M4 analysis above)" },
+    "gyroflightAnalyzeChirpSummary": { "message": "$1 measurements, $2 usable, $3 rejected" },
+    "gyroflightPart": { "message": "Part" },
+    "gyroflightPartState": { "message": "Status" },
+    "gyroflightPartProposal": { "message": "Proposed change" },
+    "gyroflightPartEvidence": { "message": "Measured evidence" },
+    "gyroflightPartMissing": { "message": "Blocked by / missing" },
+    "gyroflightPart_pid": { "message": "PID (simplified-tuning sliders)" },
+    "gyroflightPart_feedforward": { "message": "Feedforward" },
+    "gyroflightPart_gyro_filters": { "message": "Gyro filters" },
+    "gyroflightPart_dterm_filters": { "message": "D-term filters" },
+    "gyroflightPart_rpm_dynamic_notch": { "message": "RPM filter and dynamic notch" },
+    "gyroflightPart_resonances": { "message": "Blackbox FFT and resonances" },
+    "gyroflightCompareNone": { "message": "No global recommendation to compare yet." },
+    "gyroflightCompareSetting": { "message": "Setting" },
+    "gyroflightCompareCurrent": { "message": "Current (logged)" },
+    "gyroflightCompareProposed": { "message": "Proposed" },
+    "gyroflightCompareByFc": { "message": "calculated by the flight controller at Apply" },
+    "gyroflightCompareSame": { "message": "unchanged" },
+    "gyroflightCompare_slider_master_multiplier": { "message": "Master multiplier" },
+    "gyroflightCompare_slider_pi_gain": { "message": "P and I gain" },
+    "gyroflightCompare_slider_i_gain": { "message": "I gain" },
+    "gyroflightCompare_slider_d_gain": { "message": "D gain" },
+    "gyroflightCompare_slider_feedforward_gain": { "message": "Feedforward gain" },
+    "gyroflightCompare_slider_dterm_filter_multiplier": { "message": "D-term filter multiplier" },
+    "gyroflightCheck_composite": { "message": "Qualified global recommendation (incl. the phase-margin validation)" },
+    "gyroflightCheck_safety": { "message": "GyroCore Safety passes" },
+    "gyroflightCheck_release": {
+        "message": "Release conditions (Safety analysis evidence, independent PID validation)"
+    },
+    "gyroflightCheck_connection": { "message": "Connected to a real flight controller" },
+    "gyroflightApplyOnClick": {
+        "message": "On the click, Gyroflight also checks that the connected craft is the logged one (UID, board, firmware), that it is disarmed and still has the logged tune, and stores a backup before writing."
+    },
+    "gyroflightApplyReview": { "message": "Review and apply…" },
+    "gyroflightApplyProcedure": {
+        "message": "A backup of the current tune is stored first. After writing, every value is read back and compared with what the flight controller calculated; it is saved to EEPROM only when everything matches."
+    },
+    "gyroflightVerifyNone": { "message": "Nothing applied or restored in this session." },
+    "gyroflightVerifiedApply": { "message": "Applied: every value read back matched, and it was saved to EEPROM." },
+    "gyroflightVerifiedRestore": {
+        "message": "Restored: every value read back matched the backup, and it was saved to EEPROM."
+    },
+    "gyroflightVerifyExpected": { "message": "Expected" },
+    "gyroflightVerifyRead": { "message": "Read back" },
+    "gyroflightApplyBlocked": { "message": "Not applied: a check failed before anything was written." },
+    "gyroflightApplyFailed": { "message": "The write did not complete. This is not a successful Apply." },
+    "gyroflightNothingSaved": {
+        "message": "Nothing was saved to EEPROM; the saved tune is the previous one. Power-cycle the flight controller or use Restore to clear the unsaved values."
+    },
+    "gyroflightMaybeSaved": {
+        "message": "The write stopped at $1; it is unknown whether it was saved. Reconnect, check the values, and use Restore if needed."
+    },
+    "gyroflightRestoreConnect": { "message": "Connect the flight controller to see the backups taken from it." },
+    "gyroflightRestoreNone": { "message": "No backups from this flight controller in this browser." },
+    "gyroflightRestore": { "message": "Restore" },
+    "gyroflightBackupReason_before_apply": { "message": "before Apply" },
+    "gyroflightBackupReason_before_restore": { "message": "before Restore" },
+    "gyroflightBackupDownload": { "message": "Download" },
+    "gyroflightRestoreConfirmTitle": { "message": "Restore this backup?" },
+    "gyroflightRestoreConfirmText": {
+        "message": "Write the backup from $1 ($2, firmware $3) back to this flight controller. The current tune is backed up first; the result is read back and saved only when it matches the backup."
+    }
 }

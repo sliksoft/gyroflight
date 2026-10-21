@@ -162,9 +162,15 @@ describe("autotune apply confirmation gate", () => {
         await flush();
         expect(showYesNo).toHaveBeenCalledWith(
             "autotuneApplyConfirmTitle",
-            "autotuneApplyConfirmText",
+            expect.stringContaining("autotuneApplyConfirmText"),
             expect.objectContaining({ destructive: true }),
         );
+        // The dialog shows the complete change: every slider, per-axis PID and filter row.
+        const text = showYesNo.mock.calls[0][1] as string;
+        expect(text).toContain('data-gyrocore="confirm-diff"');
+        expect(text).toContain('data-row="slider:slider_pi_gain"');
+        expect(text).toContain('data-row="pid:roll:P"');
+        expect(text).toContain('data-row="filter:dterm_lpf1_static_hz"');
         expect(applyGains).not.toHaveBeenCalled();
     });
 });
