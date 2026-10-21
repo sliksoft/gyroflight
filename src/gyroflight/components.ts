@@ -19,6 +19,7 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+import type { Component } from "vue";
 import GyroflightTab from "./tabs/GyroflightTab.vue";
 import GyroflightHome from "./tabs/GyroflightHome.vue";
 import "./branding/gyroflight-theme.css";
@@ -27,9 +28,11 @@ import { registerGyroflightMessages } from "./i18n";
 
 registerGyroflightMessages();
 
-export const gyroflightTabComponents = {
+// `landing` is typed optional only so TypeScript accepts the intended override when
+// vue_tab_registry.ts spreads this map after its own `landing` entry (TS2783); it is always set.
+export const gyroflightTabComponents: { [GYROFLIGHT_TAB_KEY]: Component; landing?: Component } = {
     [GYROFLIGHT_TAB_KEY]: GyroflightTab,
-    // Gyroflight Home in place of Betaflight's Welcome tab. vue_tab_registry.js spreads these
+    // Gyroflight Home in place of Betaflight's Welcome tab. vue_tab_registry.ts spreads these
     // entries after its own, so this key wins; LandingTab.vue itself is unchanged.
     landing: GyroflightHome,
 };

@@ -20,6 +20,7 @@ this fork back upstream (no upstream PRs, no pushes to upstream).
 | Upstream default branch  | `master`                                                                                                             |
 | Fork base commit         | `d85e797e8674e3059cc3172e38df831e46a5250c` (upstream `master`, 2026-10-09)                                           |
 | Upstream version at base | `2026.12.0-alpha` (package.json)                                                                                     |
+| Last upstream sync       | `81e43bb57705f510da8a027126dbbf528a68e824` (upstream `master`), merged in five stages S1–S5 (`gyroflight/upstream-sync-s5`) |
 | Fork repository          | https://github.com/sliksoft/gyroflight (GitHub fork of the upstream repo; renamed from `gyrocore-app` on 2026-10-09) |
 | Fork default branch      | `gyroflight/main` — Gyroflight development head and GitHub default (set 2026-10-15)                                  |
 | Upstream mirror branch   | `master` — exact mirror of upstream Betaflight App; never commit Gyroflight work here                                |
@@ -71,7 +72,7 @@ Set the same on any new clone.
 
 | File                                                                        | Change                                                                                                                                                                            | Why                                                                                                                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/js/vue_tab_registry.js`                                                | import + `...gyroflightTabComponents`                                                                                                                                             | register Gyroflight tab components                                                                                                                                                                                                                                                                       |
+| `src/js/vue_tab_registry.ts`                                                | import + `...gyroflightTabComponents`                                                                                                                                             | register Gyroflight tab components                                                                                                                                                                                                                                                                       |
 | `src/components/sidebar/sidebar_items.ts`                                   | import + `...gyroflightSidebarItems` appended after Blackbox Viewer and Autotune; the list is wrapped in `applyGyroflightSidebarPolicy([...])`                                    | sidebar entries (index 0/1 order is tested); the policy (`src/gyroflight/navigation.ts`) only sets upstream's `hideInSidebar` on Pre-Flight, both Flight Plan entries, Documentation & Support (`help`) and the Gyroflight status tab. Tabs, components, `expert`, `mode` and allowed tabs are unchanged |
 | `src/stores/navigation.ts`                                                  | import + `...gyroflightAllowedTabs` in `DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED` and `DEFAULT_ALLOWED_TABS`                                                                        | `switchTab` rejects tabs not in `allowedTabs`                                                                                                                                                                                                                                                            |
 | `package.json`                                                              | `productName`, `displayName`, `description`                                                                                                                                       | app identity; feeds the PWA manifest                                                                                                                                                                                                                                                                     |
@@ -92,9 +93,14 @@ Set the same on any new clone.
 Gyroflight UI layer that needs **no** upstream edit:
 
 - **Home:** `src/gyroflight/tabs/GyroflightHome.vue` replaces the Welcome tab through `landing` in
-  `gyroflightTabComponents`. `vue_tab_registry.js` spreads that map after its own entries, so the Gyroflight
-  key wins. `LandingTab.vue`, its sponsor, community and donation content, and its language links are left
+  `gyroflightTabComponents`. `vue_tab_registry.ts` spreads that map after its own entries, so the Gyroflight
+  key wins. The map types `landing` as optional so TypeScript accepts that override (TS2783). `LandingTab.vue`, its sponsor, community and donation content, and its language links are left
   unchanged and are simply not mounted.
+- **Settings search** (upstream, Ctrl/Cmd + K): lists only settings whose tab `useVisibleTabs()` returns,
+  and `Sidebar.vue` opens a result only when its tab is in that same list. It therefore follows the
+  sidebar policy (`hideInSidebar`), Expert Mode and the allowed-tab lists with no Gyroflight edit; the index
+  covers `src/components/tabs/` only, so Gyroflight tabs are never indexed. Tested in
+  `test/gyroflight/settings_search_policy.test.ts`.
 - **Theme:** `src/gyroflight/branding/gyroflight-theme.css` is imported by `src/gyroflight/components.ts`
   and loaded after `src/css/theme.css`.
     - It remaps only the primary tokens of the default colour theme (stored key `yellow`) to the GyroCore
@@ -122,7 +128,7 @@ opt-out toggle and the landing-page statistics disclaimer are hidden. Tested in
 `test/gyroflight/privacy.test.ts`; the browser smoke confirms zero requests to `analytics.betaflight.com`.
 
 **Betaflight accounts: hidden.** Login, passkeys (WebAuthn via `login.betaflight.com`), the user
-profile, cloud backups and account deletion (`LoginApi.js`, `UserApi.js`, `LoginManager.js`,
+profile, cloud backups and account deletion (`LoginApi.ts`, `UserApi.ts`, `LoginManager.ts`,
 `UserSession.vue`, `UserProfileTab.vue`, `BackupsTab.vue`) are bound to Betaflight's origin and relying
 party and cannot work from https://app.gyrocore.dev/. Gyroflight is local-first and needs no accounts, so
 `BETAFLIGHT_ACCOUNTS_ENABLED = false` hides the Login button and account menu (sidebar and mobile) and
@@ -165,7 +171,7 @@ Then smoke the PWA (`npm run preview`): Firmware Flasher, Blackbox Viewer, Autot
 Gyroflight tab load with no page errors; the manifest still says Gyroflight.
 
 Expected conflict hotspots: `package.json` / `package-lock.json` (take upstream's lockfile, re-apply our
-fields, `npm install`), `src/stores/navigation.ts` allowed-tab lists, `sidebar_items.ts`, `vue_tab_registry.js`,
+fields, `npm install`), `src/stores/navigation.ts` allowed-tab lists, `sidebar_items.ts`, `vue_tab_registry.ts`,
 and the Autotune files above (`useAutotune.ts` most of all; see CHIRP_QUALIFICATION.md).
 After a merge, check upstream's release notes for MSP, blackbox-parser or autotune changes that GyroCore
 code depends on, and update the base commit in the provenance table.
@@ -201,7 +207,11 @@ deployments, nightly/release builds, Crowdin sync, stale-issue closing or auto-c
 `deploy.yml`, `deploy_cloudflare.yml`, `build-release.yml`, `tauri-nightly.yml`,
 `tauri-release-assets.yml`, `android-play-release.yml`, `translations-pr.yml`,
 `translations-upload.yml`, `stale.yaml`, `auto-close.yml`, `hide-artifact-links.yml`,
-`manual-build.yml`.
+`manual-build.yml`, `msp-codes.yml`.
+
+`msp-codes.yml` (upstream `30c8dd87`) is read-only and publishes nothing, but it runs on a weekly cron
+once it reaches `gyroflight/main`. Keep it disabled until we decide to run it; locally,
+`npm run check:msp-codes` performs the same check against the firmware headers.
 
 Verify with `gh workflow list --all --repo sliksoft/gyroflight`. If an upstream sync re-enables one,
 disable it again:
@@ -209,7 +219,7 @@ disable it again:
 ```bash
 for w in deploy.yml deploy_cloudflare.yml build-release.yml tauri-nightly.yml tauri-release-assets.yml \
          android-play-release.yml translations-pr.yml translations-upload.yml stale.yaml auto-close.yml \
-         hide-artifact-links.yml manual-build.yml; do
+         hide-artifact-links.yml manual-build.yml msp-codes.yml; do
   gh workflow disable "$w" --repo sliksoft/gyroflight
 done
 ```

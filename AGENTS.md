@@ -38,13 +38,13 @@ Formatting (indentation, semicolons, trailing commas, quotes) is owned by Pretti
 | `src/js/**` is the transport and protocol layer (serial, MSP framing, flashing). It does not import components | 📐 | Review call |
 | FC state lives in `useFlightControllerStore()`. New fields go there, typed in `src/stores/fc.types.ts` — never a new module-level singleton | 🔧 | `vue-tsc` rejects untyped fields; a new singleton is a review call |
 | Side effects (MSP, network, persistence, polling) live in store actions or composables, not in components | 🔧 | MSP: the boundary rule above. Network and persistence: review call |
-| New MSP codes: `src/js/msp/MSPCodes.ts` + encode/decode in `MSPHelper.ts`, aligned with firmware `msp_protocol.h` | 🚧 | CI diff of `MSPCodes.ts` against `msp_protocol.h` (#5542 phase 7) |
+| New MSP codes: `src/js/msp/MSPCodes.ts` + encode/decode in `MSPHelper.ts`, aligned with firmware `msp_protocol.h` | ✅ | `scripts/check-msp-codes.mjs` against every supported firmware branch; weekly and on pull requests touching the table (`.github/workflows/msp-codes.yml`) |
 
 ### TypeScript — #5542
 
 | Rule | Status | Enforced by |
 |---|---|---|
-| New files are `.ts` or `<script setup lang="ts">` | 🔧 | ESLint rejects any `.js` in `src/composables/**`, `src/stores/**` and `src/js/msp/**` (except the dev-only `src/js/msp/debug/**`); other folders follow as they reach zero `.js` (#5542 phase 7) |
+| New files are `.ts` or `<script setup lang="ts">` | 🔧 | ESLint rejects any `.js` in `src/components/**`, `src/composables/**`, `src/stores/**` and `src/js/msp/**` (except the dev-only `src/js/msp/debug/**`); other folders follow as they reach zero `.js` (#5542 phase 7) |
 | `strict` typing; no `any` to silence the checker | 🔧 | `strict: true` + `vue-tsc`; `@typescript-eslint/no-explicit-any` |
 | A file you touch for other reasons converts to TypeScript in the same PR; a touched test converts to `.test.ts` | 📐 | Review call |
 
@@ -54,7 +54,7 @@ Formatting (indentation, semicolons, trailing commas, quotes) is owned by Pretti
 |---|---|---|
 | Reach for `@nuxt/ui` v4 first: `UButton`, `UInput`, `UInputNumber`, `USelect`, `USwitch`, `UModal`, … | 📐 | Taste call |
 | Use shared wrappers in `src/components/elements/`: `UiBox`, `SettingRow`, `SettingColumn`, `HelpIcon`, `WikiButton` | 📐 | Taste call |
-| No new `<style scoped>` blocks; promote shared rules to `src/css/theme.css` or `nuxt-ui.css` | 🚧 | Lint rule (#5542 phase 7) |
+| No new `<style scoped>` blocks; promote shared rules to `src/css/theme.css` or `nuxt-ui.css` | 🔧 | CodeRabbit flags a new block (`.coderabbit.yaml`). A lint rule follows once the legacy blocks are gone (#5542) |
 | No hard-coded colors — theme via CSS custom properties | 🚧 | Lint rule as an error once existing violations are gone (#5542 phase 7) |
 | Respect light/dark (`.dark`) and color themes (`data-theme`) | 📐 | Visual review |
 

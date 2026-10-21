@@ -39,7 +39,7 @@ vi.mock("@/js/tab_switch.js", () => ({ switchTab: (...args: unknown[]) => switch
 
 import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items";
 import { DEFAULT_ALLOWED_TABS, DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED } from "../../src/stores/navigation";
-import { VueTabComponents } from "../../src/js/vue_tab_registry.js";
+import { VueTabComponents } from "../../src/js/vue_tab_registry";
 import { gyroflightTabComponents } from "../../src/gyroflight/components";
 import { GYROFLIGHT_HIDDEN_SIDEBAR_KEYS } from "../../src/gyroflight/navigation";
 import { gyroflightCapabilities } from "../../src/gyroflight/capabilities";
