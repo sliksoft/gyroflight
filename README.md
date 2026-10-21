@@ -61,7 +61,7 @@ Run the relevant checks before contributing:
     npm run lint
     npm test
 
-`npm run lint` runs ESLint and the TypeScript checker (`vue-tsc`). The inherited Betaflight conventions apply: new files are TypeScript; `src/composables/`, `src/stores/` and `src/js/msp/` are TypeScript-only; and only stores, composables and `src/js/` may import MSP at runtime, which lint enforces. Gyroflight and GyroCore code reaches the flight controller through those stores and composables only. [AGENTS.md](AGENTS.md) has the full coding conventions.
+`npm run lint` runs ESLint and the TypeScript checker (`vue-tsc`). The inherited Betaflight conventions apply: new files are TypeScript; `src/components/`, `src/composables/`, `src/stores/` and `src/js/msp/` are TypeScript-only; and only stores, composables and `src/js/` may import MSP at runtime, which lint enforces. Gyroflight and GyroCore code reaches the flight controller through those stores and composables only. [AGENTS.md](AGENTS.md) has the full coding conventions.
 
 For broader platform documentation, consult the [upstream Betaflight App](https://github.com/betaflight/betaflight-configurator). **Betaflight release installers do not contain Gyroflight's extensions.**
 
