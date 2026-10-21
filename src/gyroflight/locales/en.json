@@ -176,6 +176,9 @@
         "message": "The phase-margin target is not reachable; the gain is held."
     },
     "gyrocoreReason_autotune_no_open_loop_crossover": { "message": "No open-loop crossover inside the coherent band." },
+    "gyrocoreReason_phase_margin_not_validated": {
+        "message": "Phase margin is not validated: L = T/(1−T) assumes unity feedback, but Betaflight uses D on the gyro and feedforward on the setpoint. PID recommendations from that margin are blocked."
+    },
     "gyrocoreReason_autotune_gain_clamped_per_pass": { "message": "The gain change is limited by the per-pass range." },
     "gyrocoreReason_apply_no_qualified_analysis": { "message": "No Gyroflight-qualified analysis is loaded." },
     "gyrocoreReason_apply_unknown_measurement": { "message": "The selected axis has no qualified measurement." },
@@ -624,5 +627,45 @@
     "gyrocoreCfcNone": { "message": "none" },
     "gyrocoreCfcInterpretation": {
         "message": "Differences are facts, not verdicts: a lower magnitude or a higher coherence is not better by itself. Relative spectral power is not compared between Flights (it is not a calibrated PSD). No PID values are recommended here."
-    }
+    },
+    "gyrocoreM4Title": { "message": "Gyroflight M4 — feedforward, D-term and filters (measurement only)" },
+    "gyrocoreM4Intro": {
+        "message": "Open any blackbox log (.bbl) to measure stick tracking, D-term effectiveness and gyro / RPM / notch filter evidence. The file is decoded with the Blackbox Viewer parser, every embedded log is analysed separately, and missing signals are listed instead of being filled in."
+    },
+    "gyrocoreM4NoApply": {
+        "message": "Measurement only: no PID, feedforward or filter values are recommended, nothing is written to the flight controller, and Apply stays disabled."
+    },
+    "gyrocoreM4Open": { "message": "Open BBL for M4 analysis" },
+    "gyrocoreM4Analyzing": { "message": "Analysing…" },
+    "gyrocoreM4Error": { "message": "M4 analysis failed" },
+    "gyrocoreM4Log": { "message": "Log" },
+    "gyrocoreM4LogError": { "message": "Log not analysed" },
+    "gyrocoreM4ChirpDetected": { "message": "CHIRP" },
+    "gyrocoreM4ChirpNone": { "message": "NO CHIRP" },
+    "gyrocoreM4ChirpUnknown": { "message": "CHIRP UNKNOWN" },
+    "gyrocoreM4FfChirpBlocked": {
+        "message": "This log contains (or may contain) a CHIRP sweep: it is not used for stick feedforward evaluation. Tracking numbers below are diagnostics against the sweep setpoint only."
+    },
+    "gyrocoreM4MissingSignals": { "message": "Missing signals" },
+    "gyrocoreM4MissingHeaders": { "message": "Missing headers" },
+    "gyrocoreM4NoMissing": { "message": "All signals and filter headers read by M4 are present." },
+    "gyrocoreM4Warnings": { "message": "Warnings" },
+    "gyrocoreM4Feedforward": { "message": "Feedforward / stick tracking" },
+    "gyrocoreM4DTerm": { "message": "D-term effectiveness" },
+    "gyrocoreM4Filters": { "message": "Filters" },
+    "gyrocoreM4ColAxis": { "message": "Axis" },
+    "gyrocoreM4ColMeanError": { "message": "Mean |error| (°/s)" },
+    "gyrocoreM4ColTracking": { "message": "Tracking score" },
+    "gyrocoreM4ColLatency": { "message": "Latency (ms)" },
+    "gyrocoreM4ColOvershoot": { "message": "Overshoot (°/s)" },
+    "gyrocoreM4ColSource": { "message": "Signal" },
+    "gyrocoreM4ColVerdict": { "message": "Verdict" },
+    "gyrocoreM4ColWindows": { "message": "Usable windows" },
+    "gyrocoreM4ColReliability": { "message": "Reliability" },
+    "gyrocoreM4FfChirpExcluded": {
+        "message": "CHIRP sweeps in this log (plus a guard band) are excluded from feedforward: only CHIRP-free acro stick segments are used."
+    },
+    "gyrocoreM4Segments": { "message": "Flight segments (inferred from arm box + throttle; motor output is not used)" },
+    "gyrocoreM4Unsegmented": { "message": "Flight segmentation not possible — no stick, spectrum or eRPM measurement" },
+    "gyrocoreM4Gaps": { "message": "timestamp gaps" }
 }

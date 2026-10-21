@@ -68,7 +68,11 @@ describe("product Apply lock behind a released Safety step", () => {
     it("still blocks the safe positive fixture with full_safety_engine_pending and no MSP call", async () => {
         picked.bytes = MERGE_E2E_CASES.three_axis_agree();
         await useAutotune().importAndAnalyze();
-        const composite = useChirpQualificationStore().composite!;
+        const gate = useChirpQualificationStore();
+        expect(gate.composite!.blocked).toContain("phase_margin_not_validated");
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         expect(composite.authorized).toBe(true);
         const err = await useAutotune()
             .applyGains(composite.final!, composite.id)
