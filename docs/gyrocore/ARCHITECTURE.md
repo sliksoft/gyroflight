@@ -29,7 +29,7 @@ There is no router. `Sidebar.vue` → `switchTab(key, { mode })` (`js/tab_switch
 ## Gyroflight extension points
 
 ```
-src/gyroflight/tabs.ts ──► src/components/sidebar/sidebar_items.js   (...gyroflightSidebarItems)
+src/gyroflight/tabs.ts ──► src/components/sidebar/sidebar_items.ts   (...gyroflightSidebarItems)
                       └──► src/js/gui.js                             (...gyroflightAllowedTabs, both lists)
 src/gyroflight/components.ts ──► src/js/vue_tab_registry.js         (...gyroflightTabComponents)
 src/gyroflight/i18n.ts ──► i18next "en" fallback bundle (from src/gyroflight/locales/en.json)

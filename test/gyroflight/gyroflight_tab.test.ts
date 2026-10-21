@@ -22,7 +22,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { sidebarItems } from "../../src/components/sidebar/sidebar_items.js";
+import { sidebarItems } from "../../src/components/sidebar/sidebar_items";
 import {
     DEFAULT_ALLOWED_FC_TABS_WHEN_CONNECTED,
     DEFAULT_ALLOWED_TABS,
