@@ -37,9 +37,9 @@ vi.mock("../../src/components/sidebar/sidebar_items.js", () => ({ sidebarItems: 
 vi.mock("../../src/js/gui_log", () => ({ gui_log: vi.fn() }));
 vi.mock("../../src/js/localization", () => ({ i18n: { getMessage: (key: string) => key } }));
 
-import CONFIGURATOR from "../../src/js/data_storage";
 import { switchTab } from "../../src/js/tab_switch";
 import { GYROFLIGHT_TAB_KEY } from "../../src/gyroflight/tabs";
+import { useConnectionStore } from "../../src/stores/connection";
 import {
     DEFAULT_ALLOWED_FC_TABS_WHEN_CONNECTED,
     DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED,
@@ -56,7 +56,7 @@ describe("Gyroflight tab switching through the navigation store", () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         mountVueTab.mockClear();
-        CONFIGURATOR.connectionValid = true;
+        useConnectionStore().connectionValid = true;
     });
 
     it("opens Home and the Gyroflight tab without a flight controller", () => {
