@@ -8,7 +8,7 @@ applyTo: "**/*.vue, **/*.ts, **/*.js, **/*.scss, **/*.less"
 Standards for AI-assisted contributions to Betaflight Configurator. Adapted from the [awesome-copilot Vue 3 instructions](https://github.com/github/awesome-copilot/blob/main/instructions/vuejs3.instructions.md), with project-specific guardrails.
 
 ## Project context
-- **Stack**: Vue 3 + Composition API + `<script setup lang="ts">`, Pinia 4, Vite 8, Tauri 2 (desktop), Capacitor 8 (Android).
+- **Stack**: Vue 3 + Composition API + `<script setup lang="ts">`, Pinia 4, Vite 8, Capacitor 8 (Android). Gyroflight is web-only: the Tauri desktop packaging is removed (runtime adapters kept; see docs/gyrocore/UPSTREAM.md).
 - **UI**: `@nuxt/ui` v4 components + Tailwind CSS v4. Not a Nuxt app — no SSR, no `useAsyncData`, no Nuxt auto-imports outside the UI library.
 - **TypeScript**: `strict: true` everywhere, type-checked by `vue-tsc` (`npm run typecheck`, part of `npm run lint`). Every `.vue` file is checked. The remaining `.js` is still importable (`allowJs`) but not checked; the migration and what is left are tracked in #5542.
 - **State**: Pinia stores own all state. The `FC`, `GUI` and `CONFIGURATOR` singletons are gone (#4800); flight-controller state lives in `useFlightControllerStore()` (`src/stores/fc.ts`).

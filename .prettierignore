@@ -40,7 +40,6 @@ libraries/
 package.json
 package-lock.json
 resources/models/
-src-tauri/gen/
 
 # Capacitor copies the web build here during a local Android build.
 android/app/src/main/assets/public/

@@ -223,7 +223,7 @@ export default defineConfig({
         VitePWA({
             registerType: "prompt",
             workbox: {
-                globPatterns: ["**/*.{js,css,html,ico,png,svg,json,mcm,gltf}"],
+                globPatterns: ["**/*.{js,css,html,ico,png,svg,json,mcm,gltf,woff2,woff}"],
                 // 5MB
                 maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
             },

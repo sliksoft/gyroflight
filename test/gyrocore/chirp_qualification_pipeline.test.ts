@@ -311,10 +311,24 @@ describe("global tune panel (WU3)", () => {
         expect(pi.querySelector('[data-gyrocore="final"]')?.textContent?.trim()).toBe("100");
         expect(container.querySelectorAll('[data-role="participating"]')).toHaveLength(3);
         expect(
-            container.querySelector(
-                '[data-gyrocore="global-blocked"] [data-reason="phase_margin_not_validated"]',
-            ),
+            container.querySelector('[data-gyrocore="global-blocked"] [data-reason="phase_margin_not_validated"]'),
         ).not.toBeNull();
+        unmount();
+    });
+
+    it("describes a rejected axis with its own measured values, not placeholders", async () => {
+        await runImport(MERGE_E2E_CASES.roll_ok_pitch_rejected());
+        const { container, unmount } = await mountGlobal();
+        const blocked = [...container.querySelectorAll('[data-gyrocore="global-blocked"] li')];
+        const byCode = (code: string) => blocked.find((li) => li.getAttribute("data-reason") === code);
+        expect(byCode("system_id_unusable")).toBeDefined();
+        const measured = blocked.filter((li) => li.getAttribute("data-reason")?.startsWith("measurement:"));
+        expect(measured.length).toBeGreaterThan(0);
+        for (const li of measured) {
+            expect(li.textContent).not.toMatch(/\|--(\||$)/);
+        }
+        const sources = [...container.querySelectorAll('[data-role="rejected_measurement"], [data-source]')];
+        expect(sources.map((li) => li.textContent ?? "").join(" ")).not.toMatch(/gyrocoreReason_[a-z_]+\|--/);
         unmount();
     });
 
@@ -327,9 +341,7 @@ describe("global tune panel (WU3)", () => {
             container.querySelector('[data-slider="slider_pi_gain"] [data-gyrocore="final"]')?.textContent?.trim(),
         ).toBe("100");
         expect(
-            container.querySelector(
-                '[data-gyrocore="global-blocked"] [data-reason="missing_axis_evidence:yaw"]',
-            ),
+            container.querySelector('[data-gyrocore="global-blocked"] [data-reason="missing_axis_evidence:yaw"]'),
         ).not.toBeNull();
         unmount();
     });
