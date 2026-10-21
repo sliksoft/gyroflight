@@ -57,6 +57,19 @@ describe("MSP module boundary for Gyroflight and GyroCore", () => {
         60_000,
     );
 
+    // .vue goes through vue-eslint-parser, where an unresolved import would be skipped just as silently.
+    it.each([
+        ["src/gyrocore/components/Probe.vue", "@/js/msp"],
+        ["src/gyroflight/tabs/Probe.vue", "../../js/msp"],
+    ])(
+        "rejects a runtime MSP import from the component %s",
+        async (file, source) => {
+            const code = `<script setup lang="ts">\nimport MSP from "${source}";\nconsole.log(MSP);\n</script>\n`;
+            expect(await boundaryErrors(file, code)).toBe(1);
+        },
+        60_000,
+    );
+
     it("allows a type-only MSP import from GyroCore", async () => {
         const code = 'import type { MspResponse } from "@/js/msp";\nexport type Probe = MspResponse;\n';
         expect(await boundaryErrors("src/gyrocore/tuning/probe.ts", code)).toBe(0);
