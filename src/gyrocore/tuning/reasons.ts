@@ -26,6 +26,7 @@
 
 import { i18n } from "@/js/localization";
 import { describeReason } from "@/gyrocore/chirp/reasons";
+import type { ChirpMeasurement } from "@/gyrocore/chirp/qualification";
 
 function message(key: string, args: string[], fallback: string): string {
     const text = i18n.getMessage(key, args);
@@ -54,7 +55,11 @@ const COMPOSITE_HEADS = [
     "fc",
 ];
 
-export function describeCompositeReason(code: string): string {
+/**
+ * One composite code as a sentence. `m` is the source measurement when the code is one of its own
+ * gate codes (`measurement:*`, `sample_rate_contract:*`), so the sentence carries its values.
+ */
+export function describeCompositeReason(code: string, m?: ChirpMeasurement | null): string {
     const colon = code.indexOf(":");
     const head = colon >= 0 ? code.slice(0, colon) : code;
     const tail = colon >= 0 ? code.slice(colon + 1) : "";
@@ -64,9 +69,35 @@ export function describeCompositeReason(code: string): string {
         return message(`gyrocoreReason_${head}_${sub}`, [arg], describeReason(code));
     }
     if (COMPOSITE_HEADS.includes(head)) {
+        // The merge also lists the bare code (GyroCore safety/output.py) ahead of one entry per measurement.
+        if (head === "system_id_unusable" && !tail) {
+            return message("gyrocoreGlobal_system_id_unusable_any", [], code);
+        }
         return message(`gyrocoreGlobal_${head}`, [tail], code);
     }
     // A source measurement's own code; axis-prefixed warnings keep their axis.
     const axisPrefix = /^(roll|pitch|yaw):(.*)$/.exec(code);
-    return axisPrefix ? `${axisPrefix[1]}: ${describeReason(axisPrefix[2])}` : describeReason(code);
+    return axisPrefix ? `${axisPrefix[1]}: ${describeReason(axisPrefix[2], m)}` : describeReason(code, m);
+}
+
+const MEASUREMENT_CODE = /^(measurement|sample_rate_contract|recommendation):/;
+
+/**
+ * A composite's blocked or warning list. composite.ts lists each failed measurement as
+ * `system_id_unusable:<id>` followed by that measurement's own gate codes, so those codes are
+ * described with its values (looked up by id) instead of "--".
+ */
+export function describeCompositeReasons(
+    codes: readonly string[],
+    measurementById?: (id: string) => ChirpMeasurement | null | undefined,
+): string[] {
+    let source: ChirpMeasurement | null = null;
+    return codes.map((code) => {
+        if (code.startsWith("system_id_unusable:")) {
+            source = measurementById?.(code.slice("system_id_unusable:".length)) ?? null;
+        } else if (!MEASUREMENT_CODE.test(code)) {
+            source = null;
+        }
+        return describeCompositeReason(code, source);
+    });
 }

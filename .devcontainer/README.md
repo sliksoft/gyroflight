@@ -64,14 +64,11 @@ npm install
 npm run dev       # Vite dev server on :8080
 npm run test      # Run tests
 npm run lint      # Lint check
-npm run tauri:dev # Desktop app (requires display)
 ```
 
 ## What's included
 
 - **Node.js 24.x** — matches `.nvmrc`
-- **Rust 1.95** — matches `src-tauri/rust-toolchain.toml`
-- **Tauri system libs** — webkit2gtk, libsoup, librsvg, openssl, udev
 - **Android SDK** — platform-tools, build-tools 35, JDK 21
 - **USB passthrough** — serial device access for flight controller communication
 
@@ -82,13 +79,6 @@ npm run tauri:dev # Desktop app (requires display)
 ```bash
 npm run dev       # Dev server on :8080
 npm run build     # Production build
-```
-
-### Desktop (Tauri)
-
-```bash
-npm run tauri:dev    # Desktop app with hot reload
-npm run tauri:build  # Release build
 ```
 
 ### Android (Capacitor)

@@ -24,10 +24,6 @@
     "android:run": "vite build && node capacitor.config.generator.mjs && npx cap run android",
     "android:sync": "vite build && node capacitor.config.generator.mjs && npx cap sync android",
     "android:release": "vite build && node capacitor.config.generator.mjs && npx cap build android --release",
-    "tauri": "tauri",
-    "tauri:dev": "node scripts/check-tauri-prereqs.mjs && cross-env TAURI_DEV=1 tauri dev",
-    "tauri:build": "node scripts/check-tauri-prereqs.mjs && tauri build",
-    "tauri:prebuild": "node scripts/sync-tauri-version.mjs && vite build",
     "format": "prettier --write \"**/*.{js,mjs,ts,vue,css,less,json}\"",
     "storybook": "storybook dev -p 6006",
     "prepare": "husky"
@@ -97,7 +93,6 @@
     "@storybook/addon-docs": "^10.5.2",
     "@storybook/addon-links": "^10.5.2",
     "@storybook/vue3-vite": "^10.5.2",
-    "@tauri-apps/cli": "~2.11.0",
     "@types/d3": "^7.4.3",
     "@types/semver": "^7.8.0",
     "@types/three": "^0.186.0",

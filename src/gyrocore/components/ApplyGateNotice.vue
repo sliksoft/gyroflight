@@ -7,8 +7,8 @@
             {{ composite ? $t("gyrocoreApplyBlockedTitle") : $t("gyrocoreApplyNoComposite") }}
         </p>
         <ul class="list-disc ps-5">
-            <li v-for="code in authorization.blocked" :key="code" :data-reason="code">
-                {{ describeCompositeReason(code) }}
+            <li v-for="(code, i) in authorization.blocked" :key="code" :data-reason="code">
+                {{ blockedText[i] }}
             </li>
         </ul>
     </div>
@@ -29,13 +29,15 @@
 </template>
 
 <script setup lang="ts">
-import { describeCompositeReason } from "@/gyrocore/tuning/reasons";
+import { computed } from "vue";
+import { describeCompositeReasons } from "@/gyrocore/tuning/reasons";
+import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { describeSafetyReason } from "@/gyrocore/safety/reasons";
 import type { SafetyResult } from "@/gyrocore/safety/evaluate";
 import type { CompositeAuthorization } from "@/gyrocore/tuning/authorize";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 
-defineProps<{
+const props = defineProps<{
     composite: CompositeRecommendation | null;
     authorization: CompositeAuthorization;
     /** GyroCore Safety on the composite (safety/evaluate.ts). */
@@ -43,4 +45,12 @@ defineProps<{
     /** Product release lock (productLock/productApply.ts): not a rejection of the tune. */
     productLock: string[];
 }>();
+
+const gate = useChirpQualificationStore();
+const blockedText = computed(() =>
+    describeCompositeReasons(
+        props.authorization.blocked,
+        (id) => gate.report?.measurements.find((m) => m.id === id) ?? null,
+    ),
+);
 </script>

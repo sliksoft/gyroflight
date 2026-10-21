@@ -90,6 +90,8 @@ Set the same on any new clone.
 | `src/components/tabs/AutotuneTab.vue`                                       | imports + `<ChirpQualificationPanel />`, `<FlightAbSelector />`, `<DiagnosticOnlyBanner />`, `<GlobalTunePanel />`                                                                | measurement states, Flight A/B selection from a saved Tune Session (new WU4; the WU5 Cross-flight Comparison renders inside it, no further upstream change), diagnostic label, global tune (WU2, WU3)                                                                                                    |
 | `src/components/init.ts`                                                    | `import "../gyroflight/icons";` before `createApp`                                                                                                                                | registers the bundled Lucide icon set (`@iconify-json/lucide`, already a dependency) so the PWA draws every icon offline and no request goes to `api.iconify.design` (`src/gyroflight/icons.ts`, `test/gyroflight/bundled_icons.test.ts`)                                                                |
 | `vite.config.js`                                                            | `build.rollupOptions.output.manualChunks`: `@iconify-json/lucide` → `icons-lucide` chunk                                                                                          | keeps `main` below workbox's 5 MB `maximumFileSizeToCacheInBytes`, above which it would silently drop out of the precache and break offline start                                                                                                                                                        |
+| `src/components/tabs/autotune/AutotuneImport.vue`                           | sample-rate label passes `{ rate }` to `autotuneSampleRate`                                                                                                                       | the message contains `{{rate}}`; upstream passed none and showed the placeholder (`test/gyroflight/web_only_fixes.test.ts`)                                                                                                                                                                              |
+| `vite.config.js` (`globPatterns`)                                           | adds `woff2,woff`                                                                                                                                                                 | the Open Sans webfonts are precached, so the installed PWA keeps its typeface offline                                                                                                                                                                                                                    |
 | `test/components/autotuneApplyGate.test.ts`                                 | seed a GyroCore-qualified report (roll, pitch, yaw); expect the composite id; explicit test-only `vi.mock`s releasing GyroCore Safety and the product Apply lock                  | Apply requires an authorized, axis-covered composite; the button's wiring is still tested behind the lock; same assertions otherwise (WU2, WU3, WU3.1)                                                                                                                                                   |
 
 Gyroflight UI layer that needs **no** upstream edit:
@@ -115,7 +117,23 @@ Gyroflight UI layer that needs **no** upstream edit:
   "Gyroflight (default)", English only. It is registered with overwrite on, kept apart from `en.json`,
   which must never shadow upstream keys.
 
-Everything else (`favicon.ico`, Tauri/Capacitor identity, `LandingTab.vue`) is still upstream's.
+Everything else (`favicon.ico`, Capacitor identity, `LandingTab.vue`) is still upstream's.
+
+### Web-only product (divergence from upstream)
+
+Gyroflight ships only as the web app / PWA; there is no Windows or Linux desktop build. Removed:
+
+- `src-tauri/` (the Tauri desktop shell and its bundle configuration);
+- `scripts/check-tauri-prereqs.mjs`, `scripts/sync-tauri-version.mjs`, `scripts/rename-tauri-bundles.mjs`;
+- the npm scripts `tauri`, `tauri:dev`, `tauri:build`, `tauri:prebuild` and the `@tauri-apps/cli` devDependency;
+- `.github/workflows/tauri-nightly.yml`, `.github/workflows/tauri-release-assets.yml`, and the
+  `modern_release` job in `build-release.yml` that called the latter;
+- the desktop sections of `.devcontainer/README.md` and the `src-tauri/gen/` line in `.prettierignore`.
+
+Kept on purpose: the runtime adapters (`src/js/protocols/Tauri*.ts`, `@tauri-apps/api` and its plugins) and
+the `isTauri()` branches, because removing them means editing upstream transport code; in the browser they
+are never selected. Capacitor (Android) is unchanged. On an upstream sync, changes to the removed paths
+arrive as modify/delete conflicts: resolve them by keeping the deletion.
 All policy flags live in `src/gyroflight/policy.ts`; `git grep gyroflight/policy` lists every gated site.
 
 ## Privacy and accounts (divergence from upstream)
@@ -204,10 +222,11 @@ This repository has none of those secrets; do not add them.
 
 Workflow files from Betaflight remain in `.github/workflows/` (do not delete them — that would fight
 upstream merges) but are **disabled manually** in GitHub Actions so the fork does not run Betaflight
-deployments, nightly/release builds, Crowdin sync, stale-issue closing or auto-close of PRs:
+deployments, nightly/release builds, Crowdin sync, stale-issue closing or auto-close of PRs. The one
+exception is the desktop packaging, removed because Gyroflight is web-only (see "Web-only product" below):
+`tauri-nightly.yml` and `tauri-release-assets.yml` are deleted and `build-release.yml` no longer calls the latter.
 
-`deploy.yml`, `deploy_cloudflare.yml`, `build-release.yml`, `tauri-nightly.yml`,
-`tauri-release-assets.yml`, `android-play-release.yml`, `translations-pr.yml`,
+`deploy.yml`, `deploy_cloudflare.yml`, `build-release.yml`, `android-play-release.yml`, `translations-pr.yml`,
 `translations-upload.yml`, `stale.yaml`, `auto-close.yml`, `hide-artifact-links.yml`,
 `manual-build.yml`, `msp-codes.yml`.
 
@@ -222,7 +241,7 @@ Verify with `gh workflow list --all --repo sliksoft/gyroflight`. If an upstream 
 disable it again:
 
 ```bash
-for w in deploy.yml deploy_cloudflare.yml build-release.yml tauri-nightly.yml tauri-release-assets.yml \
+for w in deploy.yml deploy_cloudflare.yml build-release.yml \
          android-play-release.yml translations-pr.yml translations-upload.yml stale.yaml auto-close.yml \
          hide-artifact-links.yml manual-build.yml msp-codes.yml; do
   gh workflow disable "$w" --repo sliksoft/gyroflight

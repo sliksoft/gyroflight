@@ -254,6 +254,9 @@
     "gyrocoreGlobal_no_participating_axes": {
         "message": "No axis is eligible to contribute to a global recommendation."
     },
+    "gyrocoreGlobal_system_id_unusable_any": {
+        "message": "At least one axis has no usable measurement: its CHIRP evidence failed qualification (listed below)."
+    },
     "gyrocoreGlobal_system_id_unusable": {
         "message": "An axis has no usable measurement $1; its CHIRP evidence failed qualification."
     },
