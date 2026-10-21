@@ -22,14 +22,20 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { sidebarItems } from "../../src/components/sidebar/sidebar_items.js";
-import GUI from "../../src/js/gui";
+import { sidebarItems } from "../../src/components/sidebar/sidebar_items";
+import {
+    DEFAULT_ALLOWED_FC_TABS_WHEN_CONNECTED,
+    DEFAULT_ALLOWED_TABS,
+    DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED,
+    useNavigationStore,
+} from "../../src/stores/navigation";
 import { GYROFLIGHT_TAB_KEY, gyroflightSidebarItems } from "../../src/gyroflight/tabs";
 import { gyroflightTabComponents } from "../../src/gyroflight/components";
 import { gyroflightCapabilities } from "../../src/gyroflight/capabilities";
 import gyroflightMessages from "../../src/gyroflight/locales/en.json";
 import { gyroflightMessageStrings, registerGyroflightMessages } from "../../src/gyroflight/i18n";
 import i18next from "i18next";
+import { createPinia, setActivePinia } from "pinia";
 
 const upstreamMessages = JSON.parse(
     fs.readFileSync(path.resolve(__dirname, "../../locales/en/messages.json"), "utf-8"),
@@ -49,13 +55,56 @@ describe("Gyroflight tab registration", () => {
     });
 
     it("is allowed both with and without a connected flight controller", () => {
-        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain(GYROFLIGHT_TAB_KEY);
-        expect(GUI.defaultAllowedTabs).toContain(GYROFLIGHT_TAB_KEY);
+        expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toContain(GYROFLIGHT_TAB_KEY);
+        expect(DEFAULT_ALLOWED_TABS).toContain(GYROFLIGHT_TAB_KEY);
+        expect(DEFAULT_ALLOWED_FC_TABS_WHEN_CONNECTED).toContain(GYROFLIGHT_TAB_KEY);
+    });
+
+    it("allows exactly the former gui.js tab lists, nothing more", () => {
+        expect([...DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED]).toEqual([
+            "landing",
+            "firmware_flasher",
+            "preflight",
+            "help",
+            "user_profile",
+            "backups",
+            "flight_plan",
+            "autotune",
+            "blackbox_viewer",
+            GYROFLIGHT_TAB_KEY,
+        ]);
+        expect([...DEFAULT_ALLOWED_TABS]).toEqual([
+            "setup",
+            "failsafe",
+            "power",
+            "adjustments",
+            "auxiliary",
+            "presets",
+            "cli",
+            "configuration",
+            "logging",
+            "onboard_logging",
+            "modes",
+            "motors",
+            "pid_tuning",
+            "autotune",
+            "ports",
+            "receiver",
+            "sensors",
+            "blackbox_viewer",
+            GYROFLIGHT_TAB_KEY,
+        ]);
+    });
+
+    it("starts the navigation store with the Gyroflight tab allowed", () => {
+        setActivePinia(createPinia());
+        expect(useNavigationStore().allowedTabs).toContain(GYROFLIGHT_TAB_KEY);
+        expect(useNavigationStore().allowedTabs).toContain("landing");
     });
 
     it("keeps the upstream feature tabs reachable", () => {
         for (const key of ["firmware_flasher", "blackbox_viewer", "autotune"]) {
-            expect(GUI.defaultAllowedTabsWhenDisconnected).toContain(key);
+            expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toContain(key);
         }
     });
 });

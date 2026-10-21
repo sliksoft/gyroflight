@@ -782,7 +782,7 @@ describe("15. and 16. authorization, storage and Apply are untouched", () => {
 
     it("the product Apply lock still blocks", () => {
         compare(inMemory([flightA, flightB]));
-        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING, "independent_pid_validation_missing"]);
     });
 
     it("the comparison imports no MSP, Apply, tuning, Safety or storage-write code", () => {

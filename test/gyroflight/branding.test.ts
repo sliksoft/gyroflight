@@ -37,9 +37,9 @@ const switched = vi.hoisted(() => ({ calls: [] as unknown[][] }));
 vi.mock("@/js/utils/isExpertModeEnabled", () => ({ isExpertModeEnabled: () => expert.on }));
 vi.mock("@/js/tab_switch.js", () => ({ switchTab: (...args: unknown[]) => switched.calls.push(args) }));
 
-import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items.js";
-import GUI from "../../src/js/gui";
-import { VueTabComponents } from "../../src/js/vue_tab_registry.js";
+import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items";
+import { DEFAULT_ALLOWED_TABS, DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED } from "../../src/stores/navigation";
+import { VueTabComponents } from "../../src/js/vue_tab_registry";
 import { gyroflightTabComponents } from "../../src/gyroflight/components";
 import { GYROFLIGHT_HIDDEN_SIDEBAR_KEYS } from "../../src/gyroflight/navigation";
 import { gyroflightCapabilities } from "../../src/gyroflight/capabilities";
@@ -61,7 +61,7 @@ function mount(component: unknown, props: Record<string, unknown> = {}) {
     return { el, unmount: () => (app.unmount(), el.remove()) };
 }
 
-/** What useVisibleTabs shows for a disconnected craft, minus GUI.allowedTabs and the store. */
+/** What useVisibleTabs shows for a disconnected craft, minus the navigation store's allowedTabs. */
 function visibleKeys(expertMode: boolean, mode: "disconnected" | "connected") {
     return sidebarItems
         .filter((i) => i.mode === mode || i.mode === "shared")
@@ -131,7 +131,9 @@ describe("Gyroflight theme", () => {
     });
 
     it("keeps the upstream theme key: 'yellow' stays the stored default, labelled as Gyroflight's", async () => {
-        expect(read("src/js/main.js")).toContain('const colorTheme = result.colorTheme ?? "yellow";');
+        expect(read("src/js/main.ts")).toContain(
+            'const colorTheme = getConfig<string | undefined>("colorTheme").colorTheme ?? "yellow";',
+        );
         const upstream = JSON.parse(read("locales/en/messages.json"));
         await i18next.init({
             lng: "en",
@@ -208,16 +210,16 @@ describe("Gyroflight sidebar policy", () => {
     it("keeps their implementations: tab components and allowed tabs are unchanged", () => {
         expect(VueTabComponents.preflight).toBeDefined();
         expect(VueTabComponents.flight_plan).toBeDefined();
-        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("preflight");
-        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("flight_plan");
+        expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toContain("preflight");
+        expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toContain("flight_plan");
         expect(fs.existsSync(path.join(root, "src/components/tabs/PreflightTab.vue"))).toBe(true);
         expect(fs.existsSync(path.join(root, "src/components/tabs/FlightPlanTab.vue"))).toBe(true);
         expect(VueTabComponents.help).toBeDefined();
-        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("help");
+        expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toContain("help");
         expect(fs.existsSync(path.join(root, "src/components/tabs/HelpTab.vue"))).toBe(true);
         expect(VueTabComponents.gyroflight).toBeDefined();
-        expect(GUI.defaultAllowedTabsWhenDisconnected).toContain("gyroflight");
-        expect(GUI.defaultAllowedTabs).toContain("gyroflight");
+        expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toContain("gyroflight");
+        expect(DEFAULT_ALLOWED_TABS).toContain("gyroflight");
     });
 
     it("changes nothing else in the sidebar list", () => {
@@ -250,7 +252,7 @@ describe("Gyroflight sidebar policy", () => {
         expect(visibleKeys(false, "disconnected")).toEqual(
             expect.arrayContaining(["landing", "firmware_flasher", "blackbox_viewer"]),
         );
-        expect(GUI.defaultAllowedTabsWhenDisconnected).toEqual(
+        expect(DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED).toEqual(
             expect.arrayContaining(["firmware_flasher", "blackbox_viewer"]),
         );
     });
@@ -346,6 +348,6 @@ describe("Gyroflight status tab", () => {
 
 describe("GyroCore Apply authority is untouched", () => {
     it("the product Apply lock is still full_safety_engine_pending", () => {
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
     });
 });

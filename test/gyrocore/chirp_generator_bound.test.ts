@@ -32,12 +32,7 @@ import { MIN_MEAN_BAND_COHERENCE, MIN_USABLE_BINS, USABLE_COHERENCE_MIN } from "
 import { QV2_REASONS } from "../../src/gyrocore/chirp/qualityV2/contract";
 import { qualityRows } from "../../src/gyrocore/chirp/qualityV2/view";
 import { PRODUCT_APPLY_PENDING, productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
-import {
-    encodeChirpLog,
-    FULL_TUNE_HEADERS,
-    simulateChirp,
-    type SimOptions,
-} from "./harness/chirpSim";
+import { encodeChirpLog, FULL_TUNE_HEADERS, simulateChirp, type SimOptions } from "./harness/chirpSim";
 import type { SyntheticFrame } from "./harness/bblWriter";
 
 vi.mock("../../src/js/localization", async (importOriginal) => ({
@@ -180,16 +175,15 @@ describe("thresholds and Safety/Apply lock unchanged", () => {
     });
 
     it("keeps product Apply blocked behind full_safety_engine_pending", () => {
-        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING, "independent_pid_validation_missing"]);
         expect(PRODUCT_APPLY_PENDING).toBe("full_safety_engine_pending");
     });
 });
 
 describe("Quality V2 2.1.0 / 2.2.0 session compatibility surface", () => {
     it("still emits analysisVersion 2.2.0 with unchanged schema id", async () => {
-        const { CHIRP_QUALITY_V2_ANALYSIS_VERSION, CHIRP_QUALITY_V2_SCHEMA } = await import(
-            "../../src/gyrocore/chirp/qualityV2/contract"
-        );
+        const { CHIRP_QUALITY_V2_ANALYSIS_VERSION, CHIRP_QUALITY_V2_SCHEMA } =
+            await import("../../src/gyrocore/chirp/qualityV2/contract");
         expect(CHIRP_QUALITY_V2_ANALYSIS_VERSION).toBe("2.2.0");
         expect(CHIRP_QUALITY_V2_SCHEMA).toBe("gyrocore.chirp-quality.v2");
         const m = qualify(encodeChirpLog(sweep({ seconds: 2, endHz: 80 }))).measurements[0];

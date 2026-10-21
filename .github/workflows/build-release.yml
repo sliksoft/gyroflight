@@ -59,23 +59,6 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" apk/*.apk --clobber --repo "$GITHUB_REPOSITORY"
 
-  # Build the Tauri desktop bundles (Windows/macOS/Linux) and attach them to the release.
-  modern_release:
-    name: Attach Release Artifacts
-    needs: check_tag
-    if: needs.check_tag.outputs.should_run == 'true'
-    permissions:
-      contents: write
-    uses: ./.github/workflows/tauri-release-assets.yml
-    with:
-      tag: ${{ github.event.release.tag_name }}
-    secrets:
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-
   prepare_environment:
     name: Prepare Environment Name
     needs: check_tag

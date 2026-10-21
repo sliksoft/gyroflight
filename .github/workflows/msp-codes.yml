@@ -1,0 +1,35 @@
+name: MSP codes
+
+# The firmware renames and retires MSP codes without a configurator PR to carry
+# the change over, so the weekly run is what catches drift; the pull_request
+# paths only cover edits to the table itself and to the check.
+#
+# Gyroflight: manual dispatch only for now. A pull_request trigger would already
+# run on the PR that brings this file in, before `gh workflow disable` can reach
+# it; `npm run check:msp-codes` runs the same check locally. To restore the
+# upstream triggers, put back the pull_request paths and the weekly schedule
+# ('0 5 * * 1') from upstream 30c8dd87. See docs/gyrocore/UPSTREAM.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: MSPCodes.ts matches the firmware headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+
+      # No npm ci: the check has no dependencies beyond Node itself.
+      - run: npm run check:msp-codes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

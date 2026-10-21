@@ -22,10 +22,6 @@
 import { useAutotuneStore } from "@/stores/autotune";
 import FileSystem from "@/js/FileSystem";
 import { i18n } from "@/js/localization";
-import FC from "@/js/fc";
-import MSP from "@/js/msp";
-import MSPCodes from "@/js/msp/MSPCodes";
-import { mspHelper } from "@/js/msp/MSPHelper";
 import type { SysConfig } from "@/js/blackbox/chirp_bbl_parser";
 import type {
     CurrentSliders,
@@ -35,17 +31,13 @@ import type {
     StepResponse,
     TransferFunction,
 } from "@/js/blackbox/spectral_analysis";
-import { validateTuningSliders } from "@/composables/useTuningSliders";
 // Gyroflight: CHIRP input comes from the Blackbox Viewer decode and is qualified
 // by GyroCore before Betaflight's recommendation may be shown or applied.
 // See docs/gyrocore/CHIRP_QUALIFICATION.md.
 import { qualifyChirpFile, recomputeRecommendations, type AutotuneMath } from "@/gyrocore/chirp/qualification";
-import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
-import { assertCompositeApplyAuthorized, liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
-import { assertProductApplyReleased } from "@/gyrocore/productLock/productApply";
-import { assertSafetyAuthorized } from "@/gyrocore/safety/authorize";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { attachChirpFlightIdentity } from "@/gyrocore/chirp/qualityV2/identity";
+import { applyTune } from "@/composables/useTuneApply";
 
 export type AxisName = "roll" | "pitch" | "yaw";
 
@@ -258,38 +250,11 @@ export const AUTOTUNE_MATH: AutotuneMath<AxisGains> = {
     buildGains,
 };
 
-async function applyGains(proposed: ProposedSliders, compositeId?: string | null) {
-    // GyroCore hard gate, enforced here before any flight-controller access, not
-    // only by the disabled button. Sliders are global, so only the validated
-    // composite (global) recommendation may be written, never one axis's, and
-    // only with exactly its sliders.
-    const gateState = useChirpQualificationStore().gateState();
-    const composite = assertCompositeApplyAuthorized(gateState, compositeId, proposed);
-    // GyroCore Safety on exactly this composite and payload (no FC access).
-    assertSafetyAuthorized(gateState, composite, proposed);
-    // Product release lock: no tune is written to a craft until GyroCore's
-    // Safety engine is migrated (WU4). Before any flight-controller access.
-    assertProductApplyReleased();
-    // Read the craft's live slider state (no write) and refuse unless it is
-    // still the tune the recommendation was computed from. This also keeps the
-    // slider fields the proposal does not set at their live values below.
-    await MSP.promise(MSPCodes.MSP_SIMPLIFIED_TUNING);
-    const live = liveCompositeBlocks(FC.TUNING_SLIDERS, composite);
-    if (live.length) {
-        throw new ApplyBlockedError(live);
-    }
-
-    // Object.keys widens to string[]; the keys are the proposal's own.
-    for (const key of Object.keys(proposed) as (keyof ProposedSliders)[]) {
-        if (key in FC.TUNING_SLIDERS) {
-            FC.TUNING_SLIDERS[key] = proposed[key];
-        }
-    }
-
-    await MSP.promise(MSPCodes.MSP_SET_SIMPLIFIED_TUNING, mspHelper.crunch(MSPCodes.MSP_SET_SIMPLIFIED_TUNING));
-    await validateTuningSliders();
-    if (!FC.TUNING_SLIDERS.slider_pids_valid || !FC.TUNING_SLIDERS.slider_dterm_valid) {
-        throw new Error("Recommended autotune sliders did not pass firmware validation.");
-    }
-    await MSP.promise(MSPCodes.MSP_EEPROM_WRITE);
+/**
+ * Apply GyroCore's global tune: every gate, the user's confirmation token, the FC
+ * identity check, backup, write, read-back verification and save are in
+ * useTuneApply.ts. Resolves only when the readback matched and EEPROM was written.
+ */
+async function applyGains(proposed: ProposedSliders, compositeId?: string | null, confirmation?: string | null) {
+    return applyTune(proposed, compositeId, confirmation);
 }

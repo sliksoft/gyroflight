@@ -21,9 +21,8 @@
 
 import ShortUniqueId from "short-unique-id";
 import { set as setConfig, get as getConfig } from "./ConfigStorage";
-import GUI from "./gui";
-import CONFIGURATOR from "./data_storage";
 import { UPSTREAM_ANALYTICS_ENABLED } from "../gyroflight/policy";
+import { useAppInfoStore } from "../stores/appInfo";
 
 export interface AnalyticsSettings {
     sessionId: string;
@@ -69,13 +68,14 @@ function setupAnalytics(result: Record<string, unknown>) {
     const optOut = !!result.analyticsOptOut;
     const checkForDebugVersions = !!result.checkForConfiguratorUnstableVersions;
 
+    const appInfo = useAppInfoStore();
     const settings = {
         sessionId: uid.randomUUID(16),
         userId: userId,
-        appName: CONFIGURATOR.productName,
-        appVersion: CONFIGURATOR.version,
-        gitRevision: CONFIGURATOR.gitRevision,
-        os: GUI.operating_system,
+        appName: appInfo.productName,
+        appVersion: appInfo.version,
+        gitRevision: appInfo.gitRevision,
+        os: appInfo.operatingSystem,
         checkForDebugVersions: checkForDebugVersions,
         optOut: optOut,
     };

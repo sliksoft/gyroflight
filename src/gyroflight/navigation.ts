@@ -20,7 +20,7 @@
  */
 
 // Gyroflight navigation policy, applied to Betaflight's sidebar list by one hook in
-// src/components/sidebar/sidebar_items.js. Entries listed here get upstream's own
+// src/components/sidebar/sidebar_items.ts. Entries listed here get upstream's own
 // `hideInSidebar` flag: the sidebar and the compact bar skip them, but the tabs, their
 // components and switchTab() stay exactly as upstream ships them.
 // Nothing here may change `expert`, `mode`, `buildOptions` or `feature`.

@@ -125,9 +125,8 @@ import BaseTab from "./BaseTab.vue";
 import WikiButton from "../elements/WikiButton.vue";
 import { i18n } from "../../js/localization";
 import { useDialog } from "@/composables/useDialog";
-import GUI, { TABS } from "../../js/gui";
 import { useCloudBuild } from "../../composables/useCloudBuild";
-import { useBoardSelection } from "../../composables/useBoardSelection";
+import { requireTargetReleases, useBoardSelection } from "../../composables/useBoardSelection";
 import { useFirmwareFlashing, cleanUnifiedConfigFile } from "../../composables/useFirmwareFlashing";
 import { get as getConfig, set as setConfig } from "../../js/ConfigStorage";
 import { get as getStorage, set as setStorage } from "../../js/SessionStorage";
@@ -138,11 +137,11 @@ import { gui_log } from "../../js/gui_log";
 import semver from "semver";
 import FileSystem from "../../js/FileSystem";
 import AutoBackup, { getLastBackupData, resetLastBackupData } from "../../js/utils/AutoBackup";
-import AutoRestore from "../../js/utils/AutoRestore.js";
+import AutoRestore from "../../js/utils/AutoRestore";
 import { EventBus } from "../eventBus";
 import STM32 from "../../js/protocols/webstm32";
 import { ispConnected } from "../../js/utils/connection";
-import FC from "../../js/fc";
+import { useFlightControllerStore } from "@/stores/fc";
 import SponsorTile from "../sponsor/SponsorTile.vue";
 import FlasherBoardBuildTab from "./firmware-flasher/FlasherBoardBuildTab.vue";
 import FlasherFlashTab from "./firmware-flasher/FlasherFlashTab.vue";
@@ -161,6 +160,8 @@ import type { FirmwareData, FlashMessageTypes, ShowDialogVerifyBoard } from "../
 import type { DropdownMenuItem } from "@nuxt/ui";
 import SubtabNav from "../elements/SubtabNav.vue";
 import { applyExpertMode } from "../../js/utils/applyExpertMode";
+import { useConnectionStore } from "../../stores/connection";
+import { useNavigationStore } from "../../stores/navigation";
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -183,9 +184,12 @@ export default defineComponent({
         SubtabNav,
     },
     setup() {
+        const connectionStore = useConnectionStore();
+        const navigationStore = useNavigationStore();
         // Get $t from Vue i18n if available, otherwise use fallback
         const $t = inject<Translate>("$t", (key, params) => i18n.getMessage(key, params));
         const dialog = useDialog();
+        const fcStore = useFlightControllerStore();
 
         // Reactive state, provided to the sub-tabs below
         const state = createFlasherState();
@@ -298,27 +302,24 @@ export default defineComponent({
                 state.lastFlashResultText = state.progressLabelText;
                 state.lastFlashResultClass = state.progressLabelClass;
             }
-
-            return TABS.firmware_flasher;
         };
 
         const flashProgress = (value: number) => {
             const n = Number(value);
             if (!Number.isFinite(n)) {
-                return TABS.firmware_flasher;
+                return;
             }
             state.flashProgressValue = Math.max(0, Math.min(100, n));
             if (n >= 100) {
                 state.flashingInProgress = false;
-                GUI.flashingInProgress = false;
+                connectionStore.flashingInProgress = false;
             }
-            return TABS.firmware_flasher;
         };
 
         const resetFlashingState = () => {
             state.flashProgressValue = 0;
             state.flashingInProgress = false;
-            GUI.flashingInProgress = false;
+            connectionStore.flashingInProgress = false;
             enableFlashButton(
                 !!firmwareFlashing.getParsedHex() ||
                     !!firmwareFlashing.getUf2Binary() ||
@@ -607,7 +608,7 @@ export default defineComponent({
             }
 
             // extract osd protocols from general options and add to osdProtocols
-            const cloudBuildOptions = FC.CONFIG.buildOptions || [];
+            const cloudBuildOptions = fcStore.config.buildOptions || [];
             state.cloudBuildOptions = cloudBuildOptions;
 
             // Mark all options as default if they're in cloudBuildOptions
@@ -832,6 +833,13 @@ export default defineComponent({
                 enableLoadFileButton(true);
             };
 
+            // With no board or release there is nothing to ask the build server for. The requests
+            // used to go out anyway, as ".../undefined", and their 404s ended in the same state.
+            if (!target || !releaseStr) {
+                await loadTargetDetail(null);
+                return;
+            }
+
             try {
                 const targetDetail = await buildApi.loadTarget(target, releaseStr);
                 await loadTargetDetail(targetDetail);
@@ -848,8 +856,10 @@ export default defineComponent({
             }
 
             try {
-                if (validateBuildKey()) {
-                    const options = await buildApi.loadOptionsByBuildKey(releaseStr, cloudBuild.state.cloudBuildKey);
+                // validateBuildKey() already requires a 32-character key; the local check narrows it.
+                const buildKey = cloudBuild.state.cloudBuildKey;
+                if (buildKey && validateBuildKey()) {
+                    const options = await buildApi.loadOptionsByBuildKey(releaseStr, buildKey);
                     if (options) {
                         buildOptions(options);
                         return;
@@ -902,7 +912,8 @@ export default defineComponent({
         const saveFirmware = async () => {
             const fileType = state.firmware_type;
             try {
-                if (!fileType) {
+                const contents = fileType === "UF2" ? firmwareFlashing.getUf2Binary() : firmwareFlashing.getIntelHex();
+                if (!fileType || !state.filename || !contents) {
                     // Reading .toUpperCase() of undefined threw here before, into the same catch.
                     throw new TypeError("No firmware loaded to save");
                 }
@@ -916,10 +927,7 @@ export default defineComponent({
                     return false;
                 }
 
-                await FileSystem.writeFile(
-                    file,
-                    fileType === "UF2" ? firmwareFlashing.getUf2Binary() : firmwareFlashing.getIntelHex(),
-                );
+                await FileSystem.writeFile(file, contents);
                 return true;
             } catch (err) {
                 console.error(err);
@@ -947,9 +955,7 @@ export default defineComponent({
         };
 
         onMounted(async () => {
-            if (GUI.active_tab !== "firmware_flasher") {
-                GUI.active_tab = "firmware_flasher";
-            }
+            navigationStore.activeTab = "firmware_flasher";
 
             // Reset state on tab initialization
             activeFlasherStep.value = "board-build";
@@ -966,30 +972,6 @@ export default defineComponent({
             // Setup UI handlers and event bus listeners
             await setupUIHandlers();
             setupEventBusListeners();
-
-            // Register this module for backward compatibility
-            TABS.firmware_flasher = {
-                targets: boardSelection.state.targets,
-                validateBuildKey,
-                resetFlashingState,
-                preservePreFlashingState,
-                flashingMessage,
-                flashProgress,
-                cleanup,
-                FLASH_MESSAGE_TYPES,
-                requestDfuPermission,
-                get parsed_hex() {
-                    return firmwareFlashing.getParsedHex();
-                },
-                get hex() {
-                    return firmwareFlashing.getIntelHex();
-                },
-                get uf2_binary() {
-                    return firmwareFlashing.getUf2Binary();
-                },
-            };
-
-            GUI.content_ready(function () {});
 
             // Localize content
             i18n.localizePage();
@@ -1076,6 +1058,7 @@ export default defineComponent({
                 flashManualBaudRate: state.flashManualBaudRate,
                 filename: state.filename,
                 resetFlashingState,
+                requestDfuPermission,
                 // Board verification options
                 selectedBoard: selectedBoardTarget ?? undefined,
                 localFirmwareLoaded: state.localFirmwareLoaded,
@@ -1088,12 +1071,12 @@ export default defineComponent({
         };
 
         const startBackup = async (callback: () => void) => {
-            GUI.connect_lock = true;
+            connectionStore.connectLock = true;
 
             const aborted = function (message: string) {
-                GUI.connect_lock = false;
+                connectionStore.connectLock = false;
                 state.flashingInProgress = false;
-                GUI.flashingInProgress = false;
+                connectionStore.flashingInProgress = false;
                 enableFlashButton(true);
                 enableLoadRemoteFileButton(true);
                 enableLoadFileButton(true);
@@ -1114,7 +1097,7 @@ export default defineComponent({
             };
 
             AutoBackup.execute((result) => {
-                GUI.connect_lock = false;
+                connectionStore.connectLock = false;
                 if (result) {
                     callBackWhenPortAvailable();
                 } else {
@@ -1384,7 +1367,7 @@ export default defineComponent({
 
                 if (boardTarget) {
                     try {
-                        const targetReleases = await buildApi.loadTargetReleases(boardTarget);
+                        const targetReleases = await requireTargetReleases(buildApi, boardTarget);
                         await populateReleases({ target: boardTarget, releases: targetReleases.releases });
                     } catch (error) {
                         console.error(
@@ -1428,7 +1411,7 @@ export default defineComponent({
         const handleExitDfu = async () => {
             await firmwareFlashing.exitDfu({
                 dfuExitButtonDisabled: state.dfuExitButtonDisabled,
-                connectLock: GUI.connect_lock,
+                connectLock: connectionStore.connectLock,
             });
         };
 
@@ -1446,12 +1429,12 @@ export default defineComponent({
             state.restoreInProgress = false;
             state.restoreCompleted = false;
             state.flashingInProgress = true;
-            GUI.flashingInProgress = true;
+            connectionStore.flashingInProgress = true;
             activeFlasherStep.value = "flash";
             await nextTick();
 
             const options = {
-                connectLock: GUI.connect_lock,
+                connectLock: connectionStore.connectLock,
                 firmwareType: state.firmware_type,
                 filename: state.filename,
                 flashOnConnect: state.flashOnConnect,
@@ -1475,7 +1458,7 @@ export default defineComponent({
                 await firmwareFlashing.runFlashWorkflow(options);
             } catch (error) {
                 state.flashingInProgress = false;
-                GUI.flashingInProgress = false;
+                connectionStore.flashingInProgress = false;
                 throw error;
             }
         };
@@ -1679,16 +1662,16 @@ export default defineComponent({
                     const cliLines = hasDefaultsNoSave ? fileLines : ["defaults nosave", ...fileLines];
 
                     // Set connect lock to prevent tab switching interference
-                    GUI.connect_lock = true;
+                    connectionStore.connectLock = true;
                     state.restoreInProgress = true;
 
                     // Open wait dialog
                     dialog.openWait($t("firmwareFlasherRestoreBackupTitle"), null);
 
                     // Execute restore
-                    AutoRestore.execute(cliLines, (result: { success: boolean; skipped?: number; errors?: string }) => {
+                    AutoRestore.execute(cliLines, (result) => {
                         dialog.close();
-                        GUI.connect_lock = false;
+                        connectionStore.connectLock = false;
                         state.restoreInProgress = false;
 
                         if (result.success) {
@@ -1791,12 +1774,19 @@ export default defineComponent({
             { label: $t("firmwareFlasherSubTabFlash"), value: "flash", icon: "i-lucide-zap" },
         ]);
 
+        const selectSubtab = (subtab: string) => {
+            if (subtabItems.value.some((item) => item.value === subtab)) {
+                activeFlasherStep.value = subtab;
+            }
+        };
+
         // Return all public methods and state
         return {
             state,
             flashRingColor,
             activeFlasherStep,
             subtabItems,
+            selectSubtab,
             flashActionMenuItems,
             loadFirmwareMenuItems,
             cloudBuild,
@@ -2602,10 +2592,8 @@ export default defineComponent({
             color: var(--warning);
         }
     }
-}
 
-/* Unstable firmware dialog list styling */
-#dialogUnstableFirmwareAcknowledgement {
+    /* list styling */
     :deep(ul) {
         margin-inline-start: 1.5rem;
         margin-top: 0.5rem;

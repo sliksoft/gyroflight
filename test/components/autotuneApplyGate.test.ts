@@ -41,6 +41,15 @@ vi.mock("@/composables/useAutotune", () => ({
     useAutotune: () => ({ applyGains, recomputeGains }),
 }));
 
+// The read-only preview reads the FC over MSP; here it answers like a craft would.
+vi.mock("@/composables/useTuneApply", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../src/composables/useTuneApply")>()),
+    previewTune: async () => ({
+        before: { sliders: { slider_pi_gain: 100 }, filters: {}, pids: [[45, 80, 30]], advanced: {} },
+        expected: { sliders: { slider_pi_gain: 50 }, filters: {}, pids: [[23, 40, 30]], advanced: {} },
+        hash: "0badc0de",
+    }),
+}));
 vi.mock("@/composables/useDialog", () => ({
     useDialog: () => ({ showYesNo }),
 }));
@@ -146,7 +155,12 @@ describe("autotune apply confirmation gate", () => {
         await flush();
         expect(applyGains).toHaveBeenCalledTimes(1);
         // Gyroflight: the global (composite) recommendation, by its id.
-        expect(applyGains).toHaveBeenCalledWith(PROPOSED, expect.stringMatching(/^composite-log1-[0-9a-f]{8}$/));
+        // The third argument is the single-use confirmation token issued after the dialog.
+        expect(applyGains).toHaveBeenCalledWith(
+            PROPOSED,
+            expect.stringMatching(/^composite-log1-[0-9a-f]{8}$/),
+            expect.stringMatching(/^[0-9a-f]{32}$/),
+        );
     });
 
     it("declined confirmation leaves the flight controller untouched", async () => {
@@ -157,9 +171,15 @@ describe("autotune apply confirmation gate", () => {
         await flush();
         expect(showYesNo).toHaveBeenCalledWith(
             "autotuneApplyConfirmTitle",
-            "autotuneApplyConfirmText",
+            expect.stringContaining("autotuneApplyConfirmText"),
             expect.objectContaining({ destructive: true }),
         );
+        // The dialog shows the complete change: every slider, per-axis PID and filter row.
+        const text = showYesNo.mock.calls[0][1] as string;
+        expect(text).toContain('data-gyrocore="confirm-diff"');
+        expect(text).toContain('data-row="slider:slider_pi_gain"');
+        expect(text).toContain('data-row="pid:roll:P"');
+        expect(text).toContain('data-row="filter:dterm_lpf1_static_hz"');
         expect(applyGains).not.toHaveBeenCalled();
     });
 });

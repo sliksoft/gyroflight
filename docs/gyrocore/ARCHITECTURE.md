@@ -29,9 +29,9 @@ There is no router. `Sidebar.vue` → `switchTab(key, { mode })` (`js/tab_switch
 ## Gyroflight extension points
 
 ```
-src/gyroflight/tabs.ts ──► src/components/sidebar/sidebar_items.js   (...gyroflightSidebarItems)
+src/gyroflight/tabs.ts ──► src/components/sidebar/sidebar_items.ts   (...gyroflightSidebarItems)
                       └──► src/js/gui.js                             (...gyroflightAllowedTabs, both lists)
-src/gyroflight/components.ts ──► src/js/vue_tab_registry.js         (...gyroflightTabComponents)
+src/gyroflight/components.ts ──► src/js/vue_tab_registry.ts         (...gyroflightTabComponents)
 src/gyroflight/i18n.ts ──► i18next "en" fallback bundle (from src/gyroflight/locales/en.json)
 ```
 
@@ -44,7 +44,7 @@ would create import cycles.
 
 ## Where future GyroCore features fit in Gyroflight
 
-Target navigation is Betaflight's sidebar plus Gyroflight/GyroCore entries appended after Blackbox Viewer.
+Target navigation is Betaflight's sidebar plus Gyroflight/GyroCore entries appended after Blackbox Viewer and Autotune.
 Nothing in upstream's navigation is replaced.
 
 | Future feature                 | Integration                                                                                                                                                                  | Builds on (upstream)                                       |

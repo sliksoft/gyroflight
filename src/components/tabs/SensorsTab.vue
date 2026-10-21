@@ -12,7 +12,12 @@
                     <UiBox :title="$t('sensorConfigHardware')" type="neutral" collapsible>
                         <!-- Active Gyro / IMU (API 1.47+) -->
                         <template v-if="showMultiGyro">
-                            <SettingRow v-for="gyro in gyroList" :key="gyro.index" fullWidth>
+                            <SettingRow
+                                v-for="gyro in gyroList"
+                                :key="gyro.index"
+                                data-setting-search-key="sensorConfigActiveGyros"
+                                fullWidth
+                            >
                                 <template #label>
                                     {{ $t("sensorConfigGyroLabel", { 1: gyro.index + 1 }) }}
                                     <span v-if="gyro.name" class="text-dimmed font-normal"
@@ -217,6 +222,7 @@
                             <span>{{ $t("sensorConfigAccNeedsCalibration") }}</span>
                         </div>
                         <UButton
+                            data-setting-search-key="sensorConfigCalibrate"
                             :label="
                                 calibratingAccel ? $t('initialSetupButtonCalibratingText') : $t('sensorConfigCalibrate')
                             "
@@ -834,9 +840,7 @@ import { useFeaturePort } from "@/composables/ports/useFeaturePort";
 import { usePortConflicts } from "@/composables/ports/usePortConflicts";
 import { useSaving, withSaveFailureMessage } from "@/composables/useSaving";
 import { runTabLoad } from "@/composables/useTabLoad";
-import MSP from "../../js/msp";
-import MSPCodes from "../../js/msp/MSPCodes";
-import { mspHelper } from "../../js/msp/MSPHelper.js";
+import { useSensorsData } from "@/composables/sensors/useSensorsData";
 import { gui_log } from "../../js/gui_log";
 import { i18n } from "../../js/localization";
 import { ipCoordinates } from "../../js/utils/ipGeolocation";
@@ -868,7 +872,6 @@ import { buildCharacterizationModel } from "../../js/utils/magModelExport";
 import { useTimeout } from "../../composables/useTimeout";
 import { useInterval } from "../../composables/useInterval";
 import Model from "../../js/model";
-import GUI from "../../js/gui";
 import { flightIndicator } from "../../../libraries/flightIndicators";
 import BaseTab from "./BaseTab.vue";
 import UiBox from "../elements/UiBox.vue";
@@ -933,6 +936,16 @@ const isApi149 = computed(() => fcStore.config?.apiVersion && semver.gte(fcStore
 const isApi148 = computed(() => fcStore.config?.apiVersion && semver.gte(fcStore.config.apiVersion, API_VERSION_1_48));
 const isApi147 = computed(() => fcStore.config?.apiVersion && semver.gte(fcStore.config.apiVersion, API_VERSION_1_47));
 const isApi146 = computed(() => fcStore.config?.apiVersion && semver.gte(fcStore.config.apiVersion, API_VERSION_1_46));
+const {
+    loadSensorsConfig,
+    sendSensorsConfig,
+    loadGpsData,
+    startAccCalibration,
+    loadBoardInfo,
+    requestAttitude,
+    requestAltitude,
+    requestAttitudeQuaternion,
+} = useSensorsData(isApi146, isApi147);
 
 function roundOneDp(val: number) {
     return Math.round(val * 10) / 10;
@@ -1104,7 +1117,7 @@ const accelTrims = reactive({
 
 // --- Gyro / IMU ---
 
-// The tab's editable copy of FC.SENSOR_ALIGNMENT. The per-gyro angles stay optional: no MSP
+// The tab's editable copy of fcStore.sensorAlignment. The per-gyro angles stay optional: no MSP
 // payload carries them, so they are undefined until this tab has saved them once.
 type SensorAlignmentForm = Required<
     Pick<
@@ -1331,7 +1344,7 @@ async function acquireCoordinates(promptConsent: boolean): Promise<Coordinates |
 // A live GPS fix from the flight controller, or null if there's no fix.
 async function gpsCoordinates(): Promise<Coordinates | null> {
     try {
-        await MSP.promise(MSPCodes.MSP_RAW_GPS);
+        await loadGpsData();
         if (fcStore.gpsData?.fix) {
             return {
                 lat: fcStore.gpsData.latitude / GPS_COORD_SCALE,
@@ -1984,7 +1997,7 @@ function onCalibrateAccel() {
     // serial commands; pause the attitude poll to avoid flooding the buffer.
     pauseInterval("sensors_attitude");
 
-    MSP.send_message(MSPCodes.MSP_ACC_CALIBRATION, false, false, function () {
+    startAccCalibration(function () {
         if (!isMounted.value) {
             return;
         }
@@ -2001,7 +2014,7 @@ function onCalibrateAccel() {
             // Re-fetch board info to refresh configurationProblems; the watcher above
             // handles cleanup when the flag clears. The callback acts as a fallback for
             // firmware that does not report configurationProblems.
-            MSP.send_message(MSPCodes.MSP_BOARD_INFO, false, false, function () {
+            loadBoardInfo(function () {
                 if (calibratingAccel.value) {
                     gui_log(i18n.getMessage("initialSetupAccelCalibEnded"));
                     calibratingAccel.value = false;
@@ -2089,7 +2102,7 @@ function renderModel() {
 }
 
 function pollAttitude() {
-    MSP.send_message(MSPCodes.MSP_ATTITUDE, false, false, function () {
+    requestAttitude(function () {
         if (!isMounted.value) {
             return;
         }
@@ -2114,7 +2127,7 @@ function pollAttitude() {
         }
         const altimeter = altimeterIndicator;
         if (altimeter) {
-            MSP.send_message(MSPCodes.MSP_ALTITUDE, false, false, () => {
+            requestAltitude(() => {
                 altimeter.setAltitude(fcStore.sensorData.altitude * 100);
             });
         }
@@ -2123,7 +2136,7 @@ function pollAttitude() {
 
     // Poll quaternion alongside Euler for gimbal-lock-free sphere view rotation
     if (isApi148.value) {
-        MSP.send_message(MSPCodes.MSP_ATTITUDE_QUATERNION, false, false, function () {
+        requestAttitudeQuaternion(function () {
             attitudeQuaternion.value = fcStore.sensorData.quaternion;
         });
     }
@@ -2316,22 +2329,7 @@ const loadConfig = async () => {
                 return;
             }
 
-            await MSP.promise(MSPCodes.MSP_SENSOR_CONFIG);
-            await MSP.promise(MSPCodes.MSP_SENSOR_ALIGNMENT);
-            await MSP.promise(MSPCodes.MSP_BOARD_ALIGNMENT_CONFIG);
-            await MSP.promise(MSPCodes.MSP_ACC_TRIM);
-            await MSP.promise(MSPCodes.MSP2_SENSOR_CONFIG_ACTIVE);
-            // initModel() / wizard Model read mixer + motor_count (Custom mmix → craft mesh).
-            await MSP.promise(MSPCodes.MSP_MIXER_CONFIG);
-            await MSP.promise(MSPCodes.MSP_MOTOR_CONFIG);
-
-            if (isApi146.value) {
-                await MSP.promise(MSPCodes.MSP_COMPASS_CONFIG);
-            }
-
-            if (isApi147.value) {
-                await MSP.promise(MSPCodes.MSP2_GYRO_SENSOR);
-            }
+            await loadSensorsConfig();
 
             if (!isMounted.value) {
                 return;
@@ -2371,12 +2369,9 @@ const loadConfig = async () => {
             initModel();
             initInstruments();
             addInterval("sensors_attitude", pollAttitude, ATTITUDE_POLL_MS, true);
-
-            GUI.content_ready();
         },
         (e) => {
             console.error("Failed to load sensor config", e);
-            GUI.content_ready();
         },
     );
 };
@@ -2448,17 +2443,7 @@ const saveConfig = () =>
         }
 
         // Send MSP commands
-        await MSP.promise(MSPCodes.MSP_SET_SENSOR_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_SENSOR_CONFIG));
-        await MSP.promise(MSPCodes.MSP_SET_SENSOR_ALIGNMENT, mspHelper.crunch(MSPCodes.MSP_SET_SENSOR_ALIGNMENT));
-        await MSP.promise(
-            MSPCodes.MSP_SET_BOARD_ALIGNMENT_CONFIG,
-            mspHelper.crunch(MSPCodes.MSP_SET_BOARD_ALIGNMENT_CONFIG),
-        );
-        await MSP.promise(MSPCodes.MSP_SET_ACC_TRIM, mspHelper.crunch(MSPCodes.MSP_SET_ACC_TRIM));
-
-        if (isApi146.value) {
-            await MSP.promise(MSPCodes.MSP_SET_COMPASS_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_COMPASS_CONFIG));
-        }
+        await sendSensorsConfig();
 
         // Between the parameter group writes and the persist that serialises them, so a
         // refused port throws before anything reaches EEPROM.

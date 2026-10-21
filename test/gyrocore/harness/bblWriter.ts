@@ -55,6 +55,8 @@ export interface SyntheticFrame {
     debug: [number, number, number, number];
     /** Logged only when encodeLog gets motorCount (fields motor[0..n-1], predictor PREVIOUS). */
     motors?: number[];
+    /** Values for encodeLog's `extraFields`, same order (signed, predictor PREVIOUS). */
+    extra?: number[];
 }
 
 function unsignedVB(out: number[], value: number) {
@@ -70,9 +72,10 @@ function signedVB(out: number[], value: number) {
     unsignedVB(out, ((value << 1) ^ (value >> 31)) >>> 0);
 }
 
-function values(iteration: number, f: SyntheticFrame, motorCount: number) {
+function values(iteration: number, f: SyntheticFrame, motorCount: number, extraCount: number) {
     const motors = Array.from({ length: motorCount }, (_, i) => f.motors?.[i] ?? 0);
-    return [iteration, f.time, ...f.setpoint, ...f.gyro, ...f.debug, ...motors];
+    const extra = Array.from({ length: extraCount }, (_, i) => f.extra?.[i] ?? 0);
+    return [iteration, f.time, ...f.setpoint, ...f.gyro, ...f.debug, ...motors, ...extra];
 }
 
 /** One log: header, an S-frame with the given flight-mode flags, then I/P frames, then LOG_END. */
@@ -85,11 +88,20 @@ export function encodeLog(
         pidProcessDenom?: number;
         extraHeaders?: string[];
         motorCount?: number;
+        /** Default 96 (DEBUG_CHIRP on the pinned firmware). */
+        debugMode?: number;
+        /** Additional main fields after the motors, e.g. axisD[0] or eRPM[0]. */
+        extraFields?: string[];
+        /** Further S-frames (flight-mode flags, failsafe phase) written before the given main frame. */
+        sFrames?: { atFrame: number; flightModeFlags: number; failsafePhase?: number }[];
+        /** false: no S-frame field definitions and no S-frames (no flightModeFlags column). */
+        slowFields?: boolean;
     },
 ) {
     const motorCount = opts.motorCount ?? 0;
-    const fields = [...FIELDS, ...Array.from({ length: motorCount }, (_, i) => `motor[${i}]`)];
-    const predictors = [...P_PREDICTOR, ...Array(motorCount).fill(1)];
+    const extraFields = opts.extraFields ?? [];
+    const fields = [...FIELDS, ...Array.from({ length: motorCount }, (_, i) => `motor[${i}]`), ...extraFields];
+    const predictors = [...P_PREDICTOR, ...Array(motorCount + extraFields.length).fill(1)];
     const n = fields.length;
     const header = [
         "H Product:Blackbox flight data recorder by Nicholas Sherlock",
@@ -100,7 +112,7 @@ export function encodeLog(
         "H Firmware revision:Betaflight 2026.6.2 (synthetic) STM32F7X2",
         `H looptime:${opts.looptime ?? 125}`,
         `H pid_process_denom:${opts.pidProcessDenom ?? 8}`,
-        "H debug_mode:96",
+        `H debug_mode:${opts.debugMode ?? 96}`,
         ...(opts.extraHeaders ?? []).map((h) => `H ${h}`),
         `H Field I name:${fields.join(",")}`,
         `H Field I signed:0,0,${Array(n - 2)
@@ -114,22 +126,36 @@ export function encodeLog(
         `H Field P encoding:9,${Array(n - 1)
             .fill(0)
             .join(",")}`,
-        "H Field S name:flightModeFlags,stateFlags,failsafePhase",
-        "H Field S signed:0,0,0",
-        "H Field S predictor:0,0,0",
-        "H Field S encoding:1,1,1",
+        ...(opts.slowFields === false
+            ? []
+            : [
+                  "H Field S name:flightModeFlags,stateFlags,failsafePhase",
+                  "H Field S signed:0,0,0",
+                  "H Field S predictor:0,0,0",
+                  "H Field S encoding:1,1,1",
+              ]),
     ];
     const out: number[] = Array.from(new TextEncoder().encode(`${header.join("\n")}\n`));
 
-    out.push("S".charCodeAt(0));
-    unsignedVB(out, opts.flightModeFlags);
-    unsignedVB(out, 0);
-    unsignedVB(out, 0);
+    if (opts.slowFields !== false) {
+        out.push("S".charCodeAt(0));
+        unsignedVB(out, opts.flightModeFlags);
+        unsignedVB(out, 0);
+        unsignedVB(out, 0);
+    }
 
     let prev: number[] = [];
     let prev2: number[] = [];
+    const slowAt = new Map((opts.sFrames ?? []).map((f) => [f.atFrame, f]));
     frames.forEach((frame, iteration) => {
-        const cur = values(iteration, frame, motorCount);
+        const slow = slowAt.get(iteration);
+        if (slow && opts.slowFields !== false) {
+            out.push("S".charCodeAt(0));
+            unsignedVB(out, slow.flightModeFlags);
+            unsignedVB(out, 0);
+            unsignedVB(out, slow.failsafePhase ?? 0);
+        }
+        const cur = values(iteration, frame, motorCount, extraFields.length);
         if (iteration % opts.iInterval === 0) {
             out.push("I".charCodeAt(0));
             unsignedVB(out, cur[0]);

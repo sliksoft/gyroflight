@@ -43,16 +43,19 @@ export function useApplyGate() {
         return authorizeCompositeApply(gate.gateState(), c?.id, c?.final);
     });
 
-    // Not a verdict on the tune: the product write is not released yet.
-    const productLock = productApplyBlocks();
-
     const safety = computed(() => {
         void gate.revision;
         return safetyForComposite(gate.gateState(), composite.value);
     });
 
+    // Not a verdict on the tune: the release procedure's named conditions (productApply.ts).
+    // Nothing produces an independent PID validation yet, so that one stays open.
+    const productLock = computed(() =>
+        productApplyBlocks({ safetyAnalysisEvidence: safety.value.analysisEvidence, independentPidValidation: null }),
+    );
+
     const applyAllowed = computed(
-        () => authorization.value.allowed && safety.value.authorized && productLock.length === 0,
+        () => authorization.value.allowed && safety.value.authorized && productLock.value.length === 0,
     );
 
     return { composite, authorization, safety, productLock, applyAllowed };

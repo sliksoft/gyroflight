@@ -9,6 +9,7 @@ import * as child from "child_process";
 import { VitePWA } from "vite-plugin-pwa";
 import { resolve } from "path";
 import ui from "@nuxt/ui/vite";
+import settingsSearchIndexPlugin from "./scripts/vite-plugin-settings-search.mjs";
 import nuxtUiViteOptions from "./nuxt-ui.vite.js";
 
 const commitHash = child.execSync("git rev-parse --short HEAD").toString().trim();
@@ -171,6 +172,15 @@ export default defineConfig({
                 main: resolve(import.meta.dirname, "src/index.html"),
                 receiver_msp: resolve(import.meta.dirname, "src/components/tabs/receiver-msp/receiver_msp.html"),
             },
+            output: {
+                // Gyroflight: the bundled Lucide icon set (src/gyroflight/icons.ts) gets its own chunk so
+                // `main` stays below workbox's 5 MB precache limit; a static import still loads it first.
+                manualChunks(id) {
+                    if (id.includes("/@iconify-json/lucide/")) {
+                        return "icons-lucide";
+                    }
+                },
+            },
             onwarn(warning, defaultHandler) {
                 if (warning.code === "INEFFECTIVE_DYNAMIC_IMPORT" && isCycleBreakingImport(warning)) {
                     return;
@@ -189,6 +199,7 @@ export default defineConfig({
         },
     },
     plugins: [
+        settingsSearchIndexPlugin(),
         vue(),
         ui(nuxtUiViteOptions),
         serveLocalesPlugin(),
@@ -212,7 +223,7 @@ export default defineConfig({
         VitePWA({
             registerType: "prompt",
             workbox: {
-                globPatterns: ["**/*.{js,css,html,ico,png,svg,json,mcm,gltf}"],
+                globPatterns: ["**/*.{js,css,html,ico,png,svg,json,mcm,gltf,woff2,woff}"],
                 // 5MB
                 maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
             },
