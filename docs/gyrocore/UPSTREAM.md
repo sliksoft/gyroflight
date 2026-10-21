@@ -14,19 +14,19 @@ this fork back upstream (no upstream PRs, no pushes to upstream).
 
 ## Provenance
 
-| Item                     | Value                                                                                                                |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| Upstream repository      | https://github.com/betaflight/betaflight-configurator                                                                |
-| Upstream default branch  | `master`                                                                                                             |
-| Fork base commit         | `d85e797e8674e3059cc3172e38df831e46a5250c` (upstream `master`, 2026-10-09)                                           |
-| Upstream version at base | `2026.12.0-alpha` (package.json)                                                                                     |
+| Item                     | Value                                                                                                                       |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Upstream repository      | https://github.com/betaflight/betaflight-configurator                                                                       |
+| Upstream default branch  | `master`                                                                                                                    |
+| Fork base commit         | `d85e797e8674e3059cc3172e38df831e46a5250c` (upstream `master`, 2026-10-09)                                                  |
+| Upstream version at base | `2026.12.0-alpha` (package.json)                                                                                            |
 | Last upstream sync       | `81e43bb57705f510da8a027126dbbf528a68e824` (upstream `master`), merged in five stages S1–S5 (`gyroflight/upstream-sync-s5`) |
-| Fork repository          | https://github.com/sliksoft/gyroflight (GitHub fork of the upstream repo; renamed from `gyrocore-app` on 2026-10-09) |
-| Fork default branch      | `gyroflight/main` — Gyroflight development head and GitHub default (set 2026-10-15)                                  |
-| Upstream mirror branch   | `master` — exact mirror of upstream Betaflight App; never commit Gyroflight work here                                |
-| Work branches            | `gyroflight/*` and `gyrocore/*`; first: `gyrocore/pwa-foundation`                                                    |
-| Local checkout           | `~/Gyroflight` (convention)                                                                                          |
-| Licence                  | GPL-3.0-or-later, inherited from upstream (`LICENSE`, `DEFAULT_LICENSE.md`)                                          |
+| Fork repository          | https://github.com/sliksoft/gyroflight (GitHub fork of the upstream repo; renamed from `gyrocore-app` on 2026-10-09)        |
+| Fork default branch      | `gyroflight/main` — Gyroflight development head and GitHub default (set 2026-10-15)                                         |
+| Upstream mirror branch   | `master` — exact mirror of upstream Betaflight App; never commit Gyroflight work here                                       |
+| Work branches            | `gyroflight/*` and `gyrocore/*`; first: `gyrocore/pwa-foundation`                                                           |
+| Local checkout           | `~/Gyroflight` (convention)                                                                                                 |
+| Licence                  | GPL-3.0-or-later, inherited from upstream (`LICENSE`, `DEFAULT_LICENSE.md`)                                                 |
 
 Toolchain at the base commit (from upstream `package.json` `engines` and `.nvmrc`):
 Node `24.21.0` (`^24.21.0`), npm `11.19.0` (`>=11.19.0`).
@@ -88,6 +88,8 @@ Set the same on any new clone.
 | `src/composables/useAutotune.ts`                                            | CHIRP input via GyroCore qualification; `applyGains(sliders, compositeId)` gate; GyroCore Safety step; product Apply lock; `attachChirpFlightIdentity(report, data)` after import | Viewer decode (WU2); Apply writes only an authorized GyroCore composite, live FC recheck (WU3); Safety must pass (WU4A); no write until Safety (WU3.1)                                                                                                                                                   |
 | `src/components/tabs/autotune/GainRecommendation.vue`                       | hide axes without gains; "apply from axis" selector removed; Apply sends the composite; gate notice (with the Safety result); Apply also disabled by Safety and the product lock  | per-axis gains are evidence; sliders are global (WU2, WU3); Safety (WU4A); product lock (WU3.1)                                                                                                                                                                                                          |
 | `src/components/tabs/AutotuneTab.vue`                                       | imports + `<ChirpQualificationPanel />`, `<FlightAbSelector />`, `<DiagnosticOnlyBanner />`, `<GlobalTunePanel />`                                                                | measurement states, Flight A/B selection from a saved Tune Session (new WU4; the WU5 Cross-flight Comparison renders inside it, no further upstream change), diagnostic label, global tune (WU2, WU3)                                                                                                    |
+| `src/components/init.ts`                                                    | `import "../gyroflight/icons";` before `createApp`                                                                                                                                | registers the bundled Lucide icon set (`@iconify-json/lucide`, already a dependency) so the PWA draws every icon offline and no request goes to `api.iconify.design` (`src/gyroflight/icons.ts`, `test/gyroflight/bundled_icons.test.ts`)                                                                |
+| `vite.config.js`                                                            | `build.rollupOptions.output.manualChunks`: `@iconify-json/lucide` → `icons-lucide` chunk                                                                                          | keeps `main` below workbox's 5 MB `maximumFileSizeToCacheInBytes`, above which it would silently drop out of the precache and break offline start                                                                                                                                                        |
 | `test/components/autotuneApplyGate.test.ts`                                 | seed a GyroCore-qualified report (roll, pitch, yaw); expect the composite id; explicit test-only `vi.mock`s releasing GyroCore Safety and the product Apply lock                  | Apply requires an authorized, axis-covered composite; the button's wiring is still tested behind the lock; same assertions otherwise (WU2, WU3, WU3.1)                                                                                                                                                   |
 
 Gyroflight UI layer that needs **no** upstream edit:

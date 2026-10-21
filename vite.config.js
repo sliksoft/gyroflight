@@ -172,6 +172,15 @@ export default defineConfig({
                 main: resolve(import.meta.dirname, "src/index.html"),
                 receiver_msp: resolve(import.meta.dirname, "src/components/tabs/receiver-msp/receiver_msp.html"),
             },
+            output: {
+                // Gyroflight: the bundled Lucide icon set (src/gyroflight/icons.ts) gets its own chunk so
+                // `main` stays below workbox's 5 MB precache limit; a static import still loads it first.
+                manualChunks(id) {
+                    if (id.includes("/@iconify-json/lucide/")) {
+                        return "icons-lucide";
+                    }
+                },
+            },
             onwarn(warning, defaultHandler) {
                 if (warning.code === "INEFFECTIVE_DYNAMIC_IMPORT" && isCycleBreakingImport(warning)) {
                     return;

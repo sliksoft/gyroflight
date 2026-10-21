@@ -22,6 +22,8 @@
 // This module is imported for its side effects: setting up i18next
 // and initializing the Vue app with plugins and global model.
 import "../js/localization";
+// Gyroflight: bundled icons, so the PWA draws them offline (see src/gyroflight/icons.ts).
+import "../gyroflight/icons";
 import i18next from "i18next";
 import { createApp, reactive } from "vue";
 import ui from "@nuxt/ui/vue-plugin";
