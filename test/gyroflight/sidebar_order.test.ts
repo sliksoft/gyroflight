@@ -23,7 +23,7 @@
 // (a399ffb1). The Gyroflight items stay appended after that upstream group.
 
 import { describe, expect, it } from "vitest";
-import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items.js";
+import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items";
 import { GYROFLIGHT_TAB_KEY } from "../../src/gyroflight/tabs";
 import { DEFAULT_ALLOWED_TABS, DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED } from "../../src/stores/navigation";
 

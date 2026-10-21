@@ -987,7 +987,7 @@ describe("the component", () => {
     }
 
     it("the Autotune tab around it stays an Expert Mode tab", async () => {
-        const { sidebarItems } = await import("../../src/components/sidebar/sidebar_items.js");
+        const { sidebarItems } = await import("../../src/components/sidebar/sidebar_items");
         expect(sidebarItems.find((i: { key: string }) => i.key === "autotune")).toMatchObject({ expert: true });
     });
 

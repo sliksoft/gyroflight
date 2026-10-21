@@ -37,7 +37,7 @@ const switched = vi.hoisted(() => ({ calls: [] as unknown[][] }));
 vi.mock("@/js/utils/isExpertModeEnabled", () => ({ isExpertModeEnabled: () => expert.on }));
 vi.mock("@/js/tab_switch.js", () => ({ switchTab: (...args: unknown[]) => switched.calls.push(args) }));
 
-import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items.js";
+import { sidebarItems, isItemVisible } from "../../src/components/sidebar/sidebar_items";
 import { DEFAULT_ALLOWED_TABS, DEFAULT_ALLOWED_TABS_WHEN_DISCONNECTED } from "../../src/stores/navigation";
 import { VueTabComponents } from "../../src/js/vue_tab_registry.js";
 import { gyroflightTabComponents } from "../../src/gyroflight/components";

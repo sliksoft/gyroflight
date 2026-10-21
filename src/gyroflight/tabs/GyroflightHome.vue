@@ -71,7 +71,7 @@ import BaseTab from "@/components/tabs/BaseTab.vue";
 import UiBox from "@/components/elements/UiBox.vue";
 import GyroflightLogo from "../branding/GyroflightLogo.vue";
 import { switchTab } from "@/js/tab_switch.js";
-import { sidebarItems } from "@/components/sidebar/sidebar_items.js";
+import { sidebarItems } from "@/components/sidebar/sidebar_items";
 import { i18n } from "@/js/localization";
 import { isExpertModeEnabled } from "@/js/utils/isExpertModeEnabled";
 import { EventBus } from "@/components/eventBus.js";
