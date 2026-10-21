@@ -99,14 +99,15 @@ import { computed, ref, watch } from "vue";
 import { useAutotuneStore } from "@/stores/autotune";
 import { useConnectionStore } from "@/stores/connection";
 import { useAutotune, type AnalysisResult, type AxisName, type AxisResult } from "@/composables/useAutotune";
-import { useDialog } from "@/composables/useDialog";
 import { PHASE_MARGIN_PRESETS } from "@/js/blackbox/spectral_analysis";
 import type { SysConfig } from "@/js/blackbox/chirp_bbl_parser";
 import { i18n } from "@/js/localization";
 import UiBox from "../../elements/UiBox.vue";
 import ApplyGateNotice from "@/gyrocore/components/ApplyGateNotice.vue";
 import { useApplyGate } from "@/gyrocore/composables/useApplyGate";
-import { issueConfirmation } from "@/gyrocore/tuning/applyConfirmation";
+import { useTuneWorkflow } from "@/composables/useTuneWorkflow";
+import { useTuneWorkflowStore } from "@/gyrocore/stores/tuneWorkflow";
+import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 
 type Gains = NonNullable<AxisResult["gains"]>;
 type ProposedSliders = Gains["proposed"];
@@ -157,8 +158,10 @@ interface TableRow {
 
 const store = useAutotuneStore();
 const connectionStore = useConnectionStore();
-const { applyGains, recomputeGains } = useAutotune();
-const dialog = useDialog();
+const { recomputeGains } = useAutotune();
+const { confirmAndApply } = useTuneWorkflow();
+const tuneWorkflow = useTuneWorkflowStore();
+const gate = useChirpQualificationStore();
 
 const applied = ref(false);
 const applying = ref(false);
@@ -499,38 +502,22 @@ function formatChangePct(v: number | null | undefined) {
 }
 
 async function onApply() {
-    // Gyroflight: the global (composite) recommendation, never one axis's.
+    // Gyroflight: the global (composite) recommendation, never one axis's, through the one
+    // confirm-and-apply route (full comparison, confirmation token, verified write).
     const composite = applyComposite.value;
-    const proposed = composite?.final;
-    if (!isConnected.value || !composite || !proposed || !applyAllowed.value) {
+    if (!isConnected.value || !composite || !composite.final || !applyAllowed.value) {
         return;
     }
-
-    const confirmed = await dialog.showYesNo(
-        i18n.getMessage("autotuneApplyConfirmTitle"),
-        i18n.getMessage("autotuneApplyConfirmText"),
-        {
-            destructive: true,
-            yesText: i18n.getMessage("autotuneApplyGains"),
-            noText: i18n.getMessage("cancel"),
-        },
-    );
-    if (!confirmed) {
-        return;
-    }
-
     applyError.value = "";
     applied.value = false;
     applying.value = true;
     try {
-        // Gyroflight: the confirmation of exactly this composite; useTuneApply.ts refuses without it.
-        const token = issueConfirmation({ kind: "apply", compositeId: composite.id, sliders: { ...proposed } });
-        await applyGains(proposed, composite.id, token);
-        applied.value = true;
-    } catch (err) {
-        // `err?.message || err` for a caught value of unknown type.
-        const message = typeof err === "object" && err !== null ? Reflect.get(err, "message") : undefined;
-        applyError.value = `${i18n.getMessage("autotuneApplyFailed")}: ${message || err}`;
+        const headers = gate.report?.logs.find((l) => l.logIndex === composite.logIndex)?.headerPairs ?? [];
+        const result = await confirmAndApply(composite, headers);
+        applied.value = result === "verified";
+        if (result === "blocked" || result === "failed") {
+            applyError.value = `${i18n.getMessage("autotuneApplyFailed")}: ${tuneWorkflow.outcome?.status === "verified" ? "" : (tuneWorkflow.outcome?.message ?? "")}`;
+        }
     } finally {
         applying.value = false;
     }
