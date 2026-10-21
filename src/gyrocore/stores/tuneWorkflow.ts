@@ -53,8 +53,18 @@ export interface TuneOutcomeFailed {
 
 export type TuneOutcome = TuneOutcomeOk | TuneOutcomeFailed;
 
+/** The last read-only preview: what the flight controller holds and would hold after Apply. */
+export interface TunePreviewView {
+    status: "ok" | "blocked";
+    before: TuneSnapshot | null;
+    expected: TuneSnapshot | null;
+    reasons: string[];
+    at: string;
+}
+
 export const useTuneWorkflowStore = defineStore("gyroflightTuneWorkflow", () => {
     const outcome = ref<TuneOutcome | null>(null);
+    const preview = ref<TunePreviewView | null>(null);
     const busy = ref(false);
-    return { outcome, busy };
+    return { outcome, preview, busy };
 });

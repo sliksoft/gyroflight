@@ -79,6 +79,16 @@
         <p class="text-sm text-dimmed">{{ $t("gyroflightApplyOnClick") }}</p>
         <UButton
             size="xs"
+            variant="outline"
+            class="mt-1 me-2"
+            data-gyrocore="workflow-preview"
+            :disabled="!canPreview || workflow.busy"
+            @click="onPreview"
+        >
+            {{ $t("gyroflightPreviewButton") }}
+        </UButton>
+        <UButton
+            size="xs"
             class="mt-1"
             data-gyrocore="workflow-apply"
             :disabled="!canApply || workflow.busy"
@@ -86,6 +96,41 @@
         >
             {{ $t("gyroflightApplyReview") }}
         </UButton>
+
+        <div
+            v-if="workflow.preview"
+            class="text-sm mt-2"
+            data-gyrocore="workflow-preview-result"
+            :data-status="workflow.preview.status"
+        >
+            <p class="font-bold">{{ $t("gyroflightPreviewTitle") }}</p>
+            <template v-if="workflow.preview.status === 'ok'">
+                <p class="text-dimmed">{{ $t("gyroflightPreviewOk") }}</p>
+                <table class="gyroflight-workflow-table">
+                    <thead>
+                        <tr>
+                            <th>{{ $t("gyroflightCompareSetting") }}</th>
+                            <th>{{ $t("gyroflightPreviewNow") }}</th>
+                            <th>{{ $t("gyroflightPreviewAfter") }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="r in previewRows" :key="r.key" :data-preview="r.key">
+                            <td>{{ compareLabel(r.key) }}</td>
+                            <td>{{ r.from ?? "?" }}</td>
+                            <td>{{ r.to ?? "?" }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p v-if="!previewRows.length" class="text-dimmed">{{ $t("gyroflightPreviewNoChange") }}</p>
+            </template>
+            <template v-else>
+                <p class="text-red-500">{{ $t("gyroflightPreviewBlocked") }}</p>
+                <ul class="list-disc ps-5">
+                    <li v-for="r in workflow.preview.reasons" :key="r">{{ r }}</li>
+                </ul>
+            </template>
+        </div>
 
         <!-- 5. Verify -->
         <h4 class="font-bold mt-3" data-step="verify">5. {{ $t("gyroflightStepVerify") }}</h4>
@@ -177,7 +222,7 @@ import {
     type PartState,
     type TunePart,
 } from "@/gyrocore/tuning/tuneWorkflow";
-import { AXES } from "@/gyrocore/tuning/tuneSnapshot";
+import { AXES, snapshotDiff } from "@/gyrocore/tuning/tuneSnapshot";
 
 const t = (key: string, args: (string | number)[] = []) => i18n.getMessage(key, args.map(String));
 const gate = useChirpQualificationStore();
@@ -187,7 +232,7 @@ const fc = useFlightControllerStore();
 const backupStore = useTuneBackupStore();
 const workflow = useTuneWorkflowStore();
 const { composite, authorization, safety, productLock } = useApplyGate();
-const { confirmAndApply, confirmAndRestore } = useTuneWorkflow();
+const { preview, confirmAndApply, confirmAndRestore } = useTuneWorkflow();
 
 const headerPairs = computed(
     () => gate.report?.logs.find((l) => l.logIndex === composite.value?.logIndex)?.headerPairs ?? [],
@@ -224,6 +269,23 @@ const checklist = computed(() =>
 );
 const canApply = computed(() => !!composite.value?.final && checklist.value.every((c) => c.ok));
 const outcome = computed(() => workflow.outcome);
+// Read-only, so it is offered whenever a real FC is connected, even while Apply is blocked.
+const canPreview = computed(() => !!composite.value?.final && connected.value && !connection.virtualMode);
+const previewRows = computed(() => {
+    const p = workflow.preview;
+    return p?.status === "ok" && p.before && p.expected ? snapshotDiff(p.before, p.expected) : [];
+});
+
+async function onPreview() {
+    if (composite.value && canPreview.value && !workflow.busy) {
+        workflow.busy = true;
+        try {
+            await preview(composite.value);
+        } finally {
+            workflow.busy = false;
+        }
+    }
+}
 
 const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid) : []));
 

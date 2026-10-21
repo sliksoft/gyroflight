@@ -135,6 +135,20 @@ export function firmwareDterm(s: Record<string, number>, f: Record<string, numbe
     };
 }
 
+export function firmwareGyro(s: Record<string, number>, f: Record<string, number>) {
+    if (!s.slider_gyro_filter) {
+        return { ...f };
+    }
+    const k = s.slider_gyro_filter_multiplier / 100;
+    return {
+        ...f,
+        gyro_lowpass_hz: Math.round(250 * k),
+        gyro_lowpass2_hz: Math.round(500 * k),
+        gyro_lowpass_dyn_min_hz: Math.round(250 * k),
+        gyro_lowpass_dyn_max_hz: Math.round(500 * k),
+    };
+}
+
 export function createCraft(overrides: Partial<Craft> = {}): Craft {
     const sliders = { ...CRAFT_SLIDERS };
     const pidsInit = [...BASE.pids.map((r) => [...r]), ...Array.from({ length: 7 }, () => [0, 0, 0])];
@@ -156,7 +170,7 @@ export function createCraft(overrides: Partial<Craft> = {}): Craft {
         apiVersion: "1.48.0",
         armed: false,
         sliders,
-        filters: firmwareDterm(sliders, { ...CRAFT_FILTERS }),
+        filters: firmwareGyro(sliders, firmwareDterm(sliders, { ...CRAFT_FILTERS })),
         pids,
         advanced,
         eeprom: null,
@@ -268,6 +282,17 @@ export async function craftPromise(craft: Craft, code: number, data?: number[]) 
             Object.assign(fc.filterConfig, firmwareDterm({ ...craft.sliders, ...dt.sliders }, dt.filters));
             break;
         }
+        case MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO: {
+            const g = { slider_gyro_filter: d[0], slider_gyro_filter_multiplier: d[1] };
+            const gf = {
+                gyro_lowpass_hz: u16(d, 2),
+                gyro_lowpass2_hz: u16(d, 4),
+                gyro_lowpass_dyn_min_hz: u16(d, 6),
+                gyro_lowpass_dyn_max_hz: u16(d, 8),
+            };
+            Object.assign(fc.filterConfig, firmwareGyro({ ...craft.sliders, ...g }, gf));
+            break;
+        }
         case MSPCodes.MSP_SET_SIMPLIFIED_TUNING: {
             craft.written = true;
             if (craft.ignoreWrites) {
@@ -284,7 +309,10 @@ export async function craftPromise(craft: Craft, code: number, data?: number[]) 
             const { pids, advanced } = firmwarePids(craft.sliders, craft.pids, craft.advanced);
             craft.pids = pids;
             craft.advanced = advanced;
-            craft.filters = firmwareDterm(craft.sliders, { ...craft.filters, ...dt.filters });
+            craft.filters = firmwareGyro(
+                craft.sliders,
+                firmwareDterm(craft.sliders, { ...craft.filters, ...dt.filters }),
+            );
             if (craft.skewAfterWrite) {
                 craft.pids[0][0] += 1;
             }
@@ -342,6 +370,7 @@ export const APPLY_SUCCESS_SEQUENCE = [
     MSPCodes.MSP_PID_ADVANCED,
     MSPCodes.MSP_CALCULATE_SIMPLIFIED_PID,
     MSPCodes.MSP_CALCULATE_SIMPLIFIED_DTERM,
+    MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO,
     MSPCodes.MSP_SET_SIMPLIFIED_TUNING,
     MSPCodes.MSP_VALIDATE_SIMPLIFIED_TUNING,
     MSPCodes.MSP_SIMPLIFIED_TUNING,

@@ -41,6 +41,15 @@ const { applyGains, recomputeGains, showYesNo } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/composables/useAutotune", () => ({ useAutotune: () => ({ applyGains, recomputeGains }) }));
+// The read-only preview reads the FC over MSP; here it answers like a craft would.
+vi.mock("@/composables/useTuneApply", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../src/composables/useTuneApply")>()),
+    previewTune: async () => ({
+        before: { sliders: { slider_pi_gain: 100 }, filters: {}, pids: [[45, 80, 30]], advanced: {} },
+        expected: { sliders: { slider_pi_gain: 50 }, filters: {}, pids: [[23, 40, 30]], advanced: {} },
+        hash: "0badc0de",
+    }),
+}));
 vi.mock("@/composables/useDialog", () => ({ useDialog: () => ({ showYesNo }) }));
 vi.mock("@/stores/connection", () => ({ useConnectionStore: () => ({ connectionValid: true }) }));
 // Test-only release of the product Apply lock, to test the gate behind it (product_apply_lock.test.ts tests the lock).

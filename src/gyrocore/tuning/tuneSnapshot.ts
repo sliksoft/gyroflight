@@ -72,11 +72,13 @@ export interface TuneSnapshot {
     advanced: Record<string, number>;
 }
 
-/** What the firmware said a write would produce (MSP_CALCULATE_SIMPLIFIED_PID / _DTERM). */
+/** What the firmware said a write would produce (MSP_CALCULATE_SIMPLIFIED_PID / _DTERM / _GYRO). */
 export interface FirmwareCalculation {
     pids: Partial<Record<Axis, [number, number, number]>>;
     advanced: Record<string, number>;
     dtermFilters: Record<string, number>;
+    /** Absent: the gyro filters are expected unchanged. */
+    gyroFilters?: Record<string, number>;
 }
 
 /** Axes the slider mode drives: 1 = roll+pitch, 2 = roll+pitch+yaw, 0 = none. */
@@ -116,7 +118,11 @@ export function expectedAfterWrite(
             }
         }
     }
-    const filters = { ...before.filters, ...pick(calc.dtermFilters, DTERM_FILTER_KEYS) };
+    const filters = {
+        ...before.filters,
+        ...pick(calc.dtermFilters, DTERM_FILTER_KEYS),
+        ...(calc.gyroFilters ? pick(calc.gyroFilters, GYRO_FILTER_KEYS) : {}),
+    };
     return { sliders, filters, pids, advanced };
 }
 
@@ -159,4 +165,76 @@ export function pidsDifferFromLog(headerPairs: readonly (readonly [string, strin
         }
     }
     return out;
+}
+
+/** A stable identity of a snapshot (key order does not matter): binds a confirmation to what was shown. */
+export function snapshotHash(s: TuneSnapshot): string {
+    const sorted = (o: Record<string, number>) =>
+        Object.keys(o)
+            .sort()
+            .map((k) => [k, o[k]]);
+    const text = JSON.stringify([sorted(s.sliders), sorted(s.filters), s.pids, sorted(s.advanced)]);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+const U8 = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 255;
+const U16 = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 65535;
+
+/** Why a stored snapshot cannot be written back as-is (missing or out-of-range values); empty when sound. */
+export function snapshotIssues(s: TuneSnapshot | null | undefined): string[] {
+    if (!s || typeof s !== "object") {
+        return ["snapshot_missing"];
+    }
+    const out: string[] = [];
+    for (const k of SNAPSHOT_SLIDER_KEYS) {
+        if (!U8(s.sliders?.[k])) out.push(`slider:${k}`);
+    }
+    for (const k of SNAPSHOT_FILTER_KEYS) {
+        if (!U16(s.filters?.[k])) out.push(`filter:${k}`);
+    }
+    for (const k of SNAPSHOT_ADVANCED_KEYS) {
+        const ok = k.startsWith("feedforward") ? U16(s.advanced?.[k]) : U8(s.advanced?.[k]);
+        if (!ok) out.push(`advanced:${k}`);
+    }
+    if (!Array.isArray(s.pids) || s.pids.length < 3) {
+        out.push("pids:rows");
+    } else {
+        s.pids.forEach((row, i) => {
+            if (!Array.isArray(row) || row.length !== 3 || !row.every(U8)) out.push(`pids:row${i}`);
+        });
+    }
+    return out;
+}
+
+export interface SnapshotDiffRow {
+    key: string;
+    from: number | undefined;
+    to: number | undefined;
+}
+
+/** Every field that differs between two snapshots, for showing a Restore before it happens. */
+export function snapshotDiff(from: TuneSnapshot, to: TuneSnapshot): SnapshotDiffRow[] {
+    const rows: SnapshotDiffRow[] = [];
+    const cmp = (group: string, a: Record<string, number>, b: Record<string, number>) => {
+        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+            if (a[k] !== b[k]) rows.push({ key: `${group}:${k}`, from: a[k], to: b[k] });
+        }
+    };
+    cmp("slider", from.sliders, to.sliders);
+    cmp("filter", from.filters, to.filters);
+    cmp("advanced", from.advanced, to.advanced);
+    const n = Math.max(from.pids.length, to.pids.length);
+    for (let i = 0; i < n; i++) {
+        ["P", "I", "D"].forEach((t, j) => {
+            if (from.pids[i]?.[j] !== to.pids[i]?.[j]) {
+                rows.push({ key: `pid:${AXES[i] ?? `row${i}`}:${t}`, from: from.pids[i]?.[j], to: to.pids[i]?.[j] });
+            }
+        });
+    }
+    return rows;
 }

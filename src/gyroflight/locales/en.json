@@ -746,5 +746,17 @@
     "gyroflightRestoreConfirmTitle": { "message": "Restore this backup?" },
     "gyroflightRestoreConfirmText": {
         "message": "Write the backup from $1 ($2, firmware $3) back to this flight controller. The current tune is backed up first; the result is read back and saved only when it matches the backup."
-    }
+    },
+    "gyroflightPreviewValues": {
+        "message": "Values the flight controller calculated for this change (current -> after Apply):"
+    },
+    "gyroflightPreviewNoChange": { "message": "No value changes." },
+    "gyroflightPreviewButton": { "message": "Read from flight controller (read-only preview)" },
+    "gyroflightPreviewTitle": { "message": "Read-only preview" },
+    "gyroflightPreviewOk": {
+        "message": "Read from the connected flight controller; nothing was written. Values it holds now and would hold after Apply:"
+    },
+    "gyroflightPreviewBlocked": { "message": "The preview could not be read; nothing was written." },
+    "gyroflightPreviewNow": { "message": "Now" },
+    "gyroflightPreviewAfter": { "message": "After Apply" }
 }
