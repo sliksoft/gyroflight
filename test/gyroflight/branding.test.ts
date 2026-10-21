@@ -348,6 +348,6 @@ describe("Gyroflight status tab", () => {
 
 describe("GyroCore Apply authority is untouched", () => {
     it("the product Apply lock is still full_safety_engine_pending", () => {
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
     });
 });

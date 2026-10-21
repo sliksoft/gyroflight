@@ -358,9 +358,7 @@ describe("GyroCore Safety on the global recommendation (product entry)", () => {
     });
 
     it("RP log: yaw is shown unchanged, roll+pitch mapped", async () => {
-        const { gate } = await load(
-            bfLog([0, 1, 2], withHeader(BETAFLIGHT_TUNE_HEADERS, "simplified_pids_mode:1")),
-        );
+        const { gate } = await load(bfLog([0, 1, 2], withHeader(BETAFLIGHT_TUNE_HEADERS, "simplified_pids_mode:1")));
         const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
         clearPhaseMarginForGate(gate);
         const composite = gate.composite!;

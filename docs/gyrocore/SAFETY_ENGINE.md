@@ -1,7 +1,12 @@
 # GyroCore Safety engine in Gyroflight (WU4)
 
 Status: **WU4A (deterministic Safety foundation) complete. The full Safety pipeline is blocked by analysis**: it needs analysis evidence that Gyroflight does not have and that GyroCore itself
-has not qualified as stable. The product Apply lock stays `full_safety_engine_pending`.
+has not qualified as stable. The constant product Apply lock is replaced by a release procedure
+(`productLock/productApply.ts`): Apply is released only with Safety analysis evidence (`full_safety_engine_pending`
+until then) and an independent PID validation (`independent_pid_validation_missing`; nothing produces one yet), on top
+of the composite gate, this Safety step, the user's confirmation, the FC identity check, a backup and a verified
+read-back (`src/composables/useTuneApply.ts`, see [APPLY_RESTORE.md](APPLY_RESTORE.md)). In production every tune
+therefore stays blocked, now with named reasons.
 
 - Reference: `~/GyroCore` at `d2e60f7`, read only.
 - Betaflight firmware master: `4fc1520c5a5decddc8ef07ad57c0e766ea8747ba`.

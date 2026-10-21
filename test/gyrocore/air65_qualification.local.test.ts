@@ -195,7 +195,7 @@ describe.skipIf(!air65)("AIR65 through the GyroCore CHIRP gate (local only)", ()
         }
         expect(composites).toBe(0);
         // WU3.1: and the product write is not released (production default, no mock here).
-        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING, "independent_pid_validation_missing"]);
         expect(msp.calls).toEqual([]);
         writeReport("air65_composite", compositeSummary);
 

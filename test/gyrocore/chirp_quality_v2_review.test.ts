@@ -324,7 +324,7 @@ describe("measurement authorization scope", () => {
         } as ChirpMeasurement;
         refreshAuthorizationLevel(cleared);
         expect(cleared.qualityV2.levels.tuningAuthorized.status).toBe("YES");
-        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING, "independent_pid_validation_missing"]);
         expect(() => assertProductApplyReleased()).toThrow();
     });
 

@@ -20,29 +20,60 @@
  */
 
 /*
- * Product release lock for writing a tune to a flight controller.
+ * Product release procedure for writing a tune to a flight controller.
  *
- * GyroCore's Safety engine (mechanical safety, safe-tune limits, output
- * safety) is not migrated yet (WU4). Until it is, Gyroflight does not write
- * tuning values to a craft, even when the global tune passes every gate that
- * exists today. This is not a measurement rejection: the tune may be valid,
- * the product write is simply not released.
+ * This replaced a constant lock. Writing is released only when every condition
+ * below holds; each one is computed from data and named, so a test can satisfy it
+ * with real evidence and the interface can say exactly what is missing:
  *
- * There is deliberately no switch here. Tests that exercise the write path
- * replace this module with test/gyrocore/harness/productRelease.ts.
+ *  - full_safety_engine_pending: GyroCore Safety has no analysis evidence. Its
+ *    evidence stages (mechanical M1-M17, safe-tune clamps) cannot run, and
+ *    safety/pipeline.ts blocks every tune with missing_required_analysis. The
+ *    code is kept from the old lock because the reason is the same.
+ *  - independent_pid_validation_missing: no independent flight has confirmed a
+ *    prediction across a known gain change (a Verified Tune). Nothing in
+ *    Gyroflight produces that evidence yet, so this stays blocked until it does.
+ *
+ * These come on top of, and never replace, the composite gate (including the M2
+ * phase-margin block), GyroCore Safety, the user's confirmation, the FC identity
+ * check, the backup and the live read-back in useTuneApply.ts.
+ *
+ * Tests that exercise the write path behind it replace this module with
+ * test/gyrocore/harness/productRelease.ts, or pass evidence explicitly.
  */
 
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 
 export const PRODUCT_APPLY_PENDING = "full_safety_engine_pending";
+export const RELEASE_INDEPENDENT_VALIDATION_MISSING = "independent_pid_validation_missing";
 
-/** Why the product may not write a tune to a craft; empty once released. */
-export function productApplyBlocks(): string[] {
-    return [PRODUCT_APPLY_PENDING];
+export interface ProductReleaseEvidence {
+    /** SafetyResult.analysisEvidence: "available" only when Safety ran its evidence stages. */
+    safetyAnalysisEvidence: string;
+    /** A Verified Tune: an independent flight that confirmed the prediction. No producer exists yet. */
+    independentPidValidation: { id: string } | null;
 }
 
-export function assertProductApplyReleased(): void {
-    const blocked = productApplyBlocks();
+/** What production has today: neither kind of evidence. */
+export const NO_RELEASE_EVIDENCE: ProductReleaseEvidence = Object.freeze({
+    safetyAnalysisEvidence: "not_available",
+    independentPidValidation: null,
+});
+
+/** Why the product may not write a tune to a craft; empty once every condition holds. */
+export function productApplyBlocks(evidence: ProductReleaseEvidence = NO_RELEASE_EVIDENCE): string[] {
+    const blocked: string[] = [];
+    if (evidence.safetyAnalysisEvidence !== "available") {
+        blocked.push(PRODUCT_APPLY_PENDING);
+    }
+    if (!evidence.independentPidValidation?.id) {
+        blocked.push(RELEASE_INDEPENDENT_VALIDATION_MISSING);
+    }
+    return blocked;
+}
+
+export function assertProductApplyReleased(evidence: ProductReleaseEvidence = NO_RELEASE_EVIDENCE): void {
+    const blocked = productApplyBlocks(evidence);
     if (blocked.length) {
         throw new ApplyBlockedError(blocked);
     }

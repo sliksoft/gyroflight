@@ -359,6 +359,6 @@ describe("a successful add authorizes nothing", () => {
                 }
             }
         }
-        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING, "independent_pid_validation_missing"]);
     });
 });

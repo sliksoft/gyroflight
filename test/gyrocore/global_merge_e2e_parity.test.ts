@@ -115,10 +115,7 @@ const EXPECTED: Record<
         authorized: false,
         participating: ["roll", "pitch", "yaw"],
         proposed: HELD_FF_FLOOR,
-        blockedContains: [
-            "composite_clamp_changes_direction:slider_feedforward_gain",
-            "phase_margin_not_validated",
-        ],
+        blockedContains: ["composite_clamp_changes_direction:slider_feedforward_gain", "phase_margin_not_validated"],
     },
 };
 

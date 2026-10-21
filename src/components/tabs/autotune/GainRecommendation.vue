@@ -106,6 +106,7 @@ import { i18n } from "@/js/localization";
 import UiBox from "../../elements/UiBox.vue";
 import ApplyGateNotice from "@/gyrocore/components/ApplyGateNotice.vue";
 import { useApplyGate } from "@/gyrocore/composables/useApplyGate";
+import { issueConfirmation } from "@/gyrocore/tuning/applyConfirmation";
 
 type Gains = NonNullable<AxisResult["gains"]>;
 type ProposedSliders = Gains["proposed"];
@@ -522,7 +523,9 @@ async function onApply() {
     applied.value = false;
     applying.value = true;
     try {
-        await applyGains(proposed, composite.id);
+        // Gyroflight: the confirmation of exactly this composite; useTuneApply.ts refuses without it.
+        const token = issueConfirmation({ kind: "apply", compositeId: composite.id, sliders: { ...proposed } });
+        await applyGains(proposed, composite.id, token);
         applied.value = true;
     } catch (err) {
         // `err?.message || err` for a caught value of unknown type.

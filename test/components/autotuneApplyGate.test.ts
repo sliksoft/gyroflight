@@ -146,7 +146,12 @@ describe("autotune apply confirmation gate", () => {
         await flush();
         expect(applyGains).toHaveBeenCalledTimes(1);
         // Gyroflight: the global (composite) recommendation, by its id.
-        expect(applyGains).toHaveBeenCalledWith(PROPOSED, expect.stringMatching(/^composite-log1-[0-9a-f]{8}$/));
+        // The third argument is the single-use confirmation token issued after the dialog.
+        expect(applyGains).toHaveBeenCalledWith(
+            PROPOSED,
+            expect.stringMatching(/^composite-log1-[0-9a-f]{8}$/),
+            expect.stringMatching(/^[0-9a-f]{32}$/),
+        );
     });
 
     it("declined confirmation leaves the flight controller untouched", async () => {
