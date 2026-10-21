@@ -108,7 +108,7 @@ export function assertCompositeApplyAuthorized(
     return auth.composite;
 }
 
-/** The parts of FC.TUNING_SLIDERS the live check reads (filled by MSP_SIMPLIFIED_TUNING). */
+/** The parts of fcStore.tuningSliders the live check reads (filled by MSP_SIMPLIFIED_TUNING). */
 export interface LiveSliders {
     slider_pids_mode?: number;
     slider_dterm_filter?: number;
