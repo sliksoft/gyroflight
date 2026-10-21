@@ -36,8 +36,10 @@
                     <span class="font-bold">{{ store.analysisResult.filename }}</span>
                 </div>
                 <div class="flex flex-col">
-                    <span class="text-xs text-dimmed" v-html="$t('autotuneSampleRate')"></span>
-                    <span class="font-bold">{{ store.analysisResult.sampleRate }} Hz</span>
+                    <!-- Gyroflight: the message has a rate placeholder; passing no rate showed it literally. -->
+                    <span class="font-bold" data-gyroflight="sample-rate">
+                        {{ $t("autotuneSampleRate", { rate: store.analysisResult.sampleRate }) }}
+                    </span>
                 </div>
                 <div class="flex flex-col">
                     <span class="text-xs text-dimmed" v-html="$t('autotuneAxesDetected')"></span>

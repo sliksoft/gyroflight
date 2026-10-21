@@ -22,7 +22,8 @@
 /*
  * The product Apply lock holds on its own: with GyroCore Safety released by
  * the explicit test harness (it would otherwise block first), the Apply action
- * still refuses with full_safety_engine_pending before any MSP access.
+ * still refuses with full_safety_engine_pending (and independent_pid_validation_missing)
+ * before any MSP access.
  */
 
 import { createPinia, setActivePinia } from "pinia";
@@ -68,13 +69,21 @@ describe("product Apply lock behind a released Safety step", () => {
     it("still blocks the safe positive fixture with full_safety_engine_pending and no MSP call", async () => {
         picked.bytes = MERGE_E2E_CASES.three_axis_agree();
         await useAutotune().importAndAnalyze();
-        const composite = useChirpQualificationStore().composite!;
+        const gate = useChirpQualificationStore();
+        expect(gate.composite!.blocked).toContain("phase_margin_not_validated");
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
+        const composite = gate.composite!;
         expect(composite.authorized).toBe(true);
         const err = await useAutotune()
             .applyGains(composite.final!, composite.id)
             .catch((e: unknown) => e);
         expect(err).toBeInstanceOf(ApplyBlockedError);
-        expect((err as ApplyBlockedError).reasons).toEqual(["full_safety_engine_pending"]);
+        // The released Safety harness still has no analysis evidence, and nothing has validated the tune.
+        expect((err as ApplyBlockedError).reasons).toEqual([
+            "full_safety_engine_pending",
+            "independent_pid_validation_missing",
+        ]);
         expect(msp.calls).toEqual([]);
     });
 });

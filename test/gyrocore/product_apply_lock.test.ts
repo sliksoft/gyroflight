@@ -68,7 +68,12 @@ import GainRecommendation from "../../src/components/tabs/autotune/GainRecommend
 import { useAutotune, type AnalysisResult } from "../../src/composables/useAutotune";
 import { useAutotuneStore } from "../../src/stores/autotune";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
-import { PRODUCT_APPLY_PENDING, productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
+import {
+    assertProductApplyReleased,
+    PRODUCT_APPLY_PENDING,
+    productApplyBlocks,
+    RELEASE_INDEPENDENT_VALIDATION_MISSING,
+} from "../../src/gyrocore/productLock/productApply";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { authorizeCompositeApply } from "../../src/gyrocore/tuning/authorize";
 import { safetyForComposite } from "../../src/gyrocore/safety/authorize";
@@ -84,15 +89,40 @@ beforeEach(() => {
 });
 
 describe("product Apply lock (production default)", () => {
-    it("is on, with its own reason", () => {
+    it("is on, with its own reasons: no Safety analysis evidence and no independent validation", () => {
         expect(PRODUCT_APPLY_PENDING).toBe("full_safety_engine_pending");
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(RELEASE_INDEPENDENT_VALIDATION_MISSING).toBe("independent_pid_validation_missing");
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
+    });
+
+    it("each release condition blocks on its own and only both together release", () => {
+        const validation = { id: "verified-tune-1" };
+        expect(productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: null })).toEqual([
+            "independent_pid_validation_missing",
+        ]);
+        expect(
+            productApplyBlocks({ safetyAnalysisEvidence: "not_available", independentPidValidation: validation }),
+        ).toEqual(["full_safety_engine_pending"]);
+        expect(
+            productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: { id: "" } }),
+        ).toEqual(["independent_pid_validation_missing"]);
+        expect(
+            productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: validation }),
+        ).toEqual([]);
+        expect(() => assertProductApplyReleased()).toThrow(ApplyBlockedError);
+        expect(() =>
+            assertProductApplyReleased({ safetyAnalysisEvidence: "available", independentPidValidation: validation }),
+        ).not.toThrow();
     });
 
     it("safe positive fixture: merge, coverage and the composite gate pass; GyroCore Safety blocks before any FC access", async () => {
         picked.bytes = MERGE_E2E_CASES.three_axis_agree();
         await useAutotune().importAndAnalyze();
         const gate = useChirpQualificationStore();
+        expect(gate.composite!.blocked).toContain("phase_margin_not_validated");
+        // Isolate Safety/product layers from the GF-1 phase-margin hold.
+        const { clearPhaseMarginForGate } = await import("./harness/clearPhaseMarginBlock");
+        clearPhaseMarginForGate(gate);
         const composite = gate.composite!;
         expect(composite.merge.status).toBe("merged");
         expect(composite.coverage.missingAxes).toEqual([]);

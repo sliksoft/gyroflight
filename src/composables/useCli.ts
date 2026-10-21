@@ -23,9 +23,7 @@ import { ref, reactive, nextTick, type Ref } from "vue";
 import { i18n } from "../js/localization";
 import BFClipboard from "../js/Clipboard";
 import { generateFilename } from "../js/utils/generate_filename";
-import GUI from "../js/gui";
 import BuildApi from "../js/BuildApi";
-import CONFIGURATOR from "../js/data_storage";
 import CliAutoComplete from "../js/CliAutoComplete";
 import { gui_log } from "../js/gui_log";
 import { serial } from "../js/serial";
@@ -36,6 +34,9 @@ import { get as getConfig } from "../js/ConfigStorage";
 import { useCliAutocomplete, type CliAutocomplete } from "./useCliAutocomplete";
 import { highlightCliLine } from "../js/CliSyntaxHighlight";
 import { escapeHtml } from "../js/utils/common";
+import { addTimeout, removeTimeout } from "../js/timers";
+import { useAppInfoStore } from "../stores/appInfo";
+import { useConnectionStore } from "../stores/connection";
 
 const backspaceCode = 8;
 const lineFeedCode = 10;
@@ -201,6 +202,7 @@ async function submitSupportData(
 }
 
 export function useCli(): Cli {
+    const connectionStore = useConnectionStore();
     const autocomplete = useCliAutocomplete();
 
     // outputHistory/cliBuffer are plain vars (not reactive) — avoids Vue Proxy overhead in the serial read hot path.
@@ -370,7 +372,7 @@ export function useCli(): Cli {
             }
 
             if (commandArray.length > 0) {
-                GUI.timeout_add("CLI_send_slowly", () => sendCommandIterative(commandArray), processingDelay);
+                addTimeout("CLI_send_slowly", () => sendCommandIterative(commandArray), processingDelay);
             }
         }
 
@@ -414,6 +416,10 @@ export function useCli(): Cli {
             ".txt",
             "cli-file",
         );
+        // Android returns null when the picker is dismissed; the other platforms throw AbortError.
+        if (!file) {
+            return;
+        }
         await FileSystem.writeFile(file, content);
     };
 
@@ -579,13 +585,13 @@ export function useCli(): Cli {
     const processCharacterInCliMode = (charCode: number, currentChar: string): boolean => {
         switch (charCode) {
             case lineFeedCode:
-                if (GUI.operating_system === "Windows") {
+                if (useAppInfoStore().operatingSystem === "Windows") {
                     writeLineToOutput(cliBuffer);
                     cliBuffer = "";
                 }
                 break;
             case carriageReturnCode:
-                if (GUI.operating_system !== "Windows") {
+                if (useAppInfoStore().operatingSystem !== "Windows") {
                     writeLineToOutput(cliBuffer);
                     cliBuffer = "";
                 }
@@ -608,8 +614,8 @@ export function useCli(): Cli {
 
     const checkForReboot = () => {
         if (cliBuffer === "Rebooting") {
-            CONFIGURATOR.cliActive = false;
-            CONFIGURATOR.cliValid = false;
+            connectionStore.cliActive = false;
+            connectionStore.cliValid = false;
             gui_log(i18n.getMessage("cliReboot"));
             reinitializeConnection();
         }
@@ -620,9 +626,9 @@ export function useCli(): Cli {
      * @returns true when autocomplete should start after the current read.
      */
     const validateCliEntry = (): boolean => {
-        if (!CONFIGURATOR.cliValid && cliEntrySawMarker) {
+        if (!connectionStore.cliValid && cliEntrySawMarker) {
             gui_log(i18n.getMessage(getConfig("cliOnlyMode")?.cliOnlyMode ? "cliDevEnter" : "cliEnter"));
-            CONFIGURATOR.cliValid = true;
+            connectionStore.cliValid = true;
             // begin output history with the prompt (last line of welcome message)
             // this is to match the content of the history with what the user sees on this tab
             outputHistory = CLI_PROMPT;
@@ -662,7 +668,7 @@ export function useCli(): Cli {
         outputSuppressed = suppressed;
 
         // a backspace has already taken its character back out of the history
-        if (CONFIGURATOR.cliValid && processCharacterInCliMode(byte, currentChar)) {
+        if (connectionStore.cliValid && processCharacterInCliMode(byte, currentChar)) {
             return;
         }
 
@@ -697,7 +703,7 @@ export function useCli(): Cli {
             const currentChar = String.fromCodePoint(byte);
             const isCRLF = byte === lineFeedCode || byte === carriageReturnCode;
 
-            if (!CONFIGURATOR.cliValid && (isCRLF || state.startProcessing)) {
+            if (!connectionStore.cliValid && (isCRLF || state.startProcessing)) {
                 startAutocompleteAfterRead = readCliEntryChar(currentChar) ?? startAutocompleteAfterRead;
                 continue;
             }
@@ -735,7 +741,7 @@ export function useCli(): Cli {
         outputSuppressed = false;
         state.startProcessing = false;
 
-        CONFIGURATOR.cliActive = true;
+        connectionStore.cliActive = true;
 
         // Wait for DOM to be ready
         await nextTick();
@@ -797,7 +803,7 @@ export function useCli(): Cli {
         );
 
         // Enter CLI mode
-        GUI.timeout_add(
+        addTimeout(
             "enter_cli",
             function enter_cli() {
                 const bufferOut = new ArrayBuffer(1);
@@ -811,11 +817,11 @@ export function useCli(): Cli {
 
     /**
      * Tear down the CLI session.
-     * @returns true when leaving CLI initiated an FC reboot (`exit` + MSP_SET_REBOOT).
+     * @returns true when leaving CLI initiated an FC reboot (`exit` + MSP_REBOOT).
      */
     const cleanup = (): boolean => {
-        GUI.timeout_remove("CLI_send_slowly");
-        GUI.timeout_remove("enter_cli");
+        removeTimeout("CLI_send_slowly");
+        removeTimeout("enter_cli");
 
         if (pastePollInterval) {
             clearInterval(pastePollInterval);
@@ -854,17 +860,17 @@ export function useCli(): Cli {
             copyResetTimeout = null;
         }
 
-        // `exit` + MSP_SET_REBOOT reboots the FC. Keep tab_switch_in_progress held across the
+        // `exit` + MSP_REBOOT reboots the FC. Keep tab_switch_in_progress held across the
         // handoff; prepareDisconnect (run on every reboot path) releases it after the disconnect.
-        const rebooting = CONFIGURATOR.connectionValid && CONFIGURATOR.cliValid && CONFIGURATOR.cliActive;
+        const rebooting = connectionStore.connectionValid && connectionStore.cliValid && connectionStore.cliActive;
         if (rebooting) {
             send(getCliCommand("exit\r", cliBuffer), function () {
                 reinitializeConnection();
             });
         }
 
-        CONFIGURATOR.cliActive = false;
-        CONFIGURATOR.cliValid = false;
+        connectionStore.cliActive = false;
+        connectionStore.cliValid = false;
 
         CliAutoComplete.cleanup();
 

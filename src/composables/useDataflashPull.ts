@@ -23,8 +23,7 @@ import { ref, computed, type ComputedRef, type Ref } from "vue";
 import MSP from "../js/msp";
 import MSPCodes from "../js/msp/MSPCodes";
 import { mspHelper, type DataflashReadCallback } from "../js/msp/MSPHelper";
-import GUI from "../js/gui";
-import FC from "../js/fc";
+import { useFlightControllerStore } from "@/stores/fc";
 import { useConnectionStore } from "../stores/connection";
 
 const BLOCK_SIZE = 4096;
@@ -53,11 +52,13 @@ export interface DataflashPull {
  */
 export function useDataflashPull(): DataflashPull {
     const connectionStore = useConnectionStore();
+    const fcStore = useFlightControllerStore();
     const pulling = ref(false);
     const progress = ref(0);
 
     const available = computed(
-        () => !!GUI.connected_to && connectionStore.connectionValid && (FC.DATAFLASH?.usedSize || 0) > 0,
+        () =>
+            !!connectionStore.connectedTo && connectionStore.connectionValid && (fcStore.dataflash?.usedSize || 0) > 0,
     );
 
     /**
@@ -69,7 +70,7 @@ export function useDataflashPull(): DataflashPull {
      *   summary/read flow fails (e.g. timeout, disconnect or queue drain).
      */
     async function pull(): Promise<Uint8Array> {
-        if (!GUI.connected_to) {
+        if (!connectionStore.connectedTo) {
             throw new Error("Not connected to a flight controller");
         }
 
@@ -90,7 +91,7 @@ export function useDataflashPull(): DataflashPull {
 
             // Refresh the occupied size before reading.
             await MSP.promise(MSPCodes.MSP_DATAFLASH_SUMMARY);
-            const maxBytes = FC.DATAFLASH?.usedSize || 0;
+            const maxBytes = fcStore.dataflash?.usedSize || 0;
             if (maxBytes <= 0) {
                 throw new Error("No log data on the flight controller");
             }

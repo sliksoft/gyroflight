@@ -19,12 +19,12 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Tab metadata only — no Vue imports here, because gui.js and sidebar_items.js
+// Tab metadata only — no Vue imports here, because stores/navigation.ts and sidebar_items.ts
 // import this module early and must not pull in components (circular imports).
 
 export const GYROFLIGHT_TAB_KEY = "gyroflight";
 
-/** Mirrors the shape of entries in src/components/sidebar/sidebar_items.js. */
+/** Mirrors the shape of entries in src/components/sidebar/sidebar_items.ts. */
 export interface GyroflightSidebarItem {
     key: string;
     mode: "disconnected" | "connected" | "shared" | "cli" | "loggedin";

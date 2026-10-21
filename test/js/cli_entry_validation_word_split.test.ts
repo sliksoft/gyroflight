@@ -1,10 +1,32 @@
+/*
+ * This file is part of Betaflight.
+ *
+ * Betaflight is free software. You can redistribute this software
+ * and/or modify this software under the terms of the GNU General
+ * Public License as published by the Free Software Foundation,
+ * either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * Betaflight is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this software.
+ *
+ * If not, see <http://www.gnu.org/licenses/>.
+ */
+
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
+import { useFlightControllerStore } from "../../src/stores/fc";
 import { useCli, type Cli } from "../../src/composables/useCli";
 import CliAutoComplete from "../../src/js/CliAutoComplete";
-import CONFIGURATOR from "../../src/js/data_storage";
-import FC from "../../src/js/fc";
-import GUI from "../../src/js/gui";
+import { useAppInfoStore } from "../../src/stores/appInfo";
 import BFClipboard from "../../src/js/Clipboard";
+import { useConnectionStore } from "../../src/stores/connection";
 
 // The firmware banner is transport-fragmented. Entry validation must therefore retain its state
 // across read() callbacks or a split inside "CLI" prevents validation and drops later output.
@@ -38,24 +60,26 @@ function getHistory(cli: Cli) {
 
 describe("useCli CLI-entry validation across serial read boundaries", () => {
     beforeEach(() => {
-        CONFIGURATOR.cliActive = true;
-        CONFIGURATOR.cliValid = false;
+        setActivePinia(createPinia());
+        const connectionStore = useConnectionStore();
+        connectionStore.cliActive = true;
+        connectionStore.cliValid = false;
         CliAutoComplete.builder.state = "reset";
-        GUI.operating_system = "Linux";
+        useAppInfoStore().operatingSystem = "Linux";
     });
 
     afterEach(() => {
+        const connectionStore = useConnectionStore();
         CliAutoComplete.cleanup();
         CliAutoComplete.configEnabled = false;
-        FC.CONFIG.flightControllerIdentifier = "";
         vi.restoreAllMocks();
-        CONFIGURATOR.cliActive = false;
-        CONFIGURATOR.cliValid = false;
+        connectionStore.cliActive = false;
+        connectionStore.cliValid = false;
     });
 
     it("preserves same-read normal output before autocomplete starts", () => {
         const cli = makeCli();
-        FC.CONFIG.flightControllerIdentifier = "BTFL";
+        useFlightControllerStore().config.flightControllerIdentifier = "BTFL";
         CliAutoComplete.configEnabled = true;
         CliAutoComplete.initialize(vi.fn(), vi.fn(), () => Date.now() - cli.state.lastArrival > 250);
 
@@ -65,6 +89,7 @@ describe("useCli CLI-entry validation across serial read boundaries", () => {
     });
 
     it("validates when 'CLI' is split across reads and preserves subsequent traffic", () => {
+        const connectionStore = useConnectionStore();
         const cli = makeCli();
 
         feed(cli, ["\r\nEntering CL", "I Mode, type 'exit' to reboot, or 'help'\r\n\r\n# "]);
@@ -72,11 +97,12 @@ describe("useCli CLI-entry validation across serial read boundaries", () => {
 
         const history = getHistory(cli);
 
-        expect(CONFIGURATOR.cliValid).toBe(true);
+        expect(connectionStore.cliValid).toBe(true);
         expect(history).toContain("Betaflight / STM32F7X2");
     });
 
     it("validates a byte-fragmented banner and preserves subsequent traffic", () => {
+        const connectionStore = useConnectionStore();
         const cli = makeCli();
 
         feed(cli, BANNER.split(""));
@@ -84,7 +110,7 @@ describe("useCli CLI-entry validation across serial read boundaries", () => {
 
         const history = getHistory(cli);
 
-        expect(CONFIGURATOR.cliValid).toBe(true);
+        expect(connectionStore.cliValid).toBe(true);
         expect(history).toContain("Betaflight / STM32F7X2");
     });
 });

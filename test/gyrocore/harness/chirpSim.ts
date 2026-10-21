@@ -119,6 +119,17 @@ export function simulateChirpSequence(sweeps: SimOptions[], startTimeUs = 1_000_
     return out;
 }
 
+/**
+ * Who recorded the log (blackbox.c writeHeader); the Apply identity check compares these with the FC
+ * (harness/mspCraft.ts). Not part of FULL_TUNE_HEADERS: only the Apply tests add them (withIdentityHeaders),
+ * so every other fixture keeps its exact bytes. The encoder already writes the firmware revision.
+ */
+export const SIM_IDENTITY_HEADERS = [
+    "DeviceUID:0a1b2c3d4e5f607112233445",
+    "Board information:BEFH BETAFPVG473",
+    "Craft name:SIM",
+];
+
 export const FULL_TUNE_HEADERS = [
     "chirp_frequency_start_deci_hz:20",
     "chirp_frequency_end_deci_hz:2000",
@@ -157,6 +168,15 @@ export const BETAFLIGHT_TUNE_HEADERS = [
     "gyro_lpf1_dyn_hz:250,500",
     "gyro_lpf2_static_hz:500",
 ];
+
+/** Module factory for vi.mock("./harness/chirpSim"): every encoded log also carries SIM_IDENTITY_HEADERS. */
+export async function withIdentityHeaders(actual: typeof import("./chirpSim")) {
+    return {
+        ...actual,
+        encodeChirpLog: (frames: SyntheticFrame[], headers: string[] = actual.FULL_TUNE_HEADERS, ...rest: number[]) =>
+            actual.encodeChirpLog(frames, [...SIM_IDENTITY_HEADERS, ...headers], ...rest),
+    };
+}
 
 /** Replace one `key:value` header line. */
 export function withHeader(headers: string[], line: string): string[] {

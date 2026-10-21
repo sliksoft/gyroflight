@@ -63,7 +63,11 @@
                         {{ src.measurementId }} · {{ axisLabel(src.axisName) }} ·
                         {{ $t(`gyrocoreGlobalRole_${src.role}`) }}
                         <span v-if="src.reasons.length" class="text-dimmed">
-                            ({{ src.reasons.map((r) => describeCompositeReason(r)).join("; ") }})
+                            ({{
+                                src.reasons
+                                    .map((r) => describeCompositeReason(r, measurementById(src.measurementId)))
+                                    .join("; ")
+                            }})
                         </span>
                     </li>
                 </ul>
@@ -82,16 +86,16 @@
                 <div v-if="composite.blocked.length" class="text-sm mt-2" data-gyrocore="global-blocked">
                     <p class="font-bold text-red-500">{{ $t("gyrocoreGlobalBlocked") }}</p>
                     <ul class="list-disc ps-5">
-                        <li v-for="code in composite.blocked" :key="code" :data-reason="code">
-                            {{ describeCompositeReason(code) }}
+                        <li v-for="(code, i) in composite.blocked" :key="code" :data-reason="code">
+                            {{ blockedText[i] }}
                         </li>
                     </ul>
                 </div>
                 <div v-if="composite.warnings.length" class="text-sm mt-2 text-dimmed" data-gyrocore="global-warnings">
                     <p class="font-bold">{{ $t("gyrocoreChirpWarnings") }}</p>
                     <ul class="list-disc ps-5">
-                        <li v-for="code in composite.warnings" :key="code" :data-warning="code">
-                            {{ describeCompositeReason(code) }}
+                        <li v-for="(code, i) in composite.warnings" :key="code" :data-warning="code">
+                            {{ warningText[i] }}
                         </li>
                     </ul>
                 </div>
@@ -109,7 +113,7 @@ import SafetyPanel from "./SafetyPanel.vue";
 import { i18n } from "@/js/localization";
 import type { ChirpAxisName } from "@/gyrocore/chirp/constants";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
-import { describeCompositeReason } from "@/gyrocore/tuning/reasons";
+import { describeCompositeReason, describeCompositeReasons } from "@/gyrocore/tuning/reasons";
 
 const gate = useChirpQualificationStore();
 const composite = computed(() => gate.composite);
@@ -148,6 +152,12 @@ const coverageText = computed(() => {
             : "",
     };
 });
+
+function measurementById(id: string) {
+    return gate.report?.measurements.find((m) => m.id === id) ?? null;
+}
+const blockedText = computed(() => describeCompositeReasons(composite.value?.blocked ?? [], measurementById));
+const warningText = computed(() => describeCompositeReasons(composite.value?.warnings ?? [], measurementById));
 
 function axisLabel(axis: ChirpAxisName) {
     return i18n.getMessage(AXIS_LABEL_KEYS[axis]);

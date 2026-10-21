@@ -20,15 +20,14 @@
  */
 
 /*
- * WU3 end-to-end parity: generated CHIRP flights through Gyroflight (Viewer
- * decode -> GyroCore qualification -> Betaflight recommendGains -> GyroCore
- * merge) against GyroCore's Python engine + merge on the same bytes
- * (fixtures/merge/merge_e2e_reference.json, tools/gc_merge_e2e.py).
+ * WU3 end-to-end cases: generated CHIRP flights through Gyroflight (Viewer
+ * decode -> qualification -> recommendGains -> merge).
  *
- * Exact: which axes take part, every per-axis slider integer and the merge
- * result. The final authorization differs where Gyroflight is deliberately
- * stricter than the Python engine (docs/gyrocore/GLOBAL_TUNE_MERGE.md):
- * EXPECTED_AUTHORIZATION records it case by case.
+ * GF-1: phase-margin shaping via L = T/(1-T) is unvalidated for Betaflight's
+ * rate PID, so proposals are held at the logged slider currents. Per-axis
+ * integers therefore diverge from GyroCore's Python reference
+ * (fixtures/merge/merge_e2e_reference.json); this suite pins the GF-1 hold
+ * contract and still checks BBL sha256 + axis participation + authorization.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -53,20 +52,70 @@ interface E2eCase {
 
 const reference = readFixtureJson<{ gyrocore_commit: string; cases: E2eCase[] }>("merge/merge_e2e_reference.json");
 
-/** Gyroflight's verdict, and the reason where it is stricter than the Python engine's proposal. */
-const EXPECTED_AUTHORIZATION: Record<string, { authorized: boolean; stricterBecause?: string }> = {
-    three_axis_agree: { authorized: true },
-    rp_mode_yaw_excluded: { authorized: true },
-    // GyroCore's merge needs no axis; Gyroflight's axis coverage needs pitch and yaw under RPY.
-    single_roll: { authorized: false, stricterBecause: "missing_axis_evidence:pitch" },
-    roll_pitch_conflict: { authorized: false },
-    pids_mode_off: { authorized: false },
-    // Python merges roll alone and proposes; its safety-pipeline test blocks an unusable axis, so Gyroflight does.
-    roll_ok_pitch_rejected: { authorized: false, stricterBecause: "system_id_unusable" },
-    // Python only warns on a slider clamp; WU2/WU3 block a reduction turned into an increase.
+/** Held simplified-tuning integers under GF-1 (logged defaults are 100). */
+const HELD_DEFAULT = {
+    slider_master_multiplier: 100,
+    slider_pi_gain: 100,
+    slider_i_gain: 100,
+    slider_d_gain: 100,
+    slider_feedforward_gain: 100,
+    slider_dterm_filter_multiplier: 100,
+};
+
+/** Logged FF 15 is floored to 25 by buildProposedSliders even when scales are held. */
+const HELD_FF_FLOOR = { ...HELD_DEFAULT, slider_feedforward_gain: 25 };
+
+const EXPECTED: Record<
+    string,
+    {
+        authorized: boolean;
+        participating: string[];
+        proposed: Record<string, number>;
+        blockedContains?: string[];
+        warningsContains?: string[];
+    }
+> = {
+    three_axis_agree: {
+        authorized: false,
+        participating: ["roll", "pitch", "yaw"],
+        proposed: HELD_DEFAULT,
+        blockedContains: ["phase_margin_not_validated"],
+    },
+    rp_mode_yaw_excluded: {
+        authorized: false,
+        participating: ["roll", "pitch"],
+        proposed: HELD_DEFAULT,
+        blockedContains: ["phase_margin_not_validated"],
+    },
+    single_roll: {
+        authorized: false,
+        participating: ["roll"],
+        proposed: HELD_DEFAULT,
+        blockedContains: ["missing_axis_evidence:pitch", "phase_margin_not_validated"],
+    },
+    roll_pitch_conflict: {
+        authorized: false,
+        participating: ["roll", "pitch"],
+        proposed: HELD_DEFAULT,
+        blockedContains: ["missing_axis_evidence:yaw", "phase_margin_not_validated"],
+    },
+    pids_mode_off: {
+        authorized: false,
+        participating: [],
+        proposed: HELD_DEFAULT,
+        blockedContains: ["simplified_pids_mode_off"],
+    },
+    roll_ok_pitch_rejected: {
+        authorized: false,
+        participating: ["roll"],
+        proposed: HELD_DEFAULT,
+        blockedContains: ["system_id_unusable", "phase_margin_not_validated"],
+    },
     ff_floor_three_axis: {
         authorized: false,
-        stricterBecause: "composite_clamp_changes_direction:slider_feedforward_gain",
+        participating: ["roll", "pitch", "yaw"],
+        proposed: HELD_FF_FLOOR,
+        blockedContains: ["composite_clamp_changes_direction:slider_feedforward_gain", "phase_margin_not_validated"],
     },
 };
 
@@ -82,24 +131,33 @@ describe("end-to-end merge parity with GyroCore's Python engine", () => {
             expect(sha256(bytes)).toBe(ref.bbl_sha256);
             const report = qualifyChirpFile(bytes, ref.case_id, 60, AUTOTUNE_MATH);
             const composite = buildComposite(report, 0, {}, {})!;
+            const expected = EXPECTED[ref.case_id];
 
-            // Same per-axis Betaflight recommendations, and the same axes left out.
-            for (const [axis, py] of Object.entries(ref.axes)) {
+            expect(composite.merge.participating_axes).toEqual(expected.participating);
+            for (const axis of expected.participating) {
                 const source = composite.sources.find((s) => s.axisName === axis)!;
-                expect(source.role === "participating", `${axis} participates`).toBe(py.status !== "blocked");
-                if (py.proposed) {
-                    expect(source.proposed).toEqual(py.proposed);
+                expect(source.role).toBe("participating");
+                expect(source.proposed).toEqual(expected.proposed);
+            }
+            if (composite.final) {
+                expect(composite.final).toEqual(expected.proposed);
+            }
+            expect(composite.authorized).toBe(expected.authorized);
+            if (expected.blockedContains) {
+                for (const reason of expected.blockedContains) {
+                    expect(composite.blocked).toContain(reason);
                 }
             }
-            // Identical merge output.
-            expect(JSON.parse(JSON.stringify(composite.merge))).toEqual(ref.merge);
-
-            const expected = EXPECTED_AUTHORIZATION[ref.case_id];
-            expect(composite.authorized).toBe(expected.authorized);
-            if (expected.stricterBecause) {
-                expect(ref.proposal_status).not.toBe("blocked");
-                expect(ref.proposal_status).not.toBe("MERGE_REQUIRES_REVIEW");
-                expect(composite.blocked).toContain(expected.stricterBecause);
+            if (expected.warningsContains) {
+                for (const reason of expected.warningsContains) {
+                    expect(composite.warnings).toContain(reason);
+                }
+            }
+            // GF-1: proposals diverge from the Python L=T/(1-T) reference on purpose.
+            if (ref.axes.roll?.proposed && expected.participating.includes("roll")) {
+                expect(composite.sources.find((s) => s.axisName === "roll")!.proposed).not.toEqual(
+                    ref.axes.roll.proposed,
+                );
             }
         });
     }

@@ -20,6 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 
 const settings = {
     sessionId: "session",
@@ -77,5 +78,55 @@ describe("Gyroflight privacy policy", () => {
         tracking.sendAppView("firmware_flasher");
         expect(fetchMock).toHaveBeenCalled();
         expect(String(fetchMock.mock.calls[0][0])).toContain("analytics.betaflight.com");
+    });
+});
+
+// Since f2ca9013 the tracker is set up from the appInfo store instead of the CONFIGURATOR
+// singleton. Drive the real startup entry point (checkSetupAnalytics, used by main.ts and
+// tab_switch.ts), not just the class.
+describe("Gyroflight privacy policy: startup analytics path", () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response("{}")));
+
+    async function setUp(analyticsEnabled: boolean) {
+        vi.doMock("../../src/js/ConfigStorage", () => ({
+            get: () => ({ userId: "user", analyticsOptOut: false }),
+            set: vi.fn(),
+        }));
+        const { checkSetupAnalytics, getTracking } = await loadAnalytics(analyticsEnabled);
+        setActivePinia(createPinia());
+        let received: unknown = undefined;
+        checkSetupAnalytics((service) => {
+            received = service;
+        });
+        return { tracking: getTracking(), received };
+    }
+
+    beforeEach(() => {
+        fetchMock.mockClear();
+        vi.stubGlobal("fetch", fetchMock);
+    });
+
+    afterEach(() => {
+        vi.doUnmock("../../src/gyroflight/policy");
+        vi.doUnmock("../../src/js/ConfigStorage");
+        vi.unstubAllGlobals();
+    });
+
+    it("sets up the tracker from appInfo and sends nothing, not even the startup settings", async () => {
+        const { tracking, received } = await setUp(false);
+        expect(tracking).not.toBeNull();
+        expect(received).toBe(tracking);
+        tracking!.sendEvent(tracking!.EVENT_CATEGORIES.APPLICATION, "AppStart", {});
+        tracking!.sendAppView("blackbox_viewer");
+        tracking!.sendTiming("category", "timing", 1);
+        tracking!.sendException("boom");
+        tracking!.sendSettings();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("would post the startup settings to analytics.betaflight.com if the flag were enabled (control)", async () => {
+        await setUp(true);
+        expect(fetchMock).toHaveBeenCalled();
+        expect(String(fetchMock.mock.calls[0][0])).toBe("https://analytics.betaflight.com/analytics/settings");
     });
 });

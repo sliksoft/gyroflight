@@ -1,3 +1,24 @@
+/*
+ * This file is part of Betaflight.
+ *
+ * Betaflight is free software. You can redistribute this software
+ * and/or modify this software under the terms of the GNU General
+ * Public License as published by the Free Software Foundation,
+ * either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * Betaflight is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this software.
+ *
+ * If not, see <http://www.gnu.org/licenses/>.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -10,24 +31,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // only BLE/manual reached the cycle.
 // ---------------------------------------------------------------------------
 
-const { GUI, connectDisconnect, disconnect, scheduleRebootReconnect, cancelRebootReconnect } = vi.hoisted(() => {
+const { timers, connectDisconnect, disconnect, scheduleRebootReconnect, cancelRebootReconnect } = vi.hoisted(() => {
     return {
-        GUI: {
-            // Minimal name-keyed timeout registry mirroring gui.js timeout_add/remove.
+        timers: {
+            // Minimal name-keyed timeout registry mirroring js/timers addTimeout/removeTimeout.
             _timers: new Map(),
-            timeout_add: vi.fn(function (name, code, timeout) {
-                GUI.timeout_remove(name);
+            addTimeout: vi.fn(function (name, code, timeout) {
+                timers.removeTimeout(name);
                 const id = setTimeout(() => {
-                    GUI._timers.delete(name);
+                    timers._timers.delete(name);
                     code();
                 }, timeout);
-                GUI._timers.set(name, id);
+                timers._timers.set(name, id);
             }),
-            timeout_remove: vi.fn(function (name) {
-                const id = GUI._timers.get(name);
+            removeTimeout: vi.fn(function (name) {
+                const id = timers._timers.get(name);
                 if (id !== undefined) {
                     clearTimeout(id);
-                    GUI._timers.delete(name);
+                    timers._timers.delete(name);
                     return true;
                 }
                 return false;
@@ -40,9 +61,10 @@ const { GUI, connectDisconnect, disconnect, scheduleRebootReconnect, cancelReboo
     };
 });
 
-vi.mock("../../src/js/gui", () => ({
+vi.mock("../../src/js/timers", () => ({
     __esModule: true,
-    default: GUI,
+    addTimeout: timers.addTimeout,
+    removeTimeout: timers.removeTimeout,
 }));
 
 vi.mock("../../src/js/serial_backend", () => ({
@@ -53,26 +75,22 @@ vi.mock("../../src/js/serial_backend", () => ({
     cancelRebootReconnect,
 }));
 
-// Keep the rest of the import graph light — useMspCliSession also imports MSP and FC.
+// Keep the rest of the import graph light — useMspCliSession also imports MSP.
 vi.mock("../../src/js/msp", () => ({
     __esModule: true,
     default: { send_cli_command: vi.fn() },
-}));
-vi.mock("../../src/js/fc", () => ({
-    __esModule: true,
-    default: { CONFIG: { flightControllerVersion: "4.6.0" } },
 }));
 
 import { scheduleReconnect, cancelScheduledReconnect, saveAndReconnect } from "../../src/composables/useMspCliSession";
 import MSP from "../../src/js/msp";
 import DeviceHandler from "../../src/js/device_handler";
-import { __resetConnectionStateForTests } from "../../src/js/connection_state.js";
+import { __resetConnectionStateForTests } from "../../src/js/connection_state";
 
 describe("useMspCliSession.scheduleReconnect", () => {
     beforeEach(() => {
         vi.useFakeTimers();
         vi.clearAllMocks();
-        GUI._timers.clear();
+        timers._timers.clear();
         __resetConnectionStateForTests();
         // Auto-Connect on is the reconnect path these cases characterize; the off case is
         // covered explicitly below. A real selected port is needed for the reconnect window.

@@ -266,17 +266,8 @@ import {
     useMspCliSession,
 } from "@/composables/useMspCliSession";
 import { useDialog } from "@/composables/useDialog";
-import FC from "@/js/fc";
-import type UserApi from "@/js/UserApi";
-
-/** A cloud backup as the user API's `/api/backups` lists it. */
-interface Backup {
-    id: number | string;
-    name?: string;
-    description?: string;
-    created?: string;
-    key?: string;
-}
+import { useFlightControllerStore } from "@/stores/fc";
+import type { default as UserApi, Backup } from "@/js/UserApi";
 
 /** One failed command of a restore batch, as useMspCliSession's runBatch reports it. */
 interface RestoreFailure {
@@ -295,6 +286,7 @@ function describeError(error: unknown) {
 
 const { t } = useTranslation();
 const connectionStore = useConnectionStore();
+const fcStore = useFlightControllerStore();
 const cliSession = useMspCliSession();
 const dialog = useDialog();
 
@@ -319,7 +311,7 @@ const restoreErrors = ref<RestoreFailure[]>([]);
 const restoreErrorsOpen = ref(false);
 const restoreSavePressed = ref(false);
 let userApi: UserApi | null = null;
-// LoginManager documents these as a bare `Function`, so they are typed by what it returns.
+// The unsubscribe functions LoginManager returns; take their type from there.
 let unsubscribeLogin: ReturnType<typeof loginManager.onLogin> | null = null;
 let unsubscribeLogout: ReturnType<typeof loginManager.onLogout> | null = null;
 
@@ -356,7 +348,7 @@ async function ensureMspCliSupported() {
         t("warningTitle"),
         t("mspCliFirmwareTooOld", {
             required: MIN_FC_VERSION_FOR_MSP_CLI,
-            current: FC.CONFIG?.flightControllerVersion || "?",
+            current: fcStore.config?.flightControllerVersion || "?",
         }),
         { confirmText: t("close") },
     );

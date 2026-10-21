@@ -23,9 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setActivePinia } from "pinia";
 import { useDataflashPull, type DataflashPull } from "../../src/composables/useDataflashPull";
 import { useConnectionStore } from "../../src/stores/connection";
-import CONFIGURATOR from "../../src/js/data_storage";
-import FC from "../../src/js/fc";
-import GUI from "../../src/js/gui";
+import { useFlightControllerStore } from "../../src/stores/fc";
 import MSP from "../../src/js/msp";
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { pinia } from "../../src/js/pinia_instance";
@@ -46,6 +44,8 @@ function sequentialBytes(length: number): Uint8Array {
     return Uint8Array.from({ length }, (_, i) => i % 251);
 }
 
+let fcStore: ReturnType<typeof useFlightControllerStore>;
+
 describe("useDataflashPull", () => {
     let connectionStore: ReturnType<typeof useConnectionStore>;
     let dataflash: DataflashPull;
@@ -54,14 +54,15 @@ describe("useDataflashPull", () => {
     let reads: number[];
 
     beforeEach(() => {
-        // GUI.connected_to reads the app's Pinia instance (and makes it the active one), so the
+        // The composable reads the app's Pinia instance (and makes it the active one), so the
         // composable and the test must share that instance to see the same connection store.
         setActivePinia(pinia);
-        FC.resetState();
-        CONFIGURATOR.connectionValid = true;
         connectionStore = useConnectionStore();
+        fcStore = useFlightControllerStore();
+        fcStore.resetState();
+        connectionStore.connectionValid = true;
         connectionStore.resumeLiveData();
-        GUI.connected_to = "/dev/ttyACM0";
+        connectionStore.connectedTo = "/dev/ttyACM0";
 
         reportedUsedSize = 0;
         reads = [];
@@ -71,7 +72,7 @@ describe("useDataflashPull", () => {
         // The summary is what refreshes the occupied size before the pull reads.
         vi.spyOn(MSP, "promise").mockImplementation(async (code) => {
             if (code === MSPCodes.MSP_DATAFLASH_SUMMARY) {
-                FC.DATAFLASH.usedSize = reportedUsedSize;
+                fcStore.dataflash.usedSize = reportedUsedSize;
             }
             return undefined;
         });
@@ -84,13 +85,13 @@ describe("useDataflashPull", () => {
     });
 
     afterEach(() => {
-        CONFIGURATOR.connectionValid = false;
-        GUI.connected_to = false;
+        connectionStore.connectionValid = false;
+        connectionStore.connectedTo = false;
         vi.restoreAllMocks();
     });
 
     it("refuses to pull when not connected, without touching live data or MSP", async () => {
-        GUI.connected_to = false;
+        connectionStore.connectedTo = false;
 
         await expect(dataflash.pull()).rejects.toThrow("Not connected");
 
@@ -112,7 +113,7 @@ describe("useDataflashPull", () => {
     });
 
     it("sizes the read from the fresh summary, not the size known before the pull", async () => {
-        FC.DATAFLASH.usedSize = 10;
+        fcStore.dataflash.usedSize = 10;
         const log = sequentialBytes(300);
         reportedUsedSize = log.length;
         readReply = flashOf(log);
@@ -136,7 +137,7 @@ describe("useDataflashPull", () => {
         );
         vi.mocked(MSP.promise).mockImplementation(async () => {
             order.push("summary");
-            FC.DATAFLASH.usedSize = 0;
+            fcStore.dataflash.usedSize = 0;
             return undefined;
         });
 
@@ -260,18 +261,18 @@ describe("useDataflashPull", () => {
 
     describe("available", () => {
         it("is true only when connected, the link is valid and the flash holds data", () => {
-            FC.DATAFLASH.usedSize = 100;
+            fcStore.dataflash.usedSize = 100;
             expect(dataflash.available.value).toBe(true);
 
-            FC.DATAFLASH.usedSize = 0;
+            fcStore.dataflash.usedSize = 0;
             expect(dataflash.available.value).toBe(false);
 
-            FC.DATAFLASH.usedSize = 100;
-            CONFIGURATOR.connectionValid = false;
+            fcStore.dataflash.usedSize = 100;
+            connectionStore.connectionValid = false;
             expect(dataflash.available.value).toBe(false);
 
-            CONFIGURATOR.connectionValid = true;
-            GUI.connected_to = false;
+            connectionStore.connectionValid = true;
+            connectionStore.connectedTo = false;
             expect(dataflash.available.value).toBe(false);
         });
     });
