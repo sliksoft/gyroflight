@@ -15,9 +15,9 @@
 
 # Gyroflight
 
-**Gyroflight**, by **Redline Dynamics**, is a Betaflight-based application for flight controller configuration, flight-log analysis and carefully qualified tuning workflows. It keeps the familiar Betaflight configuration tools and extends them with **GyroCore** analysis and safety-oriented features.
+**Gyroflight**, by **Redline Dynamics**, is a Betaflight-based application for flight controller configuration, flight-log analysis and carefully qualified tuning workflows. It keeps the familiar Betaflight configuration tools and extends them with advanced flight analysis and safety-oriented tuning features.
 
-> **Development project:** Gyroflight is not an official Betaflight release. Some analysis features are experimental, and automatic application of GyroCore tuning recommendations is intentionally locked while full safety validation is being completed.
+> **Development project:** Gyroflight is not an official Betaflight release. Some analysis features are experimental, and automatic application of experimental tuning recommendations is intentionally locked while full safety validation is being completed.
 
 ## Features
 
@@ -27,18 +27,18 @@
 | **Firmware flasher** | Upstream Betaflight flashing workflow and supported targets; no custom Gyroflight flight firmware |
 | **Blackbox Viewer** | Open and inspect flight logs using the Betaflight viewer |
 | **CHIRP & Autotune** | Measurement qualification, quality diagnostics and guarded tuning recommendations |
-| **GyroCore analysis** | Flight identity, independent A/B flight selection and read-only comparisons |
+| **Flight analysis** | Flight identity, independent A/B flight selection and read-only comparisons |
 | **Tuning safety** | Explicit validation gates and an Apply lock for incomplete safety workflows |
 
-GyroCore functionality is under active development and is being integrated gradually. See [the GyroCore architecture](docs/gyrocore/ARCHITECTURE.md), [CHIRP qualification](docs/gyrocore/CHIRP_QUALIFICATION.md) and [safety engine documentation](docs/gyrocore/SAFETY_ENGINE.md) for implementation status and limitations.
+Advanced analysis and tuning functionality is under active development and is being integrated gradually. See the project source and tests for current implementation details and limitations.
 
 ## Development status
 
 The current repository branch is **gyroflight/main**. The project contains both the inherited Betaflight App and Gyroflight-specific extensions.
 
-- **Available in the codebase:** Gyroflight branding/home, Betaflight configuration and Blackbox workflows, CHIRP qualification and GyroCore diagnostic components.
+- **Available in the codebase:** Gyroflight branding/home, Betaflight configuration and Blackbox workflows, CHIRP qualification and flight-analysis diagnostic components.
 - **Under qualification:** complete safety validation and integrated end-to-end tuning workflows.
-- **Safety restriction:** GyroCore-generated tuning changes must not be written to a flight controller until the required validation and authorization path is complete.
+- **Safety restriction:** Automatically generated tuning changes must not be written to a flight controller until the required validation and authorization path is complete.
 
 This development version is **not** a claim of an independently qualified flight-ready tuning system. Always review changes and keep a known-good flight-controller configuration backup.
 
@@ -68,8 +68,7 @@ For broader platform documentation, consult the [upstream Betaflight App](https:
 | Path | Purpose |
 | --- | --- |
 | [src/gyroflight/](src/gyroflight/) | Product branding, navigation, UI integration and policy |
-| [src/gyrocore/](src/gyrocore/) | Flight analysis, CHIRP, tuning qualification and safety foundations |
-| [docs/gyrocore/](docs/gyrocore/) | Architecture, qualification reports and technical decisions |
+| [src/components/tabs/](src/components/tabs/) | Flight controller configuration, Autotune and viewer integrations |
 | [src/blackbox-viewer/](src/blackbox-viewer/) | Upstream Betaflight Blackbox Viewer |
 
 ## Betaflight attribution
