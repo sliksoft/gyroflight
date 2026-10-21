@@ -549,7 +549,7 @@ describe("abVerification", () => {
         expect(v.evidence).toEqual(flightPairEvidence(s, A.key, B.key));
         expect(v.authorization).toEqual(NOT_AUTHORIZED);
         expect(AB_SELECTION_AUTHORIZATION).toEqual(NOT_AUTHORIZED);
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
     });
 
     it("two distinct Flights of one BBL are ELIGIBLE (log index separates them)", () => {
@@ -865,7 +865,7 @@ describe("abVerification", () => {
         }
         expect(abVerification(s, forced(s, A.key, B.key)).authorization).toEqual(NOT_AUTHORIZED);
         expect(AB_SELECTION_AUTHORIZATION).toEqual(NOT_AUTHORIZED);
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
     });
 });
 
@@ -988,7 +988,7 @@ describe("useFlightAbSelector", () => {
         expect(sel.verification.value.status).toBe("ELIGIBLE");
         expect(sel.verification.value.authorization).toEqual(NOT_AUTHORIZED);
         expect(sel.verification.value).toEqual(abVerification(sel.session.value, sel.selection.value));
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
         sel.stop();
     });
 
@@ -1343,7 +1343,7 @@ describe("useFlightAbSelector.saveAnalysis", () => {
             expect(loaded.session.flights.map((f) => f.key)).toEqual([A.key]);
             expect(loaded.session.authorization.status).toBe("NOT_STORED");
         }
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
         sel.stop();
     });
 
@@ -1498,7 +1498,7 @@ describe("FlightAbSelector.vue", () => {
         await choose(q(container, "ab-select-b") as HTMLSelectElement, A.key);
         expect(q(container, "ab-status")?.getAttribute("data-status")).toBe("BLOCKED");
         expect(q(container, "ab-status-rows")!.textContent).toContain(AB_REASONS.sameFlight);
-        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending"]);
+        expect(productApplyBlocks()).toEqual(["full_safety_engine_pending", "independent_pid_validation_missing"]);
         unmount();
     });
 

@@ -914,7 +914,7 @@ describe("authorization, Safety and Apply are untouched", () => {
     ];
 
     it("the product Apply lock still blocks", () => {
-        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
+        expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING, "independent_pid_validation_missing"]);
     });
 
     it("the selector imports no MSP, Apply, tuning-authorization or Safety code", () => {
