@@ -83,6 +83,9 @@ In `pid.c` (@43875a55):
 - **TPA** — constant gain if throttle fixed during sweep
 - **iterm_relax** — ≈ inactive when setpoint HPF ≪ 40 °/s; nonlinear otherwise (RP only)
 - **D_max** — inactive when multiplier≈1; state-dependent Kd otherwise (roll)
+- **Dynamic D-term / gyro LPF1** (`dterm_lpf1_dyn_hz`, `gyro_lpf1_dyn_hz`) — the cutoff follows throttle.
+  M1 uses the static cutoff; [GF1_M5B_DYNAMIC_DTERM.md](GF1_M5B_DYNAMIC_DTERM.md) gives the D-term
+  cutoff actually in force and an LTI stand-in per sweep window
 
 ### Not LTI / insufficient for validated PM (M1)
 

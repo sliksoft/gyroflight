@@ -209,10 +209,12 @@ deployments, nightly/release builds, Crowdin sync, stale-issue closing or auto-c
 `translations-upload.yml`, `stale.yaml`, `auto-close.yml`, `hide-artifact-links.yml`,
 `manual-build.yml`, `msp-codes.yml`.
 
-`msp-codes.yml` (upstream `30c8dd87`) is read-only and publishes nothing. It runs on pull requests that
-touch `src/js/msp/MSPCodes.ts` (an upstream-sync PR does, and a workflow file added by a PR already runs on
-that PR), on a weekly cron once it reaches `gyroflight/main`, and on manual dispatch. Disable it if we do
-not want those runs; locally, `npm run check:msp-codes` performs the same check against the firmware headers.
+`msp-codes.yml` (upstream `30c8dd87`) is read-only and publishes nothing. Upstream runs it on pull requests
+that touch `src/js/msp/MSPCodes.ts`, weekly on a cron, and on manual dispatch. A workflow file added by a PR
+already runs on that PR, before `gh workflow disable` can reach it, so Gyroflight keeps it out of automatic
+runs in the file itself: `on:` has only `workflow_dispatch` (a local change, expect a small conflict on the
+next upstream change to that block). Locally, `npm run check:msp-codes` performs the same check against the
+firmware headers. To re-enable the automatic runs, restore the upstream `pull_request` paths and schedule.
 
 Verify with `gh workflow list --all --repo sliksoft/gyroflight`. If an upstream sync re-enables one,
 disable it again:

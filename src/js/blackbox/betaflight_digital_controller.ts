@@ -124,6 +124,8 @@ export function classifyModelParts(cfg: DigitalControllerConfig): ModelValidity 
         "TPA: constant if throttle fixed during sweep (scales Kp/Kd)",
         "iterm_relax: ≈1 when |setpoint HPF| ≪ 40 °/s; otherwise nonlinear (RP only when iterm_relax=RP)",
         "D_max: off when d_max==D or gain path inactive; otherwise state-dependent Kd",
+        "dterm_lpf1_dyn: throttle-scheduled cutoff; LTI at the window's median cutoff (M5-B, betaflight_dterm_dynamic.ts)",
+        "gyro_lpf1_dyn: throttle-scheduled gyro cutoff; modelled at the static cutoff, embedded in measured T",
     ];
     const insufficientOrNonlinear = [
         "dyn_notch (time-varying centres)",
@@ -475,6 +477,12 @@ export const AIR65_BBL_CONTROLLER = {
     gyroLpf2Hz: 300,
     dtermLpf1Hz: 75,
     dtermLpf2Hz: 150,
+    // dterm_lpf1_dyn_hz / gyro_lpf1_dyn_hz with expo 5: the firmware moves both
+    // lpf1 cutoffs with throttle. dtermLpf1Hz above is the static value; M5-B
+    // (betaflight_dterm_dynamic.ts) gives the cutoff actually in force.
+    dtermLpf1DynHz: [75, 150] as const,
+    gyroLpf1DynHz: [150, 300] as const,
+    lpf1DynExpo: 5,
     yawLowpassHz: 100,
     chirpLagHz: 3,
     chirpLeadHz: 30,
@@ -491,6 +499,7 @@ export const AIR65_BBL_CONTROLLER = {
         "ff_weight",
         "gyro_lpf1/2_static_hz + types",
         "dterm_lpf1/2_static_hz + types",
+        "dterm_lpf1_dyn_hz / dyn_expo + rcCommand[3] (M5-B effective cutoff)",
         "yaw_lowpass_hz",
         "chirp_lag/lead/amplitudes/time/freq",
         "DEBUG_CHIRP channels",
@@ -503,7 +512,8 @@ export const AIR65_BBL_CONTROLLER = {
         "Exact dyn_notch instantaneous centres during the sweep (time-varying)",
         "Exact rpm_filter notch schedule vs eRPM (time-varying)",
         "Per-sample TPA factor (needs continuous throttle reconstruction; constant if throttle held)",
-        "D_max multiplier trajectory (roll only; state-dependent)",
+        "D_max multiplier trajectory (roll only; state-dependent): reproduced from logged gyro in ANGLE (M5-B), not in acro",
+        "gyro_lpf1 dynamic cutoff (150–300 Hz) — M1 FRF uses the static 150 Hz",
         "Mixer / motor plant / ESC delay (plant — out of M1 controller scope)",
         "Gyro hardware LPF / sensor delay beyond logged software filters",
     ],
