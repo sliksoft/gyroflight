@@ -351,7 +351,12 @@ function recommend<G>(
         return null;
     }
     const d = m.diagnostics;
-    const result = recommendGains(d.transferFunction, currentSliders, targetPhaseMarginDeg);
+    // Real Betaflight rate loops are not unity feedback (D on gyro, FF on
+    // setpoint). L = T/(1-T) is therefore not a validated phase-margin source;
+    // recommendGains holds PID proposals until a structure-aware recovery exists.
+    const result = recommendGains(d.transferFunction, currentSliders, targetPhaseMarginDeg, {
+        openLoopModel: "unvalidated",
+    });
     return {
         result,
         gains: math.buildGains(result, d.sensitivity, d.stepResponse),

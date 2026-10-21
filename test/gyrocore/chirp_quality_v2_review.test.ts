@@ -258,13 +258,26 @@ describe("MEASURED is not PASS", () => {
 
 describe("measurement authorization scope", () => {
     it("YES only mirrors apply.allowed, and always carries the measurement-only scope", () => {
-        expect(good.apply.allowed).toBe(true);
-        expect(good.qualityV2.levels.tuningAuthorized).toEqual({
+        // GF-1: a usable CHIRP is still Apply-blocked while phase margin is unvalidated.
+        expect(good.apply.allowed).toBe(false);
+        expect(good.apply.blocked).toContain("phase_margin_not_validated");
+        expect(good.qualityV2.levels.tuningAuthorized.status).toBe("NO");
+        const cleared = {
+            apply: {
+                ...good.apply,
+                blocked: good.apply.blocked.filter((r) => r !== "phase_margin_not_validated"),
+                allowed: true,
+            },
+            qualityV2: structuredClone(good.qualityV2),
+        } as ChirpMeasurement;
+        cleared.apply.allowed = cleared.apply.blocked.length === 0;
+        refreshAuthorizationLevel(cleared);
+        expect(cleared.qualityV2.levels.tuningAuthorized).toEqual({
             status: "YES",
             role: "ACTIVE_GATE",
             reasons: [QV2_REASONS.authorizationScope],
         });
-        expect(good.qualityV2.reasons).toContain(QV2_REASONS.authorizationScope);
+        expect(cleared.qualityV2.reasons).toContain(QV2_REASONS.authorizationScope);
     });
 
     it("a rejected CHIRP is NO", () => {
@@ -305,7 +318,12 @@ describe("measurement authorization scope", () => {
     });
 
     it("physical Apply stays locked whatever the measurement level says", () => {
-        expect(good.qualityV2.levels.tuningAuthorized.status).toBe("YES");
+        const cleared = {
+            apply: { ...good.apply, blocked: [] as string[], allowed: true },
+            qualityV2: structuredClone(good.qualityV2),
+        } as ChirpMeasurement;
+        refreshAuthorizationLevel(cleared);
+        expect(cleared.qualityV2.levels.tuningAuthorized.status).toBe("YES");
         expect(productApplyBlocks()).toEqual([PRODUCT_APPLY_PENDING]);
         expect(() => assertProductApplyReleased()).toThrow();
     });

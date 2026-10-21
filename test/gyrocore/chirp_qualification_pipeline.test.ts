@@ -155,7 +155,9 @@ describe("every embedded log and every segment is analysed", () => {
         );
         for (const m of report.measurements) {
             expect(m.state).toBe("usable");
-            expect(m.apply.allowed).toBe(true);
+            // GF-1: usable system-ID is not Apply authorization while PM is unvalidated.
+            expect(m.apply.allowed).toBe(false);
+            expect(m.apply.blocked).toContain("phase_margin_not_validated");
         }
     });
 
@@ -211,7 +213,13 @@ describe("Autotune states", () => {
     it("USABLE: Betaflight's recommendation is shown for a qualified measurement", async () => {
         const { store, gate } = await runImport(encodeChirpLog(simulateChirp()));
         expect(gate.report?.state).toBe("usable");
-        expect(store.analysisResult!.axes.roll!.gains?.proposed.slider_pi_gain).toBeGreaterThan(100);
+        // GF-1: phase-margin shaping is unvalidated; proposals are held at current.
+        expect(store.analysisResult!.axes.roll!.gains?.proposed.slider_pi_gain).toBe(100);
+        expect(
+            (store.analysisResult!.axes.roll!.gains as { analysis?: { phaseMarginStatus?: string } } | undefined)
+                ?.analysis?.phaseMarginStatus ??
+                gate.report!.measurements[0].recommendation!.result.analysis.phaseMarginStatus,
+        ).toBe("NOT_VALIDATED");
     });
 });
 
@@ -235,9 +243,12 @@ describe("a recommendation requires a usable measurement", () => {
         const before = store.analysisResult!.axes.roll!.gains!.proposed.slider_pi_gain;
         useAutotune().recomputeGains(PHASE_MARGIN_PRESETS.CONSERVATIVE);
         const after = store.analysisResult!.axes.roll!.gains!.proposed;
-        expect(after.slider_pi_gain).toBeLessThan(before);
+        // GF-1: held proposals ignore the phase-margin target; only the target field updates.
+        expect(before).toBe(100);
+        expect(after.slider_pi_gain).toBe(100);
         expect(gate.report!.measurements[0].recommendation!.result.proposed).toEqual(after);
         expect(gate.report!.targetPhaseMarginDeg).toBe(PHASE_MARGIN_PRESETS.CONSERVATIVE);
+        expect(gate.report!.measurements[0].recommendation!.result.analysis.phaseMarginStatus).toBe("NOT_VALIDATED");
     });
 });
 
@@ -291,27 +302,33 @@ describe("global tune panel (WU3)", () => {
         await runImport(MERGE_E2E_CASES.three_axis_agree());
         const { container, unmount } = await mountGlobal();
         expect(container.textContent).toContain("gyrocoreGlobalIntro");
-        expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("yes");
+        expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("no");
         const pi = container.querySelector('[data-slider="slider_pi_gain"]')!;
         const cells = [...pi.querySelectorAll("td")].map((td) => td.textContent?.trim());
         expect(cells[1]).toBe("100");
-        expect(cells.slice(2, 5).map((c) => c?.split(" ")[0])).toEqual(["138", "138", "138"]);
-        expect(pi.querySelector('[data-gyrocore="final"]')?.textContent?.trim()).toBe("138");
+        // GF-1 hold: every axis and the merge final stay at the logged current.
+        expect(cells.slice(2, 5).map((c) => c?.split(" ")[0])).toEqual(["100", "100", "100"]);
+        expect(pi.querySelector('[data-gyrocore="final"]')?.textContent?.trim()).toBe("100");
         expect(container.querySelectorAll('[data-role="participating"]')).toHaveLength(3);
-        expect(container.querySelector('[data-gyrocore="global-blocked"]')).toBeNull();
+        expect(
+            container.querySelector(
+                '[data-gyrocore="global-blocked"] [data-reason="phase_margin_not_validated"]',
+            ),
+        ).not.toBeNull();
         unmount();
     });
 
     it("explains a conflict and offers no global value", async () => {
+        // GF-1 hold removes PI disagreement; under RPY the missing yaw axis still blocks.
         await runImport(MERGE_E2E_CASES.roll_pitch_conflict());
         const { container, unmount } = await mountGlobal();
         expect(container.querySelector('[data-gyrocore="global-status"]')?.getAttribute("data-authorized")).toBe("no");
         expect(
             container.querySelector('[data-slider="slider_pi_gain"] [data-gyrocore="final"]')?.textContent?.trim(),
-        ).toBe("--");
+        ).toBe("100");
         expect(
             container.querySelector(
-                '[data-gyrocore="global-blocked"] [data-reason="slider_disagreement:slider_pi_gain"]',
+                '[data-gyrocore="global-blocked"] [data-reason="missing_axis_evidence:yaw"]',
             ),
         ).not.toBeNull();
         unmount();
@@ -349,7 +366,8 @@ describe("explicit choice among repeated sweeps, through the panel", () => {
         radio.click();
         await new Promise((r) => setTimeout(r, 0));
         expect(gate.explicitAxes.roll).toBe(true);
-        expect(gate.composite!.authorized).toBe(true);
+        expect(gate.composite!.blocked).toContain("phase_margin_not_validated");
+        expect(gate.composite!.authorized).toBe(false);
         app.unmount();
         container.remove();
     });
