@@ -26,7 +26,7 @@
  * button. Every call here goes straight to the action, as a bypass of the UI
  * would. MSP is mocked: no test talks to a flight controller, and a blocked
  * call must not even read, except the live-state checks, which read once and
- * must then not write.
+ * must then not write. A missing, refused or failed live read must never write.
  */
 
 import { createPinia, setActivePinia } from "pinia";
@@ -61,6 +61,8 @@ const LIVE_FILTERS = {
 const msp = vi.hoisted(() => ({
     calls: [] as { code: number; data: number[] | undefined }[],
     live: {} as Record<string, number>,
+    // How the craft answers MSP_SIMPLIFIED_TUNING.
+    readback: "ok" as "ok" | "none" | "crc" | "unsupported" | "timeout",
 }));
 const picked = vi.hoisted(() => ({ bytes: new Uint8Array() as Uint8Array }));
 
@@ -80,11 +82,24 @@ vi.mock("../../src/js/msp", () => ({
     default: {
         promise: vi.fn(async (code: number, data?: number[]) => {
             msp.calls.push({ code, data: data ? Array.from(data) : undefined });
-            const { default: FC } = await import("../../src/js/fc");
+            const { useFlightControllerStore } = await import("../../src/stores/fc");
             const { default: MSPCodes } = await import("../../src/js/msp/MSPCodes");
             if (code === MSPCodes.MSP_SIMPLIFIED_TUNING) {
-                // What MSPHelper's read handler would fill in from the craft.
-                Object.assign(FC.TUNING_SLIDERS, msp.live);
+                if (msp.readback === "timeout") {
+                    throw new Error("MSP timeout");
+                }
+                if (msp.readback === "none") {
+                    return undefined;
+                }
+                const reply = { command: code, crcError: msp.readback === "crc", unsupported: 0 };
+                if (msp.readback === "unsupported") {
+                    return { ...reply, unsupported: 1 };
+                }
+                if (!reply.crcError) {
+                    // What MSPHelper's read handler fills in from the craft.
+                    Object.assign(useFlightControllerStore().tuningSliders, msp.live);
+                }
+                return reply;
             }
             return null;
         }),
@@ -102,13 +117,13 @@ vi.mock("@/gyrocore/safety/authorize", async () => (await import("./harness/safe
 
 vi.mock("../../src/composables/useTuningSliders", () => ({
     validateTuningSliders: vi.fn(async () => {
-        const { default: FC } = await import("../../src/js/fc");
-        FC.TUNING_SLIDERS.slider_pids_valid = 1;
-        FC.TUNING_SLIDERS.slider_dterm_valid = 1;
+        const { useFlightControllerStore } = await import("../../src/stores/fc");
+        useFlightControllerStore().tuningSliders.slider_pids_valid = 1;
+        useFlightControllerStore().tuningSliders.slider_dterm_valid = 1;
     }),
 }));
 
-import FC from "../../src/js/fc";
+import { useFlightControllerStore } from "../../src/stores/fc";
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { useAutotune } from "../../src/composables/useAutotune";
 import { PHASE_MARGIN_PRESETS } from "../../src/js/blackbox/spectral_analysis";
@@ -179,7 +194,8 @@ beforeEach(() => {
     setActivePinia(createPinia());
     msp.calls = [];
     msp.live = { ...LOGGED_LIVE };
-    Object.assign(FC.FILTER_CONFIG, LIVE_FILTERS);
+    msp.readback = "ok";
+    Object.assign(useFlightControllerStore().filterConfig, LIVE_FILTERS);
 });
 
 describe("safe positive fixture: three agreeing axes -> one global tune -> exact payload", () => {
@@ -418,6 +434,45 @@ describe("live flight-controller recheck (one read, then no write)", () => {
             noWrites();
         });
     }
+});
+
+describe("live read-back that cannot be trusted never reaches a write", () => {
+    // The store already holds the logged tune, so a check against stale store
+    // values would pass: only a fresh, valid read-back may let Apply continue.
+    const cases: [string, typeof msp.readback][] = [
+        ["no response (virtual mode or empty reply)", "none"],
+        ["CRC error", "crc"],
+        ["command refused as unsupported", "unsupported"],
+    ];
+    for (const [name, readback] of cases) {
+        it(name, async () => {
+            const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+            Object.assign(useFlightControllerStore().tuningSliders, LOGGED_LIVE);
+            msp.readback = readback;
+            await expectBlocked(useAutotune().applyGains(composite.final!, composite.id), "fc:live_readback_missing");
+            expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
+            noWrites();
+        });
+    }
+
+    it("a failed read (timeout, cancellation) rejects without writing", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        Object.assign(useFlightControllerStore().tuningSliders, LOGGED_LIVE);
+        msp.readback = "timeout";
+        await expect(useAutotune().applyGains(composite.final!, composite.id)).rejects.toThrow("MSP timeout");
+        expect(codes()).toEqual([MSPCodes.MSP_SIMPLIFIED_TUNING]);
+        noWrites();
+    });
+
+    it("control: the same call with a valid read-back writes", async () => {
+        const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
+        await useAutotune().applyGains(composite.final!, composite.id);
+        expect(codes()).toEqual([
+            MSPCodes.MSP_SIMPLIFIED_TUNING,
+            MSPCodes.MSP_SET_SIMPLIFIED_TUNING,
+            MSPCodes.MSP_EEPROM_WRITE,
+        ]);
+    });
 });
 
 describe("repeated sweeps on one axis", () => {

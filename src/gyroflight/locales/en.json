@@ -189,6 +189,9 @@
     "gyrocoreReason_fc_simplified_pids_mode_unknown": {
         "message": "The connected flight controller's simplified PID mode could not be read."
     },
+    "gyrocoreReason_fc_live_readback_missing": {
+        "message": "The connected flight controller's live slider state could not be read back, so nothing was written."
+    },
     "gyrocoreReason_fc_yaw_not_under_slider_control": {
         "message": "The connected flight controller's slider mode is RP: yaw is not under slider control."
     },
