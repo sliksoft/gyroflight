@@ -1,207 +1,90 @@
-![Betaflight](https://raw.githubusercontent.com/betaflight/.github/main/profile/images/bf_logo.svg#gh-light-mode-only)
-![Betaflight](https://raw.githubusercontent.com/betaflight/.github/main/profile/images/bf_logo_dark.svg#gh-dark-mode-only)
+<p align="center">
+  <img src="src/gyroflight/branding/logo-gyroflight-trimmed.png" alt="GYROFLIGHT by Redline Dynamics" width="760">
+</p>
 
-# Betaflight App
+<p align="center">
+  <strong>Flight controller configuration · Blackbox analysis · CHIRP · Safe tuning workflows</strong>
+</p>
 
-[![Latest version](https://img.shields.io/github/v/release/betaflight/betaflight-configurator)](https://github.com/betaflight/betaflight-configurator/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/betaflight/betaflight-configurator/deploy.yml?branch=master)](https://github.com/betaflight/betaflight-configurator/actions/workflows/deploy.yml)
-[![Crowdin](https://d322cqt584bo4o.cloudfront.net/betaflight-configurator/localized.svg)](https://crowdin.com/project/betaflight-configurator)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=betaflight_betaflight-configurator&metric=alert_status)](https://sonarcloud.io/dashboard?id=betaflight_betaflight-configurator)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Join us on Discord!](https://img.shields.io/discord/868013470023548938)](https://discord.gg/n4E6ak4u3c)
+<p align="center">
+  <a href="https://github.com/sliksoft/gyroflight/actions"><img alt="Gyroflight CI" src="https://img.shields.io/github/actions/workflow/status/sliksoft/gyroflight/gyroflight-ci.yml?branch=gyroflight%2Fmain&label=Gyroflight%20CI"></a>
+  <a href="LICENSE"><img alt="GPL-3.0 license" src="https://img.shields.io/badge/license-GPL--3.0-blue"></a>
+  <img alt="Development status" src="https://img.shields.io/badge/status-active%20development-cyan">
+  <a href="https://github.com/betaflight/betaflight-configurator"><img alt="Based on Betaflight App" src="https://img.shields.io/badge/based%20on-Betaflight%20App-ffb900"></a>
+</p>
 
+# Gyroflight
 
-Betaflight App is a crossplatform configuration and management application for the Betaflight flight control system.
+**Gyroflight**, by **Redline Dynamics**, is a Betaflight-based application for flight controller configuration, flight-log analysis and carefully qualified tuning workflows. It keeps the familiar Betaflight configuration tools and extends them with **GyroCore** analysis and safety-oriented features.
 
-The Betaflight App is a Progressive Web Application (PWA). The most recent release of the Betaflight App is available at [app.betaflight.com](https://app.betaflight.com)
+> **Development project:** Gyroflight is not an official Betaflight release. Some analysis features are experimental, and automatic application of GyroCore tuning recommendations is intentionally locked while full safety validation is being completed.
 
-NOTE: If you are considering testing the latest unstable release then it is at [master.app.betaflight.com](https://master.app.betaflight.com)
+## Features
 
-Various types of aircraft are supported by the tool and by Betaflight, e.g. quadcopters, hexacopters, octocopters and fixed-wing aircraft.
+| Area | What Gyroflight offers |
+| --- | --- |
+| **Flight controller configuration** | Familiar Betaflight configuration workflow and connectivity |
+| **Firmware flasher** | Upstream Betaflight flashing workflow and supported targets; no custom Gyroflight flight firmware |
+| **Blackbox Viewer** | Open and inspect flight logs using the Betaflight viewer |
+| **CHIRP & Autotune** | Measurement qualification, quality diagnostics and guarded tuning recommendations |
+| **GyroCore analysis** | Flight identity, independent A/B flight selection and read-only comparisons |
+| **Tuning safety** | Explicit validation gates and an Apply lock for incomplete safety workflows |
 
-## Historical Releases
+GyroCore functionality is under active development and is being integrated gradually. See [the GyroCore architecture](docs/gyrocore/ARCHITECTURE.md), [CHIRP qualification](docs/gyrocore/CHIRP_QUALIFICATION.md) and [safety engine documentation](docs/gyrocore/SAFETY_ENGINE.md) for implementation status and limitations.
 
-These are still available under different operating systems and allows you to configure the Betaflight software running on any supported Betaflight target. [Downloads are available in Releases.](https://github.com/betaflight/betaflight-configurator/releases)
+## Development status
 
-## Installation
+The current repository branch is **gyroflight/main**. The project contains both the inherited Betaflight App and Gyroflight-specific extensions.
 
-### Standalone
+- **Available in the codebase:** Gyroflight branding/home, Betaflight configuration and Blackbox workflows, CHIRP qualification and GyroCore diagnostic components.
+- **Under qualification:** complete safety validation and integrated end-to-end tuning workflows.
+- **Safety restriction:** GyroCore-generated tuning changes must not be written to a flight controller until the required validation and authorization path is complete.
 
-We provide a standalone program for Windows, Linux, Mac and Android.
+This development version is **not** a claim of an independently qualified flight-ready tuning system. Always review changes and keep a known-good flight-controller configuration backup.
 
-Download the installer from [Releases.](https://github.com/betaflight/betaflight-configurator/releases)
+## Build locally
 
-### Notes
+The project uses Node.js, npm, Vue and Vite. Use the versions specified in [.nvmrc](.nvmrc) and [package.json](package.json).
 
-#### Windows users
+    git clone https://github.com/sliksoft/gyroflight.git
+    cd gyroflight
+    git switch gyroflight/main
+    npm ci
+    npm run dev
 
-The minimum required version of windows is Windows 8.
+For a local production build:
 
-#### MacOS X users
+    npm run build
 
-Changes to the security model used in the latest versions of MacOS X 10.14 (Mojave) and 10.15 (Catalina) mean that the operating system will show an error message ('"Betaflight Configurator.app" is damaged and can’t be opened. You should move it to the Trash.') when trying to install the application. To work around this, run the following command in a terminal after installing: `sudo xattr -rd com.apple.quarantine /Applications/Betaflight\ App.app`.
+Run the relevant checks before contributing:
 
-#### Linux users
+    npm run lint
+    npm test
 
-First step is to download the installer and keep it in your working directory, which can be done with the following command:
-```
-wget https://github.com/betaflight/betaflight-configurator/releases/download/10.10.0/betaflight-configurator_10.10.0_amd64.deb
-```
+For broader platform documentation, consult the [upstream Betaflight App](https://github.com/betaflight/betaflight-configurator). **Betaflight release installers do not contain Gyroflight's extensions.**
 
-In most Linux distributions your user won't have access to serial interfaces by default. To add this access right type the following command in a terminal, log out your user and log in again:
+## Project structure
 
-```
-sudo usermod -aG dialout ${USER}
-```
+| Path | Purpose |
+| --- | --- |
+| [src/gyroflight/](src/gyroflight/) | Product branding, navigation, UI integration and policy |
+| [src/gyrocore/](src/gyrocore/) | Flight analysis, CHIRP, tuning qualification and safety foundations |
+| [docs/gyrocore/](docs/gyrocore/) | Architecture, qualification reports and technical decisions |
+| [src/blackbox-viewer/](src/blackbox-viewer/) | Upstream Betaflight Blackbox Viewer |
 
-Post-installation errors can be prevented by making sure the directory `/usr/share/desktop-directories` exists. To make sure it exists, run the following command before installing the package:
+## Betaflight attribution
 
-```
-sudo mkdir /usr/share/desktop-directories/
-```
+Gyroflight is a **fork of the [Betaflight App](https://github.com/betaflight/betaflight-configurator)**. It builds on the work of the Betaflight maintainers and contributors; it is not affiliated with or endorsed by the Betaflight project.
 
-The `libatomic` library must also be installed before installing Betaflight App. (If the library is missing, the installation will succeed but Betaflight App will not start.) Some Linux distributions (e.g. Fedora) will install it automatically. On Debian or Ubuntu you can install it as follows:
+Betaflight flight-controller firmware and upstream release channels remain separate from Gyroflight's application extensions.
 
-```
-sudo apt install libatomic1
-```
+## License
 
-On Ubuntu 23.10 please follow these alternative steps for installation:
+Gyroflight retains the source project's **GNU General Public License v3.0 (GPL-3.0)**. See [LICENSE](LICENSE) and the existing copyright and attribution notices.
 
-```
-sudo echo "deb http://archive.ubuntu.com/ubuntu/ lunar universe" > /etc/apt/sources.list.d/lunar-repos-old.list
-sudo apt update
-sudo dpkg -i betaflight-configurator_10.10.0_amd64.deb
-sudo apt-get -f install
-```
+---
 
-On Ubuntu 24.10 and above, please follow these steps, as some deprecated modules are no longer available through apt on this distro:
-```
-sudo apt update
-wget http://archive.ubuntu.com/ubuntu/pool/universe/g/gconf/libgconf-2-4_3.2.6-4ubuntu1_amd64.deb
-wget http://archive.ubuntu.com/ubuntu/pool/universe/g/gconf/gconf2-common_3.2.6-4ubuntu1_all.deb
-sudo dpkg -i gconf2-common_3.2.6-4ubuntu1_all.deb
-sudo dpkg -i libgconf-2-4_3.2.6-4ubuntu1_amd64.deb
-sudo dpkg -i betaflight-configurator_10.10.0_amd64.deb
-sudo apt-get -f install
-```
-
-#### Graphics Issues
-
-If you experience graphics display problems or smudged/dithered fonts display issues in Betaflight App, try invoking the `betaflight-configurator` executable file with the `--disable-gpu` command line switch. This will switch off hardware graphics acceleration. Likewise, setting your graphics card antialiasing option to OFF (e.g. FXAA parameter on NVidia graphics cards) might be a remedy as well.
-
-### Unstable Testing Versions
-
-The future of the Betaflight App is moving to a PWA (Progressive Web Application). In this way it will be easier to maintain specially to support different devices like phones, tablets. etc. Is a work in progress but you can have access to the latest snapshot in PWA way without installing anything (take into account that some things don't work and are in development).
-
-- Latest PWA master snapshot of the App: [https://master.app.betaflight.com/](https://master.app.betaflight.com/)
-
-**Be aware that this version is intended for testing / feedback only, and may be buggy or broken, and can cause flight controller settings to be corrupted. Caution is advised when using this version.**
-
-## Languages
-
-**Please do not submit pull requests for translation changes, but read and follow the instructions below!**
-
-Betaflight App has been translated into several languages. The application will try to detect and use your system language if a translation into this language is available. You can help [translating the application into your language](https://github.com/betaflight/betaflight/tree/master/README.md#translators);
-
-If you prefer to have the application in English or any other language, you can select your desired language in the first screen of the application.
-
-## Build and Development
-
-### Technical details
-
-The next versions of the App will be a modern tool that based on PWA (Progressive Web Application) and uses principally Node, npm, Vite and Vue for development and building. For Android we use Capacitor as wrapper over the PWA. To build and develop over it, follow the instructions below.
-
-### Prepare your environment
-
-1. Install [node.js](https://nodejs.org/) — use the exact version in [.nvmrc](./.nvmrc)
-   (`nvm use` if you have [nvm](https://github.com/nvm-sh/nvm)). The bundled npm must be
-   11.6.1 or newer: npm 11.6.0 and older write `package-lock.json` in a different shape, so
-   an older npm makes every commit rewrite the whole lockfile. `npm install` warns with
-   `EBADENGINE` if your toolchain is too old, and CI fails the *Lockfile in sync* check.
-
-### PWA version
-
-#### Run development version
-
-1. Change to project folder and run `npm install`.
-2. Run `npm run dev`.
-
-The web app will be available at http://localhost:8080 with full HMR.
-
-On the **Modes** tab, use the search field above the list to filter mode names as you
-type. Search starts at two characters, matches any part of the displayed name, and
-ignores case and surrounding whitespace. Results keep the existing mode order and
-respect **Hide unused modes**. Clear the field or reduce it to one character to
-remove the text filter; mode ranges and links are preserved while hidden.
-The no-matches message appears only after mode data has loaded successfully.
-
-#### Run production version
-
-1. Change to project folder and run `npm install`.
-2. Run `npm run build`.
-3. Run `npm run preview` after build has finished.
-
-Alternatively you can run `npm run review` to build and preview in one step.
-
-The web app should behave directly as in production, available at http://localhost:8080.
-
-### Android version
-
-The Android version uses Capacitor as the native wrapper with custom plugins to bridge the PWA to native capabilities.
-
-#### Prerequisites
-
-You need to install [Android Studio](https://developer.android.com/studio) as Capacitor apps are configured and managed through it.
-
-#### Run development version
-
-1. Change to project folder and run `npm install`.
-2. Run `npm run android:run`.
-
-The command will ask for the device to run the app. You need to have some Android virtual machine created or some Android phone [connected using ADB](https://developer.android.com/tools/adb).
-
-As alternative to the step 2, you can execute a `npm run android:open` to open de project into Android Studio and run or debug the app from there.
-
-#### Run development version with live reload
-
-1. Change to project folder and run `npm install`.
-2. Run `npm run dev -- --host`. It will start the vite server and will show you the IP address where the server is listening.
-3. Run `npm run android:dev`
-
-This will ask for the IP where the server is running (if there are more than one network interfaces). You need to have some Android virtual machine created or some Android phone [connected using ADB](https://developer.android.com/tools/adb).
-Any change make in the code will reload the app in the Android device.
-
-### Running tests
-
-`npm test`
-
-## Support and Developers Channel
-
-There's a dedicated Discord server here:
-
-https://discord.gg/n4E6ak4u3c
-
-We also have a Facebook Group. Join us to get a place to talk about Betaflight, ask configuration questions, or just hang out with fellow pilots.
-
-https://www.facebook.com/groups/betaflightgroup/
-
-Etiquette: Don't ask to ask and please wait around long enough for a reply - sometimes people are out flying, asleep or at work and can't answer immediately.
-
-### Issue trackers
-
-For Betaflight App issues raise them here
-
-https://github.com/betaflight/betaflight-configurator/issues
-
-For Betaflight Firmware issues raise them here
-
-https://github.com/betaflight/betaflight/issues
-
-## Developers
-
-We accept clean and reasonable patches, submit them!
-
-## Credits
-
-For the full details of the contributions made to the Betaflight App (and its predecessors) please check out the [Github contributors page](https://github.com/betaflight/betaflight-configurator/graphs/contributors).
+<p align="center">
+  <strong>GYROFLIGHT</strong> · by <strong>Redline Dynamics</strong><br>
+  <sub>Autonomous Flight. Real Performance.</sub>
+</p>
