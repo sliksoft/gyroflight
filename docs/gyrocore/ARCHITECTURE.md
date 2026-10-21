@@ -44,7 +44,7 @@ would create import cycles.
 
 ## Where future GyroCore features fit in Gyroflight
 
-Target navigation is Betaflight's sidebar plus Gyroflight/GyroCore entries appended after Blackbox Viewer.
+Target navigation is Betaflight's sidebar plus Gyroflight/GyroCore entries appended after Blackbox Viewer and Autotune.
 Nothing in upstream's navigation is replaced.
 
 | Future feature                 | Integration                                                                                                                                                                  | Builds on (upstream)                                       |
