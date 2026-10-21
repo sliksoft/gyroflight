@@ -71,7 +71,8 @@ export function logIdentity(headerPairs: readonly (readonly [string, string])[])
     };
 }
 
-function versionAtLeast(v: string, min: string): boolean {
+/** "1.48.0" >= "1.44.0" by number, not by text. */
+export function apiAtLeast(v: string, min: string): boolean {
     const a = v.split(".").map(Number);
     const b = min.split(".").map(Number);
     for (let i = 0; i < 3; i++) {
@@ -88,7 +89,7 @@ export function identityBlocks(log: LogIdentity, fc: FcIdentity): string[] {
     if (fc.variant !== "BTFL") {
         blocked.push("fc:identity_not_betaflight");
     }
-    if (!fc.apiVersion || !versionAtLeast(fc.apiVersion, MIN_SIMPLIFIED_TUNING_API)) {
+    if (!fc.apiVersion || !apiAtLeast(fc.apiVersion, MIN_SIMPLIFIED_TUNING_API)) {
         blocked.push("fc:api_version_unsupported");
     }
     if (!log.uid) {

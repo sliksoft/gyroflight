@@ -49,17 +49,28 @@ import { useFlightControllerStore } from "@/stores/fc";
 import { useConnectionStore } from "@/stores/connection";
 import { validateTuningSliders } from "@/composables/useTuningSliders";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
-import { assertCompositeApplyAuthorized, liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
+import {
+    assertCompositeApplyAuthorized,
+    authorizeCompositeApply,
+    liveCompositeBlocks,
+} from "@/gyrocore/tuning/authorize";
 import type { CompositeGateState } from "@/gyrocore/tuning/authorize";
 import type { ProposedSliders } from "@/composables/useAutotune";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 import { assertSafetyAuthorized } from "@/gyrocore/safety/authorize";
 import { assertProductApplyReleased } from "@/gyrocore/productLock/productApply";
 import { consumeConfirmation } from "@/gyrocore/tuning/applyConfirmation";
-import { identityBlocks, logIdentity, type FcIdentity } from "@/gyrocore/tuning/fcIdentity";
+import {
+    apiAtLeast,
+    identityBlocks,
+    logIdentity,
+    MIN_SIMPLIFIED_TUNING_API,
+    type FcIdentity,
+} from "@/gyrocore/tuning/fcIdentity";
 import {
     AXES,
     DTERM_FILTER_KEYS,
+    GYRO_FILTER_KEYS,
     SNAPSHOT_ADVANCED_KEYS,
     SNAPSHOT_FILTER_KEYS,
     SNAPSHOT_SLIDER_KEYS,
@@ -67,6 +78,8 @@ import {
     pick,
     pidsDifferFromLog,
     sliderAxes,
+    snapshotHash,
+    snapshotIssues,
     snapshotMismatches,
     type FirmwareCalculation,
     type TuneSnapshot,
@@ -198,8 +211,15 @@ async function firmwareCalculation(
         mspHelper.crunch(MSPCodes.MSP_CALCULATE_SIMPLIFIED_DTERM),
     );
     const dtermFilters = pick(fcStore.filterConfig as unknown as Record<string, unknown>, DTERM_FILTER_KEYS);
+    // MSP_SET_SIMPLIFIED_TUNING also applies the gyro filter sliders: ask for those too.
+    await readOk(
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO,
+        "fc:calculation_missing",
+        mspHelper.crunch(MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO),
+    );
+    const gyroFilters = pick(fcStore.filterConfig as unknown as Record<string, unknown>, GYRO_FILTER_KEYS);
     loadStore(before);
-    return { pids, advanced, dtermFilters };
+    return { pids, advanced, dtermFilters, gyroFilters };
 }
 
 function storeBackup(
@@ -262,9 +282,77 @@ function logHeaders(state: CompositeGateState, composite: CompositeRecommendatio
     return log?.headerPairs ?? [];
 }
 
+interface LiveTune {
+    fc: FcIdentity;
+    before: TuneSnapshot;
+    expected: TuneSnapshot;
+}
+
 /**
- * Apply GyroCore's global tune. `confirmation` is the token the interface issued after
- * the user confirmed exactly this composite and these sliders.
+ * Read-only: the connected craft is the logged one, on the logged firmware, disarmed, still
+ * holding the logged tune; then what the firmware calculates for `proposed`. No write.
+ */
+async function readLiveTune(
+    composite: CompositeRecommendation,
+    headers: readonly (readonly [string, string])[],
+    proposed: Record<string, number>,
+): Promise<LiveTune> {
+    const fc = await readIdentity();
+    const idBlocks = identityBlocks(logIdentity(headers), fc);
+    if (idBlocks.length) {
+        throw new ApplyBlockedError(idBlocks);
+    }
+    // Live slider state, read fresh (MSPHelper fills fcStore.tuningSliders). No response,
+    // a refused reply or a CRC error leaves older values: never compare to those.
+    const fcStore = useFlightControllerStore();
+    const readback = (await MSP.promise(MSPCodes.MSP_SIMPLIFIED_TUNING)) as MspReply;
+    if (!readback || readback.crcError || readback.unsupported) {
+        throw new ApplyBlockedError(["fc:live_readback_missing"]);
+    }
+    const live = liveCompositeBlocks(fcStore.tuningSliders, composite);
+    if (live.length) {
+        throw new ApplyBlockedError(live);
+    }
+    await readOk(MSPCodes.MSP_PID, "fc:live_readback_missing");
+    await readOk(MSPCodes.MSP_PID_ADVANCED, "fc:live_readback_missing");
+    const before = storeSnapshot();
+    const pidBlocks = pidsDifferFromLog(headers, before.pids);
+    if (pidBlocks.length) {
+        throw new ApplyBlockedError(pidBlocks);
+    }
+    const calc = await firmwareCalculation(before, proposed);
+    return { fc, before, expected: expectedAfterWrite(before, proposed, calc) };
+}
+
+export interface TunePreview {
+    before: TuneSnapshot;
+    expected: TuneSnapshot;
+    /** snapshotHash(expected): pass it in the confirmation so Apply refuses if anything changed. */
+    hash: string;
+}
+
+/**
+ * Read-only preview of an Apply: identity, live tune, and the values the flight controller
+ * itself calculates for the composite. Writes nothing and needs no release: it is what the
+ * user confirms, and the first hardware check of the route.
+ */
+export async function previewTune(
+    proposed: ProposedSliders,
+    compositeId: string | null | undefined,
+): Promise<TunePreview> {
+    const gateState = useChirpQualificationStore().gateState();
+    const composite = authorizeCompositeApply(gateState, compositeId, proposed).composite;
+    if (!composite || composite.id !== compositeId) {
+        throw new ApplyBlockedError(["apply:no_composite"]);
+    }
+    assertConnectedReal();
+    const live = await readLiveTune(composite, logHeaders(gateState, composite), { ...proposed });
+    return { before: live.before, expected: live.expected, hash: snapshotHash(live.expected) };
+}
+
+/**
+ * Apply GyroCore's global tune. `confirmation` is the token the interface issued after the
+ * user confirmed exactly this composite, these sliders and the preview it showed.
  */
 export async function applyTune(
     proposed: ProposedSliders,
@@ -279,42 +367,25 @@ export async function applyTune(
         safetyAnalysisEvidence: safety.analysisEvidence,
         independentPidValidation: null,
     });
-    consumeConfirmation(confirmation, { kind: "apply", compositeId: composite.id, sliders: { ...proposed } });
+    const confirmed = consumeConfirmation(confirmation, {
+        kind: "apply",
+        compositeId: composite.id,
+        sliders: { ...proposed },
+    });
     assertConnectedReal();
 
-    // 2. The connected craft is the logged one, on the logged firmware, disarmed.
-    const headers = logHeaders(gateState, composite);
-    const fc = await readIdentity();
-    const idBlocks = identityBlocks(logIdentity(headers), fc);
-    if (idBlocks.length) {
-        throw new ApplyBlockedError(idBlocks);
+    // 2-4. Identity, live tune, logged PIDs, and the firmware's calculation (read-only).
+    const { fc, before, expected } = await readLiveTune(composite, logHeaders(gateState, composite), {
+        ...proposed,
+    });
+    // What the user confirmed must still be what the firmware would produce.
+    if (confirmed.preview !== undefined && confirmed.preview !== snapshotHash(expected)) {
+        throw new ApplyBlockedError(["apply:preview_changed"]);
     }
 
-    // 3. Live slider state, read fresh (MSPHelper fills fcStore.tuningSliders). No
-    // response, a refused reply or a CRC error leaves older values: never compare to those.
-    const fcStore = useFlightControllerStore();
-    const readback = (await MSP.promise(MSPCodes.MSP_SIMPLIFIED_TUNING)) as MspReply;
-    if (!readback || readback.crcError || readback.unsupported) {
-        throw new ApplyBlockedError(["fc:live_readback_missing"]);
-    }
-    const live = liveCompositeBlocks(fcStore.tuningSliders, composite);
-    if (live.length) {
-        throw new ApplyBlockedError(live);
-    }
-
-    // 4. Backup of everything the write can change, and the logged PIDs still in place.
-    await readOk(MSPCodes.MSP_PID, "fc:live_readback_missing");
-    await readOk(MSPCodes.MSP_PID_ADVANCED, "fc:live_readback_missing");
-    const before = storeSnapshot();
-    const pidBlocks = pidsDifferFromLog(headers, before.pids);
-    if (pidBlocks.length) {
-        throw new ApplyBlockedError(pidBlocks);
-    }
+    // 5. Backup, then the write itself.
     const backup = storeBackup("before_apply", fc, before, composite.id);
-
-    // 5. What the firmware will produce, then the write itself.
-    const calc = await firmwareCalculation(before, { ...proposed });
-    const expected = expectedAfterWrite(before, { ...proposed }, calc);
+    const fcStore = useFlightControllerStore();
     loadStore(before);
     // Object.keys widens to string[]; the keys are the proposal's own slider fields.
     for (const key of Object.keys(proposed) as (keyof ProposedSliders)[]) {
@@ -337,23 +408,60 @@ export async function applyTune(
     return { status: "verified", backupId: backup.id, expected, readback: after };
 }
 
-/** Write a stored backup back to the craft it was taken from, then verify and save. */
-export async function restoreTune(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
-    consumeConfirmation(confirmation, { kind: "restore", backupId });
+export interface RestorePreview {
+    backup: TuneBackup;
+    fc: FcIdentity;
+    current: TuneSnapshot;
+    /** snapshotHash(current): pass it in the confirmation so Restore refuses if the craft changed. */
+    hash: string;
+}
+
+/** Read-only checks before a Restore: a sound backup of this craft, same firmware, disarmed. */
+async function readRestoreTarget(backupId: string): Promise<RestorePreview> {
     const backup = useTuneBackupStore().get(backupId);
     if (!backup) {
         throw new ApplyBlockedError(["restore:backup_not_found"]);
     }
+    if (snapshotIssues(backup.snapshot).length) {
+        throw new ApplyBlockedError(["restore:backup_invalid"]);
+    }
     assertConnectedReal();
     const fc = await readIdentity();
+    const blocked: string[] = [];
     if (!sameUid(fc.uid, backup.uid)) {
-        throw new ApplyBlockedError(["restore:different_craft"]);
+        blocked.push("restore:different_craft");
+    }
+    if (fc.variant !== "BTFL") {
+        blocked.push("fc:identity_not_betaflight");
+    }
+    if (!fc.apiVersion || !apiAtLeast(fc.apiVersion, MIN_SIMPLIFIED_TUNING_API)) {
+        blocked.push("fc:api_version_unsupported");
+    }
+    if (fc.version !== backup.firmware) {
+        blocked.push("restore:firmware_changed");
     }
     if (fc.armed) {
-        throw new ApplyBlockedError(["fc:armed"]);
+        blocked.push("fc:armed");
     }
-
+    if (blocked.length) {
+        throw new ApplyBlockedError(blocked);
+    }
     const current = await readSnapshot("fc:live_readback_missing");
+    return { backup, fc, current, hash: snapshotHash(current) };
+}
+
+/** Read-only preview of a Restore: what is on the craft now, against the backup. */
+export async function previewRestore(backupId: string): Promise<RestorePreview> {
+    return readRestoreTarget(backupId);
+}
+
+/** Write a stored backup back to the craft it was taken from, then verify and save. */
+export async function restoreTune(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
+    const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
+    const { backup, fc, current } = await readRestoreTarget(backupId);
+    if (confirmed.preview !== undefined && confirmed.preview !== snapshotHash(current)) {
+        throw new ApplyBlockedError(["restore:preview_changed"]);
+    }
     const safety = storeBackup("before_restore", fc, current, null);
     const target = backup.snapshot;
 
@@ -389,5 +497,5 @@ export async function restoreTune(backupId: string, confirmation: string | null 
 }
 
 export function useTuneApply() {
-    return { applyTune, restoreTune };
+    return { previewTune, applyTune, previewRestore, restoreTune };
 }

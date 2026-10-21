@@ -34,7 +34,14 @@ import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 export const CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 
 export type ConfirmationSubject =
-    { kind: "apply"; compositeId: string; sliders: Record<string, number> } | { kind: "restore"; backupId: string };
+    | {
+          kind: "apply";
+          compositeId: string;
+          sliders: Record<string, number>;
+          /** snapshotHash of the read-only preview the user saw (useTuneApply.previewTune). */
+          preview?: string;
+      }
+    | { kind: "restore"; backupId: string; preview?: string };
 
 interface Issued {
     subject: ConfirmationSubject;
@@ -67,12 +74,16 @@ export function issueConfirmation(subject: ConfirmationSubject, now = Date.now()
     return token;
 }
 
-/** Throws unless `token` confirms exactly `subject`; a token is spent even when it does not match. */
+/**
+ * Throws unless `token` confirms exactly `subject` (the preview hash is not compared here: the
+ * caller checks it once it has recomputed the preview). Returns what was confirmed. A token is
+ * spent even when it does not match.
+ */
 export function consumeConfirmation(
     token: string | null | undefined,
     subject: ConfirmationSubject,
     now = Date.now(),
-): void {
+): ConfirmationSubject {
     if (!token) {
         throw new ApplyBlockedError(["apply:confirmation_missing"]);
     }
@@ -87,6 +98,7 @@ export function consumeConfirmation(
     if (!sameSubject(entry.subject, subject)) {
         throw new ApplyBlockedError(["apply:confirmation_mismatch"]);
     }
+    return entry.subject;
 }
 
 /** Test helper: forget every issued token. */

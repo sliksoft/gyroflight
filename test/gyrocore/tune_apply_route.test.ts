@@ -92,7 +92,7 @@ vi.mock("@/gyrocore/tuning/authorize", async () => {
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { useConnectionStore } from "../../src/stores/connection";
 import { useAutotune } from "../../src/composables/useAutotune";
-import { restoreTune, TuneWriteError } from "../../src/composables/useTuneApply";
+import { previewRestore, previewTune, restoreTune, TuneWriteError } from "../../src/composables/useTuneApply";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { useTuneBackupStore, BACKUP_STORAGE_KEY } from "../../src/gyrocore/stores/tuneBackup";
@@ -344,11 +344,60 @@ describe("write, read back, verify, save", () => {
         });
     }
 
+    it("gyro filter Hz the sliders recompute on SET are expected from MSP_CALCULATE_SIMPLIFIED_GYRO", async () => {
+        const c = await load();
+        // Not what the gyro slider (on, 100) produces: the write will move it to 250.
+        route.craft.filters.gyro_lowpass_hz = 200;
+        const result = await apply(c.id);
+        expect(result.expected.filters.gyro_lowpass_hz).toBe(250);
+        expect(route.craft.filters.gyro_lowpass_hz).toBe(250);
+        expect(useTuneBackupStore().get(result.backupId)!.snapshot.filters.gyro_lowpass_hz).toBe(200);
+    });
+
     it("a mismatch names the field", async () => {
         const c = await load();
         route.craft.skewAfterWrite = true;
         const err = (await failure(apply(c.id))) as TuneWriteError;
         expect(err.mismatches).toEqual(["pid:roll:P expected 50 read 51"]);
+    });
+});
+
+describe("read-only preview, and the confirmation bound to it", () => {
+    it("reads identity, live tune and the firmware's calculation, and writes nothing", async () => {
+        const c = await load();
+        const p = await previewTune(CHANGE, c.id);
+        expect(writes()).toEqual([]);
+        expect(codes()).toContain(MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO);
+        expect(p.before.pids[0]).toEqual([45, 80, 30]);
+        expect(p.expected.pids[0]).toEqual([50, 88, 32]);
+        expect(p.hash).toMatch(/^[0-9a-f]{8}$/);
+        // Applying with that preview gives exactly the previewed values.
+        route.craft.calls = [];
+        const token = issueConfirmation({ kind: "apply", compositeId: c.id, sliders: { ...CHANGE }, preview: p.hash });
+        const result = await useAutotune().applyGains(CHANGE, c.id, token);
+        expect(result.expected).toEqual(p.expected);
+    });
+
+    it("is also possible while Apply is blocked, and reports what blocks the read", async () => {
+        const c = await load();
+        route.craft.uid = [1, 2, 3];
+        const err = await failure(previewTune(CHANGE, c.id));
+        expect((err as ApplyBlockedError).reasons).toEqual(["fc:identity_uid_mismatch"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a confirmation for another preview than the craft would now produce writes nothing", async () => {
+        const c = await load();
+        const token = issueConfirmation({
+            kind: "apply",
+            compositeId: c.id,
+            sliders: { ...CHANGE },
+            preview: "deadbeef",
+        });
+        const err = await failure(useAutotune().applyGains(CHANGE, c.id, token));
+        expect((err as ApplyBlockedError).reasons).toEqual(["apply:preview_changed"]);
+        expect(writes()).toEqual([]);
+        expect(useTuneBackupStore().backups).toEqual([]);
     });
 });
 
@@ -420,6 +469,44 @@ describe("Restore", () => {
             ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
                 .reasons,
         ).toEqual(["fc:armed"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("refuses a corrupt backup and a craft on other firmware, before any write", async () => {
+        const c = await load();
+        const applied = await apply(c.id);
+        const store = useTuneBackupStore();
+        const good = store.get(applied.backupId)!;
+        route.craft.calls = [];
+        const corrupt = { ...good, id: "bk-corrupt", snapshot: { ...good.snapshot, pids: [[45, Number.NaN, 30]] } };
+        expect(store.save(corrupt)).toBe(true);
+        expect(
+            (
+                (await failure(
+                    restoreTune("bk-corrupt", issueConfirmation({ kind: "restore", backupId: "bk-corrupt" })),
+                )) as ApplyBlockedError
+            ).reasons,
+        ).toEqual(["restore:backup_invalid"]);
+        route.craft.version = "2026.6.3";
+        expect(
+            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
+                .reasons,
+        ).toEqual(["restore:firmware_changed"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("shows what it would change, read-only, and refuses if the craft changed after that", async () => {
+        const c = await load();
+        const applied = await apply(c.id);
+        route.craft.calls = [];
+        const p = await previewRestore(applied.backupId);
+        expect(writes()).toEqual([]);
+        expect(p.current.pids[0]).toEqual([50, 88, 32]);
+        route.craft.pids[2] = [1, 2, 3];
+        const token = issueConfirmation({ kind: "restore", backupId: applied.backupId, preview: p.hash });
+        expect(((await failure(restoreTune(applied.backupId, token))) as ApplyBlockedError).reasons).toEqual([
+            "restore:preview_changed",
+        ]);
         expect(writes()).toEqual([]);
     });
 

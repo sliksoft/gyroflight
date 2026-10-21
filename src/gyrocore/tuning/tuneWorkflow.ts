@@ -34,6 +34,7 @@ import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 import type { SafetyResult } from "@/gyrocore/safety/evaluate";
 import type { M4BblReport, M4LogReport } from "@/js/blackbox/m4_bbl_integration";
 import { SLIDER_KEYS } from "@/gyrocore/tuning/merge";
+import type { SnapshotDiffRow } from "@/gyrocore/tuning/tuneSnapshot";
 
 export type PartState = "IMPLEMENTED" | "VALIDATED" | "PARTIAL" | "BLOCKED";
 
@@ -309,4 +310,18 @@ export function compareTableHtml(
         )
         .join("");
     return `<table class="gyroflight-compare" data-gyrocore="confirm-diff"><tbody>${body}</tbody></table>`;
+}
+
+/** A read-only preview or Restore as a table: every value that changes, from -> to, escaped. */
+export function snapshotDiffHtml(rows: SnapshotDiffRow[], label: (key: string) => string, noChange: string): string {
+    if (!rows.length) {
+        return `<p data-gyrocore="confirm-nochange">${esc(noChange)}</p>`;
+    }
+    const body = rows
+        .map(
+            (r) =>
+                `<tr data-row="${esc(r.key)}"><td>${esc(label(r.key))}</td><td>${esc(r.from ?? "?")}</td><td>${esc(r.to ?? "?")}</td></tr>`,
+        )
+        .join("");
+    return `<table class="gyroflight-compare" data-gyrocore="confirm-values"><tbody>${body}</tbody></table>`;
 }

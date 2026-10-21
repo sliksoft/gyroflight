@@ -33,6 +33,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
     applyGains: vi.fn(),
     restoreTune: vi.fn(),
+    previewTune: vi.fn(),
+    previewRestore: vi.fn(),
     showYesNo: vi.fn(),
     connected: true,
     virtual: false,
@@ -44,6 +46,8 @@ vi.mock("@/composables/useAutotune", () => ({
 vi.mock("@/composables/useTuneApply", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../src/composables/useTuneApply")>()),
     restoreTune: mocks.restoreTune,
+    previewTune: mocks.previewTune,
+    previewRestore: mocks.previewRestore,
 }));
 vi.mock("@/composables/useDialog", () => ({ useDialog: () => ({ showYesNo: mocks.showYesNo }) }));
 vi.mock("@/stores/connection", () => ({
@@ -130,6 +134,19 @@ beforeEach(() => {
     mocks.applyGains.mockReset();
     mocks.restoreTune.mockReset();
     mocks.showYesNo.mockReset();
+    mocks.previewTune.mockReset();
+    mocks.previewTune.mockResolvedValue({
+        before: { sliders: { slider_pi_gain: 100 }, filters: {}, pids: [[45, 80, 30]], advanced: {} },
+        expected: { sliders: { slider_pi_gain: 110 }, filters: {}, pids: [[50, 88, 32]], advanced: {} },
+        hash: "0badc0de",
+    });
+    mocks.previewRestore.mockReset();
+    mocks.previewRestore.mockResolvedValue({
+        backup: null,
+        fc: null,
+        current: { sliders: { slider_pi_gain: 110 }, filters: {}, pids: [[50, 88, 32]], advanced: {} },
+        hash: "feedf00d",
+    });
     mocks.connected = true;
     mocks.virtual = false;
 });
@@ -252,6 +269,9 @@ describe("the panel with every gate released (test harnesses)", () => {
         expect(text).toContain('data-row="slider:slider_pi_gain"');
         expect(text).toContain('data-row="pid:yaw:D"');
         expect(text).toContain("gyroflightApplyProcedure");
+        // The absolute values the FC calculated, from the read-only preview.
+        expect(text).toContain('data-gyrocore="confirm-values"');
+        expect(text).toContain('data-row="pid:roll:P"><td>pid:roll:P</td><td>45</td><td>50</td>');
         expect(mocks.applyGains).not.toHaveBeenCalled();
     });
 
@@ -342,6 +362,22 @@ describe("the panel with every gate released (test harnesses)", () => {
         await flush();
         expect(mocks.restoreTune).toHaveBeenCalledWith("bk-mine", expect.stringMatching(/^[0-9a-f]{32}$/));
         expect(c.querySelector('[data-gyrocore="workflow-verified"]')).not.toBeNull();
+    });
+
+    it("the read-only preview is offered while Apply is blocked and shows now/after", async () => {
+        const { c } = await mountReleased(["phase_margin_not_validated"]);
+        expect(button(c).disabled).toBe(true);
+        const preview = c.querySelector('[data-gyrocore="workflow-preview"]') as HTMLButtonElement;
+        expect(preview.disabled).toBe(false);
+        preview.click();
+        await flush();
+        await flush();
+        expect(mocks.previewTune).toHaveBeenCalledTimes(1);
+        const result = c.querySelector('[data-gyrocore="workflow-preview-result"]')!;
+        expect(result.getAttribute("data-status")).toBe("ok");
+        expect(result.querySelector('[data-preview="pid:roll:P"]')?.textContent).toContain("45");
+        expect(mocks.applyGains).not.toHaveBeenCalled();
+        expect(mocks.showYesNo).not.toHaveBeenCalled();
     });
 
     it("Virtual Mode or no connection keeps Apply disabled", async () => {

@@ -28,12 +28,20 @@
 
 import { useDialog } from "@/composables/useDialog";
 import { useAutotune, type ProposedSliders } from "@/composables/useAutotune";
-import { restoreTune, TuneWriteError, type TuneWriteResult } from "@/composables/useTuneApply";
+import {
+    previewRestore,
+    previewTune,
+    restoreTune,
+    TuneWriteError,
+    type TunePreview,
+    type TuneWriteResult,
+} from "@/composables/useTuneApply";
 import { i18n } from "@/js/localization";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { issueConfirmation } from "@/gyrocore/tuning/applyConfirmation";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
-import { compareRows, compareTableHtml } from "@/gyrocore/tuning/tuneWorkflow";
+import { compareRows, compareTableHtml, snapshotDiffHtml } from "@/gyrocore/tuning/tuneWorkflow";
+import { snapshotDiff } from "@/gyrocore/tuning/tuneSnapshot";
 import type { TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useTuneWorkflowStore, type TuneOutcome } from "@/gyrocore/stores/tuneWorkflow";
 
@@ -102,7 +110,35 @@ export function useTuneWorkflow() {
     const dialog = useDialog();
     const store = useTuneWorkflowStore();
 
-    /** Shows the full comparison; on the user's yes, applies exactly that composite. */
+    /** Read-only: what the craft holds and what the firmware calculates for the composite. Writes nothing. */
+    async function preview(composite: CompositeRecommendation): Promise<TunePreview | null> {
+        const proposed = composite.final as ProposedSliders | null;
+        if (!proposed) {
+            return null;
+        }
+        const at = new Date().toISOString();
+        try {
+            const p = await previewTune(proposed, composite.id);
+            store.preview = { status: "ok", before: p.before, expected: p.expected, reasons: [], at };
+            return p;
+        } catch (err) {
+            const reasons =
+                err instanceof ApplyBlockedError
+                    ? err.reasons
+                    : [
+                          typeof err === "object" && err !== null
+                              ? String(Reflect.get(err, "message") ?? err)
+                              : String(err),
+                      ];
+            store.preview = { status: "blocked", before: null, expected: null, reasons, at };
+            return null;
+        }
+    }
+
+    /**
+     * Reads a fresh preview, shows the full change (the comparison and the absolute values the
+     * flight controller calculated), and on the user's yes applies exactly that, bound to the preview.
+     */
     async function confirmAndApply(
         composite: CompositeRecommendation,
         headerPairs: readonly (readonly [string, string])[],
@@ -111,23 +147,52 @@ export function useTuneWorkflow() {
         if (!proposed || store.busy) {
             return "cancelled";
         }
-        const table = compareTableHtml(
-            compareRows(composite, headerPairs),
-            label,
-            i18n.getMessage("gyroflightCompareByFc"),
-            i18n.getMessage("gyroflightCompareSame"),
-        );
-        const confirmed = await dialog.showYesNo(
-            i18n.getMessage("autotuneApplyConfirmTitle"),
-            `${i18n.getMessage("autotuneApplyConfirmText")}${table}<p>${i18n.getMessage("gyroflightApplyProcedure")}</p>`,
-            { destructive: true, yesText: i18n.getMessage("autotuneApplyGains"), noText: i18n.getMessage("cancel") },
-        );
-        if (!confirmed) {
-            return "cancelled";
-        }
-        const token = issueConfirmation({ kind: "apply", compositeId: composite.id, sliders: { ...proposed } });
         store.busy = true;
         try {
+            const p = await preview(composite);
+            if (!p) {
+                store.outcome = {
+                    status: "blocked",
+                    action: "apply",
+                    reasons: store.preview?.reasons ?? [],
+                    stage: null,
+                    saved: null,
+                    mismatches: [],
+                    backupId: null,
+                    message: "preview",
+                    at: new Date().toISOString(),
+                };
+                return "blocked";
+            }
+            const table = compareTableHtml(
+                compareRows(composite, headerPairs),
+                label,
+                i18n.getMessage("gyroflightCompareByFc"),
+                i18n.getMessage("gyroflightCompareSame"),
+            );
+            const values = snapshotDiffHtml(
+                snapshotDiff(p.before, p.expected),
+                label,
+                i18n.getMessage("gyroflightPreviewNoChange"),
+            );
+            const confirmed = await dialog.showYesNo(
+                i18n.getMessage("autotuneApplyConfirmTitle"),
+                `${i18n.getMessage("autotuneApplyConfirmText")}${table}<p>${i18n.getMessage("gyroflightPreviewValues")}</p>${values}<p>${i18n.getMessage("gyroflightApplyProcedure")}</p>`,
+                {
+                    destructive: true,
+                    yesText: i18n.getMessage("autotuneApplyGains"),
+                    noText: i18n.getMessage("cancel"),
+                },
+            );
+            if (!confirmed) {
+                return "cancelled";
+            }
+            const token = issueConfirmation({
+                kind: "apply",
+                compositeId: composite.id,
+                sliders: { ...proposed },
+                preview: p.hash,
+            });
             const result = await useAutotune().applyGains(proposed, composite.id, token);
             store.outcome = success("apply", result as TuneWriteResult);
             return "verified";
@@ -139,22 +204,27 @@ export function useTuneWorkflow() {
         }
     }
 
-    /** Asks before writing a stored backup back to the craft it came from. */
+    /** Reads the craft, shows what Restore would change, and asks before writing the backup back. */
     async function confirmAndRestore(backup: TuneBackup): Promise<TuneActionResult> {
         if (store.busy) {
             return "cancelled";
         }
-        const confirmed = await dialog.showYesNo(
-            i18n.getMessage("gyroflightRestoreConfirmTitle"),
-            i18n.getMessage("gyroflightRestoreConfirmText", [backup.createdAt, backup.board, backup.firmware]),
-            { destructive: true, yesText: i18n.getMessage("gyroflightRestore"), noText: i18n.getMessage("cancel") },
-        );
-        if (!confirmed) {
-            return "cancelled";
-        }
-        const token = issueConfirmation({ kind: "restore", backupId: backup.id });
         store.busy = true;
         try {
+            const p = await previewRestore(backup.id);
+            const confirmed = await dialog.showYesNo(
+                i18n.getMessage("gyroflightRestoreConfirmTitle"),
+                `${i18n.getMessage("gyroflightRestoreConfirmText", [backup.createdAt, backup.board, backup.firmware])}${snapshotDiffHtml(
+                    snapshotDiff(p.current, backup.snapshot),
+                    label,
+                    i18n.getMessage("gyroflightPreviewNoChange"),
+                )}`,
+                { destructive: true, yesText: i18n.getMessage("gyroflightRestore"), noText: i18n.getMessage("cancel") },
+            );
+            if (!confirmed) {
+                return "cancelled";
+            }
+            const token = issueConfirmation({ kind: "restore", backupId: backup.id, preview: p.hash });
             store.outcome = success("restore", await restoreTune(backup.id, token));
             return "verified";
         } catch (err) {
@@ -165,5 +235,5 @@ export function useTuneWorkflow() {
         }
     }
 
-    return { confirmAndApply, confirmAndRestore };
+    return { preview, confirmAndApply, confirmAndRestore };
 }
