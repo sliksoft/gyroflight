@@ -19,7 +19,7 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Tab metadata only — no Vue imports here, because gui.js and sidebar_items.js
+// Tab metadata only — no Vue imports here, because stores/navigation.ts and sidebar_items.js
 // import this module early and must not pull in components (circular imports).
 
 export const GYROFLIGHT_TAB_KEY = "gyroflight";

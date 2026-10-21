@@ -29,17 +29,22 @@ import overrides from "./locales/en.overrides.json";
 // "Home", not a translation of "Welcome"). Re-applied whenever a language bundle loads.
 import allLanguageOverrides from "./locales/all.overrides.json";
 
+// Our bundles only hold { message: string } entries, so parseInputFile's values are all strings.
+function parseBundle(bundle: unknown): Record<string, string> {
+    return i18n.parseInputFile(JSON.stringify(bundle)) as Record<string, string>;
+}
+
 /** The bundle in the flat key -> string form i18next expects, parsed exactly as upstream locale files are. */
 export function gyroflightMessageStrings(): Record<string, string> {
-    return i18n.parseInputFile(JSON.stringify(messages));
+    return parseBundle(messages);
 }
 
 export function gyroflightOverrideStrings(): Record<string, string> {
-    return i18n.parseInputFile(JSON.stringify(overrides));
+    return parseBundle(overrides);
 }
 
 export function gyroflightAllLanguageOverrideStrings(): Record<string, string> {
-    return i18n.parseInputFile(JSON.stringify(allLanguageOverrides));
+    return parseBundle(allLanguageOverrides);
 }
 
 function applyAllLanguageOverrides(): void {

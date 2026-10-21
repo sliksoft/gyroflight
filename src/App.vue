@@ -44,7 +44,7 @@
                 :port-usage-down="PortUsage.port_usage_down"
                 :port-usage-up="PortUsage.port_usage_up"
                 :connection-timestamp="CONNECTION.timestamp"
-                :packet-error="MSP.packet_error"
+                :packet-error="connectionStore.packetErrors"
                 :cycle-time="fcStore.config.cycleTime"
                 :cpu-load="fcStore.config.cpuload"
                 :cpu-temperature="fcStore.config.cpuTemp"
@@ -71,13 +71,12 @@ import { useMediaQuery } from "@vueuse/core";
 import ConnectButton from "./components/device-picker/ConnectButton.vue";
 import GlobalDialogs from "./components/dialogs/GlobalDialogs.vue";
 import Sidebar from "./components/sidebar/Sidebar.vue";
-import MSPModule from "./js/msp";
 import PortUsageModule from "./js/port_usage.js";
 import CONFIGURATORModule from "./js/data_storage";
-import GUI from "./js/gui.js";
 import { i18n } from "./js/localization";
 import { useUiLocale } from "./composables/useUiLocale";
 import { useFlightControllerStore } from "./stores/fc";
+import { useConnectionStore } from "./stores/connection";
 import {
     completeVueTabMount,
     tabAdapterRegistration,
@@ -116,8 +115,7 @@ function currentVm() {
 
 const CONFIGURATOR = computed(() => currentVm()?.CONFIGURATOR ?? CONFIGURATORModule);
 const fcStore = useFlightControllerStore();
-// Not on the legacy vm model: MSP is a module singleton, and window.MSP (set in js/msp) is the debug handle.
-const MSP = MSPModule;
+const connectionStore = useConnectionStore();
 const PortUsage = computed(() => currentVm()?.PortUsage ?? PortUsageModule);
 const CONNECTION = computed(() => currentVm()?.CONNECTION ?? connectionFallback);
 
@@ -214,7 +212,7 @@ provide("closeMobileSidebar", () => {
 
 const activeTabComponent = computed(() => {
     const tabName = vueTabState.activeTabName;
-    return tabName ? (VueTabComponents[tabName] ?? null) : null;
+    return tabName ? (VueTabComponents[tabName as keyof typeof VueTabComponents] ?? null) : null;
 });
 
 // Tabs that keep their state (and heavy resources) alive across switches rather than being torn
@@ -228,7 +226,6 @@ const activeTabKey = computed(() =>
 );
 
 provide("betaflightModel", currentVm());
-provide("gui", GUI);
 provide(TAB_ADAPTER_REGISTRATION_KEY, tabAdapterRegistration);
 
 watch(
