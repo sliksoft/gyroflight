@@ -19,11 +19,13 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-import GUI from "./gui.js";
 import CONFIGURATOR from "./data_storage";
-import { serial } from "./serial.js";
+import { serial } from "./serial";
 import { MspCancelledError, MspTimeoutError } from "./msp/mspErrors";
 import { MspDataView } from "./msp/mspBytes";
+import { useNavigationStore } from "../stores/navigation";
+import { useConnectionStore } from "../stores/connection";
+import { pinia } from "./pinia_instance";
 
 /** A request payload: the encoders read `.length` and index it, so an array-like of bytes. */
 export type MspPayload = ArrayLike<number> | false | undefined;
@@ -142,7 +144,13 @@ const MSP = {
     callbacks: [] as MspRequest[],
     parked: new Map<number, MspRequest[]>(), // errorAware requests parked behind an in-flight same-code request
     onTimeout: null as ((code: number) => void) | null, // invoked with the code when an errorAware request exhausts MAX_RETRIES
-    packet_error: 0,
+    // CRC error count; lives in the connection store so the status bar stays reactive.
+    get packet_error(): number {
+        return useConnectionStore(pinia).packetErrors;
+    },
+    set packet_error(value: number) {
+        useConnectionStore(pinia).packetErrors = value;
+    },
     unsupported: 0,
 
     TIMEOUT: 1000,
@@ -548,7 +556,7 @@ const MSP = {
         if ((obj.attempts ?? 1) < this.MAX_RETRIES) {
             obj.attempts = (obj.attempts ?? 1) + 1;
             console.warn(
-                `MSP: data request timed-out: ${obj.code} ID: ${serial.connectionId} TAB: ${GUI.active_tab} QUEUE: ${this.callbacks.length} (${this.callbacks.map((e) => e.code)})`,
+                `MSP: data request timed-out: ${obj.code} ID: ${serial.connectionId} TAB: ${useNavigationStore().activeTab} QUEUE: ${this.callbacks.length} (${this.callbacks.map((e) => e.code)})`,
             );
             void serial.send(obj.requestBuffer);
             this._arm_timer(obj);
