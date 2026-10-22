@@ -39,7 +39,7 @@ import {
 } from "@/composables/useTuneApply";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { runAutotuneV2, type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
-import { buildLogInputs, pickPrimary } from "@/gyrocore/engine/logInput";
+import { buildLogInputs, pickPrimary, uniqueFlights } from "@/gyrocore/engine/logInput";
 import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
 import { evaluateRelease, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { useAutotuneV2Store, type AutotuneV2Outcome } from "@/gyrocore/stores/autotuneV2";
@@ -135,8 +135,9 @@ export function useAutotuneV2() {
                 inputs.push({ ...l, order: n - i });
             }
         }
-        store.inputs = inputs;
-        return inputs;
+        // One flight carried by two files (renamed, re-saved) is kept once.
+        store.inputs = uniqueFlights(inputs);
+        return store.inputs;
     }
 
     /** Run the engine on every imported file of this craft. Pure computation: no flight controller. */

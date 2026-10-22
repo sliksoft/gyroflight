@@ -31,6 +31,8 @@ import { FlightLogIndex } from "@/blackbox-viewer/flightlog_index.js";
 import { extractOptionalBlackboxChannels } from "@/js/blackbox/flight_metrics_analysis";
 import type { M4BblReport } from "@/js/blackbox/m4_bbl_integration";
 import type { ChirpMeasurement, ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
+import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
+import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import type { AutotuneLogInput, ChirpAxisInput } from "./autotuneV2";
 import type { AxisName } from "./safetyEvidence";
 
@@ -152,6 +154,75 @@ export function buildLogInputs(
     return out;
 }
 
+const fingerprints = new WeakMap<object, string>();
+
+/**
+ * Content fingerprint of a flight: the logged time base and gyroADC of every sample. Two inputs
+ * with the same fingerprint are the same measurement, whatever file (hash, name) carried them.
+ */
+export function flightFingerprint(log: AutotuneLogInput): string {
+    const cached = fingerprints.get(log.channels);
+    if (cached) return cached;
+    let h1 = 0x811c9dc5;
+    let h2 = 0x01000193;
+    const mix = (v: number) => {
+        const x = Number.isFinite(v) ? Math.round(v * 1000) | 0 : 0x7fffffff;
+        h1 = Math.imul(h1 ^ x, 0x01000193);
+        h2 = Math.imul(h2 ^ x, 0x5bd1e995);
+    };
+    const { timeUs, gyroAdc } = log.channels;
+    for (let k = 0; k < timeUs.length; k++) {
+        mix(timeUs[k]);
+        mix(gyroAdc[0][k]);
+        mix(gyroAdc[1][k]);
+        mix(gyroAdc[2][k]);
+    }
+    const fp = `${timeUs.length}:${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
+    fingerprints.set(log.channels, fp);
+    return fp;
+}
+
+/** Same log of the same file, or the same flight carried by another file. */
+export function sameFlight(a: AutotuneLogInput, b: AutotuneLogInput): boolean {
+    return (a.sha256 === b.sha256 && a.logIndex === b.logIndex) || flightFingerprint(a) === flightFingerprint(b);
+}
+
+/** Every flight once (the first occurrence is kept, in input order). */
+export function uniqueFlights(logs: AutotuneLogInput[]): AutotuneLogInput[] {
+    const out: AutotuneLogInput[] = [];
+    for (const l of logs) if (!out.some((o) => sameFlight(o, l))) out.push(l);
+    return out;
+}
+
+/** Header values beyond the absolute fields that shape the identified plant. */
+const PLANT_CONFIG_KEYS = ["looptime", "pid_process_denom", "motor_poles", "gyro_notch_hz", "dterm_notch_hz"];
+
+/**
+ * Why `other` cannot serve as an independent repeat of `primary` (empty: it can): not the same
+ * flight, the same craft and firmware, and the same logged configuration.
+ */
+export function crossLogReferenceIssues(primary: AutotuneLogInput, other: AutotuneLogInput): string[] {
+    if (sameFlight(primary, other)) return [`cross_log_duplicate_of_primary:${other.sha256}:${other.logIndex}`];
+    const a = logIdentity(primary.headerPairs);
+    const b = logIdentity(other.headerPairs);
+    const out: string[] = [];
+    if (!a.uid || !b.uid || a.uid.some((w, i) => w !== b.uid![i]) || a.board !== b.board) {
+        out.push("cross_log_other_craft");
+    }
+    if (!a.firmwareRevision || a.firmwareRevision !== b.firmwareRevision) out.push("cross_log_other_firmware");
+    const va = loggedAbsoluteValues(primary.headerPairs);
+    const vb = loggedAbsoluteValues(other.headerPairs);
+    const ha = new Map(primary.headerPairs);
+    const hb = new Map(other.headerPairs);
+    for (const k of new Set([...Object.keys(va), ...Object.keys(vb)])) {
+        if (va[k] !== vb[k]) out.push(`cross_log_config_differs:${k}`);
+    }
+    for (const k of PLANT_CONFIG_KEYS) {
+        if (ha.get(k) !== hb.get(k)) out.push(`cross_log_config_differs:${k}`);
+    }
+    return out;
+}
+
 /** The logged P/I/D/F of all axes: logs with the same key were flown with the same tune. */
 export function tuneKey(log: AutotuneLogInput): string {
     const h = new Map(log.headerPairs.map(([k, v]) => [k, v]));
@@ -181,7 +252,8 @@ export function bestLog(logs: AutotuneLogInput[]): AutotuneLogInput {
 export function pickPrimary(
     logs: AutotuneLogInput[],
 ): { primary: AutotuneLogInput; others: AutotuneLogInput[] } | null {
-    if (!logs.length) return null;
-    const primary = bestLog(groupByTune(logs)[0]);
-    return { primary, others: logs.filter((l) => l !== primary) };
+    const unique = uniqueFlights(logs);
+    if (!unique.length) return null;
+    const primary = bestLog(groupByTune(unique)[0]);
+    return { primary, others: unique.filter((l) => l !== primary) };
 }

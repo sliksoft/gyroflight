@@ -81,6 +81,7 @@ import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOpti
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
+import { crossLogReferenceIssues } from "./logInput";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 /** rcCommand[3] below this: on the ground / idle; the PID terms are not representative. */
@@ -154,6 +155,8 @@ export interface AutotuneV2Result {
     filters: FilterGroupResult[];
     feedforward: FeedforwardProposal[];
     crossLogPlant: Partial<Record<AxisName, { status: string; meanAbsGRel: number; n: number }>>;
+    /** Why other logs were not used as independent repeats (duplicate flight, other craft / firmware / config). */
+    crossLogRejected: string[];
     safety: { analysisEvidence: string; reasons: string[] };
     parts: PartReport[];
     /** Every recommended change, with its status: what Compare shows. */
@@ -417,14 +420,21 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         }),
     );
 
-    // Cross-log plant reproducibility on the same tune.
+    // Cross-log plant reproducibility: only an independent flight of this craft, firmware and
+    // configuration counts (never the primary itself, under any file name or hash).
     const crossLogPlant: AutotuneV2Result["crossLogPlant"] = {};
+    const crossLogRejected: string[] = [];
+    const references = input.others.filter((other) => {
+        const issues = crossLogReferenceIssues(log, other);
+        crossLogRejected.push(...issues);
+        return !issues.length;
+    });
     for (const name of analysed) {
         const ai = AXES.indexOf(name) as 0 | 1 | 2;
-        for (const other of input.others) {
+        for (const other of references) {
             const oc = other.chirp[name];
             const oh = headerMap(other.headerPairs);
-            if (!oc || oh[`${name}PID`] !== h[`${name}PID`]) continue;
+            if (!oc) continue;
             const ctl = analyzeAxisController(other, oh, ai, oc, flightMask(other.channels.rcThrottle));
             if (!ctl) continue;
             const otherLoop = buildAxisLoop(ai, oc.tf, ctl.cfg, null, false, false);
@@ -611,17 +621,22 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                   ? "PARTIAL"
                   : "BLOCKED",
             analysed.length
-                ? analysed.flatMap((a) => [
-                      ...(log.chirp[a]!.state === "rejected"
-                          ? [`chirp_measurement_rejected:${a}`, `required_measurement:chirp_${a}_meeting_qualification`]
-                          : []),
-                      ...(crossLogPlant[a]?.status === "PASS"
-                          ? []
-                          : [
-                                `cross_log_${(crossLogPlant[a]?.status ?? "untested").toLowerCase()}:${a}`,
-                                "required_measurement:second_chirp_flight_same_tune",
-                            ]),
-                  ])
+                ? analysed
+                      .flatMap((a) => [
+                          ...(log.chirp[a]!.state === "rejected"
+                              ? [
+                                    `chirp_measurement_rejected:${a}`,
+                                    `required_measurement:chirp_${a}_meeting_qualification`,
+                                ]
+                              : []),
+                          ...(crossLogPlant[a]?.status === "PASS"
+                              ? []
+                              : [
+                                    `cross_log_${(crossLogPlant[a]?.status ?? "untested").toLowerCase()}:${a}`,
+                                    "required_measurement:second_chirp_flight_same_tune",
+                                ]),
+                      ])
+                      .concat([...new Set(crossLogRejected.map((r) => r.split(":")[0]))])
                 : ["required_measurement:chirp_flight"],
         ),
         part(
@@ -658,6 +673,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         filters,
         feedforward,
         crossLogPlant,
+        crossLogRejected: [...new Set(crossLogRejected)],
         safety,
         parts,
         proposal,

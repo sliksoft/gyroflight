@@ -338,6 +338,9 @@ export function buildVerifiedTune(input: VerifiedTuneInput): VerifiedTune {
     if (input.baseline.sha256 === input.candidate.sha256 && input.baseline.logIndex === input.candidate.logIndex) {
         reasons.push("verified_tune:same_log");
     }
+    if (input.baselineRepeat && !repeatIndependent(input.baselineRepeat, input.baseline, input.candidate)) {
+        reasons.push("verified_tune:repeat_not_independent");
+    }
     const changedAxes = AXES.filter((a) => pidsDiffer(input.baseline.pids[a], input.candidate.pids[a]));
     if (!changedAxes.length) {
         reasons.push("verified_tune:no_pid_change_between_logs");
@@ -398,6 +401,9 @@ export function verifiedTuneIssues(
     if (!valuesComplete(v.baseline?.values) || !valuesComplete(v.candidate?.values)) {
         out.push("verified_tune:logged_values_missing");
     }
+    if (v.baselineRepeat && !repeatIndependent(v.baselineRepeat, v.baseline, v.candidate)) {
+        out.push("verified_tune:repeat_not_independent");
+    }
     if (
         !AXES.some(
             (a) =>
@@ -414,6 +420,11 @@ export function verifiedTuneIssues(
         out.push("verified_tune:different_craft");
     if (!craft.firmware || v.craft?.firmware !== craft.firmware) out.push("verified_tune:different_firmware");
     return out;
+}
+
+type LogId = { sha256: string; logIndex: number };
+function repeatIndependent(repeat: LogId, baseline: LogId, candidate: LogId): boolean {
+    return [baseline, candidate].every((l) => !(l?.sha256 === repeat.sha256 && l?.logIndex === repeat.logIndex));
 }
 
 function valuesComplete(values: Record<string, number> | undefined): boolean {

@@ -38,7 +38,7 @@ import {
 } from "@/gyrocore/releaseGate/verifiedTune";
 import { analyzeAxisController, flightMask, type AutotuneLogInput } from "./autotuneV2";
 import { buildAxisLoop } from "./loopModel";
-import { bestLog, groupByTune } from "./logInput";
+import { bestLog, groupByTune, sameFlight, uniqueFlights } from "./logInput";
 
 const AXES = ["roll", "pitch", "yaw"] as const;
 
@@ -60,7 +60,8 @@ export interface VerifiedTuneAttempt {
 }
 
 export function verifiedTuneFromLogs(logs: AutotuneLogInput[], createdAt?: string): VerifiedTuneAttempt {
-    const groups = groupByTune(logs);
+    // A flight imported twice (another name or hash) is one flight: never its own repeat.
+    const groups = groupByTune(uniqueFlights(logs));
     if (groups.length < 2) {
         return {
             record: null,
@@ -73,7 +74,7 @@ export function verifiedTuneFromLogs(logs: AutotuneLogInput[], createdAt?: strin
     const candidate = bestLog(groups[0]);
     const baseGroup = groups[1];
     const baseline = bestLog(baseGroup);
-    const repeat = baseGroup.find((l) => l !== baseline) ?? null;
+    const repeat = baseGroup.find((l) => !sameFlight(l, baseline) && !sameFlight(l, candidate)) ?? null;
     const idB = logIdentity(baseline.headerPairs);
     const idC = logIdentity(candidate.headerPairs);
     const reasons: string[] = [];
