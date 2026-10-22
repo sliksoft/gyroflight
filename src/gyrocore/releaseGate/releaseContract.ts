@@ -29,6 +29,8 @@
  *   robustness            predicted gain margin and |S| peak inside target
  *   independent_validation a Verified Tune for this craft/firmware covering the change
  *   safety_evidence       the absolute-route Safety evidence contract is complete
+ *   items_validated       every value to write is itself VALIDATED (a simulated-only or
+ *                         partial recommendation stays visible but is never written)
  *
  * Three more are checked live by the write route itself and are listed here so the
  * interface can show the whole contract: fc_identity (UID, board, firmware, disarmed),
@@ -56,7 +58,13 @@ export const RELEASE_TARGETS = Object.freeze({
 });
 
 export type ReleaseConditionName =
-    "measurement" | "model_quality" | "phase_margin" | "robustness" | "independent_validation" | "safety_evidence";
+    | "measurement"
+    | "model_quality"
+    | "phase_margin"
+    | "robustness"
+    | "independent_validation"
+    | "safety_evidence"
+    | "items_validated";
 
 export type LiveConditionName = "fc_identity" | "current_config" | "readback";
 
@@ -66,7 +74,7 @@ export type PartStatus = "VALIDATED" | "PARTIAL" | "BLOCKED";
 
 export interface AxisMargins {
     axis: "roll" | "pitch" | "yaw";
-    /** "VALIDATED" only when the loop model has no open blocker (see engine/phaseMarginModel). */
+    /** "VALIDATED" only when the loop model has no open blocker (engine/loopModel.ts). */
     status: "VALIDATED" | "NOT_VALIDATED" | "UNAVAILABLE";
     phaseMarginDeg: number | null;
     gainMarginDb: number | null;
@@ -214,6 +222,16 @@ export function evaluateRelease(proposal: AbsoluteProposal): ReleaseDecision {
               ? [...e.safetyReasons]
               : ["safety_evidence_not_available"],
     );
+
+    const itemReasons: string[] = [];
+    for (const key of Object.keys(proposal.change)) {
+        const item = proposal.items.find((i) => i.key === key);
+        if (!item) itemReasons.push(`change_without_item:${key}`);
+        else if (item.to !== proposal.change[key]) itemReasons.push(`item_value_differs:${key}`);
+        else if (item.status !== "VALIDATED")
+            itemReasons.push(`item_not_validated:${key}:${item.status.toLowerCase()}`);
+    }
+    add("items_validated", itemReasons);
 
     const blocks = conditions.flatMap((c) => c.reasons.map((r) => `${c.name}:${r}`));
     return { released: blocks.length === 0, conditions, blocks };

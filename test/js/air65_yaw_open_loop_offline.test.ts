@@ -44,8 +44,7 @@ import {
 } from "../../src/js/blackbox/betaflight_open_loop";
 import { cmag, csub } from "../../src/js/blackbox/betaflight_digital_controller";
 
-const DEFAULT_BBL =
-    "/mnt/c/Users/sande/Downloads/drone/BTFL_BLACKBOX_LOG_AIR65_C_20261018_231421_BETAFPVG473.BBL";
+const DEFAULT_BBL = "/mnt/c/Users/sande/Downloads/drone/BTFL_BLACKBOX_LOG_AIR65_C_20261018_231421_BETAFPVG473.BBL";
 const EXPECTED_SHA256 = "dfe82bca2aaabbc2f53a20a93756137546cc648196226af622d43874eed7efcb";
 
 export type Air65PracticalStatus = "EXECUTED" | "SKIPPED";
@@ -66,7 +65,7 @@ const AIR65_PRACTICAL: Air65PracticalStatus = loaded ? "EXECUTED" : "SKIPPED";
 
 describe("GF-1 M2 AIR65 practical status", () => {
     it(`reports AIR65_PRACTICAL=${AIR65_PRACTICAL}`, () => {
-        // eslint-disable-next-line no-console
+         
         console.log(JSON.stringify({ AIR65_PRACTICAL, bblPresent: Boolean(loaded) }));
         expect(["EXECUTED", "SKIPPED"]).toContain(AIR65_PRACTICAL);
         if (!loaded) {
@@ -80,7 +79,8 @@ describe("GF-1 M2 AIR65 practical status", () => {
 describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
     const maybe = loaded ? it : it.skip;
 
-    maybe("yaw: unity-equivalent reconstruction; dyn blockers → NOT_VALIDATED", () => {
+    // Both cases decode the full AIR65 BBL; the default 5 s timeout is too tight under a full parallel run.
+    maybe("yaw: unity-equivalent reconstruction; dyn blockers → NOT_VALIDATED", { timeout: 120_000 }, () => {
         const bytes = loaded!.bytes;
         const report = qualifyChirpFile(bytes, "AIR65_Oct18.bbl", 60, AUTOTUNE_MATH);
         const yaw = report.measurements.filter((m) => m.axisName === "yaw");
@@ -142,7 +142,7 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
             expect.arrayContaining(["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"]),
         );
 
-        // eslint-disable-next-line no-console
+         
         console.log(
             JSON.stringify({
                 AIR65_PRACTICAL: "EXECUTED",
@@ -173,7 +173,7 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
         }
     });
 
-    maybe("roll: method runs but is not unity-equivalent; stays NOT_VALIDATED", () => {
+    maybe("roll: method runs but is not unity-equivalent; stays NOT_VALIDATED", { timeout: 120_000 }, () => {
         const bytes = loaded!.bytes;
         const report = qualifyChirpFile(bytes, "AIR65_Oct18.bbl", 60, AUTOTUNE_MATH);
         const roll = report.measurements
@@ -198,7 +198,7 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
         });
         expect(pm.unityFeedbackEquivalent).toBe(false);
         expect(pm.status).toBe("NOT_VALIDATED");
-        // eslint-disable-next-line no-console
+         
         console.log(
             JSON.stringify({
                 AIR65_PRACTICAL: "EXECUTED",
@@ -215,7 +215,7 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
     });
 
     it.skipIf(Boolean(loaded))("skipped: known AIR65 BBL not available locally", () => {
-        // eslint-disable-next-line no-console
+         
         console.log(JSON.stringify({ AIR65_PRACTICAL: "SKIPPED", reason: "bbl_missing_or_hash_mismatch" }));
         expect(AIR65_PRACTICAL).toBe("SKIPPED");
     });
