@@ -152,13 +152,36 @@ export function buildLogInputs(
     return out;
 }
 
-/** Primary log: most qualified axes, then the longest sweeps. */
+/** The logged P/I/D/F of all axes: logs with the same key were flown with the same tune. */
+export function tuneKey(log: AutotuneLogInput): string {
+    const h = new Map(log.headerPairs.map(([k, v]) => [k, v]));
+    return ["rollPID", "pitchPID", "yawPID", "ff_weight", "d_max"].map((k) => h.get(k) ?? "").join("|");
+}
+
+/** Logs grouped by tune, the most recently imported tune first. */
+export function groupByTune(logs: AutotuneLogInput[]): AutotuneLogInput[][] {
+    const groups = new Map<string, AutotuneLogInput[]>();
+    for (const l of logs) groups.set(tuneKey(l), [...(groups.get(tuneKey(l)) ?? []), l]);
+    const newest = (g: AutotuneLogInput[]) => Math.max(...g.map((l) => l.order ?? 0));
+    return [...groups.values()].sort((a, b) => newest(b) - newest(a));
+}
+
+const score = (l: AutotuneLogInput) =>
+    Object.values(l.chirp).reduce((s, c) => s + (STATE_RANK[c!.state] ?? 0) * 1000 + (c!.end - c!.start) / 1e6, 0);
+
+/** The best log of a group: most qualified axes, then the longest sweeps, then the earliest import. */
+export function bestLog(logs: AutotuneLogInput[]): AutotuneLogInput {
+    return [...logs].sort((a, b) => score(b) - score(a) || (a.order ?? 0) - (b.order ?? 0))[0];
+}
+
+/**
+ * Primary log: the best log of the most recently imported tune (what the flight controller is
+ * expected to hold); the others serve as cross-log references (same tune only).
+ */
 export function pickPrimary(
     logs: AutotuneLogInput[],
 ): { primary: AutotuneLogInput; others: AutotuneLogInput[] } | null {
     if (!logs.length) return null;
-    const score = (l: AutotuneLogInput) =>
-        Object.values(l.chirp).reduce((s, c) => s + (STATE_RANK[c!.state] ?? 0) * 1000 + (c!.end - c!.start) / 1e6, 0);
-    const sorted = [...logs].sort((a, b) => score(b) - score(a));
-    return { primary: sorted[0], others: sorted.slice(1) };
+    const primary = bestLog(groupByTune(logs)[0]);
+    return { primary, others: logs.filter((l) => l !== primary) };
 }

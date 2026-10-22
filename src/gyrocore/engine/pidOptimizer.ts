@@ -94,7 +94,16 @@ function candidateCfg(cfg: DigitalControllerConfig, v: PidValues): DigitalContro
  * `cfg` is the controller as it acted during the sweep (effective D-term lpf1 / Kd scale from
  * M5-B); `current` the absolute values on the FC. Scaling keeps the effective/absolute ratio.
  */
-export function optimizeAxisPid(loop: AxisLoop, current: PidValues): AxisPidProposal {
+/**
+ * `limits`: the largest relative change per term a Verified Tune confirmed for this axis. With
+ * it the search stays inside what was independently validated (a larger step would not be
+ * released anyway); without it, MAX_STEP.
+ */
+export function optimizeAxisPid(
+    loop: AxisLoop,
+    current: PidValues,
+    limits: { p: number; i: number; d: number } | null = null,
+): AxisPidProposal {
     const axis = NAMES[loop.axis];
     const curMargins = loopMargins(loop);
     const reasons: string[] = [];
@@ -128,6 +137,16 @@ export function optimizeAxisPid(loop: AxisLoop, current: PidValues): AxisPidProp
                 dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), Math.round(current.d * ds)) : 0,
             };
             if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) continue;
+            if (limits) {
+                const rel = (to: number, from: number) =>
+                    from > 0 ? Math.abs(to - from) / from : to === from ? 0 : Infinity;
+                const terms = [
+                    [v.p, current.p, limits.p],
+                    [v.i, current.i, limits.i],
+                    [v.d, current.d, limits.d],
+                ] as const;
+                if (terms.some(([to, from, lim]) => rel(to, from) > lim + 1e-9)) continue;
+            }
             const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
             if (!pmKnown(m)) continue;
             if (!safest || m.phaseMarginDeg! > safest.m.phaseMarginDeg!) safest = { v, m };

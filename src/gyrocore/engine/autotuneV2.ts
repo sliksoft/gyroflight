@@ -110,6 +110,8 @@ export interface AutotuneLogInput {
     stick: { acroSeconds: number; latencyMs: Partial<Record<AxisName, number | null>> };
     /** M4 noise floor known on every axis. */
     noiseFloorKnown: boolean;
+    /** Import order (higher = imported later). The blackbox header carries no usable date. */
+    order?: number;
 }
 
 export interface AutotuneV2Input {
@@ -190,7 +192,7 @@ export function controllerConfigFromHeaders(
     };
 }
 
-function flightMask(rc: ArrayLike<number>): Uint8Array {
+export function flightMask(rc: ArrayLike<number>): Uint8Array {
     return Uint8Array.from({ length: rc.length }, (_, k) => (rc[k] >= FLIGHT_THROTTLE ? 1 : 0));
 }
 
@@ -219,7 +221,7 @@ interface AxisAnalysis {
 }
 
 /** D path (M5-B) and controller-in-force for one axis of one log. */
-function analyzeAxisController(
+export function analyzeAxisController(
     log: AutotuneLogInput,
     h: Record<string, string>,
     axis: 0 | 1 | 2,
@@ -357,7 +359,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             });
             return;
         }
-        pid.push(optimizeAxisPid(ax.loop, current));
+        // With a Verified Tune, stay inside the change it confirmed (the contract refuses more).
+        pid.push(
+            optimizeAxisPid(ax.loop, current, attested ? input.verifiedTune!.validatedRelativeChange[name] : null),
+        );
     });
 
     // 4b. Filters (needs the chain simulation).
