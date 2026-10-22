@@ -21,7 +21,11 @@ off and battery disconnected unless a step says otherwise. Stop at the first une
    proposal whose values equal the FC's: Apply, check Verify shows every value read back and saved; `diff all` unchanged.
 4. **One small change and Restore.** One field (e.g. `dterm_lpf2_static_hz` −5 Hz) through a released proposal: Apply,
    check Verify and `diff all` (only that field changed); then Restore and check `diff all` equals the original.
-5. **Real proposal.** Only after the PM / independent-validation / Safety blockers are lifted with real flights: apply,
+5. **PID profile binding.** With the backup from step 4: switch the FC to another PID profile (Betaflight App, PID
+   Tuning tab), then open Restore in Gyroflight. Expected: blocked with `restore:pid_profile_changed:<a>-><b>` and no
+   MSP_SET_* in the log; switch back and Restore succeeds; `diff all` shows the other profile unchanged. Also: preview in
+   one profile, switch, confirm Apply → `apply:preview_changed`, nothing written.
+6. **Real proposal.** Only after the PM / independent-validation / Safety blockers are lifted with real flights: apply,
    hover test with the owner's own safety procedure, then a CHIRP flight to compare with the prediction.
 
 ## What to report

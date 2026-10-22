@@ -198,6 +198,24 @@ beforeEach(() => {
 
 describe("P2-01: a Restore that fails after each write leaves the firmware's intermediate state", () => {
     // Restore writes: MSP_SET_SIMPLIFIED_TUNING, _PID, _PID_ADVANCED, _FILTER_CONFIG, then EEPROM.
+    it("write 1 itself refused (MSP_RESULT_ERROR before decoding): the FC still holds the applied tune", async () => {
+        const { backupId, appliedRam } = await applied();
+        route.fc.faults[MSPCodes.MSP_SET_SIMPLIFIED_TUNING] = "unsupported";
+        const pv = await previewAbsoluteRestore(backupId);
+        const e = await restoreAbsoluteTune(
+            backupId,
+            issueConfirmation({ kind: "restore", backupId, preview: pv.hash }),
+        ).then(
+            () => null,
+            (err: unknown) => err as TuneWriteError,
+        );
+        expect(e).toBeInstanceOf(TuneWriteError);
+        expect([e!.stage, e!.saved]).toEqual(["write", "no"]);
+        expect(route.fc.ram).toEqual(appliedRam);
+        // Against the Restore's safety backup (the applied tune): nothing differs.
+        expect(e!.changedFromBackup).toEqual([]);
+    });
+
     it("after write 1 (slider modes back on): the firmware recomputed PIDs, F, d_max and gyro LPFs", async () => {
         const { backupId } = await applied();
         const e = await restoreFailingAt(MSPCodes.MSP_SET_PID, backupId);
