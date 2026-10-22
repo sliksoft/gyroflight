@@ -87,17 +87,33 @@ export interface ChainValidation {
     reasons: string[];
 }
 
+/**
+ * Every required band must be measured with enough coherence: a band that is missing or
+ * incoherent is unsupported (INSUFFICIENT), never left out. A supported band that misses the
+ * gain / phase limits fails the whole set.
+ */
 function bandsOk(fit: DtermFit, bands: [number, number][], maxGain: number, maxPhase: number, minCoh: number) {
-    const used = fit.bands.filter(
-        (b) => bands.some(([lo, hi]) => b.loHz === lo && b.hiHz === hi) && (b.coherence ?? 0) >= minCoh,
-    );
-    if (!used.length) return "INSUFFICIENT" as const;
-    return used.every(
-        (b) => Math.abs((b.gainRatio ?? Infinity) - 1) <= maxGain && Math.abs(b.phaseDeg ?? Infinity) <= maxPhase,
-    )
-        ? ("PASS" as const)
-        : ("FAIL" as const);
+    const unsupported: string[] = [];
+    let failed = false;
+    for (const [lo, hi] of bands) {
+        const b = fit.bands.find((x) => x.loHz === lo && x.hiHz === hi);
+        if (!b || !((b.coherence ?? 0) >= minCoh)) {
+            unsupported.push(`${lo}-${hi}Hz`);
+            continue;
+        }
+        if (!(Math.abs((b.gainRatio ?? Infinity) - 1) <= maxGain && Math.abs(b.phaseDeg ?? Infinity) <= maxPhase)) {
+            failed = true;
+        }
+    }
+    const status = failed ? ("FAIL" as const) : unsupported.length ? ("INSUFFICIENT" as const) : ("PASS" as const);
+    return { status, unsupported };
 }
+
+/** The frequency range a PASS of the control bands covers; margins outside it are not backed by the chain. */
+export const CHAIN_VALIDATED_BAND_HZ: readonly [number, number] = [
+    CHAIN_ACCEPT.controlBands[0][0],
+    CHAIN_ACCEPT.controlBands[CHAIN_ACCEPT.controlBands.length - 1][1],
+];
 
 /**
  * Compare the simulated chain with the logged gyroADC of one axis over `mask` (in-flight
@@ -125,20 +141,22 @@ export function validateChain(
             reasons: [...reasons, "chain_fit_insufficient_data"],
         };
     }
-    let controlBand = bandsOk(
+    const control = bandsOk(
         fit,
         CHAIN_ACCEPT.controlBands,
         CHAIN_ACCEPT.maxGainError,
         CHAIN_ACCEPT.maxPhaseDeg,
         CHAIN_ACCEPT.minCoherence,
     );
+    let controlBand = control.status;
+    reasons.push(...control.unsupported.map((b) => `chain_band_unsupported:${b}`));
     const noiseBand = bandsOk(
         fit,
         CHAIN_ACCEPT.noiseBands,
         CHAIN_ACCEPT.noiseMaxGainError,
         10,
         CHAIN_ACCEPT.noiseMinCoherence,
-    );
+    ).status;
     let ablationNrmse: number | null = null;
     if (ablation) {
         const abValid = ablation.valid.map((v, k) => (v && mask[k] ? 1 : 0));
@@ -253,36 +271,70 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     const gaps = pts.some((p, i) => i > 0 && p.f - pts[i - 1].f > 3 * (pts[1].f - pts[0].f));
     if (gaps) reasons.push("identified_band_has_gaps");
 
-    const crossings: number[] = [];
-    for (let i = 1; i < pts.length; i++) if (mag[i - 1] >= 1 && mag[i] < 1) crossings.push(i);
-    if (!crossings.length) {
+    // Unity crossings in both directions: a resonance can lift |L| above one again after the
+    // first crossover, and every crossing then has its own phase margin.
+    const crossings: { i: number; down: boolean }[] = [];
+    for (let i = 1; i < pts.length; i++) {
+        if (mag[i - 1] >= 1 && mag[i] < 1) crossings.push({ i, down: true });
+        else if (mag[i - 1] < 1 && mag[i] >= 1) crossings.push({ i, down: false });
+    }
+    const lastBin = pts.length - 1;
+    if (!crossings.some((c) => c.down)) {
         reasons.push(mag[0] < 1 ? "loop_gain_below_one_in_band" : "crossover_outside_identified_band");
         return { ...empty, status: "NOT_VALIDATED" };
     }
     if (crossings.length > 1) reasons.push(`ambiguous_crossovers:${crossings.length}`);
-    const i = crossings[0];
-    const t = (0 - 20 * Math.log10(mag[i - 1])) / (20 * Math.log10(mag[i]) - 20 * Math.log10(mag[i - 1]));
-    const fc = pts[i - 1].f + t * (pts[i].f - pts[i - 1].f);
-    const phc = ph[i - 1] + t * (ph[i] - ph[i - 1]);
-    const pm = 180 + phc;
+    const at = (c: { i: number }) => {
+        const i = c.i;
+        const t = (0 - 20 * Math.log10(mag[i - 1])) / (20 * Math.log10(mag[i]) - 20 * Math.log10(mag[i - 1]));
+        return { f: pts[i - 1].f + t * (pts[i].f - pts[i - 1].f), pm: 180 + ph[i - 1] + t * (ph[i] - ph[i - 1]) };
+    };
+    const first = at(crossings.find((c) => c.down)!);
+    for (const c of crossings.filter((x) => !x.down)) reasons.push(`loop_gain_reenters_unity:${at(c).f.toFixed(1)}Hz`);
+    // Still above unity where the measurement stops: the next crossover lies outside the band.
+    if (mag[lastBin] >= 1) reasons.push("loop_gain_above_one_at_band_end");
+    const fc = first.f;
+    const pm = Math.min(...crossings.map((c) => at(c).pm));
+    const lastCrossHz = at(crossings[crossings.length - 1]).f;
 
+    // Every phase crossover (−180° − k·360° of the unwrapped phase, either direction).
     let gm: number | null = null;
+    let gmHz: number | null = null;
     for (let k = 1; k < pts.length; k++) {
-        if (ph[k - 1] > -180 && ph[k] <= -180) {
-            const u = (-180 - ph[k - 1]) / (ph[k] - ph[k - 1]);
-            const m = mag[k - 1] + u * (mag[k] - mag[k - 1]);
-            gm = -20 * Math.log10(m);
-            break;
+        const lo = Math.min(ph[k - 1], ph[k]);
+        const hi = Math.max(ph[k - 1], ph[k]);
+        for (let n = Math.ceil((lo + 180) / 360); n * 360 - 180 <= hi; n++) {
+            const target = n * 360 - 180;
+            if (ph[k] === ph[k - 1] || target === ph[k - 1]) continue;
+            const u = (target - ph[k - 1]) / (ph[k] - ph[k - 1]);
+            const m = -20 * Math.log10(mag[k - 1] + u * (mag[k] - mag[k - 1]));
+            if (gm === null || m < gm) {
+                gm = m;
+                gmHz = pts[k - 1].f + u * (pts[k].f - pts[k - 1].f);
+            }
         }
     }
     if (gm === null) reasons.push("phase_crossover_outside_identified_band");
 
-    // |S| peak is only meaningful when the band reaches well past the crossover.
+    // |S| peak is only meaningful when the band reaches well past the last crossing and the peak
+    // is not still rising at the band edge; a band-limited value is unknown, not a bound.
     let sPeak: number | null = null;
-    if (pts[pts.length - 1].f >= 1.5 * fc) {
-        sPeak = Math.max(...pts.map((p) => 20 * Math.log10(1 / Math.max(cmag(cadd({ re: 1, im: 0 }, p.L)), 1e-12))));
+    let sPeakHz: number | null = null;
+    const sDb = pts.map((p) => 20 * Math.log10(1 / Math.max(cmag(cadd({ re: 1, im: 0 }, p.L)), 1e-12)));
+    const peakAt = sDb.indexOf(Math.max(...sDb));
+    if (pts[lastBin].f >= 1.5 * lastCrossHz && mag[lastBin] < 1 && peakAt < lastBin) {
+        sPeak = sDb[peakAt];
+        sPeakHz = pts[peakAt].f;
     } else {
         reasons.push("sensitivity_peak_outside_identified_band");
+    }
+
+    // The chain model is validated on CHAIN_VALIDATED_BAND_HZ only: a crossover outside it, or a
+    // candidate filter change judged above it, is not backed by that validation.
+    const [bandLo, bandHi] = CHAIN_VALIDATED_BAND_HZ;
+    if (fc < bandLo || fc > bandHi) reasons.push("crossover_outside_chain_validated_band");
+    if (cand.chain && loop.chain && [gmHz, sPeakHz].some((f) => f !== null && f > bandHi)) {
+        reasons.push("chain_change_judged_outside_validated_band");
     }
     const spread = loop.chain ? loop.chain.spread(fc).phaseDeg : null;
     if (!loop.chainValidated) reasons.push("chain_model_not_validated_on_this_log");
