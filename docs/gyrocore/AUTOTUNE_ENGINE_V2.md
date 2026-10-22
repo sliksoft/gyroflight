@@ -36,8 +36,9 @@ MSP message.
   match; a second read-back after the save (the firmware reloads and validates); `configStateFlag` reboot request.
 - Failures: `TuneWriteError` with stage, saved state (`no` / `unknown` / `yes_adjusted`), mismatches and the fields that
   now differ from the backup (a partial write), or null when the craft could not be read (or another profile is active).
-  The stages tell five states apart: `prepare` (a check or fresh read failed before the first SET: nothing was sent, the
-  craft holds the backup), `write` with an unreadable craft (a SET was sent, its result is unknown), `write` with
+  The stages tell five states apart: `prepare` (a check or fresh read failed before the first SET: this attempt sent no
+  SET and wrote no EEPROM; the craft was not read back afterwards, so its current state is not verified, and a profile
+  switch seen there is named as the now active profile; the backup and its profile stay available), `write` with an unreadable craft (a SET was sent, its result is unknown), `write` with
   differing fields (a partial write the craft kept), `verify` (written, not verified) and `eeprom` / `eeprom_verify`
   (saved state unknown). The panel shows the phase, the cause, the saved state and that current state.
 - Profile switch after a SET: the firmware has no profile-bound atomic write, so a switch between the last MSP_STATUS_EX
@@ -96,11 +97,22 @@ unity crossing (an upward re-entry or a loop still above unity at the band end b
 crossings; a band-limited |S| peak is unknown), a bounded band end (`loopModel.ts` `BAND_END`: over the top 10 % of the
 identified band |L| may not rise by more than 1 dB and at the last bin it may not exceed −6 dB, the release gain-margin
 target; otherwise GM and |S| are unknown and the margins are NOT_VALIDATED, since a resonance just above the band could
-take the loop back above unity; with a bounded band end GM never exceeds the gain headroom at the band end) and a
-Verified Tune bound to this configuration; cross-log reproducibility counts only an independent flight of the same craft,
+take the loop back above unity; with a bounded band end GM never exceeds the gain headroom at the band end), a band
+the bins resolve (`loopModel.ts` `LOOP_RESOLUTION`: no step between adjacent bins larger than 25° / 2 dB, or than
+300°/neper / 60 dB/decade of its log-span; no gap wider than 3× the neighbouring steps; no step wider than half its
+frequency from half the crossover up; otherwise GM and |S| are unknown, `marginBasis` is `measured_only` and the margins
+are NOT_VALIDATED) and a Verified Tune bound to this configuration. Every margin result reports its frequency resolution
+(`resolutionHz`, the largest bin step). "bounded" margins are bounds only for a loop without features narrower than
+`RESOLVED_FEATURE_BINS` (≈ 4.5) × `resolutionHz`: a finite set of bins cannot exclude an arbitrarily narrow resonance
+between two bins (a pole/zero pair with ζ = 5e-5 at 70.25 Hz on 0.5 Hz bins leaves < 0.1 dB on the bins and still
+passes), so no margin is an absolute stability guarantee; a finer CHIRP resolution narrows that limit. Cross-log
+reproducibility counts only an independent flight of the same craft,
 firmware and configuration: not the same file, not the same samples, and not the same flight trimmed, re-exported or
 time-shifted (`logInput.ts` `FLIGHT_WINDOW`: flights are identified by content-anchored 256-sample gyroADC windows,
-constant stretches excluded; four shared windows make one flight), and not a reference whose plant comes out bit-identical
+constant stretches excluded; four shared windows make one flight; overlapping fragments form one flight transitively,
+`flightGroups`, so a fragment B overlapping both A and C makes A and C one flight although they share no sample; the
+file kept for a group carries the identity of every file in it, `flightGroup`, and the engine groups its own inputs
+too), and not a reference whose plant comes out bit-identical
 (`cross_log_identical_measurement`); a candidate that misses a target is shown, never recommended; a Verified Tune whose
 gain-change flight also moved feedforward yields no PID candidate and says so
 (`verified_tune_segment_moves_feedforward`); filter and feedforward results stay PARTIAL until a flight with them confirms
