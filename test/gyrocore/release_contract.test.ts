@@ -78,7 +78,14 @@ function proposal(change: Record<string, number> = { p_roll: 64 }, ev = evidence
         createdAt: "2026-10-22T00:00:00Z",
         log: { sha256: "d".repeat(64), logIndex: 0, headerPairs: HEADERS },
         change,
-        items: [],
+        items: Object.entries(change).map(([key, to]) => ({
+            key,
+            part: key.startsWith("p_") ? ("pid" as const) : ("dterm_filter" as const),
+            from: 0,
+            to,
+            status: "VALIDATED" as const,
+            reasons: [],
+        })),
         release: ev,
     };
 }
@@ -164,6 +171,7 @@ describe("release contract", () => {
             "robustness",
             "independent_validation",
             "safety_evidence",
+            "items_validated",
         ]);
     });
 
@@ -218,6 +226,15 @@ describe("release contract", () => {
     it("refuses a PID change larger than the one the Verified Tune confirmed (no extrapolation)", () => {
         const d = evaluateRelease(proposal({ p_roll: 90 }));
         expect(d.blocks).toEqual(["independent_validation:verified_tune:change_outside_validated:roll:p"]);
+    });
+
+    it("a value that is not itself VALIDATED is never released, even with all evidence", () => {
+        const p = proposal({ p_roll: 64, gyro_lpf2_static_hz: 280 });
+        p.items[1] = { ...p.items[1], status: "PARTIAL", reasons: ["simulated_on_logged_data"] };
+        expect(evaluateRelease(p).blocks).toEqual(["items_validated:item_not_validated:gyro_lpf2_static_hz:partial"]);
+        const q = proposal({ p_roll: 64 });
+        q.items = [];
+        expect(evaluateRelease(q).blocks).toEqual(["items_validated:change_without_item:p_roll"]);
     });
 
     it("a filter change needs margins on every axis", () => {

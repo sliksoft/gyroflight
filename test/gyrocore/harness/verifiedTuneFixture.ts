@@ -29,6 +29,7 @@
 import {
     air65PitchConfig,
     air65RollConfig,
+    air65YawConfig,
     evaluateControllerFrf,
     type DigitalControllerConfig,
 } from "../../../src/js/blackbox/betaflight_digital_controller";
@@ -52,6 +53,52 @@ function measured(cfg: DigitalControllerConfig, scale = 1, extraDelayS = 0) {
         const frf = evaluateControllerFrf(cfg, f);
         const G = plantFrf(f, { ...PLANT, K: PLANT.K * scale, delayS: PLANT.delayS + extraDelayS });
         return closedLoopFromPlant(G, frf.cReference, frf.cFeedback);
+    });
+}
+
+/**
+ * A passing record that confirmed a change of every P and I term by +30 % and every D term
+ * by −30 % on all three axes, so a proposal inside ±30 % is covered. (Scaling P, I and D
+ * together leaves T ≈ C_ref / C_fb unchanged below 40 Hz: the producer rejects that as
+ * not detectable, which is why the D step goes the other way.)
+ */
+export function verifiedTuneAllAxesFixture(scale = 1.3, dScale = 0.7): VerifiedTune {
+    const base = { roll: air65RollConfig(), pitch: air65PitchConfig(), yaw: air65YawConfig() };
+    const scaled = (c: DigitalControllerConfig) => ({
+        ...c,
+        axis: {
+            ...c.axis,
+            p: Math.round(c.axis.p * scale),
+            i: Math.round(c.axis.i * scale),
+            d: Math.round(c.axis.d * scale),
+        },
+    });
+    const cand = { roll: scaled(base.roll), pitch: scaled(base.pitch), yaw: scaled(base.yaw) };
+    const pids = (cfg: DigitalControllerConfig) => ({ p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, f: cfg.axis.f });
+    // Pitch carries more gain on the AIR65: half the plant gain keeps its crossover in the band.
+    const plantScale = { roll: 1, pitch: 0.5, yaw: 1 };
+    const axis = (name: "roll" | "pitch" | "yaw") => ({
+        plant: extractPlantFromClosedLoop(measured(base[name], plantScale[name]), base[name], {
+            missingFilterInfo: [],
+        }),
+        baselineCfg: base[name],
+        candidateCfg: cand[name],
+        candidateT: measured(cand[name], plantScale[name]),
+    });
+    return buildVerifiedTune({
+        craft: { uid: FIXTURE_UID, board: "BEFH BETAFPVG473", firmware: FIXTURE_FIRMWARE },
+        baseline: {
+            sha256: "b".repeat(64),
+            logIndex: 0,
+            pids: { roll: pids(base.roll), pitch: pids(base.pitch), yaw: pids(base.yaw) },
+        },
+        candidate: {
+            sha256: "c".repeat(64),
+            logIndex: 0,
+            pids: { roll: pids(cand.roll), pitch: pids(cand.pitch), yaw: pids(cand.yaw) },
+        },
+        axes: { roll: axis("roll"), pitch: axis("pitch"), yaw: axis("yaw") },
+        createdAt: "2026-10-22T00:00:00Z",
     });
 }
 
