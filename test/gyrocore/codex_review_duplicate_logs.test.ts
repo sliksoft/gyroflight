@@ -60,6 +60,13 @@ function withHeader(log: AutotuneLogInput, key: string, value: string): Autotune
     return { ...log, headerPairs: log.headerPairs.map(([k, v]) => [k, k === key ? value : v] as [string, string]) };
 }
 
+/** The same samples in new arrays under another file hash; `nudge` changes one gyro sample. */
+function copyOf(log: AutotuneLogInput, sha256: string, nudge = false): AutotuneLogInput {
+    const channels = structuredClone(log.channels);
+    if (nudge) (channels.gyroAdc[0] as Float64Array)[1000] += 5;
+    return { ...log, sha256, channels };
+}
+
 let independent: AutotuneV2Result;
 let sameHash: AutotuneV2Result;
 let sameFlightOtherHash: AutotuneV2Result;
@@ -70,7 +77,8 @@ beforeAll(() => {
     // The review's probe: one log twice, as primary and as reference.
     sameHash = run(primary, [syntheticLogInput("1".repeat(64))]);
     // The same flight in a re-saved file: another hash, identical samples.
-    sameFlightOtherHash = run(primary, [{ ...primary, sha256: "3".repeat(64) }]);
+    // Fresh arrays, as a second decode of a re-saved file gives: nothing is shared with the primary.
+    sameFlightOtherHash = run(primary, [copyOf(primary, "3".repeat(64))]);
 }, 600_000);
 
 describe("P1-02: a duplicate is not an independent repeat", () => {
@@ -93,6 +101,13 @@ describe("P1-02: a duplicate is not an independent repeat", () => {
         expect(sameFlightOtherHash.crossLogRejected).toContain(`cross_log_duplicate_of_primary:${"3".repeat(64)}:0`);
         expect(released(sameFlightOtherHash)).toBe(false);
     });
+
+    it("negative control: the same arrays with one gyro sample changed are not a duplicate", () => {
+        const primary = syntheticLogInput("1".repeat(64));
+        const r = run(primary, [copyOf(primary, "4".repeat(64), true)]);
+        expect(r.crossLogRejected.filter((x) => x.startsWith("cross_log_duplicate_of_primary"))).toEqual([]);
+        expect(Object.keys(r.crossLogPlant).length).toBe(3);
+    }, 600_000);
 
     it("a reference of another craft, firmware or filter configuration is not used", () => {
         const primary = syntheticLogInput("1".repeat(64));
@@ -187,7 +202,8 @@ describe("P1-02: import path", () => {
         const store = useAutotuneV2Store();
         const log = syntheticLogInput("1".repeat(64));
         store.addSource(new Uint8Array([1]), "a.bbl", report("a.bbl", log));
-        store.addSource(new Uint8Array([2]), "b.bbl", report("b.bbl", { ...log }));
+        // Another file (other bytes, other hash) that decodes to the same flight in fresh arrays.
+        store.addSource(new Uint8Array([2]), "b.bbl", report("b.bbl", copyOf(log, "6".repeat(64))));
         const v2 = useAutotuneV2();
         await v2.calculate();
         expect(store.state).toBe("done");
