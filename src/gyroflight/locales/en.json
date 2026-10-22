@@ -829,6 +829,21 @@
         "message": "Saved, but the firmware changed some values when it reloaded them."
     },
     "gyroflightV2PartialWrite": { "message": "Now different from the backup on the flight controller:" },
+    "gyroflightV2FailedStage": { "message": "Stopped while" },
+    "gyroflightV2Stage_write": { "message": "writing to the flight controller" },
+    "gyroflightV2Stage_validate": { "message": "letting the flight controller validate the values" },
+    "gyroflightV2Stage_verify": { "message": "reading back and verifying the written values" },
+    "gyroflightV2Stage_eeprom": { "message": "saving (EEPROM write)" },
+    "gyroflightV2Stage_eeprom_verify": { "message": "reading back after saving" },
+    "gyroflightV2FailedCause": { "message": "Cause" },
+    "gyroflightV2NothingWritten": { "message": "Nothing was written to the flight controller." },
+    "gyroflightV2CurrentUnknown": {
+        "message": "The flight controller's current configuration is unknown: it could not be read back after the failure (or another PID profile is active). Some values may already be written. Reconnect, check the values, and use Restore with the backup below if needed."
+    },
+    "gyroflightV2CurrentAsBackup": {
+        "message": "The flight controller still holds the backed-up values: nothing it accepted differs from the backup."
+    },
+    "gyroflightV2FailedBackup": { "message": "Backup taken before the write:" },
     "gyroflightV2Need_acro_stick_flight": {
         "message": "an acro flight with stick moves (rolls, flips, at least 3 s, CHIRP off)"
     },

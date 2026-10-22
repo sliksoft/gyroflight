@@ -103,6 +103,9 @@ export interface FirmwareFc {
     truncate: Partial<Record<number, number>>;
     /** Runs after every accepted SET (the user switching profile or arming mid-transaction). */
     afterWrite?: (fc: FirmwareFc) => void;
+    /** The link drops when this first returns true for a request: that and every later call fail. */
+    disconnectWhen?: (fc: FirmwareFc, code: number) => boolean;
+    disconnected?: boolean;
 }
 
 const clone = (s: FirmwareState): FirmwareState => structuredClone(s);
@@ -706,6 +709,10 @@ function currentFault(fc: FirmwareFc, code: number): Fault {
 export async function firmwarePromise(fc: FirmwareFc, code: number, data?: number[]) {
     const d = data ? Array.from(data) : [];
     fc.calls.push({ code, data: d });
+    if (fc.disconnected || fc.disconnectWhen?.(fc, code)) {
+        fc.disconnected = true;
+        throw new Error("MSP request while disconnected");
+    }
     const f = currentFault(fc, code);
     if (f === "timeout") throw new Error("MSP timeout");
     if (f === "disconnect") throw new Error("MSP disconnected");
