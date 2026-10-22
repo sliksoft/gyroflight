@@ -120,7 +120,8 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
     });
     const h = Object.fromEntries(headerPairs);
     const timeUs = Float64Array.from({ length: n }, (_, k) => k * 250);
-    let seed = 11;
+    // The noise is the flight: the same hash gives the same samples (a copy), another hash another flight.
+    let seed = Number.parseInt(sha256.slice(0, 8), 16) || 11;
     const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32 - 0.5;
     // eRPM 600 (×100) with 12 poles → 166.7 Hz motor fundamental.
     const erpm = [0, 1, 2, 3].map(() => new Float64Array(n).fill(600));

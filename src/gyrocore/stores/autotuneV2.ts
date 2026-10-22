@@ -89,10 +89,14 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         null,
     );
 
-    /** A newly imported file. Another craft's file replaces the list; the same file is not added twice. */
+    /**
+     * A newly imported file. Another craft's file replaces the list; the same file (by name or by
+     * content, whatever its name) is not added twice: it would count as an independent flight.
+     */
     function addSource(bytes: Uint8Array, filename: string, report: ChirpQualificationReport) {
         const uid = logIdentity(report.logs[0]?.headerPairs ?? []).uid?.join("-") ?? null;
-        const same = sources.value.filter((s) => s.uid === uid && s.filename !== filename);
+        const sameBytes = (b: Uint8Array) => b.length === bytes.length && b.every((x, i) => x === bytes[i]);
+        const same = sources.value.filter((s) => s.uid === uid && s.filename !== filename && !sameBytes(s.bytes));
         sources.value = [{ filename, bytes, report, uid }, ...same].slice(0, MAX_SOURCES);
         inputs.value = null;
         result.value = null;
