@@ -35,7 +35,11 @@
 
 import {
     cmag,
+    cmul,
+    cdiv,
+    csub,
     cphaseDeg,
+    evaluateControllerFrf,
     type Complex,
     type DigitalControllerConfig,
 } from "@/js/blackbox/betaflight_digital_controller";
@@ -53,6 +57,16 @@ export const VALIDATION_MIN_COHERENCE = 0.8;
 /** Tolerance floor per bin (M5-A reproducibility: <20 Hz tight, 20–40 Hz wider). */
 export function toleranceFloor(freqHz: number): { magDb: number; phaseDeg: number } {
     return freqHz < 20 ? { magDb: 0.5, phaseDeg: 5 } : { magDb: 1.5, phaseDeg: 10 };
+}
+/**
+ * Loop-domain check: the plant extracted from the candidate log, times the candidate C_fb,
+ * against the prediction L = G_baseline · C_fb, where |L| is within ×4 of 1 (the crossover
+ * neighbourhood that decides the phase margin). At high loop gain T ≈ C_ref / C_fb and hides
+ * plant errors; L does not.
+ */
+export const LOOP_BAND = { minMag: 0.25, maxMag: 4 } as const;
+export function loopToleranceFloor(): { magDb: number; phaseDeg: number } {
+    return { magDb: 1.5, phaseDeg: 8 };
 }
 /** A compared bin counts as resolved when the predicted change exceeds the tolerance there. */
 export const MIN_DETECTABLE_BINS = 3;
@@ -74,6 +88,10 @@ export interface VerifiedTuneLogRef {
 
 export interface AxisComparison {
     axis: Axis;
+    /** Loop-domain bins compared (crossover neighbourhood) and their agreement. */
+    loopBins: number;
+    loopWithinShare: number;
+    loopMaxExcess: number;
     comparedBins: number;
     detectableBins: number;
     withinShare: number;
@@ -147,23 +165,58 @@ function relChange(from: number, to: number): number {
     return from > 0 ? Math.abs(to - from) / from : to === from ? 0 : Number.POSITIVE_INFINITY;
 }
 
-/** Compare predicted and measured T for one axis. Pure; the caller supplies real log analyses. */
+function extractG(T: Complex, cfg: DigitalControllerConfig, f: number): Complex | null {
+    const frf = evaluateControllerFrf(cfg, f);
+    const den = csub(frf.cReference, cmul(T, frf.cFeedback));
+    return cmag(den) > 1e-9 ? cdiv(T, den) : null;
+}
+
+/** Compare predicted and measured T, and the predicted and measured loop, for one axis. Pure. */
 export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
-    const whatIf = plantFixedWhatIf(input.plant, input.baselineCfg, input.candidateCfg, { maxHz: VALIDATION_MAX_HZ });
+    const whatIf = plantFixedWhatIf(input.plant, input.baselineCfg, input.candidateCfg);
     let compared = 0;
     let detectable = 0;
     let within = 0;
     let maxExcess = 0;
     let maxMag = 0;
     let maxPhase = 0;
+    let loopBins = 0;
+    let loopWithin = 0;
+    let loopMaxExcess = 0;
     for (const b of whatIf.bins) {
-        if (b.status !== "ok" || !b.T_candidate || !b.T_current || !b.T_measured) continue;
+        if (b.status !== "ok" || !b.T_candidate || !b.T_current || !b.T_measured || !b.G) continue;
         const meas = measuredAt(input.candidateT, b.frequencyHz);
         if (!meas || !(meas.coherence >= VALIDATION_MIN_COHERENCE)) continue;
+        const rep = input.baselineRepeatT ? measuredAt(input.baselineRepeatT, b.frequencyHz) : null;
+        if (input.baselineRepeatT && (!rep || !(rep.coherence >= VALIDATION_MIN_COHERENCE))) continue;
+
+        // Loop domain, wherever the plant is identified.
+        const cfb = evaluateControllerFrf(input.candidateCfg, b.frequencyHz).cFeedback;
+        const Lpred = cmul(b.G, cfb);
+        const Gmeas = extractG(meas.T, input.candidateCfg, b.frequencyHz);
+        if (Gmeas && cmag(Lpred) >= LOOP_BAND.minMag && cmag(Lpred) <= LOOP_BAND.maxMag) {
+            let tol = loopToleranceFloor();
+            const Grep = rep ? extractG(rep.T, input.baselineCfg, b.frequencyHz) : null;
+            if (Grep) {
+                tol = {
+                    magDb: Math.max(tol.magDb, 2 * Math.abs(db(Grep) - db(b.G))),
+                    phaseDeg: Math.max(tol.phaseDeg, 2 * Math.abs(phaseDiff(Grep, b.G))),
+                };
+            }
+            const Lmeas = cmul(Gmeas, cfb);
+            const excess = Math.max(
+                Math.abs(db(Lmeas) - db(Lpred)) / tol.magDb,
+                Math.abs(phaseDiff(Lmeas, Lpred)) / tol.phaseDeg,
+            );
+            loopBins++;
+            loopMaxExcess = Math.max(loopMaxExcess, excess);
+            if (excess <= 1) loopWithin++;
+        }
+
+        // Closed-loop T, in the band where the CHIRP plant estimate is tight.
+        if (b.frequencyHz > VALIDATION_MAX_HZ) continue;
         let tol = toleranceFloor(b.frequencyHz);
-        if (input.baselineRepeatT) {
-            const rep = measuredAt(input.baselineRepeatT, b.frequencyHz);
-            if (!rep || !(rep.coherence >= VALIDATION_MIN_COHERENCE)) continue;
+        if (rep) {
             // Twice the observed log-to-log scatter, never tighter than the floor.
             tol = {
                 magDb: Math.max(tol.magDb, 2 * Math.abs(db(rep.T) - db(b.T_measured))),
@@ -183,12 +236,23 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
         if (excess <= 1) within++;
     }
     const withinShare = compared ? within / compared : 0;
+    const loopWithinShare = loopBins ? loopWithin / loopBins : 0;
     let verdict: AxisComparison["verdict"];
-    if (compared < MIN_DETECTABLE_BINS * 2) verdict = "INSUFFICIENT";
+    if (compared < MIN_DETECTABLE_BINS * 2 || loopBins < MIN_DETECTABLE_BINS) verdict = "INSUFFICIENT";
     else if (detectable < MIN_DETECTABLE_BINS) verdict = "NOT_DETECTABLE";
-    else verdict = withinShare >= MIN_WITHIN_SHARE && maxExcess <= 2 ? "PASS" : "FAIL";
+    else
+        verdict =
+            withinShare >= MIN_WITHIN_SHARE &&
+            maxExcess <= 2 &&
+            loopWithinShare >= MIN_WITHIN_SHARE &&
+            loopMaxExcess <= 2
+                ? "PASS"
+                : "FAIL";
     return {
         axis,
+        loopBins,
+        loopWithinShare,
+        loopMaxExcess,
         comparedBins: compared,
         detectableBins: detectable,
         withinShare,

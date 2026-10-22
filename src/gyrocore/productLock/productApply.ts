@@ -31,8 +31,10 @@
  *    safety/pipeline.ts blocks every tune with missing_required_analysis. The
  *    code is kept from the old lock because the reason is the same.
  *  - independent_pid_validation_missing: no independent flight has confirmed a
- *    prediction across a known gain change (a Verified Tune). Nothing in
- *    Gyroflight produces that evidence yet, so this stays blocked until it does.
+ *    prediction across a known gain change. The producer is
+ *    releaseGate/verifiedTune.ts (buildVerifiedTune, from a baseline and a
+ *    candidate CHIRP log); the record must pass verifiedTuneIssues for the craft
+ *    and firmware being written to.
  *
  * These come on top of, and never replace, the composite gate (including the M2
  * phase-margin block), GyroCore Safety, the user's confirmation, the FC identity
@@ -43,6 +45,7 @@
  */
 
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
+import { verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
 
 export const PRODUCT_APPLY_PENDING = "full_safety_engine_pending";
 export const RELEASE_INDEPENDENT_VALIDATION_MISSING = "independent_pid_validation_missing";
@@ -50,8 +53,10 @@ export const RELEASE_INDEPENDENT_VALIDATION_MISSING = "independent_pid_validatio
 export interface ProductReleaseEvidence {
     /** SafetyResult.analysisEvidence: "available" only when Safety ran its evidence stages. */
     safetyAnalysisEvidence: string;
-    /** A Verified Tune: an independent flight that confirmed the prediction. No producer exists yet. */
-    independentPidValidation: { id: string } | null;
+    /** A Verified Tune (releaseGate/verifiedTune.ts): an independent flight that confirmed the prediction. */
+    independentPidValidation: VerifiedTune | null;
+    /** The craft the write goes to; the record must be about this craft and firmware. */
+    craft?: { uid: readonly number[] | null; firmware: string | null };
 }
 
 /** What production has today: neither kind of evidence. */
@@ -66,8 +71,17 @@ export function productApplyBlocks(evidence: ProductReleaseEvidence = NO_RELEASE
     if (evidence.safetyAnalysisEvidence !== "available") {
         blocked.push(PRODUCT_APPLY_PENDING);
     }
-    if (!evidence.independentPidValidation?.id) {
+    const record = evidence.independentPidValidation;
+    if (!record) {
         blocked.push(RELEASE_INDEPENDENT_VALIDATION_MISSING);
+    } else {
+        const issues = verifiedTuneIssues(record, evidence.craft ?? { uid: null, firmware: null });
+        if (issues.length) {
+            blocked.push(
+                RELEASE_INDEPENDENT_VALIDATION_MISSING,
+                ...issues.filter((r) => r !== RELEASE_INDEPENDENT_VALIDATION_MISSING),
+            );
+        }
     }
     return blocked;
 }

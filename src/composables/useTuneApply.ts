@@ -107,6 +107,7 @@ import {
     type StoreBlocks,
 } from "@/gyrocore/tuning/absoluteTune";
 import { assertAbsoluteReleased, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
+import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 
 export type WriteStage = "write" | "validate" | "verify" | "eeprom" | "eeprom_verify";
 
@@ -395,9 +396,12 @@ export async function applyTune(
     const gateState = useChirpQualificationStore().gateState();
     const composite = assertCompositeApplyAuthorized(gateState, compositeId, proposed);
     const safety = assertSafetyAuthorized(gateState, composite, { ...proposed });
+    const logged = logIdentity(logHeaders(gateState, composite));
+    const loggedFirmware = logged.firmwareRevision?.split(/\s+/)[1] ?? null;
     assertProductApplyReleased({
         safetyAnalysisEvidence: safety.analysisEvidence,
-        independentPidValidation: null,
+        independentPidValidation: useVerifiedTuneStore().forCraft(logged.uid, loggedFirmware),
+        craft: { uid: logged.uid, firmware: loggedFirmware },
     });
     const confirmed = consumeConfirmation(confirmation, {
         kind: "apply",
