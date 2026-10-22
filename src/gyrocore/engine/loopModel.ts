@@ -116,6 +116,44 @@ export const CHAIN_VALIDATED_BAND_HZ: readonly [number, number] = [
 ];
 
 /**
+ * What the end of the identified band must show before GM and |S| count as bounded by the
+ * measurement. Above the last bin the loop is unknown; a resonance or lead just outside the band
+ * can take |L| back above one (Codex re-review R-2: a 2nd-order resonance with ζ = 0.02 at
+ * 1.10 × f_end still shows |L| = 0.64 at f_end, and 2.4 ten percent higher).
+ *
+ *   tailFraction 0.1 / minTailBins 4: the slope is judged over the top 10 % of the band, enough
+ *     bins to average identification noise, short enough that a resonance up to ~20 % above the
+ *     band shows: that ζ = 0.02 peak at 1.10 × f_end lifts |L| by 3.7 dB over the last 10 %, at
+ *     1.20 × f_end by 1.5 dB, at 1.50 × f_end by less than 0.5 dB (it falls).
+ *   maxTailRiseDb 1: the least-squares rise over the tail may not exceed 1 dB. A smooth plant
+ *     (motor pole plus delay) falls or stays flat there; coherent-bin noise of the identified L
+ *     is a fraction of a dB over 10 % of the band.
+ *   maxBandEndDb −6: |L| at the last bin may not exceed −6 dB, the release target for the gain
+ *     margin (RELEASE_TARGETS.minGainMarginDb): above it, a phase crossover just outside the band
+ *     could not carry the required margin, so the band cannot prove it.
+ *
+ * With the band end bounded, the reported GM is the worse of the in-band phase-crossover GM and
+ * the gain headroom at the band end (−20·log10 max |L| over the tail): a crossover above the
+ * band, if any, cannot be better than that.
+ */
+export const BAND_END = Object.freeze({ tailFraction: 0.1, minTailBins: 4, maxTailRiseDb: 1, maxBandEndDb: -6 });
+
+/** Rise (dB) of the least-squares line through (f, dB) from the first to the last point. */
+function lsqRiseDb(tail: { f: number; db: number }[]): number {
+    const n = tail.length;
+    if (n < 2) return 0;
+    const mf = tail.reduce((s, t) => s + t.f, 0) / n;
+    const md = tail.reduce((s, t) => s + t.db, 0) / n;
+    let num = 0;
+    let den = 0;
+    for (const t of tail) {
+        num += (t.f - mf) * (t.db - md);
+        den += (t.f - mf) * (t.f - mf);
+    }
+    return den > 0 ? (num / den) * (tail[n - 1].f - tail[0].f) : 0;
+}
+
+/**
  * Compare the simulated chain with the logged gyroADC of one axis over `mask` (in-flight
  * samples). `ablation` is the same simulation without RPM filter and dynamic notch.
  */
@@ -297,6 +335,21 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     const pm = Math.min(...crossings.map((c) => at(c).pm));
     const lastCrossHz = at(crossings[crossings.length - 1]).f;
 
+    // The loop is unknown above the last bin: the band end must be safely below unity and not
+    // heading back up (BAND_END), or a crossover just outside the band is not excluded.
+    const tailBins = Math.max(BAND_END.minTailBins, Math.round(pts.length * BAND_END.tailFraction));
+    const tail = pts.slice(-tailBins).map((p, j) => ({ f: p.f, db: 20 * Math.log10(mag[lastBin - tailBins + 1 + j]) }));
+    const tailRiseDb = lsqRiseDb(tail);
+    const tailMaxDb = Math.max(...tail.map((t) => t.db));
+    const bandEndDb = 20 * Math.log10(mag[lastBin]);
+    const bandEndOk = mag[lastBin] < 1 && tailRiseDb <= BAND_END.maxTailRiseDb && bandEndDb <= BAND_END.maxBandEndDb;
+    if (mag[lastBin] < 1 && tailRiseDb > BAND_END.maxTailRiseDb) {
+        reasons.push(`loop_gain_rising_at_band_end:+${tailRiseDb.toFixed(1)}dB`);
+    }
+    if (mag[lastBin] < 1 && bandEndDb > BAND_END.maxBandEndDb) {
+        reasons.push(`loop_gain_near_unity_at_band_end:${bandEndDb.toFixed(1)}dB`);
+    }
+
     // Every phase crossover (−180° − k·360° of the unwrapped phase, either direction).
     let gm: number | null = null;
     let gmHz: number | null = null;
@@ -315,14 +368,22 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         }
     }
     if (gm === null) reasons.push("phase_crossover_outside_identified_band");
+    // The next phase crossover, if it lies above the band, cannot carry more margin than the gain
+    // headroom the band end still shows: GM is the worse of the two, and unknown while the band
+    // end is not bounded.
+    if (gm !== null) {
+        if (!bandEndOk) gm = null;
+        else if (-tailMaxDb < gm) gm = -tailMaxDb;
+    }
 
-    // |S| peak is only meaningful when the band reaches well past the last crossing and the peak
-    // is not still rising at the band edge; a band-limited value is unknown, not a bound.
+    // |S| peak is only meaningful when the band reaches well past the last crossing, the band end
+    // is bounded and the peak is not still rising at the band edge; a band-limited value is
+    // unknown, not a bound.
     let sPeak: number | null = null;
     let sPeakHz: number | null = null;
     const sDb = pts.map((p) => 20 * Math.log10(1 / Math.max(cmag(cadd({ re: 1, im: 0 }, p.L)), 1e-12)));
     const peakAt = sDb.indexOf(Math.max(...sDb));
-    if (pts[lastBin].f >= 1.5 * lastCrossHz && mag[lastBin] < 1 && peakAt < lastBin) {
+    if (pts[lastBin].f >= 1.5 * lastCrossHz && bandEndOk && peakAt < lastBin) {
         sPeak = sDb[peakAt];
         sPeakHz = pts[peakAt].f;
     } else {
