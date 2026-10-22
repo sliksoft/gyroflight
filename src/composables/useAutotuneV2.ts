@@ -112,6 +112,9 @@ function failure(action: "apply" | "restore", err: unknown): AutotuneV2Outcome {
             // A profile switch the route ran into after a SET: that other profile may hold the
             // write in RAM (the panel says which, and what to do).
             profileSwitch: err.stage === "prepare" ? null : profileSwitchOf(err.message),
+            // Before the first SET a switch writes nothing, but the active profile is then not the
+            // backed-up one: the panel says so instead of calling the craft equal to the backup.
+            prepareProfileSwitch: err.stage === "prepare" ? profileSwitchOf(err.message) : null,
             at,
         };
     }

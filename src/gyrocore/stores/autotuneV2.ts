@@ -72,6 +72,8 @@ export type AutotuneV2Outcome =
           message: string;
           /** A PID profile switch the write ran into after a SET: `to` may hold the write in RAM. */
           profileSwitch?: { from: number; to: number | null } | null;
+          /** A PID profile switch found before the first SET: nothing written, `to` is now active. */
+          prepareProfileSwitch?: { from: number; to: number | null } | null;
           at: string;
       };
 

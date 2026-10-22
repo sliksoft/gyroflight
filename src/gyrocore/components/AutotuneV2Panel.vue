@@ -218,10 +218,21 @@
             </ul>
             <!-- What the flight controller holds now, against the backup taken before the write. -->
             <template v-if="outcome.status === 'failed'">
-                <!-- No SET was sent (a check, a fresh read or the backup failed first). -->
-                <p v-if="!outcome.stage || outcome.stage === 'prepare'" data-gyrocore="v2-nothing-written">
-                    {{ $t("gyroflightV2NothingWritten") }}
-                </p>
+                <!--
+                    No SET was sent (a check, a fresh read or the backup failed first). That says what
+                    this attempt did, not what the craft holds now: nothing was read back after the
+                    failure, and another PID profile may be active.
+                -->
+                <div v-if="!outcome.stage || outcome.stage === 'prepare'" data-gyrocore="v2-nothing-written">
+                    <p>{{ $t("gyroflightV2NothingWritten") }}</p>
+                    <p class="text-yellow-500" data-gyrocore="v2-not-reverified">
+                        {{ $t("gyroflightV2NotReverified") }}
+                    </p>
+                    <p v-if="prepareProfileText" class="text-yellow-500" data-gyrocore="v2-prepare-profile">
+                        {{ prepareProfileText }}
+                    </p>
+                    <p v-if="backupKeptText" data-gyrocore="v2-backup-kept">{{ backupKeptText }}</p>
+                </div>
                 <!-- A SET was sent and the craft could not be read back afterwards. -->
                 <p v-else-if="outcome.changedFromBackup === null" class="text-yellow-500" data-gyrocore="v2-fc-unknown">
                     {{
@@ -314,6 +325,20 @@ const profileSwitchText = computed(() => {
         noSave: i18n.getMessage("gyroflightV2ProfileSwitchNoSave"),
         recovery: i18n.getMessage("gyroflightV2ProfileSwitchRecovery", [to, from]),
     };
+});
+/** A profile switch seen before the first SET: nothing written, but the active profile is not the backed-up one. */
+const prepareProfileText = computed(() => {
+    const o = outcome.value;
+    if (!o || o.status === "verified" || !o.prepareProfileSwitch) return null;
+    const { from, to } = o.prepareProfileSwitch;
+    return i18n.getMessage("gyroflightV2PrepareProfileSwitch", [String(from + 1), to === null ? "?" : String(to + 1)]);
+});
+/** The backup taken before the failed attempt, with the PID profile it holds (only when one was taken). */
+const backupKeptText = computed(() => {
+    const o = outcome.value;
+    if (!o || o.status === "verified" || !o.backupId) return null;
+    const profile = backupStore.backups.find((b) => b.id === o.backupId)?.absolute?.pidProfile;
+    return i18n.getMessage("gyroflightV2BackupKept", [profile == null ? "?" : String(profile + 1)]);
 });
 const released = computed(() => (v2.result ? releasedProposal() : null));
 const connected = computed(() => !!connection.connectionValid);
