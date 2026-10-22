@@ -138,19 +138,103 @@ export const CHAIN_VALIDATED_BAND_HZ: readonly [number, number] = [
  */
 export const BAND_END = Object.freeze({ tailFraction: 0.1, minTailBins: 4, maxTailRiseDb: 1, maxBandEndDb: -6 });
 
-/** Rise (dB) of the least-squares line through (f, dB) from the first to the last point. */
+/**
+ * What the identified bins must show before PM, GM and |S| read on them count as bounds of the
+ * continuous loop (Codex final review F-02). Margins are read on measured bins only; between two
+ * bins the loop is not measured. A pole/zero pair narrower than the bin spacing can sit between
+ * two bins and leave almost no trace on either (fr = 70.25 Hz, ζ_pole = 1e-4 on a 0.5 Hz grid:
+ * the bins show +1.2 dB, the loop between them reaches |L| = 4.1).
+ *
+ *   maxPhaseStepDeg 25 / maxGainStepDb 2: largest change of the loop between two adjacent bins
+ *     (unwrapped phase, dB). A resonance whose −3 dB bandwidth is w turns the phase by at most
+ *     about 2·atan(Δf / w) over one bin step Δf, so 25° means every feature the data shows spans
+ *     at least ≈ 4.5 bin steps (RESOLVED_FEATURE_BINS). The 70.25 Hz example steps 55° between
+ *     70.0 and 70.5 Hz. The AIR65 CHIRP logs (1.95 Hz bins) step at most 23° above the crossover.
+ *   maxPhaseSlopeDegPerNeper 300 / maxGainSlopeDbPerDecade 60: a well-damped loop turns
+ *     faster over a coarse relative step (integrator and PI zero at 4–8 Hz: 69° and 6 dB per
+ *     1.95 Hz bin on the AIR65 logs). The allowed step is the larger of the floor and slope ×
+ *     log-span of the step, so it does not depend on the grid being uniform.
+ *   maxGapRatio 3: a step wider than 3× the median step of its neighbourhood (±5 steps) is a gap
+ *     (a log-spaced or jittered grid is not one).
+ *   maxRelativeSpacing 0.5: from half the crossover up, no step may be wider than half its
+ *     frequency: a sparse band (bins at 5, 10, 20, 40 Hz around a 10 Hz crossover) cannot resolve
+ *     the crossover region whatever its steps show. The AIR65 logs step 1.95 Hz from 8 Hz up (24 %).
+ *
+ * Validity limit, stated rather than solved: a finite set of bins cannot exclude an arbitrarily
+ * narrow, unmeasured resonance. A pole/zero pair whose both bandwidths are well below the bin
+ * step (fr = 70.25 Hz, ζ_zero = 5e-4, ζ_pole = 5e-5 on 0.5 Hz bins: steps of about 14°, |L(fr)| ≈ 2)
+ * passes these checks. "bounded" margins (LoopMargins.marginBasis) therefore hold for a loop
+ * without features narrower than RESOLVED_FEATURE_BINS × resolutionHz; they are not an absolute
+ * stability guarantee. A finer CHIRP resolution (longer FFT segments) narrows that limit.
+ */
+export const LOOP_RESOLUTION = Object.freeze({
+    maxPhaseStepDeg: 25,
+    maxGainStepDb: 2,
+    maxPhaseSlopeDegPerNeper: 300,
+    maxGainSlopeDbPerDecade: 60,
+    maxGapRatio: 3,
+    maxRelativeSpacing: 0.5,
+});
+
+/** Narrowest feature, in bin steps, the step limit shows: −3 dB bandwidth ≈ Δf / tan(maxPhaseStepDeg / 2). */
+export const RESOLVED_FEATURE_BINS = 1 / Math.tan(((LOOP_RESOLUTION.maxPhaseStepDeg / 2) * Math.PI) / 180);
+
+/**
+ * Rise (dB) of the least-squares line through (f, dB) from the first to the last point. Each point
+ * weighs the frequency span it stands for, so a cluster of bins does not outweigh the rest of the
+ * tail (a uniform grid weighs every point equally).
+ */
 function lsqRiseDb(tail: { f: number; db: number }[]): number {
     const n = tail.length;
     if (n < 2) return 0;
-    const mf = tail.reduce((s, t) => s + t.f, 0) / n;
-    const md = tail.reduce((s, t) => s + t.db, 0) / n;
+    const w = tail.map((_, j) =>
+        j === 0
+            ? tail[1].f - tail[0].f
+            : j === n - 1
+              ? tail[n - 1].f - tail[n - 2].f
+              : (tail[j + 1].f - tail[j - 1].f) / 2,
+    );
+    const sw = w.reduce((s, x) => s + x, 0);
+    if (!(sw > 0)) return 0;
+    const mf = tail.reduce((s, t, j) => s + w[j] * t.f, 0) / sw;
+    const md = tail.reduce((s, t, j) => s + w[j] * t.db, 0) / sw;
     let num = 0;
     let den = 0;
-    for (const t of tail) {
-        num += (t.f - mf) * (t.db - md);
-        den += (t.f - mf) * (t.f - mf);
+    for (const [j, t] of tail.entries()) {
+        num += w[j] * (t.f - mf) * (t.db - md);
+        den += w[j] * (t.f - mf) * (t.f - mf);
     }
     return den > 0 ? (num / den) * (tail[n - 1].f - tail[0].f) : 0;
+}
+
+/**
+ * Whether the bins resolve the loop (LOOP_RESOLUTION): gaps, a band too coarse around the
+ * crossover, and steps larger than a resolved loop makes. `ph` is the unwrapped phase.
+ */
+function resolutionIssues(f: number[], magDb: number[], ph: number[], fc: number): string[] {
+    const R = LOOP_RESOLUTION;
+    const steps = f.slice(1).map((x, i) => x - f[i]);
+    const span = (i: number) => `${f[i].toFixed(1)}-${f[i + 1].toFixed(1)}Hz`;
+    const gaps: string[] = [];
+    const coarse: string[] = [];
+    const unresolved: string[] = [];
+    steps.forEach((s, i) => {
+        const near = steps.filter((_, j) => j !== i && Math.abs(j - i) <= 5).sort((a, b) => a - b);
+        if (near.length && s > R.maxGapRatio * near[Math.floor(near.length / 2)]) gaps.push(span(i));
+        if (f[i] >= fc / 2 && s > R.maxRelativeSpacing * f[i]) coarse.push(span(i));
+        const phaseLimit = Math.max(R.maxPhaseStepDeg, R.maxPhaseSlopeDegPerNeper * Math.log(f[i + 1] / f[i]));
+        const gainLimit = Math.max(R.maxGainStepDb, R.maxGainSlopeDbPerDecade * Math.log10(f[i + 1] / f[i]));
+        if (Math.abs(ph[i + 1] - ph[i]) > phaseLimit || Math.abs(magDb[i + 1] - magDb[i]) > gainLimit) {
+            unresolved.push(span(i));
+        }
+    });
+    const list = (name: string, xs: string[]) =>
+        xs.length ? [`${name}:${xs.slice(0, 3).join(",")}${xs.length > 3 ? `,+${xs.length - 3}` : ""}`] : [];
+    return [
+        ...(gaps.length ? ["identified_band_has_gaps"] : []),
+        ...list("identified_band_too_coarse", coarse),
+        ...list("loop_unresolved_between_bins", unresolved),
+    ];
 }
 
 /**
@@ -240,6 +324,15 @@ export interface LoopMargins {
     /** Chain phase spread at the crossover over the sweep (°). */
     chainSpreadDeg: number | null;
     okBins: number;
+    /** Largest step between two adjacent identified bins (Hz): the frequency resolution of the margins. */
+    resolutionHz: number | null;
+    /**
+     * "bounded": the bins resolve the loop (LOOP_RESOLUTION) and the band end is bounded (BAND_END),
+     * so PM / GM / |S| bound the loop for features at least RESOLVED_FEATURE_BINS × resolutionHz wide.
+     * "measured_only": values read on the bins, not a bound (GM and |S| are then unknown).
+     * null: no margins.
+     */
+    marginBasis: "bounded" | "measured_only" | null;
     reasons: string[];
 }
 
@@ -297,6 +390,8 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         delayMarginMs: null,
         chainSpreadDeg: null,
         okBins: pts.length,
+        resolutionHz: pts.length > 1 ? Math.max(...pts.slice(1).map((p, i) => p.f - pts[i].f)) : null,
+        marginBasis: null,
         reasons,
     };
     if (pts.length < 4) {
@@ -305,9 +400,6 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     }
     const mag = pts.map((p) => cmag(p.L));
     const ph = unwrap(pts.map((p) => cphaseDeg(p.L)));
-    // Bins must be contiguous for unwrapping and crossings to mean anything.
-    const gaps = pts.some((p, i) => i > 0 && p.f - pts[i - 1].f > 3 * (pts[1].f - pts[0].f));
-    if (gaps) reasons.push("identified_band_has_gaps");
 
     // Unity crossings in both directions: a resonance can lift |L| above one again after the
     // first crossover, and every crossing then has its own phase margin.
@@ -335,10 +427,25 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     const pm = Math.min(...crossings.map((c) => at(c).pm));
     const lastCrossHz = at(crossings[crossings.length - 1]).f;
 
+    // Between bins the loop is not measured: the bins must be contiguous and resolve it
+    // (LOOP_RESOLUTION), or no margin read on them bounds the loop between them.
+    const resolution = resolutionIssues(
+        pts.map((p) => p.f),
+        mag.map((m) => 20 * Math.log10(m)),
+        ph,
+        fc,
+    );
+    reasons.push(...resolution);
+
     // The loop is unknown above the last bin: the band end must be safely below unity and not
-    // heading back up (BAND_END), or a crossover just outside the band is not excluded.
-    const tailBins = Math.max(BAND_END.minTailBins, Math.round(pts.length * BAND_END.tailFraction));
-    const tail = pts.slice(-tailBins).map((p, j) => ({ f: p.f, db: 20 * Math.log10(mag[lastBin - tailBins + 1 + j]) }));
+    // heading back up (BAND_END), or a crossover just outside the band is not excluded. The tail
+    // is the top tailFraction of the band in frequency, whatever the spacing of its bins.
+    const tailFrom = pts[lastBin].f - BAND_END.tailFraction * (pts[lastBin].f - pts[0].f);
+    const tailStart = Math.min(
+        pts.findIndex((p) => p.f >= tailFrom),
+        pts.length - BAND_END.minTailBins,
+    );
+    const tail = pts.slice(tailStart).map((p, j) => ({ f: p.f, db: 20 * Math.log10(mag[tailStart + j]) }));
     const tailRiseDb = lsqRiseDb(tail);
     const tailMaxDb = Math.max(...tail.map((t) => t.db));
     const bandEndDb = 20 * Math.log10(mag[lastBin]);
@@ -371,8 +478,9 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     // The next phase crossover, if it lies above the band, cannot carry more margin than the gain
     // headroom the band end still shows: GM is the worse of the two, and unknown while the band
     // end is not bounded.
+    const bounded = bandEndOk && !resolution.length;
     if (gm !== null) {
-        if (!bandEndOk) gm = null;
+        if (!bounded) gm = null;
         else if (-tailMaxDb < gm) gm = -tailMaxDb;
     }
 
@@ -383,11 +491,13 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     let sPeakHz: number | null = null;
     const sDb = pts.map((p) => 20 * Math.log10(1 / Math.max(cmag(cadd({ re: 1, im: 0 }, p.L)), 1e-12)));
     const peakAt = sDb.indexOf(Math.max(...sDb));
-    if (pts[lastBin].f >= 1.5 * lastCrossHz && bandEndOk && peakAt < lastBin) {
+    if (!(pts[lastBin].f >= 1.5 * lastCrossHz && bandEndOk && peakAt < lastBin)) {
+        reasons.push("sensitivity_peak_outside_identified_band");
+    } else if (bounded) {
+        // An unresolved band (resolution reasons above) leaves |S| unknown: the peak read on the
+        // bins is not the peak between them.
         sPeak = sDb[peakAt];
         sPeakHz = pts[peakAt].f;
-    } else {
-        reasons.push("sensitivity_peak_outside_identified_band");
     }
 
     // The chain model is validated on CHAIN_VALIDATED_BAND_HZ only: a crossover outside it, or a
@@ -411,6 +521,8 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         delayMarginMs: fc > 0 ? (pm / (360 * fc)) * 1000 : null,
         chainSpreadDeg: spread,
         okBins: pts.length,
+        resolutionHz: empty.resolutionHz,
+        marginBasis: bounded ? "bounded" : "measured_only",
         reasons,
     };
 }
