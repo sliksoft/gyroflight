@@ -33,7 +33,7 @@ import type { M4BblReport } from "@/js/blackbox/m4_bbl_integration";
 import type { ChirpMeasurement, ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
-import type { AutotuneLogInput, ChirpAxisInput } from "./autotuneV2";
+import type { AutotuneLogInput, ChirpAxisInput, FlightFragment } from "./autotuneV2";
 import type { AxisName } from "./safetyEvidence";
 
 const FIELDS = [
@@ -266,24 +266,78 @@ export function sharedWindows(a: AutotuneLogInput, b: AutotuneLogInput): number 
 }
 
 /**
- * Same log of the same file, the same samples under another file, or the same flight trimmed,
- * re-exported or time-shifted (FLIGHT_WINDOW.minShared shared active windows or more).
+ * The identities a log stands for: its own, or, for the file uniqueFlights kept for a flight
+ * carried by several files, those of all of them.
  */
-export function sameFlight(a: AutotuneLogInput, b: AutotuneLogInput): boolean {
-    if (a.sha256 === b.sha256 && a.logIndex === b.logIndex) return true;
-    if (flightFingerprint(a) === flightFingerprint(b)) return true;
-    return sharedWindows(a, b) >= FLIGHT_WINDOW.minShared;
+export function flightFragments(log: AutotuneLogInput): readonly FlightFragment[] {
+    if (log.flightGroup?.length) return log.flightGroup;
+    return [
+        {
+            sha256: log.sha256,
+            logIndex: log.logIndex,
+            fingerprint: flightFingerprint(log),
+            windows: flightWindows(log),
+        },
+    ];
 }
 
-/** Every flight once: of several files carrying one flight the longest is kept, in input order. */
-export function uniqueFlights(logs: AutotuneLogInput[]): AutotuneLogInput[] {
-    const out: AutotuneLogInput[] = [];
-    for (const l of logs) {
-        const i = out.findIndex((o) => sameFlight(o, l));
-        if (i < 0) out.push(l);
-        else if (l.channels.timeUs.length > out[i].channels.timeUs.length) out[i] = l;
+function sameFragment(a: FlightFragment, b: FlightFragment): boolean {
+    if (a.sha256 === b.sha256 && a.logIndex === b.logIndex) return true;
+    if (a.fingerprint === b.fingerprint) return true;
+    const [small, large] = a.windows.size <= b.windows.size ? [a.windows, b.windows] : [b.windows, a.windows];
+    let n = 0;
+    for (const w of small) if (large.has(w) && ++n >= FLIGHT_WINDOW.minShared) return true;
+    return false;
+}
+
+/**
+ * Same log of the same file, the same samples under another file, or the same flight trimmed,
+ * re-exported or time-shifted (FLIGHT_WINDOW.minShared shared active windows or more). A log kept
+ * by uniqueFlights for several files matches whatever any of them matches.
+ */
+export function sameFlight(a: AutotuneLogInput, b: AutotuneLogInput): boolean {
+    const fb = flightFragments(b);
+    return flightFragments(a).some((x) => fb.some((y) => sameFragment(x, y)));
+}
+
+/**
+ * Logs grouped by flight, transitively: fragments A and C of one flight share no sample, but a
+ * third fragment B overlapping both proves all three one flight (Codex final review F-01). Groups
+ * are in the input order of their first log.
+ */
+export function flightGroups(logs: readonly AutotuneLogInput[]): AutotuneLogInput[][] {
+    const parent = logs.map((_, i) => i);
+    const root = (i: number): number => (parent[i] === i ? i : (parent[i] = root(parent[i])));
+    for (let i = 0; i < logs.length; i++) {
+        for (let j = i + 1; j < logs.length; j++) {
+            if (root(i) !== root(j) && sameFlight(logs[i], logs[j]))
+                parent[Math.max(root(i), root(j))] = Math.min(root(i), root(j));
+        }
     }
-    return out;
+    const groups = new Map<number, AutotuneLogInput[]>();
+    logs.forEach((l, i) => groups.set(root(i), [...(groups.get(root(i)) ?? []), l]));
+    return [...groups.values()];
+}
+
+/**
+ * Every flight once, in the input order of its first file. Of several files carrying one flight
+ * (directly or through overlapping fragments, flightGroups) the longest is kept, ties broken by
+ * file hash and log index so the choice does not depend on the import order; the kept log carries
+ * the identity of the whole group (flightGroup), so the dropped files still count as this flight.
+ */
+export function uniqueFlights(logs: AutotuneLogInput[]): AutotuneLogInput[] {
+    return flightGroups(logs).map((group) => {
+        if (group.length === 1) return group[0];
+        const kept = [...group].sort(
+            (a, b) =>
+                b.channels.timeUs.length - a.channels.timeUs.length ||
+                (a.sha256 < b.sha256 ? -1 : a.sha256 > b.sha256 ? 1 : 0) ||
+                a.logIndex - b.logIndex,
+        )[0];
+        const fragments = new Map<string, FlightFragment>();
+        for (const f of group.flatMap(flightFragments)) fragments.set(`${f.sha256}:${f.logIndex}:${f.fingerprint}`, f);
+        return { ...kept, flightGroup: [...fragments.values()] };
+    });
 }
 
 /** Header values beyond the absolute fields that shape the identified plant. */
@@ -291,10 +345,21 @@ const PLANT_CONFIG_KEYS = ["looptime", "pid_process_denom", "motor_poles", "gyro
 
 /**
  * Why `other` cannot serve as an independent repeat of `primary` (empty: it can): not the same
- * flight, the same craft and firmware, and the same logged configuration.
+ * flight, the same craft and firmware, and the same logged configuration. `pool` are the further
+ * logs at hand: a fragment among them that overlaps both makes `other` the primary's flight too.
  */
-export function crossLogReferenceIssues(primary: AutotuneLogInput, other: AutotuneLogInput): string[] {
-    if (sameFlight(primary, other)) return [`cross_log_duplicate_of_primary:${other.sha256}:${other.logIndex}`];
+export function crossLogReferenceIssues(
+    primary: AutotuneLogInput,
+    other: AutotuneLogInput,
+    pool: readonly AutotuneLogInput[] = [],
+): string[] {
+    const linked =
+        sameFlight(primary, other) ||
+        (pool.length > 0 &&
+            flightGroups([primary, other, ...pool.filter((l) => l !== primary && l !== other)]).some(
+                (g) => g.includes(primary) && g.includes(other),
+            ));
+    if (linked) return [`cross_log_duplicate_of_primary:${other.sha256}:${other.logIndex}`];
     const a = logIdentity(primary.headerPairs);
     const b = logIdentity(other.headerPairs);
     const out: string[] = [];

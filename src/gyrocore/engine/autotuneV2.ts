@@ -119,6 +119,20 @@ export interface AutotuneLogInput {
     noiseFloorKnown: boolean;
     /** Import order (higher = imported later). The blackbox header carries no usable date. */
     order?: number;
+    /**
+     * Set by uniqueFlights on the file kept for a flight carried by several files: the identity of
+     * every one of them (this file included), so a later comparison still sees the files dropped
+     * as copies, and the fragments that linked them.
+     */
+    flightGroup?: readonly FlightFragment[];
+}
+
+/** What identifies one file's flight (logInput.ts sameFlight): file, sample fingerprint, gyro windows. */
+export interface FlightFragment {
+    sha256: string;
+    logIndex: number;
+    fingerprint: string;
+    windows: ReadonlySet<string>;
 }
 
 export interface AutotuneV2Input {
@@ -421,11 +435,12 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     );
 
     // Cross-log plant reproducibility: only an independent flight of this craft, firmware and
-    // configuration counts (never the primary itself, under any file name or hash).
+    // configuration counts (never the primary itself, under any file name or hash, nor a fragment
+    // of the primary's flight linked to it through another fragment among the inputs).
     const crossLogPlant: AutotuneV2Result["crossLogPlant"] = {};
     const crossLogRejected: string[] = [];
     const references = input.others.filter((other) => {
-        const issues = crossLogReferenceIssues(log, other);
+        const issues = crossLogReferenceIssues(log, other, input.others);
         crossLogRejected.push(...issues);
         return !issues.length;
     });
