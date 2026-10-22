@@ -50,6 +50,10 @@ export interface FcIdentity {
     apiVersion: string;
     /** MSP_STATUS_EX mode bit 0. */
     armed: boolean;
+    /** MSP_STATUS_EX active PID profile (currentPidProfile); null when not reported validly. */
+    pidProfile: number | null;
+    /** MSP_STATUS_EX PID_PROFILE_COUNT; null when not reported validly. */
+    pidProfileCount: number | null;
 }
 
 export function parseDeviceUid(hex: string | undefined): [number, number, number] | null {

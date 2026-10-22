@@ -64,14 +64,35 @@ function escapeHtml(s: string | undefined) {
     return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
 
-export function changesHtml(rows: AbsoluteDiffRow[]): string {
+/**
+ * Every value that changes, and where it lands: the PID profile written (`pidProfile`, the
+ * firmware index; shown 1-based as in the Betaflight interface) or every profile (global filters).
+ */
+export function changesHtml(rows: AbsoluteDiffRow[], pidProfile?: number | null): string {
     if (!rows.length) return `<p>${escapeHtml(i18n.getMessage("gyroflightPreviewNoChange"))}</p>`;
+    const where = (r: AbsoluteDiffRow) =>
+        r.scope === "global"
+            ? i18n.getMessage("gyroflightScopeGlobal")
+            : i18n.getMessage("gyroflightScopeProfile", [pidProfile == null ? "?" : String(pidProfile + 1)]);
     const body = rows
-        .map((r) => `<tr><td>${escapeHtml(r.key)}</td><td>${r.from ?? "?"}</td><td>${r.to ?? "?"}</td></tr>`)
+        .map(
+            (r) =>
+                `<tr><td>${escapeHtml(r.key)}</td><td>${escapeHtml(where(r))}</td><td>${r.from ?? "?"}</td><td>${
+                    r.to ?? "?"
+                }</td></tr>`,
+        )
         .join("");
     return `<table><thead><tr><th>${escapeHtml(i18n.getMessage("gyroflightCompareSetting"))}</th><th>${escapeHtml(
-        i18n.getMessage("gyroflightPreviewNow"),
-    )}</th><th>${escapeHtml(i18n.getMessage("gyroflightPreviewAfter"))}</th></tr></thead><tbody>${body}</tbody></table>`;
+        i18n.getMessage("gyroflightCompareScope"),
+    )}</th><th>${escapeHtml(i18n.getMessage("gyroflightPreviewNow"))}</th><th>${escapeHtml(
+        i18n.getMessage("gyroflightPreviewAfter"),
+    )}</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function profileNote(pidProfile: number | null | undefined): string {
+    return `<p>${escapeHtml(
+        i18n.getMessage("gyroflightV2ProfileNote", [pidProfile == null ? "?" : String(pidProfile + 1)]),
+    )}</p>`;
 }
 
 function failure(action: "apply" | "restore", err: unknown): AutotuneV2Outcome {
@@ -222,7 +243,10 @@ export function useAutotuneV2() {
             }
             const confirmed = await dialog.showYesNo(
                 i18n.getMessage("gyroflightV2ApplyConfirmTitle"),
-                `${i18n.getMessage("gyroflightV2ApplyConfirmText")}${changesHtml(p.changes)}<p>${i18n.getMessage("gyroflightV2ApplyProcedure")}</p>`,
+                `${i18n.getMessage("gyroflightV2ApplyConfirmText")}${profileNote(p.expected.pidProfile)}${changesHtml(
+                    p.changes,
+                    p.expected.pidProfile,
+                )}<p>${i18n.getMessage("gyroflightV2ApplyProcedure")}</p>`,
                 {
                     destructive: true,
                     yesText: i18n.getMessage("gyroflightV2ApplyYes"),
@@ -253,7 +277,9 @@ export function useAutotuneV2() {
             const p = await previewAbsoluteRestore(backup.id);
             const confirmed = await dialog.showYesNo(
                 i18n.getMessage("gyroflightRestoreConfirmTitle"),
-                `${i18n.getMessage("gyroflightRestoreConfirmText", [backup.createdAt, backup.board, backup.firmware])}${changesHtml(p.changes)}`,
+                `${i18n.getMessage("gyroflightRestoreConfirmText", [backup.createdAt, backup.board, backup.firmware])}${profileNote(
+                    p.backup.absolute?.pidProfile,
+                )}${changesHtml(p.changes, p.backup.absolute?.pidProfile)}`,
                 { destructive: true, yesText: i18n.getMessage("gyroflightRestore"), noText: i18n.getMessage("cancel") },
             );
             if (!confirmed) return "cancelled";
