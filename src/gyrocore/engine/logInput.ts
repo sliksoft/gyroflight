@@ -182,15 +182,107 @@ export function flightFingerprint(log: AutotuneLogInput): string {
     return fp;
 }
 
-/** Same log of the same file, or the same flight carried by another file. */
-export function sameFlight(a: AutotuneLogInput, b: AutotuneLogInput): boolean {
-    return (a.sha256 === b.sha256 && a.logIndex === b.logIndex) || flightFingerprint(a) === flightFingerprint(b);
+/**
+ * Window identity of a flight, independent of file boundaries and of the time base: the gyroADC
+ * stream is cut at content-defined anchors (a sample whose own hash is 0 mod `anchorModulo`), and
+ * each window of `samples` samples from an anchor is hashed. A trimmed, re-exported or time-shifted
+ * copy of the same flight cuts at the same anchors inside the shared stretch and so carries the
+ * same window hashes; two independent flights never share a window, because a window is 256
+ * samples × 3 axes of gyro noise equal to 1e-3 (a chance collision of the 64-bit hash aside).
+ *
+ * Windows in which no axis moves more than `minSpan` (constant / clipped / zero stretches, as on
+ * the bench or when a log was padded) are not counted: any two logs could share those.
+ */
+export const FLIGHT_WINDOW = Object.freeze({
+    /** Samples per window: 256 (64 ms at 4 kHz, 32 ms at 8 kHz). */
+    samples: 256,
+    /** Anchor density: about one window start per 64 samples. */
+    anchorModulo: 64,
+    /** Gyro quantum before hashing (an exact copy agrees to it; a re-identification does not). */
+    quantum: 1e-3,
+    /** Smallest peak-to-peak gyro movement (log units) of any axis for a window to count. */
+    minSpan: 1,
+    /**
+     * Shared active windows that make two logs the same flight: 4 (≈ 0.26 s of bit-identical gyro
+     * at 4 kHz, a quarter of the shortest CHIRP segment the engine analyses). Trimming or shifting
+     * a flight leaves hundreds; independent flights leave none.
+     */
+    minShared: 4,
+});
+
+const windowSets = new WeakMap<object, Set<string>>();
+
+/** The active window hashes of a flight (cached per channel set). */
+export function flightWindows(log: AutotuneLogInput): Set<string> {
+    const cached = windowSets.get(log.channels);
+    if (cached) return cached;
+    const { samples, anchorModulo, quantum, minSpan } = FLIGHT_WINDOW;
+    const [g0, g1, g2] = log.channels.gyroAdc;
+    const n = Math.min(g0.length, g1.length, g2.length);
+    const q = (v: number) => (Number.isFinite(v) ? Math.round(v / quantum) | 0 : 0x7fffffff);
+    const out = new Set<string>();
+    for (let k = 0; k + samples <= n; k++) {
+        const a = Math.imul(q(g0[k]) ^ Math.imul(q(g1[k]), 0x9e3779b1) ^ Math.imul(q(g2[k]), 0x85ebca6b), 0x27d4eb2f);
+        if ((a >>> 0) % anchorModulo !== 0) continue;
+        let span = 0;
+        for (const g of [g0, g1, g2]) {
+            let lo = Infinity;
+            let hi = -Infinity;
+            for (let j = k; j < k + samples; j++) {
+                const v = g[j];
+                if (v < lo) lo = v;
+                if (v > hi) hi = v;
+            }
+            span = Math.max(span, hi - lo);
+        }
+        if (!(span > minSpan)) {
+            // A flat stretch anchors at every sample; its windows are not counted anyway.
+            k += samples / 2 - 1;
+            continue;
+        }
+        let h1 = 0x811c9dc5;
+        let h2 = 0x01000193;
+        for (const g of [g0, g1, g2]) {
+            for (let j = k; j < k + samples; j++) {
+                const x = q(g[j]);
+                h1 = Math.imul(h1 ^ x, 0x01000193);
+                h2 = Math.imul(h2 ^ x, 0x5bd1e995);
+            }
+        }
+        out.add(`${(h1 >>> 0).toString(16)}:${(h2 >>> 0).toString(16)}`);
+    }
+    windowSets.set(log.channels, out);
+    return out;
 }
 
-/** Every flight once (the first occurrence is kept, in input order). */
+/** Active windows two flights have in common. */
+export function sharedWindows(a: AutotuneLogInput, b: AutotuneLogInput): number {
+    const wa = flightWindows(a);
+    const wb = flightWindows(b);
+    const [small, large] = wa.size <= wb.size ? [wa, wb] : [wb, wa];
+    let n = 0;
+    for (const w of small) if (large.has(w)) n++;
+    return n;
+}
+
+/**
+ * Same log of the same file, the same samples under another file, or the same flight trimmed,
+ * re-exported or time-shifted (FLIGHT_WINDOW.minShared shared active windows or more).
+ */
+export function sameFlight(a: AutotuneLogInput, b: AutotuneLogInput): boolean {
+    if (a.sha256 === b.sha256 && a.logIndex === b.logIndex) return true;
+    if (flightFingerprint(a) === flightFingerprint(b)) return true;
+    return sharedWindows(a, b) >= FLIGHT_WINDOW.minShared;
+}
+
+/** Every flight once: of several files carrying one flight the longest is kept, in input order. */
 export function uniqueFlights(logs: AutotuneLogInput[]): AutotuneLogInput[] {
     const out: AutotuneLogInput[] = [];
-    for (const l of logs) if (!out.some((o) => sameFlight(o, l))) out.push(l);
+    for (const l of logs) {
+        const i = out.findIndex((o) => sameFlight(o, l));
+        if (i < 0) out.push(l);
+        else if (l.channels.timeUs.length > out[i].channels.timeUs.length) out[i] = l;
+    }
     return out;
 }
 

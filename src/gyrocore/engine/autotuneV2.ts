@@ -438,7 +438,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             const ctl = analyzeAxisController(other, oh, ai, oc, flightMask(other.channels.rcThrottle));
             if (!ctl) continue;
             const otherLoop = buildAxisLoop(ai, oc.tf, ctl.cfg, null, false, false);
-            crossLogPlant[name] = assessCrossLogPlantReproducibility(axes[name]!.loop.plant, otherLoop.plant);
+            const cmp = assessCrossLogPlantReproducibility(axes[name]!.loop.plant, otherLoop.plant);
+            // Two independent flights never identify the same plant to the last bit: an exact
+            // match is the same measurement again (a copy the window identity did not catch).
+            if (cmp.n > 0 && cmp.meanAbsGRel === 0) {
+                crossLogRejected.push(`cross_log_identical_measurement:${other.sha256}:${other.logIndex}`);
+                continue;
+            }
+            crossLogPlant[name] = cmp;
             break;
         }
     }
