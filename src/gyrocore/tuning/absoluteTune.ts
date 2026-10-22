@@ -191,14 +191,37 @@ function pidRowKey(row: number, term: number): string {
     return row < 3 ? `${TERMS[term]}_${AXIS_NAMES[row]}` : `pid_row${row}_${TERMS[term]}`;
 }
 
+/** A decoded value, or NaN when the reply did not carry it (MspDataView reads null past the end). */
+function present(v: unknown): number {
+    return v === null || v === undefined || v === "" ? Number.NaN : Number(v);
+}
+
 function readStoreField(blocks: StoreBlocks, f: AbsoluteField): number {
     if (f.group === "advanced") {
-        const v = Number(blocks.advancedTuning[f.store]);
+        const v = present(blocks.advancedTuning[f.store]);
         return f.key === "tpa_rate" ? Math.round(v * 100) : v;
     }
     const [name, idx] = f.store.split(":");
     const raw = blocks.filterConfig[name];
-    return Number(idx === undefined ? raw : Array.isArray(raw) ? raw[Number(idx)] : Number.NaN);
+    return present(idx === undefined ? raw : Array.isArray(raw) ? raw[Number(idx)] : undefined);
+}
+
+/**
+ * Smallest reply payload (bytes) that carries every field the absolute route reads, per MSP API,
+ * counted from Betaflight's msp.c. A CRC-valid shorter reply is refused: its decoder would have
+ * stored null, 0 or left a previous value in place.
+ */
+export function minReplyBytes(block: "pid" | "advanced" | "filter" | "simplified", apiVersion: string): number {
+    switch (block) {
+        case "pid":
+            return 15; // PID_ITEM_COUNT (5) × P, I, D
+        case "advanced":
+            return 61; // through tpa_breakpoint (API 1.45+)
+        case "filter":
+            return apiAtLeast(apiVersion, API_RPM_EXT) ? 56 : 49; // + RPM fade / Q / weights from 1.48
+        case "simplified":
+            return 53; // PID, D-term and gyro slider groups
+    }
 }
 
 /** AbsoluteValues from the decoded store blocks (after fresh MSP_PID / _PID_ADVANCED / _FILTER_CONFIG reads). */
@@ -266,6 +289,10 @@ export function changeSetIssues(change: AbsoluteValues, before: AbsoluteValues, 
     const keys = Object.keys(change);
     if (!keys.length) {
         out.push("absolute:empty_change");
+    }
+    // Every value the write starts from must have been read: never write over a missing one.
+    if (fieldsForApi(apiVersion).some((f) => !Number.isInteger(before[f.key]))) {
+        out.push("absolute:snapshot_incomplete");
     }
     for (const key of keys) {
         const f = BY_KEY.get(key);

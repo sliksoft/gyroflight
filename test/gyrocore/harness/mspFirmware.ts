@@ -81,6 +81,11 @@ export interface FirmwareFc {
     errorAfterDecode: Set<number>;
     /** Extra config fixes on the EEPROM reload (stands in for validateAndFixConfig paths not modelled). */
     adjustOnReload?: (s: FirmwareState) => void;
+    /**
+     * A CRC-valid reply that is shorter than the firmware's: this many trailing payload bytes of
+     * the code's reply are dropped (the frame itself is intact, so the transport accepts it).
+     */
+    truncate: Partial<Record<number, number>>;
 }
 
 const clone = (s: FirmwareState): FirmwareState => structuredClone(s);
@@ -197,6 +202,7 @@ export function createFirmwareFc(overrides: Partial<FirmwareFc> = {}): FirmwareF
         calls: [],
         ignoreWrite: new Set(),
         errorAfterDecode: new Set(),
+        truncate: {},
         ...overrides,
         ram,
     };
@@ -523,9 +529,12 @@ function validateAndFixConfig(s: FirmwareState) {
 
 // --- the MSP.promise stand-in --------------------------------------------------
 
-function deliver(code: number, bytes: number[]) {
+/** Decode a reply through the real MSPHelper; the resolved response carries its length, as msp.ts does. */
+function deliver(fc: FirmwareFc, code: number, full: number[]) {
+    const bytes = full.slice(0, Math.max(0, full.length - (fc.truncate[code] ?? 0)));
     const view = new MspDataView(Uint8Array.from(bytes).buffer);
     mspHelper.process_data({ code, dataView: view, crcError: false, unsupported: 0, callbacks: [] });
+    return { command: code, crcError: false, unsupported: 0, length: bytes.length };
 }
 
 function currentFault(fc: FirmwareFc, code: number): Fault {
@@ -570,17 +579,13 @@ export async function firmwarePromise(fc: FirmwareFc, code: number, data?: numbe
             store.config.configStateFlag = fc.rebootRequired ? 1 : 0;
             return ok;
         case MSPCodes.MSP_PID:
-            deliver(code, encodePid(fc.ram));
-            return ok;
+            return deliver(fc, code, encodePid(fc.ram));
         case MSPCodes.MSP_PID_ADVANCED:
-            deliver(code, encodePidAdvanced(fc.ram));
-            return ok;
+            return deliver(fc, code, encodePidAdvanced(fc.ram));
         case MSPCodes.MSP_FILTER_CONFIG:
-            deliver(code, encodeFilterConfig(fc.ram, fc.apiVersion));
-            return ok;
+            return deliver(fc, code, encodeFilterConfig(fc.ram, fc.apiVersion));
         case MSPCodes.MSP_SIMPLIFIED_TUNING:
-            deliver(code, encodeSimplified(fc.ram));
-            return ok;
+            return deliver(fc, code, encodeSimplified(fc.ram));
         case MSPCodes.MSP_SET_PID:
         case MSPCodes.MSP_SET_PID_ADVANCED:
         case MSPCodes.MSP_SET_FILTER_CONFIG:

@@ -98,6 +98,7 @@ import {
     expectedValues,
     liveDiffersFromLog,
     loggedAbsoluteValues,
+    minReplyBytes,
     slidersActive,
     slidersOff,
     valuesFromStore,
@@ -151,7 +152,7 @@ export interface TuneWriteResult {
     readback: TuneSnapshot;
 }
 
-type MspReply = { crcError?: boolean; unsupported?: number | boolean } | null | undefined;
+type MspReply = { crcError?: boolean; unsupported?: number | boolean; length?: number } | null | undefined;
 
 /** One MSP read that must answer validly; throws `reason` otherwise (no response, CRC error, refused). */
 async function readOk(code: number, reason: string, data?: number[]): Promise<void> {
@@ -549,18 +550,45 @@ function storeBlocks(): StoreBlocks {
     };
 }
 
-/** Fresh reads of the four blocks; any missing, refused or corrupt reply blocks with `reason`. */
+const ABSOLUTE_READ_BLOCK: Record<number, Parameters<typeof minReplyBytes>[0]> = {
+    [MSPCodes.MSP_PID]: "pid",
+    [MSPCodes.MSP_PID_ADVANCED]: "advanced",
+    [MSPCodes.MSP_FILTER_CONFIG]: "filter",
+    [MSPCodes.MSP_SIMPLIFIED_TUNING]: "simplified",
+};
+
+/**
+ * One read of a tuning block that must answer validly and completely: a CRC-valid reply shorter
+ * than the firmware's layout for this API leaves null, 0 or stale values in the store.
+ */
+async function readFull(code: number, reason: string, apiVersion: string): Promise<void> {
+    const reply = (await MSP.promise(code)) as MspReply;
+    if (!reply || reply.crcError || reply.unsupported) {
+        throw new ApplyBlockedError([reason]);
+    }
+    const min = minReplyBytes(ABSOLUTE_READ_BLOCK[code], apiVersion);
+    if (!(typeof reply.length === "number" && reply.length >= min)) {
+        throw new ApplyBlockedError([reason, `fc:reply_too_short:${code}:${reply.length ?? "?"}<${min}`]);
+    }
+}
+
+/** Fresh reads of the four blocks; any missing, refused, short or corrupt reply blocks with `reason`. */
 async function readAbsoluteSnapshot(reason: string, apiVersion: string): Promise<AbsoluteSnapshot> {
-    await readOk(MSPCodes.MSP_SIMPLIFIED_TUNING, reason);
-    await readOk(MSPCodes.MSP_PID, reason);
-    await readOk(MSPCodes.MSP_PID_ADVANCED, reason);
-    await readOk(MSPCodes.MSP_FILTER_CONFIG, reason);
+    await readFull(MSPCodes.MSP_SIMPLIFIED_TUNING, reason, apiVersion);
+    await readFull(MSPCodes.MSP_PID, reason, apiVersion);
+    await readFull(MSPCodes.MSP_PID_ADVANCED, reason, apiVersion);
+    await readFull(MSPCodes.MSP_FILTER_CONFIG, reason, apiVersion);
     const fcStore = useFlightControllerStore();
-    return {
+    const snapshot: AbsoluteSnapshot = {
         apiVersion,
         sliders: pick(fcStore.tuningSliders as unknown as Record<string, unknown>, SNAPSHOT_SLIDER_KEYS),
         values: valuesFromStore(storeBlocks(), apiVersion),
     };
+    const issues = absoluteSnapshotIssues(snapshot);
+    if (issues.length) {
+        throw new ApplyBlockedError([reason, ...issues.map((i) => `fc:snapshot_incomplete:${i}`)]);
+    }
+    return snapshot;
 }
 
 /** One write; the firmware's error reply (MSP_RESULT_ERROR) counts as a failed write. */
@@ -623,8 +651,8 @@ async function writeAbsoluteBlocks(
     try {
         if (slidersChange || all) {
             // MSP_SET_SIMPLIFIED_TUNING also stores the LPF values it carries: send the live ones.
-            await readOk(MSPCodes.MSP_SIMPLIFIED_TUNING, "fc:live_readback_missing");
-            await readOk(MSPCodes.MSP_FILTER_CONFIG, "fc:live_readback_missing");
+            await readFull(MSPCodes.MSP_SIMPLIFIED_TUNING, "fc:live_readback_missing", api);
+            await readFull(MSPCodes.MSP_FILTER_CONFIG, "fc:live_readback_missing", api);
             Object.assign(fcStore.tuningSliders, all ? target.sliders : pick(target.sliders, SLIDER_MODE_KEYS));
             if (all) {
                 valuesToStore(target.values, storeBlocks(), api);
@@ -640,7 +668,8 @@ async function writeAbsoluteBlocks(
             if (!groups.has(group as never)) {
                 continue;
             }
-            await readOk(read, "fc:live_readback_missing");
+            // Each SET encodes the whole block: start from a complete fresh read of it.
+            await readFull(read, "fc:live_readback_missing", api);
             valuesToStore(target.values, storeBlocks(), api);
             await writeOk(write);
         }
