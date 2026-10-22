@@ -136,7 +136,8 @@ describe("P2-03: a failed Apply says where, why, what is saved and what the FC h
         expect(box.textContent).toContain("gyroflightV2Saved_no");
         const unknown = q(box, '[data-gyrocore="v2-fc-unknown"]')!;
         expect(unknown).not.toBeNull();
-        expect(unknown.textContent).toContain("gyroflightV2CurrentUnknown");
+        // The SET was sent and its result is unknown (final review P3-b wording for stage "write").
+        expect(unknown.textContent).toContain("gyroflightV2SetResultUnknown");
         expect(q(box, '[data-gyrocore="v2-partial"]')).toBeNull();
     }, 600_000);
 

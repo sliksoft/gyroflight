@@ -70,6 +70,8 @@ export type AutotuneV2Outcome =
           changedFromBackup: string[] | null;
           backupId: string | null;
           message: string;
+          /** A PID profile switch the write ran into after a SET: `to` may hold the write in RAM. */
+          profileSwitch?: { from: number; to: number | null } | null;
           at: string;
       };
 

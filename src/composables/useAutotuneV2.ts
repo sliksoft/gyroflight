@@ -33,6 +33,7 @@ import {
     applyAbsoluteTune,
     previewAbsoluteRestore,
     previewAbsoluteTune,
+    profileSwitchOf,
     restoreAbsoluteTune,
     TuneWriteError,
     type AbsoluteWriteResult,
@@ -108,6 +109,9 @@ function failure(action: "apply" | "restore", err: unknown): AutotuneV2Outcome {
             changedFromBackup: err.changedFromBackup,
             backupId: err.backupId,
             message: err.message,
+            // A profile switch the route ran into after a SET: that other profile may hold the
+            // write in RAM (the panel says which, and what to do).
+            profileSwitch: err.stage === "prepare" ? null : profileSwitchOf(err.message),
             at,
         };
     }
