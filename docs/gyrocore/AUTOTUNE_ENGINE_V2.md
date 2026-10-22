@@ -46,6 +46,14 @@ loop gain T ≈ C_ref/C_fb hides plant errors). Tolerance: twice the baseline-re
 must be resolvable; both logs distinct; the record has an integrity hash. Only passing records are stored (per craft,
 localStorage).
 
+In the app (`engine/verifiedTuneFromLogs.ts`, panel button _Create Verified Tune from these logs_): the imported logs are
+grouped by logged tune; the tune imported last is the candidate, the one before it the baseline, a second baseline log the
+repeat. With a record, the engine works from the candidate tune and keeps its PID search inside the confirmed change.
+
+The v1 slider route reads the same record but stays blocked: GyroCore Safety's slider path is unchanged (it still returns
+`missing_required_analysis`) and the composite phase-margin hold remains. The satisfiable contract is the absolute
+route's; this was deliberate.
+
 ## Engine (`gyrocore/engine/`)
 
 | Module                    | Content                                                                                                                                                                                           |
