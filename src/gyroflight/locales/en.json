@@ -699,6 +699,12 @@
     "gyroflightPart_resonances": { "message": "Blackbox FFT and resonances" },
     "gyroflightCompareNone": { "message": "No global recommendation to compare yet." },
     "gyroflightCompareSetting": { "message": "Setting" },
+    "gyroflightCompareScope": { "message": "Applies to" },
+    "gyroflightScopeProfile": { "message": "PID profile $1" },
+    "gyroflightScopeGlobal": { "message": "all PID profiles (global)" },
+    "gyroflightV2ProfileNote": {
+        "message": "PID profile $1 is active on the flight controller. PID, feedforward, D-max, D-term and slider values are written to that profile only; gyro, dynamic notch and RPM filter values are global and apply to every profile. The write stops if the active profile changes."
+    },
     "gyroflightCompareCurrent": { "message": "Current (logged)" },
     "gyroflightCompareProposed": { "message": "Proposed" },
     "gyroflightCompareByFc": { "message": "calculated by the flight controller at Apply" },

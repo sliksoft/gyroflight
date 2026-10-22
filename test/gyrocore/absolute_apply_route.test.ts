@@ -158,8 +158,8 @@ describe("preview: read-only", () => {
         const pv = await previewAbsoluteTune(proposal());
         const sliderRows = pv.changes.filter((c) => c.group === "slider");
         expect(sliderRows).toEqual([
-            { key: "slider_pids_mode", group: "slider", from: 2, to: 0 },
-            { key: "slider_gyro_filter", group: "slider", from: 1, to: 0 },
+            { key: "slider_pids_mode", group: "slider", scope: "profile", from: 2, to: 0 },
+            { key: "slider_gyro_filter", group: "slider", scope: "global", from: 1, to: 0 },
         ]);
         expect(writes()).toEqual([]);
     });

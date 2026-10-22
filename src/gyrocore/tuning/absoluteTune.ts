@@ -49,6 +49,12 @@ export interface AbsoluteField {
     max: number;
     /** Only present from this MSP API on. */
     minApi?: string;
+    /**
+     * Where the firmware keeps it: "profile" in the active pidProfile_t (MSP writes go to
+     * currentPidProfile), "global" in gyroConfig / dynNotchConfig / rpmFilterConfig, shared by
+     * every PID profile (msp.c MSP_PID, MSP_PID_ADVANCED, MSP_FILTER_CONFIG).
+     */
+    scope: "profile" | "global";
 }
 
 const AXIS_NAMES = ["roll", "pitch", "yaw"] as const;
@@ -64,14 +70,18 @@ const PID_FIELDS: AbsoluteField[] = AXIS_NAMES.flatMap((axis, row) =>
         proposable: true,
         min: 0,
         max: 250,
+        scope: "profile" as const,
     })),
 );
 
 function adv(key: string, store: string, max: number, proposable = false, min = 0): AbsoluteField {
-    return { key, group: "advanced", store, proposable, min, max };
+    return { key, group: "advanced", store, proposable, min, max, scope: "profile" };
 }
+/** MSP_FILTER_CONFIG: the D-term and yaw fields are pidProfile_t, the rest global (msp.c). */
+const PROFILE_FILTER_KEYS = /^(dterm_|yaw_lowpass_hz$)/;
 function flt(key: string, store: string, max: number, proposable = false, min = 0, minApi?: string): AbsoluteField {
-    return { key, group: "filter", store, proposable, min, max, ...(minApi ? { minApi } : {}) };
+    const scope = PROFILE_FILTER_KEYS.test(key) ? "profile" : "global";
+    return { key, group: "filter", store, proposable, min, max, scope, ...(minApi ? { minApi } : {}) };
 }
 
 /** Firmware-held MSP_PID_ADVANCED fields, in firmware order (msp.c MSP_PID_ADVANCED). */
@@ -159,6 +169,13 @@ export function absoluteField(key: string): AbsoluteField | undefined {
     return BY_KEY.get(key);
 }
 
+/** Scope of a value or slider key: PID rows, PID / D-term sliders are per profile; gyro sliders global. */
+export function scopeOf(key: string): "profile" | "global" {
+    if (/^pid_row\d+_[pid]$/.test(key)) return "profile";
+    if (key.startsWith("slider_")) return key.startsWith("slider_gyro_") ? "global" : "profile";
+    return BY_KEY.get(key)?.scope ?? "profile";
+}
+
 /** The fields this MSP API carries. */
 export function fieldsForApi(apiVersion: string): AbsoluteField[] {
     return ABSOLUTE_FIELDS.filter((f) => !f.minApi || apiAtLeast(apiVersion, f.minApi));
@@ -175,6 +192,11 @@ export type AbsoluteValues = Record<string, number>;
 
 export interface AbsoluteSnapshot {
     apiVersion: string;
+    /**
+     * The PID profile the profile-scoped values were read from (MSP_STATUS_EX). Required for a
+     * Restore; absent only in backups taken before the route recorded it.
+     */
+    pidProfile?: number;
     /** MSP_SIMPLIFIED_TUNING: the modes and sliders (written back by Restore). */
     sliders: Record<string, number>;
     values: AbsoluteValues;
@@ -348,6 +370,8 @@ export function changedGroups(before: AbsoluteValues, after: AbsoluteValues): Se
 export interface AbsoluteDiffRow {
     key: string;
     group: AbsoluteGroup | "slider";
+    /** "profile": the PID profile being written; "global": every profile (scopeOf). */
+    scope: "profile" | "global";
     from: number | undefined;
     to: number | undefined;
 }
@@ -357,12 +381,18 @@ export function absoluteDiff(from: AbsoluteSnapshot, to: AbsoluteSnapshot): Abso
     const rows: AbsoluteDiffRow[] = [];
     for (const k of new Set([...Object.keys(from.sliders), ...Object.keys(to.sliders)])) {
         if (from.sliders[k] !== to.sliders[k]) {
-            rows.push({ key: k, group: "slider", from: from.sliders[k], to: to.sliders[k] });
+            rows.push({ key: k, group: "slider", scope: scopeOf(k), from: from.sliders[k], to: to.sliders[k] });
         }
     }
     for (const k of new Set([...Object.keys(from.values), ...Object.keys(to.values)])) {
         if (from.values[k] !== to.values[k]) {
-            rows.push({ key: k, group: groupOf(k) ?? "advanced", from: from.values[k], to: to.values[k] });
+            rows.push({
+                key: k,
+                group: groupOf(k) ?? "advanced",
+                scope: scopeOf(k),
+                from: from.values[k],
+                to: to.values[k],
+            });
         }
     }
     return rows;
@@ -393,7 +423,7 @@ export function absoluteHash(s: AbsoluteSnapshot): string {
         Object.keys(o)
             .sort()
             .map((k) => [k, o[k]]);
-    const text = JSON.stringify([s.apiVersion, sorted(s.sliders), sorted(s.values)]);
+    const text = JSON.stringify([s.apiVersion, s.pidProfile ?? null, sorted(s.sliders), sorted(s.values)]);
     let h = 0x811c9dc5;
     for (let i = 0; i < text.length; i++) {
         h ^= text.charCodeAt(i);
@@ -408,6 +438,7 @@ export function absoluteSnapshotIssues(s: AbsoluteSnapshot | null | undefined): 
         return ["absolute_snapshot_missing"];
     }
     const out: string[] = [];
+    if (!(Number.isInteger(s.pidProfile) && s.pidProfile! >= 0)) out.push("pid_profile");
     for (const k of SLIDER_MODE_KEYS) {
         if (!Number.isInteger(s.sliders?.[k])) out.push(`slider:${k}`);
     }

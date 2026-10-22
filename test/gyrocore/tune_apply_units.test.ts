@@ -54,6 +54,8 @@ const AIR65_FC: FcIdentity = {
     version: "2026.6.2",
     apiVersion: "1.48.0",
     armed: false,
+    pidProfile: 0,
+    pidProfileCount: 4,
 };
 
 describe("FC identity", () => {

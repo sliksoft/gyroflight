@@ -176,6 +176,11 @@ async function readIdentity(): Promise<FcIdentity> {
     }
     const c = fcStore.config;
     const uid = Array.isArray(c.uid) && c.uid.length === 3 && c.uid.every(Number.isFinite) ? c.uid : null;
+    const count = Number.isInteger(c.numProfiles) && c.numProfiles > 0 ? Number(c.numProfiles) : null;
+    const profile =
+        Number.isInteger(c.profile) && c.profile >= 0 && (count === null || c.profile < count)
+            ? Number(c.profile)
+            : null;
     return {
         uid: uid ? ([uid[0], uid[1], uid[2]] as [number, number, number]) : null,
         manufacturerId: String(c.manufacturerId ?? ""),
@@ -184,6 +189,8 @@ async function readIdentity(): Promise<FcIdentity> {
         version: String(c.flightControllerVersion ?? ""),
         apiVersion: String(c.apiVersion ?? ""),
         armed: bit_check(Number(c.mode ?? 0), 0),
+        pidProfile: profile,
+        pidProfileCount: count,
     };
 }
 
@@ -572,15 +579,36 @@ async function readFull(code: number, reason: string, apiVersion: string): Promi
     }
 }
 
-/** Fresh reads of the four blocks; any missing, refused, short or corrupt reply blocks with `reason`. */
-async function readAbsoluteSnapshot(reason: string, apiVersion: string): Promise<AbsoluteSnapshot> {
+/**
+ * MSP_STATUS_EX again: the active PID profile is still `profile` (MSP_PID, _PID_ADVANCED and the
+ * D-term part of MSP_FILTER_CONFIG act on whichever profile is active) and, before a write, the
+ * craft is still disarmed. Anything else stops the transaction.
+ */
+async function assertPidProfile(profile: number, { disarmed }: { disarmed: boolean }): Promise<void> {
+    await readOk(MSPCodes.MSP_STATUS_EX, "fc:status_missing");
+    const c = useFlightControllerStore().config;
+    const blocked: string[] = [];
+    if (c.profile !== profile) blocked.push(`fc:pid_profile_changed:${profile}->${c.profile ?? "?"}`);
+    if (disarmed && bit_check(Number(c.mode ?? 0), 0)) blocked.push("fc:armed");
+    if (blocked.length) {
+        throw new ApplyBlockedError(blocked);
+    }
+}
+
+/**
+ * Fresh reads of the four blocks of PID profile `profile`; any missing, refused, short or corrupt
+ * reply, or a profile switch while reading, blocks with `reason`.
+ */
+async function readAbsoluteSnapshot(reason: string, apiVersion: string, profile: number): Promise<AbsoluteSnapshot> {
     await readFull(MSPCodes.MSP_SIMPLIFIED_TUNING, reason, apiVersion);
     await readFull(MSPCodes.MSP_PID, reason, apiVersion);
     await readFull(MSPCodes.MSP_PID_ADVANCED, reason, apiVersion);
     await readFull(MSPCodes.MSP_FILTER_CONFIG, reason, apiVersion);
+    await assertPidProfile(profile, { disarmed: false });
     const fcStore = useFlightControllerStore();
     const snapshot: AbsoluteSnapshot = {
         apiVersion,
+        pidProfile: profile,
         sliders: pick(fcStore.tuningSliders as unknown as Record<string, unknown>, SNAPSHOT_SLIDER_KEYS),
         values: valuesFromStore(storeBlocks(), apiVersion),
     };
@@ -603,10 +631,16 @@ function changedFrom(backup: AbsoluteSnapshot, now: AbsoluteSnapshot): string[] 
     return absoluteDiff(backup, now).map((r) => `${r.group}:${r.key} ${r.from}→${r.to}`);
 }
 
-/** After a failed write: what is on the craft now, against the backup (null when unreadable). */
+/**
+ * After a failed write: what is on the craft now, against the backup. null when unreadable, or
+ * when another PID profile is active (the written one cannot be read without switching back).
+ */
 async function partialWriteState(backup: AbsoluteSnapshot): Promise<string[] | null> {
     try {
-        return changedFrom(backup, await readAbsoluteSnapshot("fc:verify_readback_missing", backup.apiVersion));
+        return changedFrom(
+            backup,
+            await readAbsoluteSnapshot("fc:verify_readback_missing", backup.apiVersion, backup.pidProfile!),
+        );
     } catch {
         return null;
     }
@@ -646,10 +680,12 @@ async function writeAbsoluteBlocks(
 ): Promise<void> {
     const fcStore = useFlightControllerStore();
     const api = target.apiVersion;
+    const profile = current.pidProfile!;
     const groups = all ? new Set(["pid", "advanced", "filter"]) : changedGroups(current.values, target.values);
     const slidersChange = SLIDER_MODE_KEYS.some((k) => current.sliders[k] !== target.sliders[k]);
     try {
         if (slidersChange || all) {
+            await assertPidProfile(profile, { disarmed: true });
             // MSP_SET_SIMPLIFIED_TUNING also stores the LPF values it carries: send the live ones.
             await readFull(MSPCodes.MSP_SIMPLIFIED_TUNING, "fc:live_readback_missing", api);
             await readFull(MSPCodes.MSP_FILTER_CONFIG, "fc:live_readback_missing", api);
@@ -668,7 +704,8 @@ async function writeAbsoluteBlocks(
             if (!groups.has(group as never)) {
                 continue;
             }
-            // Each SET encodes the whole block: start from a complete fresh read of it.
+            // Each SET encodes the whole block: start from a complete fresh read of it, in the same profile.
+            await assertPidProfile(profile, { disarmed: true });
             await readFull(read, "fc:live_readback_missing", api);
             valuesToStore(target.values, storeBlocks(), api);
             await writeOk(write);
@@ -684,9 +721,10 @@ async function verifyAbsoluteAndSave(
     backup: AbsoluteSnapshot,
     backupId: string,
 ): Promise<Omit<AbsoluteWriteResult, "status" | "backupId" | "expected">> {
+    const profile = expected.pidProfile!;
     let readback: AbsoluteSnapshot;
     try {
-        readback = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion);
+        readback = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion, profile);
     } catch (err) {
         throw new TuneWriteError("verify", "no", backupId, errorText(err), [], null);
     }
@@ -701,6 +739,12 @@ async function verifyAbsoluteAndSave(
             changedFrom(backup, readback),
         );
     }
+    try {
+        // MSP_EEPROM_WRITE saves every profile: only while the verified one is still active.
+        await assertPidProfile(profile, { disarmed: true });
+    } catch (err) {
+        throw new TuneWriteError("verify", "no", backupId, errorText(err), [], null);
+    }
     let reply: MspReply;
     try {
         reply = (await MSP.promise(MSPCodes.MSP_EEPROM_WRITE)) as MspReply;
@@ -713,7 +757,7 @@ async function verifyAbsoluteAndSave(
     }
     let afterSave: AbsoluteSnapshot;
     try {
-        afterSave = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion);
+        afterSave = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion, profile);
     } catch (err) {
         throw new TuneWriteError("eeprom_verify", "unknown", backupId, errorText(err));
     }
@@ -747,10 +791,13 @@ async function readLiveAbsolute(proposal: AbsoluteProposal): Promise<LiveAbsolut
     if (!fc.apiVersion || !apiAtLeast(fc.apiVersion, MIN_ABSOLUTE_API)) {
         blocked.push("absolute:api_version_unsupported");
     }
+    if (fc.pidProfile === null) {
+        blocked.push("fc:pid_profile_unknown");
+    }
     if (blocked.length) {
         throw new ApplyBlockedError([...new Set(blocked)]);
     }
-    const before = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion);
+    const before = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion, fc.pidProfile!);
     const live = liveDiffersFromLog(loggedAbsoluteValues(proposal.log.headerPairs), before.values);
     const issues = changeSetIssues(proposal.change, before.values, fc.apiVersion);
     if (live.length || issues.length) {
@@ -758,6 +805,8 @@ async function readLiveAbsolute(proposal: AbsoluteProposal): Promise<LiveAbsolut
     }
     const expected: AbsoluteSnapshot = {
         apiVersion: fc.apiVersion,
+        // In the hash too: a profile switch after the preview refuses the Apply.
+        pidProfile: before.pidProfile,
         sliders: slidersActive(before.sliders) ? slidersOff(before.sliders) : { ...before.sliders },
         values: expectedValues(before.values, proposal.change),
     };
@@ -836,6 +885,10 @@ async function readAbsoluteRestoreTarget(backupId: string): Promise<{
     if (!backup?.absolute) {
         throw new ApplyBlockedError(["restore:backup_not_found"]);
     }
+    if (!Number.isInteger(backup.absolute.pidProfile)) {
+        // Taken before backups named their profile: which profile it belongs to is unknown.
+        throw new ApplyBlockedError(["restore:backup_without_pid_profile"]);
+    }
     if (absoluteSnapshotIssues(backup.absolute).length) {
         throw new ApplyBlockedError(["restore:backup_invalid"]);
     }
@@ -847,10 +900,15 @@ async function readAbsoluteRestoreTarget(backupId: string): Promise<{
     if (fc.version !== backup.firmware) blocked.push("restore:firmware_changed");
     if (fc.apiVersion !== backup.absolute.apiVersion) blocked.push("restore:api_version_changed");
     if (fc.armed) blocked.push("fc:armed");
+    // The profile-bound values go back into the profile they were read from, never another one.
+    if (fc.pidProfile === null) blocked.push("fc:pid_profile_unknown");
+    else if (fc.pidProfile !== backup.absolute.pidProfile) {
+        blocked.push(`restore:pid_profile_changed:${backup.absolute.pidProfile}->${fc.pidProfile}`);
+    }
     if (blocked.length) {
         throw new ApplyBlockedError(blocked);
     }
-    const current = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion);
+    const current = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion, fc.pidProfile!);
     return { backup: backup as TuneBackup & { absolute: AbsoluteSnapshot }, fc, current };
 }
 

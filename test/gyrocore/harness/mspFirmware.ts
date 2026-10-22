@@ -33,7 +33,15 @@
  *
  * Firmware behaviour modelled because the route depends on it:
  *   - MSP_SET_SIMPLIFIED_TUNING stores sliders and the LPF values it carries, then applies the
- *     sliders only when a mode is on (simplified_tuning.c);
+ *     sliders only when a mode is on, with simplified_tuning.c's own arithmetic (float products,
+ *     int truncation in constrain(), F and d_max recomputed, integer filter scaling, disabled
+ *     filters kept at 0); checked against that C file compiled on the host
+ *     (simplified_tuning_c/firmware_c_output.json);
+ *   - PID profiles (PID_PROFILE_COUNT 4): MSP_PID, MSP_PID_ADVANCED, the D-term / yaw fields of
+ *     MSP_FILTER_CONFIG and the PID / D-term sliders act on the current profile, gyro / notch /
+ *     RPM filters and the gyro sliders are global (msp.c currentPidProfile vs gyroConfig(),
+ *     dynNotchConfig(), rpmFilterConfig()); MSP_SELECT_SETTING switches the profile when disarmed;
+ *     MSP_STATUS_EX is encoded byte for byte (profile index and count included);
  *   - MSP_SET_FILTER_CONFIG returns an error for an invalid dyn_notch_count / RPM Q / weights
  *     after having stored the fields before them (a partial write), then runs
  *     validateAndFixGyroConfig (dyn LPF min > max → min 0);
@@ -48,6 +56,7 @@ import { useFlightControllerStore } from "../../../src/stores/fc";
 import type { Fault } from "./mspCraft";
 
 const PID_ITEM_COUNT = 5;
+export const PID_PROFILE_COUNT = 4;
 const RPM_FILTER_HARMONICS_MAX = 3;
 const DYN_NOTCH_COUNT_MAX = 7;
 
@@ -61,6 +70,10 @@ export interface FirmwareState {
 
 export interface FirmwareFc {
     apiVersion: string;
+    /** Active PID profile (currentPidProfile); `ram` holds its values plus the global ones. */
+    pidProfile: number;
+    /** Every PID profile as last stored; the active one is current in `ram`, not here. */
+    profiles: ProfileState[];
     uid: [number, number, number];
     manufacturerId: string;
     boardName: string;
@@ -70,6 +83,8 @@ export interface FirmwareFc {
     rebootRequired: boolean;
     ram: FirmwareState;
     eeprom: FirmwareState;
+    /** Every PID profile as saved by the last MSP_EEPROM_WRITE. */
+    eepromProfiles: ProfileState[];
     faults: Partial<Record<number, Fault>>;
     /** Fault per code once this many writes were accepted (counting SETs and EEPROM). */
     faultsAfterWrites: { after: number; code: number; fault: Fault }[];
@@ -86,9 +101,83 @@ export interface FirmwareFc {
      * the code's reply are dropped (the frame itself is intact, so the transport accepts it).
      */
     truncate: Partial<Record<number, number>>;
+    /** Runs after every accepted SET (the user switching profile or arming mid-transaction). */
+    afterWrite?: (fc: FirmwareFc) => void;
 }
 
 const clone = (s: FirmwareState): FirmwareState => structuredClone(s);
+
+/** Fields of FirmwareState.p that live in pidProfile_t (msp.c reads them from currentPidProfile). */
+export const PROFILE_P_KEYS = [
+    "feedforward_transition",
+    "rateAccelLimit",
+    "yawRateAccelLimit",
+    "angle_limit",
+    "anti_gravity_gain",
+    "iterm_rotation",
+    "iterm_relax",
+    "iterm_relax_type",
+    "throttle_boost",
+    "acro_trainer_angle_limit",
+    "f_roll",
+    "f_pitch",
+    "f_yaw",
+    "d_max_roll",
+    "d_max_pitch",
+    "d_max_yaw",
+    "d_max_gain",
+    "d_max_advance",
+    "use_integrated_yaw",
+    "integrated_yaw_relax",
+    "iterm_relax_cutoff",
+    "motor_output_limit",
+    "auto_profile_cell_count",
+    "dyn_idle_min_rpm",
+    "feedforward_averaging",
+    "feedforward_smooth_factor",
+    "feedforward_boost",
+    "feedforward_max_rate_limit",
+    "feedforward_jitter_factor",
+    "vbat_sag_compensation",
+    "thrust_linear",
+    "tpa_mode",
+    "tpa_rate",
+    "tpa_breakpoint",
+    "dterm_lpf1_static_hz",
+    "yaw_lowpass_hz",
+    "dterm_notch_hz",
+    "dterm_notch_cutoff",
+    "dterm_lpf1_type",
+    "dterm_lpf2_static_hz",
+    "dterm_lpf2_type",
+    "dterm_lpf1_dyn_min_hz",
+    "dterm_lpf1_dyn_max_hz",
+    "dterm_lpf1_dyn_expo",
+] as const;
+/** gyroConfig_t holds the gyro slider pair; every other slider is per profile. */
+const GLOBAL_SLIDER_KEYS = new Set(["slider_gyro_filter", "slider_gyro_filter_multiplier"]);
+
+export interface ProfileState {
+    pids: number[][];
+    p: Record<string, number>;
+    sliders: Record<string, number>;
+}
+
+/** The pidProfile_t part of a state. */
+export function profilePart(s: FirmwareState): ProfileState {
+    return structuredClone({
+        pids: s.pids,
+        p: Object.fromEntries(PROFILE_P_KEYS.map((k) => [k, s.p[k]])),
+        sliders: Object.fromEntries(Object.entries(s.sliders).filter(([k]) => !GLOBAL_SLIDER_KEYS.has(k))),
+    });
+}
+
+function loadProfile(s: FirmwareState, prof: ProfileState) {
+    const c = structuredClone(prof);
+    s.pids = c.pids;
+    Object.assign(s.p, c.p);
+    Object.assign(s.sliders, c.sliders);
+}
 
 /** AIR65 (BTFL_BLACKBOX_LOG_AIR65_C_20261018_231421 headers) as the default craft. */
 export function air65FirmwareState(): FirmwareState {
@@ -186,8 +275,12 @@ export function air65FirmwareState(): FirmwareState {
 
 export function createFirmwareFc(overrides: Partial<FirmwareFc> = {}): FirmwareFc {
     const ram = overrides.ram ?? air65FirmwareState();
+    const profiles = Array.from({ length: PID_PROFILE_COUNT }, () => profilePart(ram));
     return {
         apiVersion: "1.48.0",
+        pidProfile: 0,
+        profiles,
+        eepromProfiles: structuredClone(profiles),
         uid: [0x0a1b2c3d, 0x4e5f6071, 0x12233445],
         manufacturerId: "BEFH",
         boardName: "BETAFPVG473",
@@ -452,33 +545,71 @@ function decodeSetFilterConfig(s: FirmwareState, d: number[]): boolean {
     return true;
 }
 
-/** simplified_tuning.c, enough for the route: modes on recompute from the sliders. */
-function applySimplified(s: FirmwareState) {
+// simplified_tuning.c (2026.6.2) and the defaults it uses (flight/pid.h, sensors/gyro.h).
+const PID_DEFAULTS = [
+    { P: 45, I: 80, D: 30, F: 120 },
+    { P: 47, I: 84, D: 34, F: 125 },
+    { P: 45, I: 80, D: 0, F: 120 },
+];
+const D_MAX_DEFAULTS = [40, 46, 0];
+const PID_GAIN_MAX = 250;
+const F_GAIN_MAX = 1000;
+const LPF_MAX_HZ = 1000;
+const DYN_LPF_MAX_HZ = 1000;
+const f32 = Math.fround;
+/** common/maths.h constrain(int, int, int): a float argument is truncated toward zero first. */
+const constrainInt = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.trunc(v)));
+/** C int arithmetic `a * b / 100` on non-negative operands. */
+const idiv100 = (a: number, b: number) => Math.trunc((a * b) / 100);
+
+/** calculateNewPidValues: single-precision products, left to right, as the C expressions read. */
+function calculateNewPidValues(s: FirmwareState) {
     const sl = s.sliders;
-    const m = sl.slider_master_multiplier / 100;
-    if (sl.slider_pids_mode > 0) {
-        const axes = sl.slider_pids_mode >= 2 ? [0, 1, 2] : [0, 1];
-        const base = [
-            [45, 80, 30],
-            [47, 84, 34],
-            [45, 80, 0],
+    const master = f32(sl.slider_master_multiplier / 100);
+    const piGain = f32(sl.slider_pi_gain / 100);
+    const dGain = f32(sl.slider_d_gain / 100);
+    const ffGain = f32(sl.slider_feedforward_gain / 100);
+    const iGain = f32(sl.slider_i_gain / 100);
+    const dMaxSlider = f32(sl.slider_dmax_gain / 100);
+    const mul = (...xs: number[]) => xs.reduce((a, b) => f32(a * b));
+    const axes = ["roll", "pitch", "yaw"] as const;
+    for (let axis = 0; axis <= Math.min(sl.slider_pids_mode, 2); axis++) {
+        const def = PID_DEFAULTS[axis];
+        const pitchD = axis === 1 ? f32(sl.slider_roll_pitch_ratio / 100) : 1;
+        const pitchPi = axis === 1 ? f32(sl.slider_pitch_pi_gain / 100) : 1;
+        s.pids[axis] = [
+            constrainInt(mul(def.P, master, piGain, pitchPi), 0, PID_GAIN_MAX),
+            constrainInt(mul(def.I, master, piGain, iGain, pitchPi), 0, PID_GAIN_MAX),
+            constrainInt(mul(def.D, master, dGain, pitchD), 0, PID_GAIN_MAX),
         ];
-        for (const i of axes) {
-            s.pids[i] = base[i].map((v, j) =>
-                Math.round(v * m * (j === 2 ? sl.slider_d_gain / 100 : sl.slider_pi_gain / 100)),
-            );
-        }
+        s.p[`f_${axes[axis]}`] = constrainInt(mul(def.F, master, pitchPi, ffGain), 0, F_GAIN_MAX);
+        const dMaxDef = D_MAX_DEFAULTS[axis];
+        const dMaxGain = dMaxDef > 0 ? f32(dMaxSlider + f32(f32(f32(1 - dMaxSlider) * def.D) / dMaxDef)) : 1;
+        s.p[`d_max_${axes[axis]}`] = constrainInt(mul(dMaxDef, master, dGain, pitchD, dMaxGain), 0, PID_GAIN_MAX);
     }
-    if (sl.slider_dterm_filter) {
-        const k = sl.slider_dterm_filter_multiplier / 100;
-        s.p.dterm_lpf1_static_hz = Math.round(75 * k);
-        s.p.dterm_lpf2_static_hz = Math.round(150 * k);
+}
+
+/** calculateNewDTermFilterValues / calculateNewGyroFilterValues: integer scaling, 0 (off) kept. */
+function calculateNewFilterValues(p: Record<string, number>, prefix: "dterm" | "gyro", mult: number) {
+    const [min, max, lpf2] = prefix === "dterm" ? [75, 150, 150] : [250, 500, 500];
+    if (p[`${prefix}_lpf1_dyn_min_hz`]) {
+        p[`${prefix}_lpf1_dyn_min_hz`] = constrainInt(idiv100(min, mult), 0, DYN_LPF_MAX_HZ);
+        p[`${prefix}_lpf1_dyn_max_hz`] = constrainInt(idiv100(max, mult), 0, DYN_LPF_MAX_HZ);
     }
-    if (sl.slider_gyro_filter) {
-        const k = sl.slider_gyro_filter_multiplier / 100;
-        s.p.gyro_lpf1_static_hz = Math.round(250 * k);
-        s.p.gyro_lpf2_static_hz = Math.round(500 * k);
+    if (p[`${prefix}_lpf1_static_hz`]) {
+        p[`${prefix}_lpf1_static_hz`] = constrainInt(idiv100(min, mult), 0, DYN_LPF_MAX_HZ);
     }
+    if (p[`${prefix}_lpf2_static_hz`]) {
+        p[`${prefix}_lpf2_static_hz`] = constrainInt(idiv100(lpf2, mult), 0, LPF_MAX_HZ);
+    }
+}
+
+/** applySimplifiedTuning: PIDs when the PID mode is on, each filter group when its mode is on. */
+export function applySimplified(s: FirmwareState) {
+    const sl = s.sliders;
+    if (sl.slider_pids_mode !== 0) calculateNewPidValues(s);
+    if (sl.slider_dterm_filter) calculateNewFilterValues(s.p, "dterm", sl.slider_dterm_filter_multiplier);
+    if (sl.slider_gyro_filter) calculateNewFilterValues(s.p, "gyro", sl.slider_gyro_filter_multiplier);
 }
 
 function decodeSetSimplified(s: FirmwareState, d: number[]): boolean {
@@ -525,6 +656,34 @@ function validateAndFixConfig(s: FirmwareState) {
     }
     if (s.p.dterm_lpf1_dyn_min_hz > s.p.dterm_lpf1_dyn_max_hz) s.p.dterm_lpf1_dyn_min_hz = 0;
     if (s.p.gyro_lpf1_dyn_min_hz > s.p.gyro_lpf1_dyn_max_hz) s.p.gyro_lpf1_dyn_min_hz = 0;
+}
+
+/** MSP_SELECT_SETTING on a PID profile (msp.c): ignored while armed, out of range → 0. */
+export function selectPidProfile(fc: FirmwareFc, index: number) {
+    if (fc.armed) return;
+    const n = index >= PID_PROFILE_COUNT ? 0 : index;
+    fc.profiles[fc.pidProfile] = profilePart(fc.ram);
+    loadProfile(fc.ram, fc.profiles[n]);
+    fc.pidProfile = n;
+}
+
+/** MSP_STATUS_EX in msp.c order (API 1.48: CPU temp, rate and battery profile counts appended). */
+function encodeStatusEx(fc: FirmwareFc): number[] {
+    const w = new Writer();
+    w.u16(125)
+        .u16(0)
+        .u16(0x23)
+        .u32(fc.armed ? 1 : 0)
+        .u8(fc.pidProfile)
+        .u16(10);
+    w.u8(PID_PROFILE_COUNT)
+        .u8(0)
+        .u8(0)
+        .u8(0)
+        .u32(0)
+        .u8(fc.rebootRequired ? 1 : 0);
+    w.u16(40).u8(4).u8(3).u8(0);
+    return w.bytes;
 }
 
 // --- the MSP.promise stand-in --------------------------------------------------
@@ -575,9 +734,12 @@ export async function firmwarePromise(fc: FirmwareFc, code: number, data?: numbe
             store.config.uid = [...fc.uid];
             return ok;
         case MSPCodes.MSP_STATUS_EX:
-            store.config.mode = fc.armed ? 1 : 0;
-            store.config.configStateFlag = fc.rebootRequired ? 1 : 0;
+            return deliver(fc, code, encodeStatusEx(fc));
+        case MSPCodes.MSP_SELECT_SETTING: {
+            const value = d[0] ?? 0;
+            if (!(value & (1 << 6)) && !(value & (1 << 7))) selectPidProfile(fc, value);
             return ok;
+        }
         case MSPCodes.MSP_PID:
             return deliver(fc, code, encodePid(fc.ram));
         case MSPCodes.MSP_PID_ADVANCED:
@@ -599,6 +761,7 @@ export async function firmwarePromise(fc: FirmwareFc, code: number, data?: numbe
                 [MSPCodes.MSP_SET_SIMPLIFIED_TUNING]: decodeSetSimplified,
             }[code]!;
             const accepted = decode(fc.ram, d);
+            fc.afterWrite?.(fc);
             return accepted && !fc.errorAfterDecode.has(code) ? ok : err;
         }
         case MSPCodes.MSP_EEPROM_WRITE:
@@ -609,6 +772,8 @@ export async function firmwarePromise(fc: FirmwareFc, code: number, data?: numbe
             validateAndFixConfig(fc.ram);
             fc.adjustOnReload?.(fc.ram);
             fc.eeprom = clone(fc.ram);
+            fc.profiles[fc.pidProfile] = profilePart(fc.ram);
+            fc.eepromProfiles = structuredClone(fc.profiles);
             return ok;
         default:
             return null;
@@ -622,6 +787,7 @@ export const FIRMWARE_WRITE_CODES = new Set([
     MSPCodes.MSP_SET_FILTER_CONFIG,
     MSPCodes.MSP_SET_SIMPLIFIED_TUNING,
     MSPCodes.MSP_EEPROM_WRITE,
+    MSPCodes.MSP_SELECT_SETTING,
 ]);
 
 export const firmwareCodecs = { encodePid, encodePidAdvanced, encodeFilterConfig, encodeSimplified };
