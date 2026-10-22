@@ -830,13 +830,34 @@
     },
     "gyroflightV2PartialWrite": { "message": "Now different from the backup on the flight controller:" },
     "gyroflightV2FailedStage": { "message": "Stopped while" },
+    "gyroflightV2Stage_prepare": {
+        "message": "checking the flight controller before the first write (no SET command was sent)"
+    },
     "gyroflightV2Stage_write": { "message": "writing to the flight controller" },
     "gyroflightV2Stage_validate": { "message": "letting the flight controller validate the values" },
     "gyroflightV2Stage_verify": { "message": "reading back and verifying the written values" },
     "gyroflightV2Stage_eeprom": { "message": "saving (EEPROM write)" },
     "gyroflightV2Stage_eeprom_verify": { "message": "reading back after saving" },
     "gyroflightV2FailedCause": { "message": "Cause" },
-    "gyroflightV2NothingWritten": { "message": "Nothing was written to the flight controller." },
+    "gyroflightV2NothingWritten": {
+        "message": "No SET command was sent: the flight controller holds exactly the backed-up values."
+    },
+    "gyroflightV2SetResultUnknown": {
+        "message": "A SET command was sent and the flight controller could not be read back afterwards (link lost, or another PID profile active): the result of that write is unknown. Reconnect, check the values, and use Restore with the backup below if needed."
+    },
+    "gyroflightV2ProfileSwitchRam": {
+        "message": "The active PID profile changed to profile $1 during the write (it started in profile $2). Profile $1 may now hold one block of this write in RAM."
+    },
+    "gyroflightV2ProfileSwitchNotSaved": {
+        "message": "EEPROM was not written: the saved configuration of every profile is unchanged."
+    },
+    "gyroflightV2ProfileSwitchSaveUnknown": { "message": "Whether EEPROM was written is unknown." },
+    "gyroflightV2ProfileSwitchNoSave": {
+        "message": "Do not save (no Save, no EEPROM write, no CLI save) before the state is checked."
+    },
+    "gyroflightV2ProfileSwitchRecovery": {
+        "message": "Recovery: power-cycle or reboot the flight controller so RAM reloads from EEPROM, reconnect, check profile $1 against its own saved values, then select profile $2 and use Restore with the backup below if that profile differs."
+    },
     "gyroflightV2CurrentUnknown": {
         "message": "The flight controller's current configuration is unknown: it could not be read back after the failure (or another PID profile is active). Some values may already be written. Reconnect, check the values, and use Restore with the backup below if needed."
     },

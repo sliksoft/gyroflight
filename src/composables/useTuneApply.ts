@@ -110,7 +110,18 @@ import {
 import { assertAbsoluteReleased, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 
-export type WriteStage = "write" | "validate" | "verify" | "eeprom" | "eeprom_verify";
+/**
+ * Where a write transaction stopped. "prepare": before the first SET was sent (a check or a fresh
+ * read failed), so the craft holds what it held; "write": a SET was sent and the transaction did
+ * not reach verification (its result may be unknown, or a later SET failed: a partial write).
+ */
+export type WriteStage = "prepare" | "write" | "validate" | "verify" | "eeprom" | "eeprom_verify";
+
+/** The PID profile switch a failed transaction ran into, from the route's own `fc:pid_profile_changed:a->b`. */
+export function profileSwitchOf(detail: string): { from: number; to: number | null } | null {
+    const m = /fc:pid_profile_changed:(\d+)->(\d+|\?)/.exec(detail);
+    return m ? { from: Number(m[1]), to: m[2] === "?" ? null : Number(m[2]) } : null;
+}
 
 /**
  * "no": EEPROM was not written, the saved tune is the previous one. "unknown": it may or may not be.
@@ -683,6 +694,9 @@ async function writeAbsoluteBlocks(
     const profile = current.pidProfile!;
     const groups = all ? new Set(["pid", "advanced", "filter"]) : changedGroups(current.values, target.values);
     const slidersChange = SLIDER_MODE_KEYS.some((k) => current.sliders[k] !== target.sliders[k]);
+    // SETs sent so far: none means the craft still holds exactly what was backed up (a failed
+    // check or fresh read before the first SET is "prepare", not a write with an unknown result).
+    let sent = 0;
     try {
         if (slidersChange || all) {
             await assertPidProfile(profile, { disarmed: true });
@@ -693,6 +707,7 @@ async function writeAbsoluteBlocks(
             if (all) {
                 valuesToStore(target.values, storeBlocks(), api);
             }
+            sent++;
             await writeOk(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
         }
         const blocks: [string, number, number][] = [
@@ -708,9 +723,13 @@ async function writeAbsoluteBlocks(
             await assertPidProfile(profile, { disarmed: true });
             await readFull(read, "fc:live_readback_missing", api);
             valuesToStore(target.values, storeBlocks(), api);
+            sent++;
             await writeOk(write);
         }
     } catch (err) {
+        if (sent === 0) {
+            throw new TuneWriteError("prepare", "no", backupId, errorText(err), [], []);
+        }
         throw new TuneWriteError("write", "no", backupId, errorText(err), [], await partialWriteState(backup));
     }
 }

@@ -218,9 +218,17 @@
             </ul>
             <!-- What the flight controller holds now, against the backup taken before the write. -->
             <template v-if="outcome.status === 'failed'">
-                <p v-if="!outcome.stage" data-gyrocore="v2-nothing-written">{{ $t("gyroflightV2NothingWritten") }}</p>
+                <!-- No SET was sent (a check, a fresh read or the backup failed first). -->
+                <p v-if="!outcome.stage || outcome.stage === 'prepare'" data-gyrocore="v2-nothing-written">
+                    {{ $t("gyroflightV2NothingWritten") }}
+                </p>
+                <!-- A SET was sent and the craft could not be read back afterwards. -->
                 <p v-else-if="outcome.changedFromBackup === null" class="text-yellow-500" data-gyrocore="v2-fc-unknown">
-                    {{ $t("gyroflightV2CurrentUnknown") }}
+                    {{
+                        outcome.stage === "write"
+                            ? $t("gyroflightV2SetResultUnknown")
+                            : $t("gyroflightV2CurrentUnknown")
+                    }}
                 </p>
                 <p v-else-if="!outcome.changedFromBackup.length" data-gyrocore="v2-fc-as-backup">
                     {{ $t("gyroflightV2CurrentAsBackup") }}
@@ -230,6 +238,19 @@
                     <ul class="list-disc ps-5">
                         <li v-for="d in outcome.changedFromBackup" :key="d">{{ d }}</li>
                     </ul>
+                </div>
+                <!-- A PID profile switch after a SET: the other profile may hold the write in RAM. -->
+                <div
+                    v-if="outcome.profileSwitch && profileSwitchText"
+                    class="text-yellow-500"
+                    data-gyrocore="v2-profile-switch"
+                    :data-from="outcome.profileSwitch.from"
+                    :data-to="outcome.profileSwitch.to ?? ''"
+                >
+                    <p>{{ profileSwitchText.ram }}</p>
+                    <p>{{ profileSwitchText.saved }}</p>
+                    <p class="font-bold">{{ profileSwitchText.noSave }}</p>
+                    <p>{{ profileSwitchText.recovery }}</p>
                 </div>
                 <p v-if="outcome.backupId" class="text-dimmed" data-gyrocore="v2-failed-backup">
                     {{ $t("gyroflightV2FailedBackup") }} {{ outcome.backupId }}
@@ -278,6 +299,22 @@ const { calculate, createVerifiedTune, preview, releasedProposal, confirmAndAppl
 
 const result = computed(() => v2.result);
 const outcome = computed(() => v2.outcome);
+
+/** The profile-switch warning of a failed write: which profile may hold it, and how to recover. */
+const profileSwitchText = computed(() => {
+    const o = outcome.value;
+    if (!o || o.status === "verified" || !o.profileSwitch) return null;
+    const to = o.profileSwitch.to === null ? "?" : String(o.profileSwitch.to + 1);
+    const from = String(o.profileSwitch.from + 1);
+    return {
+        ram: i18n.getMessage("gyroflightV2ProfileSwitchRam", [to, from]),
+        saved: i18n.getMessage(
+            o.saved === "no" ? "gyroflightV2ProfileSwitchNotSaved" : "gyroflightV2ProfileSwitchSaveUnknown",
+        ),
+        noSave: i18n.getMessage("gyroflightV2ProfileSwitchNoSave"),
+        recovery: i18n.getMessage("gyroflightV2ProfileSwitchRecovery", [to, from]),
+    };
+});
 const released = computed(() => (v2.result ? releasedProposal() : null));
 const connected = computed(() => !!connection.connectionValid);
 
