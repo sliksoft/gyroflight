@@ -840,7 +840,16 @@
     "gyroflightV2Stage_eeprom_verify": { "message": "reading back after saving" },
     "gyroflightV2FailedCause": { "message": "Cause" },
     "gyroflightV2NothingWritten": {
-        "message": "No SET command was sent: the flight controller holds exactly the backed-up values."
+        "message": "This attempt sent no SET command and did not write EEPROM: it changed nothing on the flight controller."
+    },
+    "gyroflightV2NotReverified": {
+        "message": "The flight controller was not read back after this failure: its current configuration is not verified and not confirmed to match the backup. Another PID profile may be active, or values may have changed outside this attempt. Reconnect, check the active PID profile and read the values again before another Apply or Restore."
+    },
+    "gyroflightV2PrepareProfileSwitch": {
+        "message": "The active PID profile changed from profile $1 to profile $2 before the first write. Profile $2 was neither backed up nor written by this attempt."
+    },
+    "gyroflightV2BackupKept": {
+        "message": "The backup taken before this attempt (PID profile $1) is unchanged and remains available for Restore."
     },
     "gyroflightV2SetResultUnknown": {
         "message": "A SET command was sent and the flight controller could not be read back afterwards (link lost, or another PID profile active): the result of that write is unknown. Reconnect, check the values, and use Restore with the backup below if needed."
