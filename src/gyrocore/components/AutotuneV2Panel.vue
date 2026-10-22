@@ -204,14 +204,37 @@
             <p class="font-bold text-red-500">
                 {{ outcome.status === "blocked" ? $t("gyroflightApplyBlocked") : $t("gyroflightApplyFailed") }}
             </p>
+            <!-- Where it stopped and why: the write route's phase and the error itself. -->
+            <p v-if="outcome.stage" data-gyrocore="v2-stage" :data-stage="outcome.stage">
+                {{ $t("gyroflightV2FailedStage") }}: {{ $t(`gyroflightV2Stage_${outcome.stage}`) }}
+            </p>
+            <p v-if="outcome.status === 'failed' && outcome.message" data-gyrocore="v2-cause">
+                {{ $t("gyroflightV2FailedCause") }}: {{ outcome.message }}
+            </p>
             <p v-if="outcome.status === 'failed'">{{ $t(`gyroflightV2Saved_${outcome.saved ?? "unknown"}`) }}</p>
             <ul class="list-disc ps-5">
                 <li v-for="r in outcome.reasons" :key="r">{{ r }}</li>
                 <li v-for="m in outcome.mismatches" :key="m">{{ m }}</li>
             </ul>
-            <p v-if="outcome.changedFromBackup?.length" data-gyrocore="v2-partial">
-                {{ $t("gyroflightV2PartialWrite") }} {{ outcome.changedFromBackup.join(", ") }}
-            </p>
+            <!-- What the flight controller holds now, against the backup taken before the write. -->
+            <template v-if="outcome.status === 'failed'">
+                <p v-if="!outcome.stage" data-gyrocore="v2-nothing-written">{{ $t("gyroflightV2NothingWritten") }}</p>
+                <p v-else-if="outcome.changedFromBackup === null" class="text-yellow-500" data-gyrocore="v2-fc-unknown">
+                    {{ $t("gyroflightV2CurrentUnknown") }}
+                </p>
+                <p v-else-if="!outcome.changedFromBackup.length" data-gyrocore="v2-fc-as-backup">
+                    {{ $t("gyroflightV2CurrentAsBackup") }}
+                </p>
+                <div v-else data-gyrocore="v2-partial">
+                    {{ $t("gyroflightV2PartialWrite") }}
+                    <ul class="list-disc ps-5">
+                        <li v-for="d in outcome.changedFromBackup" :key="d">{{ d }}</li>
+                    </ul>
+                </div>
+                <p v-if="outcome.backupId" class="text-dimmed" data-gyrocore="v2-failed-backup">
+                    {{ $t("gyroflightV2FailedBackup") }} {{ outcome.backupId }}
+                </p>
+            </template>
         </div>
 
         <!-- 6. Restore -->
