@@ -859,5 +859,12 @@
     "gyroflightV2Need_log_gyro_unfilt": { "message": "blackbox logging of gyroUnfilt" },
     "gyroflightV2Need_bidirectional_dshot_erpm_logging": { "message": "bidirectional DShot with eRPM logging" },
     "gyroflightV2Need_chirp_flight": { "message": "a CHIRP flight" },
-    "gyroflightV2Need_chirp_on_this_axis": { "message": "a CHIRP sweep on this axis" }
+    "gyroflightV2Need_chirp_on_this_axis": { "message": "a CHIRP sweep on this axis" },
+    "gyroflightV2CreateVerifiedTune": { "message": "Create Verified Tune from these logs" },
+    "gyroflightV2VerifiedTuneHelp": {
+        "message": "Independent validation: import the CHIRP log(s) of the current tune first (ideally two), then the CHIRP log(s) flown after applying a clearly different PID set. The tune imported last is compared with the prediction made from the one before it."
+    },
+    "gyroflightV2VerifiedTune_PASS": { "message": "Verified Tune passed and stored for this craft" },
+    "gyroflightV2VerifiedTune_FAIL": { "message": "Verified Tune failed: the prediction did not hold" },
+    "gyroflightV2VerifiedTune_NONE": { "message": "No Verified Tune could be made" }
 }

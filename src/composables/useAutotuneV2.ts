@@ -40,6 +40,7 @@ import {
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { runAutotuneV2, type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
 import { buildLogInputs, pickPrimary } from "@/gyrocore/engine/logInput";
+import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
 import { evaluateRelease, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { useAutotuneV2Store, type AutotuneV2Outcome } from "@/gyrocore/stores/autotuneV2";
 import type { TuneBackup } from "@/gyrocore/stores/tuneBackup";
@@ -58,8 +59,9 @@ function reasonsOf(err: unknown): string[] {
     return [typeof err === "object" && err !== null ? String(Reflect.get(err, "message") ?? err) : String(err)];
 }
 
-function escapeHtml(s: string) {
-    return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+/** A missing message (undefined) must not break the confirmation dialog. */
+function escapeHtml(s: string | undefined) {
+    return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
 
 export function changesHtml(rows: AbsoluteDiffRow[]): string {
@@ -118,25 +120,32 @@ export function useAutotuneV2() {
     const store = useAutotuneV2Store();
     const dialog = useDialog();
 
+    /** Engine inputs of every imported file (cached until a file is added). Newest import = highest order. */
+    async function buildInputs(): Promise<AutotuneLogInput[]> {
+        if (store.inputs) return store.inputs;
+        const inputs: AutotuneLogInput[] = [];
+        const n = store.sources.length;
+        for (const [i, s] of store.sources.entries()) {
+            store.progressMessage = i18n.getMessage("gyroflightV2Progress", [s.filename, String(i + 1), String(n)]);
+            // Let the interface paint the progress line before the long synchronous analysis.
+            await new Promise((r) => setTimeout(r, 0));
+            const sha = await sha256Hex(s.bytes);
+            // store.sources is newest first: the first source gets the highest order.
+            for (const l of buildLogInputs(s.bytes, sha, s.report, analyzeM4BblFile(s.bytes, s.filename))) {
+                inputs.push({ ...l, order: n - i });
+            }
+        }
+        store.inputs = inputs;
+        return inputs;
+    }
+
     /** Run the engine on every imported file of this craft. Pure computation: no flight controller. */
     async function calculate() {
         if (!store.sources.length || store.state === "calculating") return;
         store.state = "calculating";
         store.errorMessage = "";
         try {
-            const inputs: AutotuneLogInput[] = [];
-            for (const [i, s] of store.sources.entries()) {
-                store.progressMessage = i18n.getMessage("gyroflightV2Progress", [
-                    s.filename,
-                    String(i + 1),
-                    String(store.sources.length),
-                ]);
-                // Let the interface paint the progress line before the long synchronous analysis.
-                await new Promise((r) => setTimeout(r, 0));
-                const sha = await sha256Hex(s.bytes);
-                inputs.push(...buildLogInputs(s.bytes, sha, s.report, analyzeM4BblFile(s.bytes, s.filename)));
-            }
-            const picked = pickPrimary(inputs);
+            const picked = pickPrimary(await buildInputs());
             if (!picked) throw new Error(i18n.getMessage("gyroflightV2NoChirp"));
             const id = logIdentity(picked.primary.headerPairs);
             const firmware = id.firmwareRevision?.split(/\s+/)[1] ?? null;
@@ -151,6 +160,29 @@ export function useAutotuneV2() {
         } finally {
             store.progressMessage = "";
         }
+    }
+
+    /**
+     * Independent validation from the imported logs: the tune imported last is the candidate, the
+     * one before it the baseline (with its repeat). A passing record is stored for this craft and
+     * the calculation is run again with it. No flight controller access.
+     */
+    async function createVerifiedTune() {
+        if (!store.sources.length || store.state === "calculating") return;
+        try {
+            const attempt = verifiedTuneFromLogs(await buildInputs());
+            const stored = attempt.record?.verdict === "PASS" && useVerifiedTuneStore().save(attempt.record);
+            store.verifiedTuneAttempt = {
+                verdict: attempt.record ? attempt.record.verdict : "NONE",
+                id: stored ? attempt.record!.id : null,
+                reasons: attempt.reasons,
+            };
+        } catch (err) {
+            store.verifiedTuneAttempt = { verdict: "NONE", id: null, reasons: reasonsOf(err) };
+        } finally {
+            store.progressMessage = "";
+        }
+        await calculate();
     }
 
     /** The proposal Apply may write: VALIDATED items only, and only when its release contract holds. */
@@ -231,5 +263,5 @@ export function useAutotuneV2() {
         }
     }
 
-    return { calculate, preview, releasedProposal, confirmAndApply, confirmAndRestore };
+    return { calculate, createVerifiedTune, preview, releasedProposal, confirmAndApply, confirmAndRestore };
 }

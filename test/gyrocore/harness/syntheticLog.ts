@@ -39,7 +39,12 @@ import {
 } from "../../../src/js/blackbox/betaflight_open_loop";
 import { dtermConfigFromHeaders, simulateDterm } from "../../../src/js/blackbox/betaflight_dterm_dynamic";
 import { chainConfigFromHeaders, simulateGyroChain } from "../../../src/gyrocore/engine/gyroChain";
-import { controllerConfigFromHeaders, type AutotuneLogInput } from "../../../src/gyrocore/engine/autotuneV2";
+import {
+    analyzeAxisController,
+    controllerConfigFromHeaders,
+    flightMask,
+    type AutotuneLogInput,
+} from "../../../src/gyrocore/engine/autotuneV2";
 
 export const SYNTH_HEADERS: [string, string][] = [
     ["Firmware revision", "Betaflight 2026.6.2 (43875a55a) STM32G474"],
@@ -97,9 +102,23 @@ export const SYNTH_HEADERS: [string, string][] = [
 const FS = 4000;
 const PLANT_SCALE = [1, 0.5, 1];
 
-export function syntheticLogInput(sha256: string, seconds = 11): AutotuneLogInput {
+export interface SyntheticLogOptions {
+    seconds?: number;
+    /** Logged P/I/D per axis (default: the AIR65 values). */
+    pids?: Partial<Record<"roll" | "pitch" | "yaw", [number, number, number]>>;
+    /** Plant gain factor of this flight (≠ 1: the craft behaved differently than predicted). */
+    plantScale?: number;
+}
+
+export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
+    const o = typeof opts === "number" ? { seconds: opts } : opts;
+    const seconds = o.seconds ?? 11;
     const n = Math.round(seconds * FS);
-    const h = Object.fromEntries(SYNTH_HEADERS);
+    const headerPairs: [string, string][] = SYNTH_HEADERS.map(([k, v]) => {
+        const axis = k.replace("PID", "") as "roll" | "pitch" | "yaw";
+        return k.endsWith("PID") && o.pids?.[axis] ? [k, o.pids[axis]!.join(",")] : [k, v];
+    });
+    const h = Object.fromEntries(headerPairs);
     const timeUs = Float64Array.from({ length: n }, (_, k) => k * 250);
     let seed = 11;
     const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32 - 0.5;
@@ -135,22 +154,11 @@ export function syntheticLogInput(sha256: string, seconds = 11): AutotuneLogInpu
         return Float64Array.from(sd.d, (v) => (Number.isFinite(v) ? v : 0));
     });
     const freqs = Array.from({ length: 199 }, (_, i) => 1 + i * 0.5);
-    const tf = (axis: 0 | 1 | 2) => {
-        const cfg = controllerConfigFromHeaders(h, axis) as DigitalControllerConfig;
-        return syntheticTransferFunction(freqs, (f) => {
-            const frf = evaluateControllerFrf(cfg, f);
-            return closedLoopFromPlant(
-                plantFrf(f, { K: 80 * PLANT_SCALE[axis], motorHz: 40, delayS: 0.002 }),
-                frf.cReference,
-                frf.cFeedback,
-            );
-        });
-    };
     const sweep = (k: number) => ({ start: Math.round((1 + 3.3 * k) * FS), end: Math.round((4 + 3.3 * k) * FS) });
-    return {
+    const log: AutotuneLogInput = {
         sha256,
         logIndex: 0,
-        headerPairs: SYNTH_HEADERS,
+        headerPairs,
         sampleRateHz: FS,
         channels: {
             timeUs,
@@ -161,12 +169,25 @@ export function syntheticLogInput(sha256: string, seconds = 11): AutotuneLogInpu
             axisD: [axisD[0], axisD[1], null],
             motors: [0, 1, 2, 3].map(() => new Float64Array(n).fill(1500)),
         },
-        chirp: {
-            roll: { tf: tf(0), ...sweep(0), state: "usable" },
-            pitch: { tf: tf(1), ...sweep(1), state: "usable" },
-            yaw: { tf: tf(2), ...sweep(2), state: "usable" },
-        },
+        chirp: {},
         stick: { acroSeconds: 0, latencyMs: {} },
         noiseFloorKnown: true,
     };
+    // Each sweep's T is what a plant would show under the controller the engine reconstructs
+    // for this log (headers + M5-B effective D path), so baseline and candidate are consistent.
+    const mask = flightMask(rcThrottle);
+    (["roll", "pitch", "yaw"] as const).forEach((name, axis) => {
+        const w = sweep(axis);
+        const placeholder = { tf: syntheticTransferFunction([1], () => ({ re: 1, im: 0 })), ...w, state: "usable" };
+        const cfg =
+            analyzeAxisController(log, h, axis as 0 | 1 | 2, placeholder, mask)?.cfg ??
+            (controllerConfigFromHeaders(h, axis as 0 | 1 | 2) as DigitalControllerConfig);
+        const K = 80 * PLANT_SCALE[axis] * (o.plantScale ?? 1);
+        const tf = syntheticTransferFunction(freqs, (f) => {
+            const frf = evaluateControllerFrf(cfg, f);
+            return closedLoopFromPlant(plantFrf(f, { K, motorHz: 40, delayS: 0.002 }), frf.cReference, frf.cFeedback);
+        });
+        log.chirp[name] = { tf, ...w, state: "usable" };
+    });
+    return log;
 }

@@ -22,6 +22,33 @@
         >
             {{ $t("gyroflightV2Calculate") }}
         </UButton>
+        <UButton
+            size="xs"
+            variant="outline"
+            class="mt-1 ms-2"
+            data-gyrocore="v2-verified-tune"
+            :disabled="v2.sources.length < 2 || v2.state === 'calculating'"
+            @click="createVerifiedTune"
+        >
+            {{ $t("gyroflightV2CreateVerifiedTune") }}
+        </UButton>
+        <p class="text-sm text-dimmed">{{ $t("gyroflightV2VerifiedTuneHelp") }}</p>
+        <div
+            v-if="v2.verifiedTuneAttempt"
+            class="text-sm"
+            data-gyrocore="v2-verified-tune-result"
+            :data-verdict="v2.verifiedTuneAttempt.verdict"
+        >
+            <span
+                :class="v2.verifiedTuneAttempt.verdict === 'PASS' ? 'text-green-500' : 'text-red-500'"
+                class="font-bold"
+            >
+                {{ $t(`gyroflightV2VerifiedTune_${v2.verifiedTuneAttempt.verdict}`) }}
+            </span>
+            <span v-if="v2.verifiedTuneAttempt.reasons.length" class="text-dimmed">
+                ({{ v2.verifiedTuneAttempt.reasons.join("; ") }})
+            </span>
+        </div>
         <p v-if="v2.progressMessage" class="text-sm text-dimmed">{{ v2.progressMessage }}</p>
         <p v-if="v2.state === 'error'" class="text-sm text-red-500" data-gyrocore="v2-error">{{ v2.errorMessage }}</p>
 
@@ -223,7 +250,8 @@ const v2 = useAutotuneV2Store();
 const connection = useConnectionStore();
 const fc = useFlightControllerStore();
 const backupStore = useTuneBackupStore();
-const { calculate, preview, releasedProposal, confirmAndApply, confirmAndRestore } = useAutotuneV2();
+const { calculate, createVerifiedTune, preview, releasedProposal, confirmAndApply, confirmAndRestore } =
+    useAutotuneV2();
 
 const result = computed(() => v2.result);
 const outcome = computed(() => v2.outcome);

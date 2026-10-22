@@ -28,11 +28,12 @@
 import { defineStore } from "pinia";
 import { ref, shallowRef } from "vue";
 import type { ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
-import type { AutotuneV2Result } from "@/gyrocore/engine/autotuneV2";
+import type { AutotuneLogInput, AutotuneV2Result } from "@/gyrocore/engine/autotuneV2";
 import type { AbsoluteDiffRow, AbsoluteSnapshot } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 
-export const MAX_SOURCES = 3;
+/** Baseline, its repeat, candidate and its repeat, plus room for one more. */
+export const MAX_SOURCES = 6;
 
 export interface AutotuneV2Source {
     filename: string;
@@ -81,12 +82,19 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
     const preview = ref<AutotuneV2Preview | null>(null);
     const outcome = ref<AutotuneV2Outcome | null>(null);
     const busy = ref(false);
+    /** Decoded engine inputs of the current sources (rebuilt when a source is added). */
+    const inputs = shallowRef<AutotuneLogInput[] | null>(null);
+    /** Outcome of the last "create Verified Tune" (the record itself goes to the Verified Tune store). */
+    const verifiedTuneAttempt = ref<{ verdict: "PASS" | "FAIL" | "NONE"; id: string | null; reasons: string[] } | null>(
+        null,
+    );
 
     /** A newly imported file. Another craft's file replaces the list; the same file is not added twice. */
     function addSource(bytes: Uint8Array, filename: string, report: ChirpQualificationReport) {
         const uid = logIdentity(report.logs[0]?.headerPairs ?? []).uid?.join("-") ?? null;
         const same = sources.value.filter((s) => s.uid === uid && s.filename !== filename);
         sources.value = [{ filename, bytes, report, uid }, ...same].slice(0, MAX_SOURCES);
+        inputs.value = null;
         result.value = null;
         preview.value = null;
         state.value = "idle";
@@ -94,6 +102,8 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
 
     function reset() {
         sources.value = [];
+        inputs.value = null;
+        verifiedTuneAttempt.value = null;
         result.value = null;
         preview.value = null;
         outcome.value = null;
@@ -102,5 +112,18 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         progressMessage.value = "";
     }
 
-    return { sources, result, state, errorMessage, progressMessage, preview, outcome, busy, addSource, reset };
+    return {
+        sources,
+        inputs,
+        verifiedTuneAttempt,
+        result,
+        state,
+        errorMessage,
+        progressMessage,
+        preview,
+        outcome,
+        busy,
+        addSource,
+        reset,
+    };
 });
