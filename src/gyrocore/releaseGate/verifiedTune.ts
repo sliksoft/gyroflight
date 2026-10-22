@@ -31,6 +31,12 @@
  *
  * The record names both logs by SHA-256, the craft by UID / board / firmware, and carries
  * its own integrity hash; verifiedTuneIssues re-checks all of it wherever it is used.
+ *
+ * What a record covers (validatedRegionIssues): only changes that start from exactly the
+ * baseline's logged configuration and lie on the measured segment baseline → candidate, with one
+ * common fraction per axis for P, I, D, F and d_max. A reverse step, a step past the candidate,
+ * another combination of terms, or any step from another starting point (the candidate itself
+ * included) is not covered: a new starting point needs its own gain-change flight.
  */
 
 import {
@@ -46,7 +52,8 @@ import {
 import { plantFixedWhatIf, type IdentifiedPlant } from "@/js/blackbox/betaflight_open_loop";
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 
-export const VERIFIED_TUNE_KIND = "gyroflight.verified_tune.v1";
+/** v2: bound to the absolute logged configurations (v1 records carried relative limits and are refused). */
+export const VERIFIED_TUNE_KIND = "gyroflight.verified_tune.v2";
 const AXES = ["roll", "pitch", "yaw"] as const;
 type Axis = (typeof AXES)[number];
 
@@ -84,6 +91,8 @@ export interface VerifiedTuneLogRef {
     sha256: string;
     logIndex: number;
     pids: Record<Axis, LoggedPids>;
+    /** Every logged absolute value (absoluteTune.loggedAbsoluteValues of the log header). */
+    values: Record<string, number>;
 }
 
 export interface AxisComparison {
@@ -110,8 +119,6 @@ export interface VerifiedTune {
     baseline: VerifiedTuneLogRef;
     candidate: VerifiedTuneLogRef;
     baselineRepeat: { sha256: string; logIndex: number } | null;
-    /** Largest relative PID change per axis and term the prediction was confirmed for. */
-    validatedRelativeChange: Record<Axis, { p: number; i: number; d: number }>;
     comparisons: AxisComparison[];
     verdict: "PASS" | "FAIL";
     reasons: string[];
@@ -161,8 +168,43 @@ function pidsDiffer(a: LoggedPids, b: LoggedPids): boolean {
     return a.p !== b.p || a.i !== b.i || a.d !== b.d;
 }
 
-function relChange(from: number, to: number): number {
-    return from > 0 ? Math.abs(to - from) / from : to === from ? 0 : Number.POSITIVE_INFINITY;
+/** The per-axis keys a Verified Tune can cover (one common segment fraction per axis). */
+export function axisKeys(axis: Axis): string[] {
+    return [`p_${axis}`, `i_${axis}`, `d_${axis}`, `f_${axis}`, `d_max_${axis}`];
+}
+const AXIS_KEY = /^(p|i|d|f|d_max)_(roll|pitch|yaw)$/;
+
+/**
+ * Is `target` (values of one axis' keys) on the segment base → cand with one common fraction
+ * t ∈ [0, 1]? Integer rounding of each term is allowed (±0.5). A key equal in base and cand must
+ * stay exactly at base.
+ */
+export function onValidatedSegment(
+    base: Record<string, number>,
+    cand: Record<string, number>,
+    target: Record<string, number>,
+    keys: readonly string[],
+): boolean {
+    let lo = 0;
+    let hi = 1;
+    for (const k of keys) {
+        const b = base[k];
+        const c = cand[k];
+        const x = target[k] ?? b;
+        if (!Number.isFinite(b) || !Number.isFinite(c) || !Number.isFinite(x)) {
+            if (x !== b) return false;
+            continue;
+        }
+        if (b === c) {
+            if (x !== b) return false;
+            continue;
+        }
+        const t1 = (x - 0.5 - b) / (c - b);
+        const t2 = (x + 0.5 - b) / (c - b);
+        lo = Math.max(lo, Math.min(t1, t2));
+        hi = Math.min(hi, Math.max(t1, t2));
+    }
+    return lo <= hi + 1e-9;
 }
 
 function extractG(T: Complex, cfg: DigitalControllerConfig, f: number): Complex | null {
@@ -300,10 +342,18 @@ export function buildVerifiedTune(input: VerifiedTuneInput): VerifiedTune {
     if (!changedAxes.length) {
         reasons.push("verified_tune:no_pid_change_between_logs");
     }
+    if (!valuesComplete(input.baseline.values) || !valuesComplete(input.candidate.values)) {
+        reasons.push("verified_tune:logged_values_missing");
+    } else {
+        // Only PID-family values may differ: a filter or other change would make the comparison
+        // confirm something other than the PID prediction it is used for.
+        for (const k of new Set([...Object.keys(input.baseline.values), ...Object.keys(input.candidate.values)])) {
+            if (!AXIS_KEY.test(k) && input.baseline.values[k] !== input.candidate.values[k]) {
+                reasons.push(`verified_tune:non_pid_value_changed:${k}`);
+            }
+        }
+    }
     const comparisons: AxisComparison[] = [];
-    const validated = Object.fromEntries(
-        AXES.map((a) => [a, { p: 0, i: 0, d: 0 }]),
-    ) as VerifiedTune["validatedRelativeChange"];
     for (const axis of changedAxes) {
         const ax = input.axes[axis];
         if (!ax) {
@@ -314,10 +364,6 @@ export function buildVerifiedTune(input: VerifiedTuneInput): VerifiedTune {
         comparisons.push(cmp);
         if (cmp.verdict !== "PASS") {
             reasons.push(`verified_tune:${axis}:${cmp.verdict.toLowerCase()}`);
-        } else {
-            const b = input.baseline.pids[axis];
-            const c = input.candidate.pids[axis];
-            validated[axis] = { p: relChange(b.p, c.p), i: relChange(b.i, c.i), d: relChange(b.d, c.d) };
         }
     }
     const body: Omit<VerifiedTune, "id"> = {
@@ -327,7 +373,6 @@ export function buildVerifiedTune(input: VerifiedTuneInput): VerifiedTune {
         baseline: input.baseline,
         candidate: input.candidate,
         baselineRepeat: input.baselineRepeat ?? null,
-        validatedRelativeChange: validated,
         comparisons,
         verdict: reasons.length ? "FAIL" : "PASS",
         reasons,
@@ -350,6 +395,9 @@ export function verifiedTuneIssues(
     if (!SHA256.test(v.baseline?.sha256 ?? "") || !SHA256.test(v.candidate?.sha256 ?? "")) {
         out.push("verified_tune:log_hash_invalid");
     }
+    if (!valuesComplete(v.baseline?.values) || !valuesComplete(v.candidate?.values)) {
+        out.push("verified_tune:logged_values_missing");
+    }
     if (
         !AXES.some(
             (a) =>
@@ -368,21 +416,39 @@ export function verifiedTuneIssues(
     return out;
 }
 
-/** A proposal may not extrapolate: its PID changes must lie inside what the record confirmed. */
-export function changeWithinValidated(
+function valuesComplete(values: Record<string, number> | undefined): boolean {
+    return (
+        !!values &&
+        typeof values === "object" &&
+        AXES.every((a) => [`p_${a}`, `i_${a}`, `d_${a}`].every((k) => Number.isFinite(values[k])))
+    );
+}
+
+/**
+ * What a record does not cover in `change` applied to the logged configuration `from` (empty:
+ * covered). `from` must be exactly the record's baseline; every changed axis must stay on the
+ * measured segment; any other key is never covered.
+ */
+export function validatedRegionIssues(
     v: VerifiedTune,
-    from: Record<Axis, LoggedPids>,
-    to: Partial<Record<Axis, Partial<LoggedPids>>>,
+    from: Record<string, number>,
+    change: Record<string, number>,
 ): string[] {
+    const base = v.baseline.values;
+    const cand = v.candidate.values;
+    const mismatch = [...new Set([...Object.keys(base), ...Object.keys(from)])]
+        .filter((k) => base[k] !== from[k])
+        .sort()
+        .map((k) => `verified_tune:baseline_mismatch:${k}`);
+    if (mismatch.length) return mismatch;
     const out: string[] = [];
     for (const axis of AXES) {
-        for (const term of ["p", "i", "d"] as const) {
-            const target = to[axis]?.[term];
-            if (target === undefined || target === from[axis][term]) continue;
-            if (relChange(from[axis][term], target) > v.validatedRelativeChange[axis][term] + 1e-9) {
-                out.push(`verified_tune:change_outside_validated:${axis}:${term}`);
-            }
-        }
+        const keys = axisKeys(axis);
+        if (!keys.some((k) => k in change && change[k] !== from[k])) continue;
+        if (!onValidatedSegment(base, cand, change, keys)) out.push(`verified_tune:change_outside_validated:${axis}`);
+    }
+    for (const k of Object.keys(change)) {
+        if (!AXIS_KEY.test(k) && change[k] !== from[k]) out.push(`verified_tune:change_outside_validated:${k}`);
     }
     return out;
 }

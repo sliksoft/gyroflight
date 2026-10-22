@@ -58,6 +58,10 @@ import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 let withoutVt: AutotuneV2Result;
 let withVt: AutotuneV2Result;
+let fromCandidate: AutotuneV2Result;
+// A measured gain reduction (P / I × 0.9, D × 0.7) from the logged AIR65 tune: the direction the
+// search recommends here, so its segment can carry a released proposal.
+const record = () => verifiedTuneAllAxesFixture(0.9, 0.7);
 
 beforeAll(() => {
     const primary = syntheticLogInput("e".repeat(64));
@@ -66,7 +70,20 @@ beforeAll(() => {
     withVt = runAutotuneV2({
         primary,
         others: [repeat],
-        verifiedTune: verifiedTuneAllAxesFixture(),
+        verifiedTune: record(),
+        createdAt: "2026-10-22T00:00:00Z",
+    });
+    // The same record against a log flown with its candidate tune: a new starting point.
+    const c = record().candidate.pids;
+    const pids = {
+        roll: [c.roll.p, c.roll.i, c.roll.d] as [number, number, number],
+        pitch: [c.pitch.p, c.pitch.i, c.pitch.d] as [number, number, number],
+        yaw: [c.yaw.p, c.yaw.i, c.yaw.d] as [number, number, number],
+    };
+    fromCandidate = runAutotuneV2({
+        primary: syntheticLogInput("a".repeat(64), { pids }),
+        others: [syntheticLogInput("9".repeat(64), { pids })],
+        verifiedTune: record(),
         createdAt: "2026-10-22T00:00:00Z",
     });
 }, 600_000);
@@ -124,6 +141,27 @@ describe("release contract on the engine's own proposal", () => {
         const partial = withVt.proposal!.items.filter((i) => i.status !== "VALIDATED");
         for (const it of partial) expect(r.change[it.key]).toBeUndefined();
         if (partial.length) expect(evaluateRelease(withVt.proposal!).released).toBe(false);
+    });
+
+    it("the released PID values lie on the record's measured segment, never past its candidate", () => {
+        const r = withVt.releasableProposal!;
+        const v = record();
+        for (const [k, to] of Object.entries(r.change)) {
+            const [b, c] = [v.baseline.values[k], v.candidate.values[k]];
+            expect(Math.min(b, c) <= to && to <= Math.max(b, c), `${k}: ${b} → ${to} (cand ${c})`).toBe(true);
+        }
+    });
+
+    it("the same record from its candidate tune (a new starting point) releases nothing", () => {
+        expect(fromCandidate.parts.find((p) => p.part === "independent_gain_prediction")).toMatchObject({
+            status: "BLOCKED",
+            reasons: [
+                "verified_tune_measured_from_another_configuration",
+                "required_measurement:gain_change_chirp_flight_plus_baseline_repeat",
+            ],
+        });
+        const p = fromCandidate.releasableProposal ?? fromCandidate.proposal;
+        if (p) expect(evaluateRelease(p).released).toBe(false);
     });
 });
 

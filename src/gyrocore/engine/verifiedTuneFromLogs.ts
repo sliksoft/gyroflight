@@ -28,6 +28,7 @@
  * measured one. Only real log analyses go in; the verdict is the producer's.
  */
 
+import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import {
     buildVerifiedTune,
@@ -106,8 +107,18 @@ export function verifiedTuneFromLogs(logs: AutotuneLogInput[], createdAt?: strin
     });
     const record = buildVerifiedTune({
         craft: { uid: idB.uid!, board: idB.board ?? "", firmware: idB.firmwareRevision?.split(/\s+/)[1] ?? "" },
-        baseline: { sha256: baseline.sha256, logIndex: baseline.logIndex, pids: pb },
-        candidate: { sha256: candidate.sha256, logIndex: candidate.logIndex, pids: pc },
+        baseline: {
+            sha256: baseline.sha256,
+            logIndex: baseline.logIndex,
+            pids: pb,
+            values: loggedAbsoluteValues(baseline.headerPairs),
+        },
+        candidate: {
+            sha256: candidate.sha256,
+            logIndex: candidate.logIndex,
+            pids: pc,
+            values: loggedAbsoluteValues(candidate.headerPairs),
+        },
         ...(repeat ? { baselineRepeat: { sha256: repeat.sha256, logIndex: repeat.logIndex } } : {}),
         axes,
         createdAt,

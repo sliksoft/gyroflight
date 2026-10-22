@@ -27,9 +27,10 @@
 
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
+import { validatedRegionIssues, verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
 
-export const VERIFIED_TUNE_STORAGE_KEY = "gyroflight.verifiedTunes.v1";
+/** v2 records (bound to absolute logged configurations); v1 records under the old key are never read. */
+export const VERIFIED_TUNE_STORAGE_KEY = "gyroflight.verifiedTunes.v2";
 const PER_CRAFT = 10;
 
 function readStorage(): VerifiedTune[] {
@@ -68,9 +69,19 @@ export const useVerifiedTuneStore = defineStore("gyroflightVerifiedTunes", () =>
         return true;
     }
 
-    /** The newest record that is valid evidence for this craft and firmware, or null. */
-    function forCraft(uid: readonly number[] | null, firmware: string | null): VerifiedTune | null {
-        return records.value.find((r) => verifiedTuneIssues(r, { uid, firmware }).length === 0) ?? null;
+    /**
+     * The newest record that is valid evidence for this craft and firmware, or null. With `logged`
+     * (a log's absolute values), a record measured from exactly that configuration comes first: only
+     * such a record can cover a change from it (verifiedTune.validatedRegionIssues).
+     */
+    function forCraft(
+        uid: readonly number[] | null,
+        firmware: string | null,
+        logged?: Record<string, number>,
+    ): VerifiedTune | null {
+        const valid = records.value.filter((r) => verifiedTuneIssues(r, { uid, firmware }).length === 0);
+        const bound = logged ? valid.find((r) => validatedRegionIssues(r, logged, {}).length === 0) : undefined;
+        return bound ?? valid[0] ?? null;
     }
 
     function reload() {

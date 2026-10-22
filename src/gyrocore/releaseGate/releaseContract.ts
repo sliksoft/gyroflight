@@ -27,7 +27,8 @@
  *   model_quality         plant identification and the notch-aware gyro chain validated
  *   phase_margin          predicted PM validated and above target on every changed axis
  *   robustness            predicted gain margin and |S| peak inside target
- *   independent_validation a Verified Tune for this craft/firmware covering the change
+ *   independent_validation a Verified Tune for this craft/firmware whose measured baseline is
+ *                         this log's configuration and whose measured segment covers the change
  *   safety_evidence       the absolute-route Safety evidence contract is complete
  *   items_validated       every value to write is itself VALIDATED (a simulated-only or
  *                         partial recommendation stays visible but is never written)
@@ -42,13 +43,8 @@
 
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
-import type { AbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
-import {
-    changeWithinValidated,
-    verifiedTuneIssues,
-    type LoggedPids,
-    type VerifiedTune,
-} from "@/gyrocore/releaseGate/verifiedTune";
+import { loggedAbsoluteValues, type AbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
+import { validatedRegionIssues, verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
 
 export const RELEASE_TARGETS = Object.freeze({
     minPhaseMarginDeg: 40,
@@ -132,21 +128,6 @@ export interface ReleaseDecision {
 
 const AXES = ["roll", "pitch", "yaw"] as const;
 
-function loggedPids(headers: readonly (readonly [string, string])[]): Record<(typeof AXES)[number], LoggedPids> {
-    const get = (k: string) =>
-        headers
-            .find(([key]) => key === k)?.[1]
-            ?.split(",")
-            .map((v) => Number(v.trim())) ?? [];
-    const ff = get("ff_weight");
-    return Object.fromEntries(
-        AXES.map((a, i) => {
-            const [p, ii, d] = get(`${a}PID`);
-            return [a, { p, i: ii, d, f: ff[i] ?? 0 }];
-        }),
-    ) as Record<(typeof AXES)[number], LoggedPids>;
-}
-
 function changedAxes(change: AbsoluteValues): (typeof AXES)[number][] {
     return AXES.filter((a) => [`p_${a}`, `i_${a}`, `d_${a}`, `f_${a}`, `d_max_${a}`].some((k) => k in change));
 }
@@ -204,14 +185,13 @@ export function evaluateRelease(proposal: AbsoluteProposal): ReleaseDecision {
 
     const iv = verifiedTuneIssues(e.independentValidation, { uid: id.uid, firmware });
     if (!iv.length && e.independentValidation) {
-        const from = loggedPids(proposal.log.headerPairs);
-        const to = Object.fromEntries(
-            AXES.map((a) => [
-                a,
-                { p: proposal.change[`p_${a}`], i: proposal.change[`i_${a}`], d: proposal.change[`d_${a}`] },
-            ]),
+        iv.push(
+            ...validatedRegionIssues(
+                e.independentValidation,
+                loggedAbsoluteValues(proposal.log.headerPairs),
+                proposal.change,
+            ),
         );
-        iv.push(...changeWithinValidated(e.independentValidation, from, to));
     }
     add("independent_validation", iv);
     add(

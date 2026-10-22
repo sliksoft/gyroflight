@@ -37,17 +37,10 @@ import {
 import { verifiedTuneIssues, type VerifiedTune } from "../../src/gyrocore/releaseGate/verifiedTune";
 import { productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
 import { useVerifiedTuneStore } from "../../src/gyrocore/stores/verifiedTunes";
-import { FIXTURE_FIRMWARE, FIXTURE_UID, verifiedTuneFixture } from "./harness/verifiedTuneFixture";
+import { FIXTURE_FIRMWARE, FIXTURE_UID, fixtureHeaders, verifiedTuneFixture } from "./harness/verifiedTuneFixture";
 
-const HEADERS: [string, string][] = [
-    ["Firmware revision", `Betaflight ${FIXTURE_FIRMWARE} (43875a55a) STM32G474`],
-    ["Board information", "BEFH BETAFPVG473"],
-    ["DeviceUID", "0a1b2c3d4e5f607112233445"],
-    ["rollPID", "56,79,30"],
-    ["pitchPID", "82,117,61"],
-    ["yawPID", "56,79,0"],
-    ["ff_weight", "22,32,22"],
-];
+// The fixture record's baseline log: the proposal starts from exactly that configuration.
+const HEADERS = fixtureHeaders();
 
 function margins(axis: "roll" | "pitch" | "yaw", pm = 50, gm = 9, s = 4) {
     return {
@@ -102,7 +95,7 @@ describe("Verified Tune producer", () => {
         expect(v.comparisons[0]).toMatchObject({ axis: "roll", verdict: "PASS" });
         expect(v.comparisons[0].detectableBins).toBeGreaterThanOrEqual(3);
         expect(v.comparisons[0].loopBins).toBeGreaterThanOrEqual(3);
-        expect(v.validatedRelativeChange.roll.p).toBeCloseTo(17 / 56, 6);
+        expect([v.baseline.values.p_roll, v.candidate.values.p_roll]).toEqual([56, 73]);
         expect(verifiedTuneIssues(v, { uid: FIXTURE_UID, firmware: FIXTURE_FIRMWARE })).toEqual([]);
     });
 
@@ -131,7 +124,7 @@ describe("Verified Tune producer", () => {
         const v = verifiedTuneFixture();
         const edited: VerifiedTune = {
             ...v,
-            validatedRelativeChange: { ...v.validatedRelativeChange, roll: { p: 5, i: 5, d: 5 } },
+            candidate: { ...v.candidate, values: { ...v.candidate.values, p_roll: 250 } },
         };
         expect(verifiedTuneIssues(edited, { uid: FIXTURE_UID, firmware: FIXTURE_FIRMWARE })).toContain(
             "verified_tune:integrity",
@@ -225,13 +218,17 @@ describe("release contract", () => {
 
     it("refuses a PID change larger than the one the Verified Tune confirmed (no extrapolation)", () => {
         const d = evaluateRelease(proposal({ p_roll: 90 }));
-        expect(d.blocks).toEqual(["independent_validation:verified_tune:change_outside_validated:roll:p"]);
+        expect(d.blocks).toEqual(["independent_validation:verified_tune:change_outside_validated:roll"]);
     });
 
     it("a value that is not itself VALIDATED is never released, even with all evidence", () => {
         const p = proposal({ p_roll: 64, gyro_lpf2_static_hz: 280 });
         p.items[1] = { ...p.items[1], status: "PARTIAL", reasons: ["simulated_on_logged_data"] };
-        expect(evaluateRelease(p).blocks).toEqual(["items_validated:item_not_validated:gyro_lpf2_static_hz:partial"]);
+        // A Verified Tune confirms a PID change only: it never covers a filter value either.
+        expect(evaluateRelease(p).blocks).toEqual([
+            "independent_validation:verified_tune:change_outside_validated:gyro_lpf2_static_hz",
+            "items_validated:item_not_validated:gyro_lpf2_static_hz:partial",
+        ]);
         const q = proposal({ p_roll: 64 });
         q.items = [];
         expect(evaluateRelease(q).blocks).toEqual(["items_validated:change_without_item:p_roll"]);
