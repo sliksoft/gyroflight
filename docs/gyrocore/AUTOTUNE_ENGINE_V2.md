@@ -36,7 +36,15 @@ MSP message.
   match; a second read-back after the save (the firmware reloads and validates); `configStateFlag` reboot request.
 - Failures: `TuneWriteError` with stage, saved state (`no` / `unknown` / `yes_adjusted`), mismatches and the fields that
   now differ from the backup (a partial write), or null when the craft could not be read (or another profile is active).
-  The panel shows the phase, the cause, the saved state and that current state (unknown / as backup / differing values).
+  The stages tell five states apart: `prepare` (a check or fresh read failed before the first SET: nothing was sent, the
+  craft holds the backup), `write` with an unreadable craft (a SET was sent, its result is unknown), `write` with
+  differing fields (a partial write the craft kept), `verify` (written, not verified) and `eeprom` / `eeprom_verify`
+  (saved state unknown). The panel shows the phase, the cause, the saved state and that current state.
+- Profile switch after a SET: the firmware has no profile-bound atomic write, so a switch between the last MSP_STATUS_EX
+  check and the SET puts that block into the other profile's RAM. The route catches it at the next check (stage `verify`
+  or `write`, `fc:pid_profile_changed:a->b`); the panel then names the profile that may hold the write, states that
+  EEPROM was not written, says not to save, and gives the recovery: reboot so RAM reloads from EEPROM, check that profile,
+  select the original profile and Restore if it differs.
 - Restore: only into the PID profile the backup was read from (a backup without a profile index is refused); slider
   modes and sliders first, then all three blocks exactly, verify, save, read again.
 
@@ -74,8 +82,8 @@ route's; this was deliberate.
 | Module                    | Content                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `gyroChain.ts`            | gyro chain in firmware order: lpf2, RPM notches from eRPM (SVF/TPT, weights, fade, round-robin), dynamic lpf1, dynamic-notch SDFT replica; exact FRFs; mean LTI response over a sweep with spread |
-| `loopModel.ts`            | chain validation against logged gyroADC; L = G · H_cand/H_cur · C_fb,cand on identified bins; PM, GM,                                                                                             | S   | , delay margin                      |
-| `pidOptimizer.ts`         | bounded search for bandwidth under PM ≥ 45°, GM ≥ 6 dB, \|S\| ≤ 6 dB; ±30 % without a record (shown, never released), only the Verified Tune's measured segment with one; I:P and d_max:D kept |
+| `loopModel.ts`            | chain validation against logged gyroADC; L = G · H_cand/H_cur · C_fb,cand on identified bins; PM, GM,                                                                                             | S   | , delay margin |
+| `pidOptimizer.ts`         | bounded search for bandwidth under PM ≥ 45°, GM ≥ 6 dB, \|S\| ≤ 6 dB; ±30 % without a record (shown, never released), only the Verified Tune's measured segment with one; I:P and d_max:D kept    |
 | `filterOptimizer.ts`      | RPM, dynamic notch, gyro LPF, D-term LPF candidates re-simulated on the logged data                                                                                                               |
 | `feedforwardOptimizer.ts` | blocked without acro stick data (2026.6.2: no PID FF in ANGLE); calibrated model otherwise                                                                                                        |
 | `safetyEvidence.ts`       | absolute-route Safety evidence contract                                                                                                                                                           |
@@ -85,9 +93,18 @@ Status rules: a measurement rejected by qualification is diagnostic only (margin
 qualified axes only; the chain is validated only when every control band (2–20, 20–80 Hz) is coherent and matches;
 margins are VALIDATED only with a validated chain, a steady chain at the crossover, a crossover inside 2–80 Hz, a single
 unity crossing (an upward re-entry or a loop still above unity at the band end blocks; PM and GM are the worst over all
-crossings; a band-limited |S| peak is unknown) and a Verified Tune bound to this configuration; cross-log reproducibility
-counts only an independent flight (not the same file or the same samples) of the same craft, firmware and configuration; a candidate that misses a target is shown, never recommended; filter and feedforward results stay PARTIAL until a
-flight with them confirms them.
+crossings; a band-limited |S| peak is unknown), a bounded band end (`loopModel.ts` `BAND_END`: over the top 10 % of the
+identified band |L| may not rise by more than 1 dB and at the last bin it may not exceed −6 dB, the release gain-margin
+target; otherwise GM and |S| are unknown and the margins are NOT_VALIDATED, since a resonance just above the band could
+take the loop back above unity; with a bounded band end GM never exceeds the gain headroom at the band end) and a
+Verified Tune bound to this configuration; cross-log reproducibility counts only an independent flight of the same craft,
+firmware and configuration: not the same file, not the same samples, and not the same flight trimmed, re-exported or
+time-shifted (`logInput.ts` `FLIGHT_WINDOW`: flights are identified by content-anchored 256-sample gyroADC windows,
+constant stretches excluded; four shared windows make one flight), and not a reference whose plant comes out bit-identical
+(`cross_log_identical_measurement`); a candidate that misses a target is shown, never recommended; a Verified Tune whose
+gain-change flight also moved feedforward yields no PID candidate and says so
+(`verified_tune_segment_moves_feedforward`); filter and feedforward results stay PARTIAL until a flight with them confirms
+them.
 
 ## Tests
 
