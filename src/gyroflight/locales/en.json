@@ -758,5 +758,106 @@
     },
     "gyroflightPreviewBlocked": { "message": "The preview could not be read; nothing was written." },
     "gyroflightPreviewNow": { "message": "Now" },
-    "gyroflightPreviewAfter": { "message": "After Apply" }
+    "gyroflightPreviewAfter": { "message": "After Apply" },
+    "gyroflightBackupReason_before_absolute_apply": { "message": "before absolute Apply" },
+    "gyroflightV2Title": { "message": "Autotune engine v2: absolute PID, feedforward and filters" },
+    "gyroflightV2Intro": {
+        "message": "Calculates absolute P/I/D, feedforward, gyro and D-term lowpass, RPM filter and dynamic notch values from your CHIRP logs. Every part shows whether it is validated and which measurement it still needs. Only validated values under a complete release contract can be applied, and only when you click Apply."
+    },
+    "gyroflightV2NoSource": {
+        "message": "Import a blackbox log with CHIRP sweeps above; it is listed here for the calculation."
+    },
+    "gyroflightV2Calculate": { "message": "Calculate" },
+    "gyroflightV2Progress": { "message": "Analysing $1 ($2 of $3)..." },
+    "gyroflightV2NoChirp": { "message": "No CHIRP measurement with a transfer function in these logs." },
+    "gyroflightV2Part_absolute_pid": { "message": "Absolute P / I / D" },
+    "gyroflightV2Part_feedforward": { "message": "Feedforward" },
+    "gyroflightV2Part_gyro_filter": { "message": "Gyro lowpass filters" },
+    "gyroflightV2Part_dterm_filter": { "message": "D-term lowpass filters" },
+    "gyroflightV2Part_rpm_filter": { "message": "RPM filter" },
+    "gyroflightV2Part_dynamic_notch": { "message": "Dynamic notch" },
+    "gyroflightV2Part_plant_identification": { "message": "CHIRP plant identification" },
+    "gyroflightV2Part_phase_margin_robustness": { "message": "Phase margin and robustness" },
+    "gyroflightV2Part_independent_gain_prediction": { "message": "Independent prediction of changed PIDs" },
+    "gyroflightV2Margins": { "message": "Loop margins per axis (now → proposed)" },
+    "gyroflightV2Axis": { "message": "Axis" },
+    "gyroflightV2ChainFit": { "message": "Filter chain vs logged gyro" },
+    "gyroflightV2Crossover": { "message": "Crossover" },
+    "gyroflightV2NoChange": { "message": "No change is proposed." },
+    "gyroflightV2Written": { "message": "Applied" },
+    "gyroflightV2NotValidatedNote": {
+        "message": "Values that are not VALIDATED stay visible here but are never written."
+    },
+    "gyroflightV2Cond_measurement": { "message": "Qualified CHIRP measurement on every changed axis" },
+    "gyroflightV2Cond_model_quality": { "message": "Filter chain, D path and plant validated on the logs" },
+    "gyroflightV2Cond_phase_margin": { "message": "Predicted phase margin validated and above target" },
+    "gyroflightV2Cond_robustness": { "message": "Predicted gain margin and sensitivity peak inside target" },
+    "gyroflightV2Cond_independent_validation": {
+        "message": "Independent flight confirmed the prediction (Verified Tune)"
+    },
+    "gyroflightV2Cond_safety_evidence": { "message": "Safety evidence complete" },
+    "gyroflightV2Cond_items_validated": { "message": "Every value to write is itself validated" },
+    "gyroflightV2Cond_fc_identity": { "message": "Checked when you click: same craft, board and firmware, disarmed" },
+    "gyroflightV2Cond_current_config": {
+        "message": "Checked when you click: the flight controller still holds the logged values"
+    },
+    "gyroflightV2Cond_readback": {
+        "message": "Checked when you click: every value reads back as written, before and after saving"
+    },
+    "gyroflightV2ApplyConfirmTitle": { "message": "Apply absolute tune" },
+    "gyroflightV2ApplyConfirmText": {
+        "message": "<p>These values will be written to the flight controller. Simplified tuning is switched off first, so it cannot recalculate them. A backup of every value is stored and can be restored.</p>"
+    },
+    "gyroflightV2ApplyProcedure": {
+        "message": "After writing, every value is read back; it is saved to EEPROM only when all match, and read back again after saving."
+    },
+    "gyroflightV2ApplyYes": { "message": "Write these values" },
+    "gyroflightV2RebootRequired": {
+        "message": "The flight controller asks for a reboot before the new filter settings take full effect."
+    },
+    "gyroflightV2Saved_no": { "message": "Nothing was saved: the previous settings are still the saved ones." },
+    "gyroflightV2Saved_unknown": {
+        "message": "It is not known whether the change was saved. Read the settings again before flying."
+    },
+    "gyroflightV2Saved_yes_adjusted": {
+        "message": "Saved, but the firmware changed some values when it reloaded them."
+    },
+    "gyroflightV2PartialWrite": { "message": "Now different from the backup on the flight controller:" },
+    "gyroflightV2Need_acro_stick_flight": {
+        "message": "an acro flight with stick moves (rolls, flips, at least 3 s, CHIRP off)"
+    },
+    "gyroflightV2Need_ab_flight_with_proposal": {
+        "message": "a flight with the proposed settings to compare against this one"
+    },
+    "gyroflightV2Need_ab_stick_flight_with_proposal": {
+        "message": "an acro stick flight with the proposed feedforward"
+    },
+    "gyroflightV2Need_fft_freq_debug_flight_for_direct_centre_check": {
+        "message": "a flight with debug_mode FFT_FREQ (dynamic notch centres)"
+    },
+    "gyroflightV2Need_gain_change_chirp_flight_plus_baseline_repeat": {
+        "message": "a CHIRP flight with changed PIDs plus a repeat with the current PIDs"
+    },
+    "gyroflightV2Need_second_chirp_flight_same_tune": { "message": "a second CHIRP flight with the same tune" },
+    "gyroflightV2Need_chirp_roll_meeting_qualification": {
+        "message": "a roll CHIRP that passes qualification (coherence)"
+    },
+    "gyroflightV2Need_chirp_pitch_meeting_qualification": {
+        "message": "a pitch CHIRP that passes qualification (coherence)"
+    },
+    "gyroflightV2Need_chirp_yaw_meeting_qualification": {
+        "message": "a yaw CHIRP that passes qualification (coherence)"
+    },
+    "gyroflightV2Need_qualified_chirp_on_roll_and_pitch": { "message": "qualified CHIRP sweeps on roll and pitch" },
+    "gyroflightV2Need_qualified_chirp_flight": { "message": "a qualified CHIRP flight" },
+    "gyroflightV2Need_chirp_to_higher_frequency_for_gain_margin": {
+        "message": "a CHIRP that reaches higher frequencies (gain margin)"
+    },
+    "gyroflightV2Need_chirp_to_higher_frequency_for_sensitivity_peak": {
+        "message": "a CHIRP that reaches higher frequencies (sensitivity peak)"
+    },
+    "gyroflightV2Need_log_gyro_unfilt": { "message": "blackbox logging of gyroUnfilt" },
+    "gyroflightV2Need_bidirectional_dshot_erpm_logging": { "message": "bidirectional DShot with eRPM logging" },
+    "gyroflightV2Need_chirp_flight": { "message": "a CHIRP flight" },
+    "gyroflightV2Need_chirp_on_this_axis": { "message": "a CHIRP sweep on this axis" }
 }

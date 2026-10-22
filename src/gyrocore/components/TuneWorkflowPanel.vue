@@ -287,7 +287,8 @@ async function onPreview() {
     }
 }
 
-const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid) : []));
+// Backups of the absolute route are restored from the autotune v2 panel (they include the filter block).
+const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !b.absolute) : []));
 
 function measurementById(id: string) {
     return gate.report?.measurements.find((m) => m.id === id) ?? null;
