@@ -184,9 +184,22 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
             analyzeAxisController(log, h, axis as 0 | 1 | 2, placeholder, mask)?.cfg ??
             (controllerConfigFromHeaders(h, axis as 0 | 1 | 2) as DigitalControllerConfig);
         const K = 80 * PLANT_SCALE[axis] * (o.plantScale ?? 1);
+        // A measured T carries this flight's own estimation noise (0.1 % gain, 0.1° phase, from the
+        // same seed as the gyro): two flights never identify the same plant to the last bit, and the
+        // engine treats an exact match as the same measurement (cross_log_identical_measurement).
         const tf = syntheticTransferFunction(freqs, (f) => {
             const frf = evaluateControllerFrf(cfg, f);
-            return closedLoopFromPlant(plantFrf(f, { K, motorHz: 40, delayS: 0.002 }), frf.cReference, frf.cFeedback);
+            const T = closedLoopFromPlant(
+                plantFrf(f, { K, motorHz: 40, delayS: 0.002 }),
+                frf.cReference,
+                frf.cFeedback,
+            );
+            const g = 1 + 2e-3 * rnd();
+            const ph = (2e-3 * rnd() * Math.PI) / 180;
+            return {
+                re: g * (T.re * Math.cos(ph) - T.im * Math.sin(ph)),
+                im: g * (T.re * Math.sin(ph) + T.im * Math.cos(ph)),
+            };
         });
         log.chirp[name] = { tf, ...w, state: "usable" };
     });

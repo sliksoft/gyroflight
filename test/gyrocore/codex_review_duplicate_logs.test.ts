@@ -44,6 +44,7 @@ import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
 import { buildVerifiedTune, verifiedTuneIssues } from "../../src/gyrocore/releaseGate/verifiedTune";
 import { verifiedTuneFromLogs } from "../../src/gyrocore/engine/verifiedTuneFromLogs";
+import { flightFingerprint } from "../../src/gyrocore/engine/logInput";
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
@@ -102,11 +103,17 @@ describe("P1-02: a duplicate is not an independent repeat", () => {
         expect(released(sameFlightOtherHash)).toBe(false);
     });
 
-    it("negative control: the same arrays with one gyro sample changed are not a duplicate", () => {
+    it("the same arrays with one gyro sample changed: another whole-file fingerprint, still the same flight", () => {
+        // The whole-file fingerprint tells the copies apart (it was this test's point before the
+        // window identity of the final review fix); the flight is nevertheless the same one, and
+        // the engine now says so (final_review_duplicate_flights.test.ts covers the window rule).
         const primary = syntheticLogInput("1".repeat(64));
-        const r = run(primary, [copyOf(primary, "4".repeat(64), true)]);
-        expect(r.crossLogRejected.filter((x) => x.startsWith("cross_log_duplicate_of_primary"))).toEqual([]);
-        expect(Object.keys(r.crossLogPlant).length).toBe(3);
+        const copy = copyOf(primary, "4".repeat(64), true);
+        expect(flightFingerprint(copy)).not.toBe(flightFingerprint(primary));
+        const r = run(primary, [copy]);
+        expect(r.crossLogRejected).toContain(`cross_log_duplicate_of_primary:${"4".repeat(64)}:0`);
+        expect(r.crossLogPlant).toEqual({});
+        expect(released(r)).toBe(false);
     }, 600_000);
 
     it("a reference of another craft, firmware or filter configuration is not used", () => {
