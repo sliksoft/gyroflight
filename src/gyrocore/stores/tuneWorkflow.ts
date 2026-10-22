@@ -44,7 +44,7 @@ export interface TuneOutcomeFailed {
     /** Blocked: the gate reasons (nothing was written). Failed: the stage that did not complete. */
     reasons: string[];
     stage: string | null;
-    saved: "no" | "unknown" | null;
+    saved: "no" | "unknown" | "yes_adjusted" | null;
     mismatches: string[];
     backupId: string | null;
     message: string;

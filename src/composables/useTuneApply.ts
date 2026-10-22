@@ -86,23 +86,52 @@ import {
 } from "@/gyrocore/tuning/tuneSnapshot";
 import { newBackupId, sameUid, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
+import {
+    MIN_ABSOLUTE_API,
+    SLIDER_MODE_KEYS,
+    absoluteDiff,
+    absoluteHash,
+    absoluteMismatches,
+    absoluteSnapshotIssues,
+    changeSetIssues,
+    changedGroups,
+    expectedValues,
+    liveDiffersFromLog,
+    loggedAbsoluteValues,
+    slidersActive,
+    slidersOff,
+    valuesFromStore,
+    valuesToStore,
+    type AbsoluteSnapshot,
+    type AbsoluteValues,
+    type StoreBlocks,
+} from "@/gyrocore/tuning/absoluteTune";
+import { assertAbsoluteReleased, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 
-export type WriteStage = "write" | "validate" | "verify" | "eeprom";
+export type WriteStage = "write" | "validate" | "verify" | "eeprom" | "eeprom_verify";
+
+/**
+ * "no": EEPROM was not written, the saved tune is the previous one. "unknown": it may or may not be.
+ * "yes_adjusted": saved, but the firmware changed values on reload (validateAndFixConfig).
+ */
+export type SavedState = "no" | "unknown" | "yes_adjusted";
 
 /** A write was sent and did not end verified and saved. Never shown as success. */
 export class TuneWriteError extends Error {
     readonly stage: WriteStage;
-    /** "no": EEPROM was not written, the saved tune is the previous one. "unknown": it may or may not be. */
-    readonly saved: "no" | "unknown";
+    readonly saved: SavedState;
     readonly backupId: string;
     readonly mismatches: string[];
+    /** Absolute route: fields that, as last read, differ from the backup (a partial write); null: unread. */
+    readonly changedFromBackup: string[] | null;
 
     constructor(
         stage: WriteStage,
-        saved: "no" | "unknown",
+        saved: SavedState,
         backupId: string,
         detail: string,
         mismatches: string[] = [],
+        changedFromBackup: string[] | null = null,
     ) {
         super(`Tune write failed at ${stage} (saved: ${saved}): ${detail}`);
         this.name = "TuneWriteError";
@@ -110,6 +139,7 @@ export class TuneWriteError extends Error {
         this.saved = saved;
         this.backupId = backupId;
         this.mismatches = mismatches;
+        this.changedFromBackup = changedFromBackup;
     }
 }
 
@@ -227,6 +257,7 @@ function storeBackup(
     fc: FcIdentity,
     snapshot: TuneSnapshot,
     compositeId: string | null,
+    absolute?: AbsoluteSnapshot,
 ): TuneBackup {
     const backup: TuneBackup = {
         id: newBackupId(),
@@ -237,6 +268,7 @@ function storeBackup(
         firmware: fc.version,
         compositeId,
         snapshot,
+        ...(absolute ? { absolute } : {}),
     };
     if (!useTuneBackupStore().save(backup)) {
         throw new ApplyBlockedError(["apply:backup_not_stored"]);
@@ -422,6 +454,10 @@ async function readRestoreTarget(backupId: string): Promise<RestorePreview> {
     if (!backup) {
         throw new ApplyBlockedError(["restore:backup_not_found"]);
     }
+    if (backup.absolute) {
+        // Taken by the absolute route: only restoreAbsoluteTune puts back the filter block too.
+        throw new ApplyBlockedError(["restore:use_absolute_restore"]);
+    }
     if (snapshotIssues(backup.snapshot).length) {
         throw new ApplyBlockedError(["restore:backup_invalid"]);
     }
@@ -496,6 +532,329 @@ export async function restoreTune(backupId: string, confirmation: string | null 
     return { status: "verified", backupId: safety.id, expected: target, readback: after };
 }
 
+// ---------------------------------------------------------------------------
+// v2: absolute PID / feedforward / filter values (MSP_PID, MSP_PID_ADVANCED, MSP_FILTER_CONFIG)
+// ---------------------------------------------------------------------------
+
+function storeBlocks(): StoreBlocks {
+    const fcStore = useFlightControllerStore();
+    return {
+        pids: fcStore.pids,
+        advancedTuning: fcStore.advancedTuning as unknown as Record<string, unknown>,
+        filterConfig: fcStore.filterConfig as unknown as Record<string, unknown>,
+    };
+}
+
+/** Fresh reads of the four blocks; any missing, refused or corrupt reply blocks with `reason`. */
+async function readAbsoluteSnapshot(reason: string, apiVersion: string): Promise<AbsoluteSnapshot> {
+    await readOk(MSPCodes.MSP_SIMPLIFIED_TUNING, reason);
+    await readOk(MSPCodes.MSP_PID, reason);
+    await readOk(MSPCodes.MSP_PID_ADVANCED, reason);
+    await readOk(MSPCodes.MSP_FILTER_CONFIG, reason);
+    const fcStore = useFlightControllerStore();
+    return {
+        apiVersion,
+        sliders: pick(fcStore.tuningSliders as unknown as Record<string, unknown>, SNAPSHOT_SLIDER_KEYS),
+        values: valuesFromStore(storeBlocks(), apiVersion),
+    };
+}
+
+/** One write; the firmware's error reply (MSP_RESULT_ERROR) counts as a failed write. */
+async function writeOk(code: number): Promise<void> {
+    const reply = (await MSP.promise(code, mspHelper.crunch(code))) as MspReply;
+    if (!reply || reply.crcError || reply.unsupported) {
+        throw new Error(`write_refused:${code}`);
+    }
+}
+
+function changedFrom(backup: AbsoluteSnapshot, now: AbsoluteSnapshot): string[] {
+    return absoluteDiff(backup, now).map((r) => `${r.group}:${r.key} ${r.from}→${r.to}`);
+}
+
+/** After a failed write: what is on the craft now, against the backup (null when unreadable). */
+async function partialWriteState(backup: AbsoluteSnapshot): Promise<string[] | null> {
+    try {
+        return changedFrom(backup, await readAbsoluteSnapshot("fc:verify_readback_missing", backup.apiVersion));
+    } catch {
+        return null;
+    }
+}
+
+/** fcStore.config.configStateFlag bit 0 (MSP_STATUS_EX): the firmware asks for a reboot. */
+async function rebootRequired(): Promise<boolean | null> {
+    try {
+        await readOk(MSPCodes.MSP_STATUS_EX, "fc:status_missing");
+    } catch {
+        return null;
+    }
+    return (Number(useFlightControllerStore().config.configStateFlag ?? 0) & 1) === 1;
+}
+
+export interface AbsoluteWriteResult {
+    status: "verified";
+    backupId: string;
+    expected: AbsoluteSnapshot;
+    readback: AbsoluteSnapshot;
+    /** Read after MSP_EEPROM_WRITE (the firmware reloads and validates its config there). */
+    afterSave: AbsoluteSnapshot;
+    /** null: MSP_STATUS_EX could not be read after the save. */
+    rebootRequired: boolean | null;
+}
+
+/**
+ * Write `target` exactly: slider modes (first, so they cannot recompute what follows), then
+ * every block whose values differ, each from a fresh read with only the target's values put in.
+ */
+async function writeAbsoluteBlocks(
+    current: AbsoluteSnapshot,
+    target: AbsoluteSnapshot,
+    backup: AbsoluteSnapshot,
+    backupId: string,
+    all = false,
+): Promise<void> {
+    const fcStore = useFlightControllerStore();
+    const api = target.apiVersion;
+    const groups = all ? new Set(["pid", "advanced", "filter"]) : changedGroups(current.values, target.values);
+    const slidersChange = SLIDER_MODE_KEYS.some((k) => current.sliders[k] !== target.sliders[k]);
+    try {
+        if (slidersChange || all) {
+            // MSP_SET_SIMPLIFIED_TUNING also stores the LPF values it carries: send the live ones.
+            await readOk(MSPCodes.MSP_SIMPLIFIED_TUNING, "fc:live_readback_missing");
+            await readOk(MSPCodes.MSP_FILTER_CONFIG, "fc:live_readback_missing");
+            Object.assign(fcStore.tuningSliders, all ? target.sliders : pick(target.sliders, SLIDER_MODE_KEYS));
+            if (all) {
+                valuesToStore(target.values, storeBlocks(), api);
+            }
+            await writeOk(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
+        }
+        const blocks: [string, number, number][] = [
+            ["pid", MSPCodes.MSP_PID, MSPCodes.MSP_SET_PID],
+            ["advanced", MSPCodes.MSP_PID_ADVANCED, MSPCodes.MSP_SET_PID_ADVANCED],
+            ["filter", MSPCodes.MSP_FILTER_CONFIG, MSPCodes.MSP_SET_FILTER_CONFIG],
+        ];
+        for (const [group, read, write] of blocks) {
+            if (!groups.has(group as never)) {
+                continue;
+            }
+            await readOk(read, "fc:live_readback_missing");
+            valuesToStore(target.values, storeBlocks(), api);
+            await writeOk(write);
+        }
+    } catch (err) {
+        throw new TuneWriteError("write", "no", backupId, errorText(err), [], await partialWriteState(backup));
+    }
+}
+
+/** Read back, compare everything, save, read again after the firmware reloaded its config. */
+async function verifyAbsoluteAndSave(
+    expected: AbsoluteSnapshot,
+    backup: AbsoluteSnapshot,
+    backupId: string,
+): Promise<Omit<AbsoluteWriteResult, "status" | "backupId" | "expected">> {
+    let readback: AbsoluteSnapshot;
+    try {
+        readback = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion);
+    } catch (err) {
+        throw new TuneWriteError("verify", "no", backupId, errorText(err), [], null);
+    }
+    const mismatches = absoluteMismatches(expected, readback);
+    if (mismatches.length) {
+        throw new TuneWriteError(
+            "verify",
+            "no",
+            backupId,
+            mismatches.join("; "),
+            mismatches,
+            changedFrom(backup, readback),
+        );
+    }
+    let reply: MspReply;
+    try {
+        reply = (await MSP.promise(MSPCodes.MSP_EEPROM_WRITE)) as MspReply;
+    } catch (err) {
+        throw new TuneWriteError("eeprom", "unknown", backupId, errorText(err));
+    }
+    if (!reply || reply.crcError || reply.unsupported) {
+        // The firmware refuses MSP_EEPROM_WRITE while armed: nothing was saved.
+        throw new TuneWriteError("eeprom", reply ? "no" : "unknown", backupId, "eeprom_write_refused");
+    }
+    let afterSave: AbsoluteSnapshot;
+    try {
+        afterSave = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion);
+    } catch (err) {
+        throw new TuneWriteError("eeprom_verify", "unknown", backupId, errorText(err));
+    }
+    const adjusted = absoluteMismatches(expected, afterSave);
+    if (adjusted.length) {
+        throw new TuneWriteError(
+            "eeprom_verify",
+            "yes_adjusted",
+            backupId,
+            adjusted.join("; "),
+            adjusted,
+            changedFrom(backup, afterSave),
+        );
+    }
+    return { readback, afterSave, rebootRequired: await rebootRequired() };
+}
+
+interface LiveAbsolute {
+    fc: FcIdentity;
+    before: AbsoluteSnapshot;
+    expected: AbsoluteSnapshot;
+}
+
+/**
+ * Read-only: the logged craft, logged firmware, disarmed, MSP API with the absolute layout,
+ * the active PID profile still holding every logged value; then what the write must produce.
+ */
+async function readLiveAbsolute(proposal: AbsoluteProposal): Promise<LiveAbsolute> {
+    const fc = await readIdentity();
+    const blocked = identityBlocks(logIdentity(proposal.log.headerPairs), fc);
+    if (!fc.apiVersion || !apiAtLeast(fc.apiVersion, MIN_ABSOLUTE_API)) {
+        blocked.push("absolute:api_version_unsupported");
+    }
+    if (blocked.length) {
+        throw new ApplyBlockedError([...new Set(blocked)]);
+    }
+    const before = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion);
+    const live = liveDiffersFromLog(loggedAbsoluteValues(proposal.log.headerPairs), before.values);
+    const issues = changeSetIssues(proposal.change, before.values, fc.apiVersion);
+    if (live.length || issues.length) {
+        throw new ApplyBlockedError([...live, ...issues]);
+    }
+    const expected: AbsoluteSnapshot = {
+        apiVersion: fc.apiVersion,
+        sliders: slidersActive(before.sliders) ? slidersOff(before.sliders) : { ...before.sliders },
+        values: expectedValues(before.values, proposal.change),
+    };
+    return { fc, before, expected };
+}
+
+export interface AbsolutePreview {
+    before: AbsoluteSnapshot;
+    expected: AbsoluteSnapshot;
+    /** Every value that changes, slider modes included. */
+    changes: ReturnType<typeof absoluteDiff>;
+    /** absoluteHash(expected): pass it in the confirmation so Apply refuses if anything changed. */
+    hash: string;
+}
+
+/** Read-only preview of an absolute Apply. Writes nothing and needs no release. */
+export async function previewAbsoluteTune(proposal: AbsoluteProposal): Promise<AbsolutePreview> {
+    assertConnectedReal();
+    const live = await readLiveAbsolute(proposal);
+    return {
+        before: live.before,
+        expected: live.expected,
+        changes: absoluteDiff(live.before, live.expected),
+        hash: absoluteHash(live.expected),
+    };
+}
+
+/**
+ * Apply an absolute proposal. `confirmation` is the token the interface issued after the user
+ * confirmed exactly this proposal, these values and the preview it showed.
+ */
+export async function applyAbsoluteTune(
+    proposal: AbsoluteProposal,
+    confirmation: string | null | undefined,
+): Promise<AbsoluteWriteResult> {
+    // 1. The release contract and the user's confirmation, before any MSP.
+    assertAbsoluteReleased(proposal);
+    const confirmed = consumeConfirmation(confirmation, {
+        kind: "absolute",
+        proposalId: proposal.id,
+        change: { ...proposal.change },
+    });
+    assertConnectedReal();
+
+    // 2. Identity, live values against the log, and the expected result (read-only).
+    const { fc, before, expected } = await readLiveAbsolute(proposal);
+    if (confirmed.preview !== undefined && confirmed.preview !== absoluteHash(expected)) {
+        throw new ApplyBlockedError(["apply:preview_changed"]);
+    }
+
+    // 3. Backup (every firmware-held value), then the write, then verify and save.
+    const backup = storeBackup("before_absolute_apply", fc, v1Snapshot(), null, before);
+    await writeAbsoluteBlocks(before, expected, before, backup.id);
+    const verified = await verifyAbsoluteAndSave(expected, before, backup.id);
+    return { status: "verified", backupId: backup.id, expected, ...verified };
+}
+
+/** The v1 snapshot from the store as just read (kept in every backup for the v1 Restore). */
+function v1Snapshot(): TuneSnapshot {
+    return storeSnapshot();
+}
+
+export interface AbsoluteRestorePreview {
+    backup: TuneBackup;
+    current: AbsoluteSnapshot;
+    changes: ReturnType<typeof absoluteDiff>;
+    hash: string;
+}
+
+async function readAbsoluteRestoreTarget(backupId: string): Promise<{
+    backup: TuneBackup & { absolute: AbsoluteSnapshot };
+    fc: FcIdentity;
+    current: AbsoluteSnapshot;
+}> {
+    const backup = useTuneBackupStore().get(backupId);
+    if (!backup?.absolute) {
+        throw new ApplyBlockedError(["restore:backup_not_found"]);
+    }
+    if (absoluteSnapshotIssues(backup.absolute).length) {
+        throw new ApplyBlockedError(["restore:backup_invalid"]);
+    }
+    assertConnectedReal();
+    const fc = await readIdentity();
+    const blocked: string[] = [];
+    if (!sameUid(fc.uid, backup.uid)) blocked.push("restore:different_craft");
+    if (fc.variant !== "BTFL") blocked.push("fc:identity_not_betaflight");
+    if (fc.version !== backup.firmware) blocked.push("restore:firmware_changed");
+    if (fc.apiVersion !== backup.absolute.apiVersion) blocked.push("restore:api_version_changed");
+    if (fc.armed) blocked.push("fc:armed");
+    if (blocked.length) {
+        throw new ApplyBlockedError(blocked);
+    }
+    const current = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion);
+    return { backup: backup as TuneBackup & { absolute: AbsoluteSnapshot }, fc, current };
+}
+
+/** Read-only preview of restoring an absolute backup: every value that would change back. */
+export async function previewAbsoluteRestore(backupId: string): Promise<AbsoluteRestorePreview> {
+    const { backup, current } = await readAbsoluteRestoreTarget(backupId);
+    return { backup, current, changes: absoluteDiff(current, backup.absolute), hash: absoluteHash(current) };
+}
+
+/** Write an absolute backup back exactly (slider modes first, then all three blocks), verify, save. */
+export async function restoreAbsoluteTune(
+    backupId: string,
+    confirmation: string | null | undefined,
+): Promise<AbsoluteWriteResult> {
+    const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
+    const { backup, fc, current } = await readAbsoluteRestoreTarget(backupId);
+    if (confirmed.preview !== undefined && confirmed.preview !== absoluteHash(current)) {
+        throw new ApplyBlockedError(["restore:preview_changed"]);
+    }
+    const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current);
+    const target = backup.absolute;
+    await writeAbsoluteBlocks(current, target, current, safety.id, true);
+    const verified = await verifyAbsoluteAndSave(target, current, safety.id);
+    return { status: "verified", backupId: safety.id, expected: target, ...verified };
+}
+
+export type { AbsoluteProposal, AbsoluteValues };
+
 export function useTuneApply() {
-    return { previewTune, applyTune, previewRestore, restoreTune };
+    return {
+        previewTune,
+        applyTune,
+        previewRestore,
+        restoreTune,
+        previewAbsoluteTune,
+        applyAbsoluteTune,
+        previewAbsoluteRestore,
+        restoreAbsoluteTune,
+    };
 }

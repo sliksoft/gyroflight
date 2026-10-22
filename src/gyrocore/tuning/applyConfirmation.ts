@@ -41,6 +41,14 @@ export type ConfirmationSubject =
           /** snapshotHash of the read-only preview the user saw (useTuneApply.previewTune). */
           preview?: string;
       }
+    | {
+          kind: "absolute";
+          proposalId: string;
+          /** The absolute values the user confirmed, by CLI name. */
+          change: Record<string, number>;
+          /** absoluteHash of the read-only preview the user saw (useTuneApply.previewAbsoluteTune). */
+          preview?: string;
+      }
     | { kind: "restore"; backupId: string; preview?: string };
 
 interface Issued {
@@ -54,6 +62,10 @@ function sameSubject(a: ConfirmationSubject, b: ConfirmationSubject): boolean {
     if (a.kind === "apply" && b.kind === "apply") {
         const keys = new Set([...Object.keys(a.sliders), ...Object.keys(b.sliders)]);
         return a.compositeId === b.compositeId && [...keys].every((k) => a.sliders[k] === b.sliders[k]);
+    }
+    if (a.kind === "absolute" && b.kind === "absolute") {
+        const keys = new Set([...Object.keys(a.change), ...Object.keys(b.change)]);
+        return a.proposalId === b.proposalId && [...keys].every((k) => a.change[k] === b.change[k]);
     }
     if (a.kind === "restore" && b.kind === "restore") {
         return a.backupId === b.backupId;

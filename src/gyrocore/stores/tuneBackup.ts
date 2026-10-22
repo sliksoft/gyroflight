@@ -31,6 +31,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import type { TuneSnapshot } from "@/gyrocore/tuning/tuneSnapshot";
+import type { AbsoluteSnapshot } from "@/gyrocore/tuning/absoluteTune";
 
 export const BACKUP_STORAGE_KEY = "gyroflight.tuneBackups.v1";
 /** Newest backups kept per craft. */
@@ -40,12 +41,14 @@ export interface TuneBackup {
     id: string;
     createdAt: string;
     /** Why it was taken: right before an Apply, or before a Restore (so a Restore can be undone). */
-    reason: "before_apply" | "before_restore";
+    reason: "before_apply" | "before_absolute_apply" | "before_restore";
     uid: [number, number, number];
     board: string;
     firmware: string;
     compositeId: string | null;
     snapshot: TuneSnapshot;
+    /** Absolute route: every firmware-held PID / PID_ADVANCED / FILTER_CONFIG value and the slider modes. */
+    absolute?: AbsoluteSnapshot;
 }
 
 function readStorage(): TuneBackup[] {
