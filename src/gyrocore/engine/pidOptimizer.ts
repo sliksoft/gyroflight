@@ -165,6 +165,25 @@ export function optimizeAxisPid(
             status: "BLOCKED",
         };
     }
+    // The search moves P, I, D and d_max along the segment; a feedforward step is not a loop-margin
+    // change and the search does not take it. A record whose gain-change flight also moved F
+    // therefore covers no point this search can propose: say so, rather than "no candidate meets
+    // the targets" (Codex re-review P3-c). The validated region is not widened.
+    const fKey = segment?.keys[3];
+    if (segment && fKey && segment.base[fKey] !== segment.cand[fKey]) {
+        reasons.push(
+            `verified_tune_segment_moves_feedforward:${fKey}:${segment.base[fKey]}->${segment.cand[fKey]}`,
+            "required_measurement:gain_change_flight_with_feedforward_unchanged",
+        );
+        return {
+            ...base,
+            proposed: current,
+            proposedMargins: curMargins,
+            outcome: "not_computable",
+            changed: false,
+            status: "BLOCKED",
+        };
+    }
     let best: { v: PidValues; m: LoopMargins } | null = null;
     let safest: { v: PidValues; m: LoopMargins } | null = null;
     for (const v of searchGrid(current, segment)) {
