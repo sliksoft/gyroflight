@@ -40,6 +40,25 @@ import {
     syntheticTransferFunction,
 } from "../../../src/js/blackbox/betaflight_open_loop";
 import { buildVerifiedTune, type VerifiedTune } from "../../../src/gyrocore/releaseGate/verifiedTune";
+import { loggedAbsoluteValues } from "../../../src/gyrocore/tuning/absoluteTune";
+import { SYNTH_HEADERS } from "./syntheticLog";
+
+/** The synthetic AIR65 log header with these logged P/I/D (what a log of that tune would carry). */
+export function fixtureHeaders(
+    pids: Partial<Record<"roll" | "pitch" | "yaw", readonly [number, number, number]>> = {},
+): [string, string][] {
+    return SYNTH_HEADERS.map(([k, v]) => {
+        const axis = k.replace("PID", "") as "roll" | "pitch" | "yaw";
+        return k.endsWith("PID") && pids[axis] ? [k, pids[axis]!.join(",")] : [k, v];
+    });
+}
+
+type PidSet = Record<"roll" | "pitch" | "yaw", { p: number; i: number; d: number }>;
+/** The logged absolute values of a synthetic log flown with `pids`. */
+function valuesOf(pids: PidSet): Record<string, number> {
+    const row = (a: keyof PidSet) => [pids[a].p, pids[a].i, pids[a].d] as const;
+    return loggedAbsoluteValues(fixtureHeaders({ roll: row("roll"), pitch: row("pitch"), yaw: row("yaw") }));
+}
 
 export const FIXTURE_UID: [number, number, number] = [0x003e0021, 0x38415012, 0x20343141];
 export const FIXTURE_FIRMWARE = "2026.6.2";
@@ -70,7 +89,7 @@ export function verifiedTuneAllAxesFixture(scale = 1.3, dScale = 0.7): VerifiedT
             ...c.axis,
             p: Math.round(c.axis.p * scale),
             i: Math.round(c.axis.i * scale),
-            d: Math.round(c.axis.d * scale),
+            d: Math.round(c.axis.d * dScale),
         },
     });
     const cand = { roll: scaled(base.roll), pitch: scaled(base.pitch), yaw: scaled(base.yaw) };
@@ -85,18 +104,12 @@ export function verifiedTuneAllAxesFixture(scale = 1.3, dScale = 0.7): VerifiedT
         candidateCfg: cand[name],
         candidateT: measured(cand[name], plantScale[name]),
     });
+    const basePids = { roll: pids(base.roll), pitch: pids(base.pitch), yaw: pids(base.yaw) };
+    const candPids = { roll: pids(cand.roll), pitch: pids(cand.pitch), yaw: pids(cand.yaw) };
     return buildVerifiedTune({
         craft: { uid: FIXTURE_UID, board: "BEFH BETAFPVG473", firmware: FIXTURE_FIRMWARE },
-        baseline: {
-            sha256: "b".repeat(64),
-            logIndex: 0,
-            pids: { roll: pids(base.roll), pitch: pids(base.pitch), yaw: pids(base.yaw) },
-        },
-        candidate: {
-            sha256: "c".repeat(64),
-            logIndex: 0,
-            pids: { roll: pids(cand.roll), pitch: pids(cand.pitch), yaw: pids(cand.yaw) },
-        },
+        baseline: { sha256: "b".repeat(64), logIndex: 0, pids: basePids, values: valuesOf(basePids) },
+        candidate: { sha256: "c".repeat(64), logIndex: 0, pids: candPids, values: valuesOf(candPids) },
         axes: { roll: axis("roll"), pitch: axis("pitch"), yaw: axis("yaw") },
         createdAt: "2026-10-22T00:00:00Z",
     });
@@ -119,17 +132,16 @@ export function verifiedTuneFixture(
     };
     const yaw = { p: 56, i: 79, d: 0, f: 22 };
     const plant = extractPlantFromClosedLoop(measured(base.roll), base.roll, { missingFilterInfo: [] });
+    const basePids = { roll: pids(base.roll), pitch: pids(base.pitch), yaw };
+    const candPids = { roll: pids(cand.roll), pitch: pids(cand.pitch), yaw };
     return buildVerifiedTune({
         craft: { uid: FIXTURE_UID, board: "BEFH BETAFPVG473", firmware: opts.firmware ?? FIXTURE_FIRMWARE },
-        baseline: {
-            sha256: "b".repeat(64),
-            logIndex: 0,
-            pids: { roll: pids(base.roll), pitch: pids(base.pitch), yaw },
-        },
+        baseline: { sha256: "b".repeat(64), logIndex: 0, pids: basePids, values: valuesOf(basePids) },
         candidate: {
             sha256: opts.sameLog ? "b".repeat(64) : "c".repeat(64),
             logIndex: 0,
-            pids: { roll: pids(cand.roll), pitch: pids(cand.pitch), yaw },
+            pids: candPids,
+            values: valuesOf(candPids),
         },
         axes: {
             roll: {

@@ -27,10 +27,13 @@
  * to D (so the D_max boost the sweep measured stays the same) and never drops below D.
  *
  * The result is a prediction. Its status follows the margins: BLOCKED while they are not
- * VALIDATED (loopModel.ts), so the release contract keeps it from being written.
+ * VALIDATED (loopModel.ts), so the release contract keeps it from being written. With a Verified
+ * Tune bound to this configuration, candidates are taken only on its measured segment (the
+ * same predicate the release contract applies).
  */
 
 import type { DigitalControllerConfig } from "@/js/blackbox/betaflight_digital_controller";
+import { onValidatedSegment } from "@/gyrocore/releaseGate/verifiedTune";
 import { loopMargins, type AxisLoop, type LoopMargins } from "./loopModel";
 
 export const PID_TARGETS = Object.freeze({
@@ -95,14 +98,51 @@ function candidateCfg(cfg: DigitalControllerConfig, v: PidValues): DigitalContro
  * M5-B); `current` the absolute values on the FC. Scaling keeps the effective/absolute ratio.
  */
 /**
- * `limits`: the largest relative change per term a Verified Tune confirmed for this axis. With
- * it the search stays inside what was independently validated (a larger step would not be
- * released anyway); without it, MAX_STEP.
+ * A Verified Tune's measured segment for this axis: the logged absolute values of its baseline
+ * (equal to `current`) and candidate, by CLI key (p_roll, …, d_max_roll, f_roll).
+ */
+export interface ValidatedSegment {
+    keys: string[];
+    base: Record<string, number>;
+    cand: Record<string, number>;
+}
+
+/** Fractions of the validated segment tried by the search. */
+const SEGMENT_STEPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+
+function* searchGrid(current: PidValues, segment: ValidatedSegment | null): Generator<PidValues> {
+    if (segment) {
+        const [p, i, d, , dMax] = segment.keys;
+        const at = (k: string, t: number) => Math.round(segment.base[k] + t * (segment.cand[k] - segment.base[k]));
+        for (const t of SEGMENT_STEPS) {
+            const v = { p: at(p, t), i: at(i, t), d: at(d, t), dMax: at(dMax, t) };
+            const target = { [p]: v.p, [i]: v.i, [d]: v.d, [dMax]: v.dMax };
+            if (onValidatedSegment(segment.base, segment.cand, target, segment.keys)) yield v;
+        }
+        return;
+    }
+    const dScales = current.d > 0 ? SCALES : [1];
+    for (const ps of SCALES) {
+        for (const ds of dScales) {
+            yield {
+                p: Math.round(current.p * ps),
+                i: Math.round(current.i * ps),
+                d: Math.round(current.d * ds),
+                dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), Math.round(current.d * ds)) : 0,
+            };
+        }
+    }
+}
+
+/**
+ * `segment`: the measured segment of a Verified Tune bound to this configuration. With it the
+ * search stays on what was independently validated (anything else would not be released);
+ * without it, MAX_STEP around the current values.
  */
 export function optimizeAxisPid(
     loop: AxisLoop,
     current: PidValues,
-    limits: { p: number; i: number; d: number } | null = null,
+    segment: ValidatedSegment | null = null,
 ): AxisPidProposal {
     const axis = NAMES[loop.axis];
     const curMargins = loopMargins(loop);
@@ -125,33 +165,14 @@ export function optimizeAxisPid(
             status: "BLOCKED",
         };
     }
-    const dScales = current.d > 0 ? SCALES : [1];
     let best: { v: PidValues; m: LoopMargins } | null = null;
     let safest: { v: PidValues; m: LoopMargins } | null = null;
-    for (const ps of SCALES) {
-        for (const ds of dScales) {
-            const v: PidValues = {
-                p: Math.round(current.p * ps),
-                i: Math.round(current.i * ps),
-                d: Math.round(current.d * ds),
-                dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), Math.round(current.d * ds)) : 0,
-            };
-            if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) continue;
-            if (limits) {
-                const rel = (to: number, from: number) =>
-                    from > 0 ? Math.abs(to - from) / from : to === from ? 0 : Infinity;
-                const terms = [
-                    [v.p, current.p, limits.p],
-                    [v.i, current.i, limits.i],
-                    [v.d, current.d, limits.d],
-                ] as const;
-                if (terms.some(([to, from, lim]) => rel(to, from) > lim + 1e-9)) continue;
-            }
-            const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
-            if (!pmKnown(m)) continue;
-            if (!safest || m.phaseMarginDeg! > safest.m.phaseMarginDeg!) safest = { v, m };
-            if (meets(m) && (!best || m.crossoverHz! > best.m.crossoverHz!)) best = { v, m };
-        }
+    for (const v of searchGrid(current, segment)) {
+        if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) continue;
+        const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
+        if (!pmKnown(m)) continue;
+        if (!safest || m.phaseMarginDeg! > safest.m.phaseMarginDeg!) safest = { v, m };
+        if (meets(m) && (!best || m.crossoverHz! > best.m.crossoverHz!)) best = { v, m };
     }
     const same = (v: PidValues) =>
         v.p === current.p && v.i === current.i && v.d === current.d && v.dMax === current.dMax;

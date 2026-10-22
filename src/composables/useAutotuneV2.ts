@@ -46,7 +46,7 @@ import { useAutotuneV2Store, type AutotuneV2Outcome } from "@/gyrocore/stores/au
 import type { TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 import { issueConfirmation } from "@/gyrocore/tuning/applyConfirmation";
-import type { AbsoluteDiffRow } from "@/gyrocore/tuning/absoluteTune";
+import { loggedAbsoluteValues, type AbsoluteDiffRow } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -151,7 +151,11 @@ export function useAutotuneV2() {
             const firmware = id.firmwareRevision?.split(/\s+/)[1] ?? null;
             store.result = runAutotuneV2({
                 ...picked,
-                verifiedTune: useVerifiedTuneStore().forCraft(id.uid, firmware),
+                verifiedTune: useVerifiedTuneStore().forCraft(
+                    id.uid,
+                    firmware,
+                    loggedAbsoluteValues(picked.primary.headerPairs),
+                ),
             });
             store.state = "done";
         } catch (err) {

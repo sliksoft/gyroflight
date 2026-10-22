@@ -22,9 +22,11 @@
 /*
  * The release contract reached the way a user reaches it, through useAutotuneV2 only: import
  * baseline + repeat, apply a clearly different PID set, import its two CHIRP logs, create the
- * Verified Tune from those logs, Calculate, then Apply / Verify / Restore on the simulated FC
- * that holds the candidate tune. No fixture record is injected. A candidate flight that
- * contradicts the prediction yields no record and nothing releasable.
+ * Verified Tune from those logs, Calculate. A record covers only its measured segment from its
+ * measured baseline: with the FC on the candidate tune nothing further is released; with the FC
+ * back on the baseline (a new baseline flight imported) the confirmed segment is released, then
+ * Apply / Verify / Restore run on the simulated FC. No fixture record is injected. A candidate
+ * flight that contradicts the prediction yields no record and nothing releasable.
  * (Synthetic logs stand in for the BBL decode: buildLogInputs is replaced per file.)
  */
 
@@ -65,8 +67,15 @@ import { air65FirmwareState, createFirmwareFc } from "./harness/mspFirmware";
 import { SYNTH_HEADERS, syntheticLogInput } from "./harness/syntheticLog";
 
 const BASE: Record<string, [number, number, number]> = { roll: [56, 79, 30], pitch: [82, 117, 61], yaw: [56, 79, 0] };
-// P / I +20 %, D −20 %: a change the CHIRP can resolve (scaling all three together cannot).
-const CAND = { roll: [67, 95, 24], pitch: [98, 140, 49], yaw: [67, 95, 0] } as Record<string, [number, number, number]>;
+// P / I −10 %, D −30 %: a change the CHIRP can resolve (scaling all three together cannot), in
+// the direction the search recommends for this craft.
+const CAND = { roll: [50, 71, 21], pitch: [74, 105, 43], yaw: [50, 71, 0] } as Record<string, [number, number, number]>;
+
+function fcHolding(pids: Record<string, [number, number, number]>) {
+    const ram = air65FirmwareState();
+    ram.pids = [pids.roll, pids.pitch, pids.yaw, ram.pids[3], ram.pids[4]].map((r) => [...r]);
+    mocks.fc = createFirmwareFc({ ram });
+}
 
 function importLog(name: string, log: AutotuneLogInput) {
     mocks.logs.set(name, log);
@@ -84,14 +93,12 @@ beforeEach(() => {
     resetConfirmations();
     mocks.logs.clear();
     mocks.showYesNo.mockClear();
-    const ram = air65FirmwareState();
-    ram.pids = [CAND.roll, CAND.pitch, CAND.yaw, ram.pids[3], ram.pids[4]].map((r) => [...r]);
-    mocks.fc = createFirmwareFc({ ram });
+    fcHolding(CAND);
     useConnectionStore().virtualMode = false;
 });
 
 describe("user flow: baseline, gain change, Verified Tune, Apply, Restore", () => {
-    it("the contract is reachable from imported logs alone, and the write is verified and restorable", async () => {
+    async function verifiedFromLogs() {
         importLog("baseline.bbl", syntheticLogInput("1".repeat(64), { pids: BASE }));
         importLog("baseline-repeat.bbl", syntheticLogInput("2".repeat(64), { pids: BASE }));
         importLog("candidate.bbl", syntheticLogInput("3".repeat(64), { pids: CAND }));
@@ -99,20 +106,46 @@ describe("user flow: baseline, gain change, Verified Tune, Apply, Restore", () =
         expect(SYNTH_HEADERS.find(([k]) => k === "rollPID")![1]).toBe("56,79,30");
 
         const v2 = useAutotuneV2();
-        const store = useAutotuneV2Store();
         await v2.createVerifiedTune();
-        expect(store.verifiedTuneAttempt?.verdict).toBe("PASS");
+        expect(useAutotuneV2Store().verifiedTuneAttempt?.verdict).toBe("PASS");
         expect(useVerifiedTuneStore().records).toHaveLength(1);
         const record = useVerifiedTuneStore().records[0];
         expect(record.baseline.sha256).toBe("1".repeat(64));
         expect(record.candidate.sha256).toBe("3".repeat(64));
         expect(record.baselineRepeat?.sha256).toBe("2".repeat(64));
+        return v2;
+    }
 
-        // Calculate ran again with the record; it works from the candidate tune (what the FC holds).
+    it("FC on the candidate tune: the record covers no further step from there", async () => {
+        const v2 = await verifiedFromLogs();
+        const store = useAutotuneV2Store();
+        // Calculate ran again with the record, from the candidate tune (what the FC holds).
         expect(store.state).toBe("done");
-        expect(store.result!.proposal?.log.sha256 ?? store.result!.releasableProposal?.log.sha256).toBe("3".repeat(64));
+        expect(store.result!.parts.find((p) => p.part === "independent_gain_prediction")!.reasons).toContain(
+            "verified_tune_measured_from_another_configuration",
+        );
+        expect(v2.releasedProposal()).toBeNull();
+        useConnectionStore().connectionValid = true;
+        expect(await v2.confirmAndApply()).toBe("cancelled");
+        expect(mocks.fc.calls).toEqual([]);
+    }, 600_000);
+
+    it("FC back on the measured baseline: the confirmed segment is released, verified and restorable", async () => {
+        const v2 = await verifiedFromLogs();
+        const store = useAutotuneV2Store();
+        // The user put the baseline back on the craft and flew it again.
+        fcHolding(BASE);
+        importLog("baseline-again.bbl", syntheticLogInput("5".repeat(64), { pids: BASE }));
+        await v2.calculate();
+        expect(store.state).toBe("done");
         const released = v2.releasedProposal();
         expect(released).not.toBeNull();
+        expect(released!.log.sha256).toBe("1".repeat(64));
+        const record = useVerifiedTuneStore().records[0];
+        for (const [k, to] of Object.entries(released!.change)) {
+            const [b, c] = [record.baseline.values[k], record.candidate.values[k]];
+            expect(Math.min(b, c) <= to && to <= Math.max(b, c), k).toBe(true);
+        }
 
         const original = structuredClone(mocks.fc.ram);
         useConnectionStore().connectionValid = true;

@@ -75,7 +75,8 @@ beforeAll(() => {
     released = runAutotuneV2({
         primary,
         others: [repeat],
-        verifiedTune: verifiedTuneAllAxesFixture(),
+        // A measured gain reduction from the logged tune: its segment carries the released proposal.
+        verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
         createdAt: "2026-10-22T00:00:00Z",
     });
 }, 600_000);

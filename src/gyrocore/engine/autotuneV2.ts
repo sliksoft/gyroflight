@@ -46,7 +46,13 @@ import {
 import { assessCrossLogPlantReproducibility } from "@/js/blackbox/betaflight_open_loop";
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
-import { verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
+import {
+    axisKeys,
+    validatedRegionIssues,
+    verifiedTuneIssues,
+    type VerifiedTune,
+} from "@/gyrocore/releaseGate/verifiedTune";
+import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import type {
     AbsoluteProposal,
     AbsoluteReleaseEvidence,
@@ -282,8 +288,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     const mask = flightMask(log.channels.rcThrottle);
     const id = logIdentity(log.headerPairs);
     const firmware = id.firmwareRevision?.split(/\s+/)[1] ?? null;
-    const attested =
-        !!input.verifiedTune && verifiedTuneIssues(input.verifiedTune, { uid: id.uid, firmware }).length === 0;
+    // A Verified Tune attests only for the configuration it was measured from: its baseline must
+    // be exactly this log's logged configuration (a new starting point needs its own flight).
+    const recordIssues = input.verifiedTune ? verifiedTuneIssues(input.verifiedTune, { uid: id.uid, firmware }) : [];
+    const baselineIssues =
+        input.verifiedTune && !recordIssues.length
+            ? validatedRegionIssues(input.verifiedTune, loggedAbsoluteValues(log.headerPairs), {})
+            : [];
+    const attested = !!input.verifiedTune && !recordIssues.length && !baselineIssues.length;
 
     // 1. Gyro chain.
     const chainCfg = chainConfigFromHeaders(h);
@@ -359,9 +371,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             });
             return;
         }
-        // With a Verified Tune, stay inside the change it confirmed (the contract refuses more).
+        // With a Verified Tune, stay on the segment it confirmed (the contract refuses anything else).
+        const vt = input.verifiedTune;
         pid.push(
-            optimizeAxisPid(ax.loop, current, attested ? input.verifiedTune!.validatedRelativeChange[name] : null),
+            optimizeAxisPid(
+                ax.loop,
+                current,
+                attested && vt ? { keys: axisKeys(name), base: vt.baseline.values, cand: vt.candidate.values } : null,
+            ),
         );
     });
 
@@ -625,7 +642,9 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             attested
                 ? []
                 : [
-                      "no_verified_tune_for_this_craft",
+                      ...(baselineIssues.length
+                          ? ["verified_tune_measured_from_another_configuration"]
+                          : ["no_verified_tune_for_this_craft"]),
                       "required_measurement:gain_change_chirp_flight_plus_baseline_repeat",
                   ],
         ),
