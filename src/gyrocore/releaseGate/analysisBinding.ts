@@ -78,8 +78,10 @@ function plainFields(value: object): { isArray: boolean; entries: [string, unkno
         if (!("value" in d) || !d.enumerable) throw new TypeError(`not plain data: property ${k}`);
     }
     if (Object.getOwnPropertySymbols(o).length) throw new TypeError("not plain data: symbol key");
-    if (isArray && keys.length !== (o as unknown as unknown[]).length)
-        throw new TypeError("not plain data: sparse array");
+    // Exactly the indices 0..length-1: a hole filled by a named property would serialize alike.
+    if (isArray && (keys.length !== (o as unknown as unknown[]).length || keys.some((k, i) => k !== String(i)))) {
+        throw new TypeError("not plain data: not exactly the indices of an array");
+    }
     return { isArray, entries: keys.map((k) => [k, o[k]]) };
 }
 
@@ -121,15 +123,37 @@ export function plainCopy<T>(value: T): T {
     ) as T;
 }
 
-/** The analysis an Apply was authorized against: the decoded inputs and the result, by identity. */
+/**
+ * The analysis an Apply was authorized against: the decoded inputs and the result by identity,
+ * and each input by identity and log. Deeper edits of a decoded log (its samples) are not seen.
+ */
 export interface AnalysisPin {
     inputs: unknown;
     result: unknown;
+    logs: { input: unknown; sha256: string; logIndex: number }[];
 }
 
 export function pinAnalysis(): AnalysisPin {
     const store = useAutotuneV2Store();
-    return { inputs: store.inputs, result: store.result };
+    return {
+        inputs: store.inputs,
+        result: store.result,
+        logs: (store.inputs ?? []).map((l) => ({ input: l, sha256: l.sha256, logIndex: l.logIndex })),
+    };
+}
+
+function analysisChanged(since: AnalysisPin): boolean {
+    const store = useAutotuneV2Store();
+    const now = store.inputs ?? [];
+    return (
+        store.inputs !== since.inputs ||
+        store.result !== since.result ||
+        now.length !== since.logs.length ||
+        now.some(
+            (l, i) =>
+                l !== since.logs[i].input || l.sha256 !== since.logs[i].sha256 || l.logIndex !== since.logs[i].logIndex,
+        )
+    );
 }
 
 /**
@@ -147,7 +171,7 @@ export function analysisBindingIssues(
     const current = store.result?.releasableProposal ?? null;
     if (!current) return ["no_releasable_proposal"];
     if (canonicalText(proposal) !== canonicalText(current)) return ["proposal_differs_from_analysis"];
-    if (since && (store.inputs !== since.inputs || store.result !== since.result)) {
+    if (since && analysisChanged(since)) {
         return ["analysis_changed_since_authorization"];
     }
     if (!recompute) return [];
