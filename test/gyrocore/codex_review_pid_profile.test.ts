@@ -39,11 +39,19 @@ vi.mock("../../src/js/msp", () => ({
         ),
     },
 }));
+// The write authority's steps other than the release contract (writeAuthority.ts), released.
+vi.mock("@/gyrocore/releaseGate/analysisBinding", async () =>
+    (await import("./harness/analysisBindingRelease")).releasedAnalysisBinding(),
+);
+vi.mock("@/gyrocore/safety/authorize", async () => (await import("./harness/safetyRelease")).releasedSafety());
+vi.mock("@/gyrocore/productLock/productApply", async () =>
+    (await import("./harness/productRelease")).releasedProductApply(),
+);
 vi.mock("@/gyrocore/releaseGate/releaseContract", async () => ({
     ...(await vi.importActual<typeof import("../../src/gyrocore/releaseGate/releaseContract")>(
         "@/gyrocore/releaseGate/releaseContract",
     )),
-    assertAbsoluteReleased: () => undefined,
+    evaluateRelease: () => ({ released: true, conditions: [], blocks: [] }),
 }));
 
 import MSPCodes from "../../src/js/msp/MSPCodes";

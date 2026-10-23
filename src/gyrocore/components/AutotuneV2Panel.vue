@@ -331,6 +331,7 @@ import { useAutotuneV2 } from "@/composables/useAutotuneV2";
 import { useAutotuneV2Store, type AutotuneV2Source } from "@/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
+import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
 import { RESOLVED_FEATURE_BINS, type LoopMargins } from "@/gyrocore/engine/loopModel";
 
 const v2 = useAutotuneV2Store();
@@ -375,10 +376,15 @@ const backupKeptText = computed(() => {
 const released = computed(() => (v2.result ? releasedProposal() : null));
 const connected = computed(() => !!connection.connectionValid);
 
-/** The contract of what Apply would write: the releasable part, or the whole proposal when nothing is. */
+/**
+ * The contract of what Apply would write (the releasable part, or the whole proposal when nothing
+ * is), then the write authority's other steps: binding, GyroCore Safety, product lock.
+ */
 const contract = computed(() => {
     const p = v2.result?.releasableProposal ?? v2.result?.proposal;
-    return p ? evaluateRelease(p).conditions : [];
+    if (!p) return [];
+    const authority = absoluteWriteDecision(p, { recompute: false }).steps.filter((s) => s.name !== "release_contract");
+    return [...evaluateRelease(p).conditions, ...authority];
 });
 
 const canPreview = computed(() => !!v2.result?.proposal && connected.value && !connection.virtualMode);

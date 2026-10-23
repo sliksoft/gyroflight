@@ -49,6 +49,7 @@ import { verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/ve
 
 export const PRODUCT_APPLY_PENDING = "full_safety_engine_pending";
 export const RELEASE_INDEPENDENT_VALIDATION_MISSING = "independent_pid_validation_missing";
+export const RELEASE_INDEPENDENT_VALIDATION_NOT_CURRENT = "independent_pid_validation_not_current";
 
 export interface ProductReleaseEvidence {
     /** SafetyResult.analysisEvidence: "available" only when Safety ran its evidence stages. */
@@ -57,6 +58,11 @@ export interface ProductReleaseEvidence {
     independentPidValidation: VerifiedTune | null;
     /** The craft the write goes to; the record must be about this craft and firmware. */
     craft?: { uid: readonly number[] | null; firmware: string | null };
+    /**
+     * Absolute route: the record the proposal was calculated with. It must be the one this browser
+     * holds now (`independentPidValidation`): a record deleted or replaced since does not count.
+     */
+    carriedPidValidation?: VerifiedTune | null;
 }
 
 /** What production has today: neither kind of evidence. */
@@ -82,6 +88,9 @@ export function productApplyBlocks(evidence: ProductReleaseEvidence = NO_RELEASE
                 ...issues.filter((r) => r !== RELEASE_INDEPENDENT_VALIDATION_MISSING),
             );
         }
+    }
+    if (evidence.carriedPidValidation !== undefined && evidence.carriedPidValidation?.id !== record?.id) {
+        blocked.push(RELEASE_INDEPENDENT_VALIDATION_NOT_CURRENT);
     }
     return blocked;
 }

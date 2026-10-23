@@ -37,6 +37,8 @@ const route = vi.hoisted(() => ({
     craft: undefined as unknown as Craft,
     change: null as null | Record<string, number>,
     picked: new Uint8Array() as Uint8Array,
+    /** Runs before each MSP request reaches the craft (the state changing while Apply awaits). */
+    onCall: null as null | ((code: number) => void),
 }));
 
 // The Apply route checks the craft against the log's DeviceUID / board: give these logs one.
@@ -57,9 +59,10 @@ vi.mock("../../src/js/localization", async (importOriginal) => ({
 }));
 vi.mock("../../src/js/msp", () => ({
     default: {
-        promise: vi.fn(async (code: number, data?: number[]) =>
-            (await import("./harness/mspCraft")).craftPromise(route.craft, code, data),
-        ),
+        promise: vi.fn(async (code: number, data?: number[]) => {
+            route.onCall?.(code);
+            return (await import("./harness/mspCraft")).craftPromise(route.craft, code, data);
+        }),
     },
 }));
 vi.mock("@/gyrocore/productLock/productApply", async () =>
@@ -154,6 +157,7 @@ beforeEach(() => {
     resetConfirmations();
     route.craft = createCraft();
     route.change = { ...CHANGE };
+    route.onCall = null;
 });
 
 describe("the user's confirmation", () => {
@@ -272,6 +276,21 @@ describe("backup before the write", () => {
         expect(backup.snapshot.sliders.slider_pi_gain).toBe(before.sliders.slider_pi_gain);
         expect(backup.snapshot.pids.slice(0, 3)).toEqual(before.pids.slice(0, 3));
         expect(JSON.parse(localStorage.getItem(BACKUP_STORAGE_KEY)!)[0].id).toBe(result.backupId);
+    });
+});
+
+describe("the gates again, right before the write", () => {
+    it("a composite that changes during the live reads stops the Apply before the backup and the SET", async () => {
+        const c = await load();
+        route.onCall = (code) => {
+            // Another recommendation by the time the reads return (selection or analysis changed).
+            if (code === MSPCodes.MSP_PID) route.change = { ...CHANGE, slider_pi_gain: 120 };
+        };
+        const err = await failure(apply(c.id));
+        expect((err as ApplyBlockedError).reasons).toEqual(["apply:sliders_differ_from_composite"]);
+        expect(codes()).toContain(MSPCodes.MSP_PID);
+        expect(writes()).toEqual([]);
+        expect(useTuneBackupStore().backups).toEqual([]);
     });
 });
 

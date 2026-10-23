@@ -24,7 +24,9 @@
  *
  * Apply writes only GyroCore's authorized global (composite) tune, and only after:
  *   1. the composite gate (incl. the M2 phase-margin block), GyroCore Safety and the
- *      product release procedure pass (no flight-controller access before this);
+ *      product release procedure pass (gyrocore/releaseGate/writeAuthority.ts, the one
+ *      write authority of both Apply routes; no flight-controller access before this,
+ *      and the same gates run again right before the first SET);
  *   2. the user's single-use confirmation of exactly this change is presented;
  *   3. a fresh read shows the connected FC is the logged craft (UID, board,
  *      firmware), runs Betaflight with simplified tuning, and is disarmed;
@@ -49,16 +51,10 @@ import { useFlightControllerStore } from "@/stores/fc";
 import { useConnectionStore } from "@/stores/connection";
 import { validateTuningSliders } from "@/composables/useTuningSliders";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
-import {
-    assertCompositeApplyAuthorized,
-    authorizeCompositeApply,
-    liveCompositeBlocks,
-} from "@/gyrocore/tuning/authorize";
+import { authorizeCompositeApply, liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
 import type { CompositeGateState } from "@/gyrocore/tuning/authorize";
 import type { ProposedSliders } from "@/composables/useAutotune";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
-import { assertSafetyAuthorized } from "@/gyrocore/safety/authorize";
-import { assertProductApplyReleased } from "@/gyrocore/productLock/productApply";
 import { consumeConfirmation } from "@/gyrocore/tuning/applyConfirmation";
 import {
     apiAtLeast,
@@ -107,8 +103,8 @@ import {
     type AbsoluteValues,
     type StoreBlocks,
 } from "@/gyrocore/tuning/absoluteTune";
-import { assertAbsoluteReleased, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
-import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
+import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
+import { assertAbsoluteWriteAuthorized, assertSliderWriteAuthorized } from "@/gyrocore/releaseGate/writeAuthority";
 
 /**
  * Where a write transaction stopped. "prepare": before the first SET was sent (a check or a fresh
@@ -412,16 +408,7 @@ export async function applyTune(
     confirmation: string | null | undefined,
 ): Promise<TuneWriteResult> {
     // 1. Every gate that needs no flight controller, in this order, before any MSP.
-    const gateState = useChirpQualificationStore().gateState();
-    const composite = assertCompositeApplyAuthorized(gateState, compositeId, proposed);
-    const safety = assertSafetyAuthorized(gateState, composite, { ...proposed });
-    const logged = logIdentity(logHeaders(gateState, composite));
-    const loggedFirmware = logged.firmwareRevision?.split(/\s+/)[1] ?? null;
-    assertProductApplyReleased({
-        safetyAnalysisEvidence: safety.analysisEvidence,
-        independentPidValidation: useVerifiedTuneStore().forCraft(logged.uid, loggedFirmware),
-        craft: { uid: logged.uid, firmware: loggedFirmware },
-    });
+    const { gateState, composite } = assertSliderWriteAuthorized(proposed, compositeId);
     const confirmed = consumeConfirmation(confirmation, {
         kind: "apply",
         compositeId: composite.id,
@@ -437,6 +424,9 @@ export async function applyTune(
     if (confirmed.preview !== undefined && confirmed.preview !== snapshotHash(expected)) {
         throw new ApplyBlockedError(["apply:preview_changed"]);
     }
+
+    // The reads above awaited: the gates again on the state as it is now. Nothing awaits from here to the SET.
+    assertSliderWriteAuthorized(proposed, compositeId);
 
     // 5. Backup, then the write itself.
     const backup = storeBackup("before_apply", fc, before, composite.id);
@@ -688,6 +678,7 @@ async function writeAbsoluteBlocks(
     backup: AbsoluteSnapshot,
     backupId: string,
     all = false,
+    beforeFirstSet?: () => void,
 ): Promise<void> {
     const fcStore = useFlightControllerStore();
     const api = target.apiVersion;
@@ -697,6 +688,12 @@ async function writeAbsoluteBlocks(
     // SETs sent so far: none means the craft still holds exactly what was backed up (a failed
     // check or fresh read before the first SET is "prepare", not a write with an unknown result).
     let sent = 0;
+    const send = async (code: number) => {
+        // The last check before the craft changes; nothing awaits between it and the SET.
+        if (sent === 0) beforeFirstSet?.();
+        sent++;
+        await writeOk(code);
+    };
     try {
         if (slidersChange || all) {
             await assertPidProfile(profile, { disarmed: true });
@@ -707,8 +704,7 @@ async function writeAbsoluteBlocks(
             if (all) {
                 valuesToStore(target.values, storeBlocks(), api);
             }
-            sent++;
-            await writeOk(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
+            await send(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
         }
         const blocks: [string, number, number][] = [
             ["pid", MSPCodes.MSP_PID, MSPCodes.MSP_SET_PID],
@@ -723,8 +719,7 @@ async function writeAbsoluteBlocks(
             await assertPidProfile(profile, { disarmed: true });
             await readFull(read, "fc:live_readback_missing", api);
             valuesToStore(target.values, storeBlocks(), api);
-            sent++;
-            await writeOk(write);
+            await send(write);
         }
     } catch (err) {
         if (sent === 0) {
@@ -861,8 +856,9 @@ export async function applyAbsoluteTune(
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
-    // 1. The release contract and the user's confirmation, before any MSP.
-    assertAbsoluteReleased(proposal);
+    // 1. The write authority (the engine recomputed for this proposal, release contract, GyroCore
+    // Safety, product lock) and the user's confirmation, before any MSP.
+    assertAbsoluteWriteAuthorized(proposal, { recompute: true });
     const confirmed = consumeConfirmation(confirmation, {
         kind: "absolute",
         proposalId: proposal.id,
@@ -876,9 +872,12 @@ export async function applyAbsoluteTune(
         throw new ApplyBlockedError(["apply:preview_changed"]);
     }
 
-    // 3. Backup (every firmware-held value), then the write, then verify and save.
+    // 3. The authority again (the reads above awaited), backup (every firmware-held value), the write
+    // with the authority once more right before its first SET, then verify and save.
+    const recheck = () => assertAbsoluteWriteAuthorized(proposal, { recompute: false });
+    recheck();
     const backup = storeBackup("before_absolute_apply", fc, v1Snapshot(), null, before);
-    await writeAbsoluteBlocks(before, expected, before, backup.id);
+    await writeAbsoluteBlocks(before, expected, before, backup.id, false, recheck);
     const verified = await verifyAbsoluteAndSave(expected, before, backup.id);
     return { status: "verified", backupId: backup.id, expected, ...verified };
 }
