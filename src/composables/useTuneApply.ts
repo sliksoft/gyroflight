@@ -428,7 +428,7 @@ export async function applyTune(
         ...proposed,
     });
     // What the user confirmed must still be what the firmware would produce.
-    if (confirmed.preview !== undefined && confirmed.preview !== snapshotHash(expected)) {
+    if (confirmed.preview !== snapshotHash(expected)) {
         throw new ApplyBlockedError(["apply:preview_changed"]);
     }
 
@@ -524,10 +524,7 @@ export async function restoreTune(backupId: string, confirmation: string | null 
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readRestoreTarget(backupId);
     const target = backup.snapshot;
-    if (
-        confirmed.preview !== undefined &&
-        confirmed.preview !== restoreHash(snapshotHash(current), snapshotHash(target))
-    ) {
+    if (confirmed.preview !== restoreHash(snapshotHash(current), snapshotHash(target))) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, current, null);
@@ -706,9 +703,15 @@ async function writeAbsoluteBlocks(
     // SETs sent so far: none means the craft still holds exactly what was backed up (a failed
     // check or fresh read before the first SET is "prepare", not a write with an unknown result).
     let sent = 0;
-    const send = async (code: number) => {
-        // The last check before the craft changes; nothing awaits between it and the SET.
+    // The store holds target values that no fresh read replaced: on a failure they go back out, so
+    // the PID tab's Save can never write a value this route did not get onto the craft verified.
+    let storeHoldsTarget = false;
+    const send = async (code: number, fill: () => void) => {
+        // The last check before the store and the craft change; nothing awaits between it, the
+        // store update and the SET.
         if (sent === 0) beforeFirstSet?.();
+        storeHoldsTarget = true;
+        fill();
         sent++;
         await writeOk(code);
     };
@@ -718,11 +721,12 @@ async function writeAbsoluteBlocks(
             // MSP_SET_SIMPLIFIED_TUNING also stores the LPF values it carries: send the live ones.
             await readFull(MSPCodes.MSP_SIMPLIFIED_TUNING, "fc:live_readback_missing", api);
             await readFull(MSPCodes.MSP_FILTER_CONFIG, "fc:live_readback_missing", api);
-            Object.assign(fcStore.tuningSliders, all ? target.sliders : pick(target.sliders, SLIDER_MODE_KEYS));
-            if (all) {
-                valuesToStore(target.values, storeBlocks(), api);
-            }
-            await send(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
+            await send(MSPCodes.MSP_SET_SIMPLIFIED_TUNING, () => {
+                Object.assign(fcStore.tuningSliders, all ? target.sliders : pick(target.sliders, SLIDER_MODE_KEYS));
+                if (all) {
+                    valuesToStore(target.values, storeBlocks(), api);
+                }
+            });
         }
         const blocks: [string, number, number][] = [
             ["pid", MSPCodes.MSP_PID, MSPCodes.MSP_SET_PID],
@@ -736,15 +740,24 @@ async function writeAbsoluteBlocks(
             // Each SET encodes the whole block: start from a complete fresh read of it, in the same profile.
             await assertPidProfile(profile, { disarmed: true });
             await readFull(read, "fc:live_readback_missing", api);
-            valuesToStore(target.values, storeBlocks(), api);
-            await send(write);
+            await send(write, () => valuesToStore(target.values, storeBlocks(), api));
         }
     } catch (err) {
         if (sent === 0) {
+            if (storeHoldsTarget) putBackInStore(current);
             throw new TuneWriteError("prepare", "no", backupId, errorText(err), [], []);
         }
-        throw new TuneWriteError("write", "no", backupId, errorText(err), [], await partialWriteState(backup));
+        const changed = await partialWriteState(backup);
+        // Unread craft: the store keeps no target value (partialWriteState left a fresh read otherwise).
+        if (changed === null) putBackInStore(backup);
+        throw new TuneWriteError("write", "no", backupId, errorText(err), [], changed);
     }
+}
+
+/** The values of `snapshot` into the shared FC store (the store only; nothing is sent). */
+function putBackInStore(snapshot: AbsoluteSnapshot): void {
+    Object.assign(useFlightControllerStore().tuningSliders, snapshot.sliders);
+    valuesToStore(snapshot.values, storeBlocks(), snapshot.apiVersion);
 }
 
 /** Read back, compare everything, save, read again after the firmware reloaded its config. */
@@ -856,6 +869,11 @@ export interface AbsolutePreview {
 
 /** Read-only preview of an absolute Apply. Writes nothing and needs no release. */
 export async function previewAbsoluteTune(proposal: AbsoluteProposal): Promise<AbsolutePreview> {
+    // A proposal without its log or change cannot be compared with the craft: refused, not crashed through.
+    const p = proposal as Partial<AbsoluteProposal> | null | undefined;
+    if (!Array.isArray(p?.log?.headerPairs) || !p.change || typeof p.change !== "object") {
+        throw new ApplyBlockedError(["preview:proposal_malformed"]);
+    }
     assertConnectedReal();
     const live = await readLiveAbsolute(proposal);
     return {
@@ -895,7 +913,7 @@ export async function applyAbsoluteTune(
 
     // 2. Identity, live values against the log, and the expected result (read-only).
     const { fc, before, expected } = await readLiveAbsolute(authorized);
-    if (confirmed.preview !== undefined && confirmed.preview !== absoluteHash(expected)) {
+    if (confirmed.preview !== absoluteHash(expected)) {
         throw new ApplyBlockedError(["apply:preview_changed"]);
     }
 
@@ -977,10 +995,7 @@ export async function restoreAbsoluteTune(
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readAbsoluteRestoreTarget(backupId);
     const target = backup.absolute;
-    if (
-        confirmed.preview !== undefined &&
-        confirmed.preview !== restoreHash(absoluteHash(current), absoluteHash(target))
-    ) {
+    if (confirmed.preview !== restoreHash(absoluteHash(current), absoluteHash(target))) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current);

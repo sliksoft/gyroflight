@@ -325,7 +325,7 @@ export function flightGroups(logs: readonly AutotuneLogInput[]): AutotuneLogInpu
  * file hash and log index so the choice does not depend on the import order; the kept log carries
  * the identity of the whole group (flightGroup), so the dropped files still count as this flight.
  */
-export function uniqueFlights(logs: AutotuneLogInput[]): AutotuneLogInput[] {
+export function uniqueFlights(logs: readonly AutotuneLogInput[]): AutotuneLogInput[] {
     return flightGroups(logs).map((group) => {
         if (group.length === 1) return group[0];
         const kept = [...group].sort(
@@ -387,7 +387,7 @@ export function tuneKey(log: AutotuneLogInput): string {
 }
 
 /** Logs grouped by tune, the most recently imported tune first. */
-export function groupByTune(logs: AutotuneLogInput[]): AutotuneLogInput[][] {
+export function groupByTune(logs: readonly AutotuneLogInput[]): AutotuneLogInput[][] {
     const groups = new Map<string, AutotuneLogInput[]>();
     for (const l of logs) groups.set(tuneKey(l), [...(groups.get(tuneKey(l)) ?? []), l]);
     const newest = (g: AutotuneLogInput[]) => Math.max(...g.map((l) => l.order ?? 0));
@@ -398,7 +398,7 @@ const score = (l: AutotuneLogInput) =>
     Object.values(l.chirp).reduce((s, c) => s + (STATE_RANK[c!.state] ?? 0) * 1000 + (c!.end - c!.start) / 1e6, 0);
 
 /** The best log of a group: most qualified axes, then the longest sweeps, then the earliest import. */
-export function bestLog(logs: AutotuneLogInput[]): AutotuneLogInput {
+export function bestLog(logs: readonly AutotuneLogInput[]): AutotuneLogInput {
     return [...logs].sort((a, b) => score(b) - score(a) || (a.order ?? 0) - (b.order ?? 0))[0];
 }
 
@@ -407,7 +407,7 @@ export function bestLog(logs: AutotuneLogInput[]): AutotuneLogInput {
  * expected to hold); the others serve as cross-log references (same tune only).
  */
 export function pickPrimary(
-    logs: AutotuneLogInput[],
+    logs: readonly AutotuneLogInput[],
 ): { primary: AutotuneLogInput; others: AutotuneLogInput[] } | null {
     const unique = uniqueFlights(logs);
     if (!unique.length) return null;

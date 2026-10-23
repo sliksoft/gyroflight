@@ -73,22 +73,33 @@ stays outside the authority (own confirmation, same UID / firmware / profile, ba
 Binding details: `applyAbsoluteTune` authorizes, confirms and writes a plain-data copy of the proposal taken on entry
 (a getter, a function or a class instance is refused: `apply:proposal_not_plain_data`; Vue proxies are read through),
 and the rechecks require the store's decoded inputs and result to still be the objects the authorization recomputed
-against, each input the same object and log (`binding:analysis_changed_since_authorization`; an edit deeper inside a
-decoded log is not detected). The comparison (`canonicalText`) serializes plain data only, without `toJSON`. Restore's
-confirmation binds the current tune and the backup's target (`restoreHash`) when it carries the preview hash, as the
-interface's always does.
+against, each input the same object and log, compared by index so a deleted entry counts as a change
+(`binding:analysis_changed_since_authorization`). Calculate publishes the inputs frozen (the array, each log and its
+channel object); an edit of the samples themselves is not detected without the recomputation. The comparison
+(`canonicalText`) serializes plain data only, without `toJSON`.
+
+Confirmation: every token (slider Apply, absolute Apply, both Restores) must carry the hash of the read-only preview the
+user saw; a token without one is refused (`apply:confirmation_without_preview`) and every route compares the hash with
+the one it recomputes (Restore: the current tune and the backup's target, `restoreHash`).
+
+Shared FC store: the absolute route puts target values into the store only after the last check and right before the
+SET that sends them. If the check refuses there, the craft's values go back into the store; if a SET fails and the craft
+cannot be read afterwards, the backup's values do; otherwise the store holds what was last read from the craft. So the
+PID tab's Save never finds a proposal value the route did not get verified onto the craft. The absolute Preview
+computes its expected values in memory (it only reads the craft into the store).
 
 The slider Preview (`previewTune`) runs the firmware calculation through the shared FC store, where MSPHelper decodes its
 replies and the PID tab's Save would write them. It therefore needs the slider route's whole write authority, so an
 unauthorized proposal never enters that store (today: Preview is refused while Apply is, since GyroCore Safety blocks),
-and it puts the live values back even when a calculation fails.
+and it puts the live values back even when a calculation fails. Its button is offered exactly when Apply is, with a line
+saying why otherwise.
 
 Open risks: MSP has no atomic check-and-write. The last check runs synchronously before the first SET is handed to
 `MSP.promise`, and `MSP_STATUS_EX` is re-read before every SET, but a change on the craft between that read and the SET
 (a profile switch, arming) is caught only afterwards (stage `write` / `verify`); the transport may queue or retry a
 request after the check, and a calculation reply arriving after its timeout is still decoded into the FC store
 (authorized Previews only). Separate Apply / Restore calls with distinct tokens, and upstream saves, are not serialized
-against each other. A Restore token without the preview hash binds the backup id only.
+against each other.
 The binding proves that the proposal follows from the decoded inputs in the store, not that those inputs are the
 currently imported files (a stale calculation that republishes them, audit P1-7, is not fixed here).
 

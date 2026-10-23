@@ -65,6 +65,9 @@ import {
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
+
+/** A token bound to a preview the route never reaches: the test expects a refusal before the hash is compared. */
+const UNREAD_PREVIEW = "test:preview-not-read";
 import type { AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
 import {
     air65FirmwareState,
@@ -154,7 +157,10 @@ describe("P1-05: Restore after a profile switch", () => {
         expect(e1).toBeInstanceOf(ApplyBlockedError);
         expect(e1.reasons).toContain("restore:pid_profile_changed:0->1");
         const e2 = (await failure(
-            restoreAbsoluteTune(res.backupId, issueConfirmation({ kind: "restore", backupId: res.backupId })),
+            restoreAbsoluteTune(
+                res.backupId,
+                issueConfirmation({ kind: "restore", backupId: res.backupId, preview: UNREAD_PREVIEW }),
+            ),
         )) as ApplyBlockedError;
         expect(e2).toBeInstanceOf(ApplyBlockedError);
         expect(writes().length).toBe(before);

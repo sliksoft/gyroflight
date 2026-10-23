@@ -96,6 +96,9 @@
         >
             {{ $t("gyroflightApplyReview") }}
         </UButton>
+        <p v-if="!canPreview" class="text-sm text-dimmed" data-gyrocore="workflow-preview-needs-release">
+            {{ $t("gyroflightPreviewNeedsRelease") }}
+        </p>
 
         <div
             v-if="workflow.preview"
@@ -269,8 +272,9 @@ const checklist = computed(() =>
 );
 const canApply = computed(() => !!composite.value?.final && checklist.value.every((c) => c.ok));
 const outcome = computed(() => workflow.outcome);
-// Read-only, so it is offered whenever a real FC is connected, even while Apply is blocked.
-const canPreview = computed(() => !!composite.value?.final && connected.value && !connection.virtualMode);
+// The firmware calculation of the preview goes through the shared FC store (useTuneApply
+// previewTune): it needs the same write authority as Apply, so it is offered exactly when Apply is.
+const canPreview = computed(() => canApply.value);
 const previewRows = computed(() => {
     const p = workflow.preview;
     return p?.status === "ok" && p.before && p.expected ? snapshotDiff(p.before, p.expected) : [];

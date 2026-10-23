@@ -147,6 +147,9 @@ describe("user flow: baseline, gain change, Verified Tune, Apply, Restore", () =
         importLog("baseline-again.bbl", syntheticLogInput("5".repeat(64), { pids: BASE }));
         await v2.calculate();
         expect(store.state).toBe("done");
+        // Published frozen: what an Apply is authorized against cannot be edited in place.
+        expect(Object.isFrozen(store.inputs)).toBe(true);
+        for (const l of store.inputs!) expect(Object.isFrozen(l) && Object.isFrozen(l.channels)).toBe(true);
         // The app has no qualification log for the margins' model class (Codex final acceptance
         // F-02): the bounds stay MODEL_CONDITIONAL, the measurement is named, nothing is released.
         expect(v2.releasedProposal()).toBeNull();

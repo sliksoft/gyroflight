@@ -758,6 +758,9 @@
     },
     "gyroflightPreviewNoChange": { "message": "No value changes." },
     "gyroflightPreviewButton": { "message": "Read from flight controller (read-only preview)" },
+    "gyroflightPreviewNeedsRelease": {
+        "message": "The preview is offered only when Apply is: the flight controller calculates it in the values the PID tab would save, so it needs the same checks (marked ✗ above)."
+    },
     "gyroflightPreviewTitle": { "message": "Read-only preview" },
     "gyroflightPreviewOk": {
         "message": "Read from the connected flight controller; nothing was written. Values it holds now and would hold after Apply:"

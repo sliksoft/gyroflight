@@ -118,6 +118,7 @@ import MSPCodes from "../../src/js/msp/MSPCodes";
 import {
     applyAbsoluteTune,
     previewAbsoluteRestore,
+    previewAbsoluteTune,
     restoreAbsoluteTune,
     TuneWriteError,
     useTuneApply,
@@ -128,6 +129,7 @@ import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { useVerifiedTuneStore } from "../../src/gyrocore/stores/verifiedTunes";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
+
 import { absoluteWriteDecision } from "../../src/gyrocore/releaseGate/writeAuthority";
 import { analysisBindingIssues, canonicalText, plainCopy } from "../../src/gyrocore/releaseGate/analysisBinding";
 import {
@@ -138,6 +140,7 @@ import type { AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseCon
 import type { AutotuneLogInput, AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import type { AbsoluteValues } from "../../src/gyrocore/tuning/absoluteTune";
 import { air65FirmwareState, createFirmwareFc, FIRMWARE_WRITE_CODES, type FirmwareState } from "./harness/mspFirmware";
+import { FAULT_FREE_FIRMWARE, previewedHash } from "./harness/previewConfirmation";
 import { FIXTURE_FIRMWARE, FIXTURE_UID, verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 function headersFor(s: FirmwareState): [string, string][] {
@@ -200,9 +203,15 @@ function analysed(p: AbsoluteProposal) {
 const codes = () => gate.fc.calls.map((c) => c.code);
 const writes = () => codes().filter((c) => FIRMWARE_WRITE_CODES.has(c));
 const backups = () => useTuneBackupStore().backups;
-const confirm = (p: AbsoluteProposal) =>
-    issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...p.change } });
-const apply = (p: AbsoluteProposal) => applyAbsoluteTune(p, confirm(p));
+/** The user's confirmation of `p`, bound to the read-only preview of the craft as it is now. */
+const confirm = async (p: AbsoluteProposal) =>
+    issueConfirmation({
+        kind: "absolute",
+        proposalId: p.id,
+        change: { ...p.change },
+        preview: await previewedHash(gate.fc, FAULT_FREE_FIRMWARE(), () => previewAbsoluteTune(p)),
+    });
+const apply = async (p: AbsoluteProposal) => applyAbsoluteTune(p, await confirm(p));
 
 async function denial(p: Promise<unknown>): Promise<ApplyBlockedError> {
     const err = await p.then(
@@ -289,7 +298,7 @@ describe("each step alone denies, before any MSP and without a backup", () => {
     it("the exported useTuneApply() object goes through the same authority", async () => {
         gate.safety = false;
         const p = proposal();
-        await denial(useTuneApply().applyAbsoluteTune(p, confirm(p)));
+        await denial(useTuneApply().applyAbsoluteTune(p, await confirm(p)));
         nothingReachedTheCraft();
     });
 });
@@ -302,7 +311,7 @@ describe("analysis binding: the proposal is the current analysis's own (composit
     it("a proposal from an earlier calculation is refused once the analysis was recalculated", async () => {
         const old = proposal();
         analysed(proposal(CHANGE, "2026-10-23T09:00:00Z"));
-        const token = confirm(old);
+        const token = await confirm(old);
         const err = await denial(applyAbsoluteTune(old, token));
         expect(err.reasons).toEqual(["binding:proposal_differs_from_analysis"]);
         nothingReachedTheCraft();
@@ -557,7 +566,7 @@ describe("independent review: attempts to get past the authority", () => {
         gate.binding = false;
         analysed(proposal());
         const p = useAutotuneV2Store().result!.releasableProposal!;
-        const token = confirm(p);
+        const token = await confirm(p);
         let changed = false;
         gate.fc.disconnectWhen = (_fc, code) => {
             if (!changed && code === MSPCodes.MSP_API_VERSION) {
@@ -612,7 +621,8 @@ describe("independent review: attempts to get past the authority", () => {
         gate.fc.disconnectWhen = (_fc, code) => {
             if (!changed && code === MSPCodes.MSP_PID) {
                 changed = true;
-                useAutotuneV2Store().inputs!.length = 0;
+                // Production publishes the inputs frozen; the binding must catch an in-place edit regardless.
+                (useAutotuneV2Store().inputs as AutotuneLogInput[]).length = 0;
                 gate.fresh = null;
             }
             return false;
@@ -628,7 +638,7 @@ describe("independent review: attempts to get past the authority", () => {
         analysed(p);
         gate.fc.disconnectWhen = (_fc, code) => {
             if (code === MSPCodes.MSP_PID) {
-                const inputs = useAutotuneV2Store().inputs!;
+                const inputs = useAutotuneV2Store().inputs as AutotuneLogInput[];
                 inputs[0] = { ...inputs[0] };
             }
             return false;
@@ -657,7 +667,7 @@ describe("independent review: attempts to get past the authority", () => {
         Object.defineProperty(forged, "toJSON", { value: () => original });
         expect(() => analysisBindingIssues(forged, { recompute: true })).toThrow(TypeError);
         expect(failedSteps(forged)).toContain("analysis_binding");
-        const err = await denial(applyAbsoluteTune(forged, confirm(forged)));
+        const err = await denial(applyAbsoluteTune(forged, await confirm(forged)));
         expect(err.reasons).toEqual(["apply:proposal_not_plain_data"]);
         nothingReachedTheCraft();
     });
@@ -687,7 +697,7 @@ describe("independent review: attempts to get past the authority", () => {
 
     it("one token, two concurrent Applies: the second is refused", async () => {
         const p = proposal();
-        const token = confirm(p);
+        const token = await confirm(p);
         const first = applyAbsoluteTune(p, token);
         const second = applyAbsoluteTune(p, token);
         expect((await denial(second)).reasons).toEqual(["apply:confirmation_unknown_or_used"]);

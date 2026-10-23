@@ -95,8 +95,9 @@ vi.mock("@/gyrocore/tuning/authorize", async () => {
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { useConnectionStore } from "../../src/stores/connection";
 import { useFlightControllerStore } from "../../src/stores/fc";
-import { useAutotune } from "../../src/composables/useAutotune";
+import { useAutotune, type ProposedSliders } from "../../src/composables/useAutotune";
 import { previewRestore, previewTune, restoreTune, TuneWriteError } from "../../src/composables/useTuneApply";
+import { FAULT_FREE_CRAFT, previewedHash, UNREAD_PREVIEW } from "./harness/previewConfirmation";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { useTuneBackupStore, BACKUP_STORAGE_KEY } from "../../src/gyrocore/stores/tuneBackup";
@@ -105,6 +106,7 @@ import {
     issueConfirmation,
     resetConfirmations,
 } from "../../src/gyrocore/tuning/applyConfirmation";
+
 import { clearPhaseMarginForGate } from "./harness/clearPhaseMarginBlock";
 import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { FULL_TUNE_HEADERS, simulateChirpSequence } from "./harness/chirpSim";
@@ -137,12 +139,25 @@ async function load(bytes: Uint8Array = MERGE_E2E_CASES.three_axis_agree()) {
     return gate.composite!;
 }
 
-function confirmApply(id: string, sliders: Record<string, number> = CHANGE) {
-    return issueConfirmation({ kind: "apply", compositeId: id, sliders: { ...sliders } });
+/** The read-only preview hash now, with the faults and hooks a test arranged for the write paused. */
+async function previewHashNow(preview: () => Promise<{ hash: string }>) {
+    const hook = route.onCall;
+    route.onCall = null;
+    try {
+        return await previewedHash(route.craft, FAULT_FREE_CRAFT(), preview);
+    } finally {
+        route.onCall = hook;
+    }
 }
 
-async function apply(id: string, token: string | null = confirmApply(id)) {
-    return useAutotune().applyGains(CHANGE, id, token);
+/** The user's confirmation of `sliders`, bound to the preview of the craft as it is now. */
+async function confirmApply(id: string, sliders: Record<string, number> = CHANGE) {
+    const preview = await previewHashNow(() => previewTune(sliders as ProposedSliders, id));
+    return issueConfirmation({ kind: "apply", compositeId: id, sliders: { ...sliders }, preview });
+}
+
+async function apply(id: string, token?: string | null) {
+    return useAutotune().applyGains(CHANGE, id, token === undefined ? await confirmApply(id) : token);
 }
 
 async function failure(p: Promise<unknown>) {
@@ -171,23 +186,23 @@ describe("the user's confirmation", () => {
 
     it("must confirm exactly this change, once, and recently", async () => {
         const c = await load();
-        const other = confirmApply(c.id, { ...CHANGE, slider_pi_gain: 120 });
+        const other = await confirmApply(c.id, { ...CHANGE, slider_pi_gain: 120 });
         expect(((await failure(apply(c.id, other))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_mismatch",
         ]);
-        const restoreToken = issueConfirmation({ kind: "restore", backupId: "x" });
+        const restoreToken = issueConfirmation({ kind: "restore", backupId: "x", preview: UNREAD_PREVIEW });
         expect(((await failure(apply(c.id, restoreToken))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_mismatch",
         ]);
         const old = issueConfirmation(
-            { kind: "apply", compositeId: c.id, sliders: { ...CHANGE } },
+            { kind: "apply", compositeId: c.id, sliders: { ...CHANGE }, preview: UNREAD_PREVIEW },
             Date.now() - CONFIRMATION_TTL_MS - 1,
         );
         expect(((await failure(apply(c.id, old))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_expired",
         ]);
         expect(codes()).toEqual([]);
-        const ok = confirmApply(c.id);
+        const ok = await confirmApply(c.id);
         await apply(c.id, ok);
         expect(((await failure(apply(c.id, ok))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_unknown_or_used",
@@ -442,8 +457,9 @@ describe("read-only preview, and the confirmation bound to it", () => {
 });
 
 describe("Restore", () => {
-    function confirmRestore(backupId: string) {
-        return issueConfirmation({ kind: "restore", backupId });
+    async function confirmRestoreToken(backupId: string) {
+        const preview = await previewHashNow(() => previewRestore(backupId));
+        return issueConfirmation({ kind: "restore", backupId, preview });
     }
 
     it("puts the backed-up tune back on the same craft, verified and saved, after its own backup", async () => {
@@ -452,7 +468,7 @@ describe("Restore", () => {
         const applied = await apply(c.id);
         expect(route.craft.pids[0]).not.toEqual(before[0]);
         route.craft.calls = [];
-        const restored = await restoreTune(applied.backupId, confirmRestore(applied.backupId));
+        const restored = await restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId));
         expect(restored.status).toBe("verified");
         expect(route.craft.pids.slice(0, 3)).toEqual(before.slice(0, 3));
         expect(route.craft.sliders.slider_pi_gain).toBe(100);
@@ -482,7 +498,7 @@ describe("Restore", () => {
             snapshot,
         };
         expect(store.save(backup)).toBe(true);
-        await restoreTune("bk-manual", confirmRestore("bk-manual"));
+        await restoreTune("bk-manual", await confirmRestoreToken("bk-manual"));
         expect(route.craft.pids[2]).toEqual([52, 90, 6]);
         expect(codes()).toContain(MSPCodes.MSP_SET_PID);
         expect(route.craft.eeprom?.pids[2]).toEqual([52, 90, 6]);
@@ -496,18 +512,25 @@ describe("Restore", () => {
             "apply:confirmation_missing",
         ]);
         expect(
-            ((await failure(restoreTune("bk-nope", confirmRestore("bk-nope")))) as ApplyBlockedError).reasons,
+            ((await failure(restoreTune("bk-nope", await confirmRestoreToken("bk-nope")))) as ApplyBlockedError)
+                .reasons,
         ).toEqual(["restore:backup_not_found"]);
         route.craft.uid = [9, 9, 9];
         expect(
-            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
-                .reasons,
+            (
+                (await failure(
+                    restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)),
+                )) as ApplyBlockedError
+            ).reasons,
         ).toEqual(["restore:different_craft"]);
         route.craft.uid = createCraft().uid;
         route.craft.armed = true;
         expect(
-            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
-                .reasons,
+            (
+                (await failure(
+                    restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)),
+                )) as ApplyBlockedError
+            ).reasons,
         ).toEqual(["fc:armed"]);
         expect(writes()).toEqual([]);
     });
@@ -523,14 +546,20 @@ describe("Restore", () => {
         expect(
             (
                 (await failure(
-                    restoreTune("bk-corrupt", issueConfirmation({ kind: "restore", backupId: "bk-corrupt" })),
+                    restoreTune(
+                        "bk-corrupt",
+                        issueConfirmation({ kind: "restore", backupId: "bk-corrupt", preview: UNREAD_PREVIEW }),
+                    ),
                 )) as ApplyBlockedError
             ).reasons,
         ).toEqual(["restore:backup_invalid"]);
         route.craft.version = "2026.6.3";
         expect(
-            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
-                .reasons,
+            (
+                (await failure(
+                    restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)),
+                )) as ApplyBlockedError
+            ).reasons,
         ).toEqual(["restore:firmware_changed"]);
         expect(writes()).toEqual([]);
     });
@@ -556,7 +585,7 @@ describe("Restore", () => {
         route.craft.eeprom = null;
         route.craft.written = false;
         route.craft.ignoreWrites = true;
-        const err = await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)));
+        const err = await failure(restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)));
         expect(err).toBeInstanceOf(TuneWriteError);
         expect(route.craft.eeprom).toBeNull();
     });
