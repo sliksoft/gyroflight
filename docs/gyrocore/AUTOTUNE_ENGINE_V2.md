@@ -71,17 +71,24 @@ in `test/gyrocore/harness/` (`analysisBindingRelease`, `safetyRelease`, `product
 stays outside the authority (own confirmation, same UID / firmware / profile, backup first).
 
 Binding details: `applyAbsoluteTune` authorizes, confirms and writes a plain-data copy of the proposal taken on entry
-(a getter, a function or a class instance is refused: `apply:proposal_not_plain_data`; Vue proxies are read through), and the rechecks require the store's decoded
-inputs and result to still be the objects the authorization recomputed against
-(`binding:analysis_changed_since_authorization`). The comparison (`canonicalText`) serializes plain data only, without
-`toJSON`. Restore's confirmation binds the current tune and the backup's target (`restoreHash`), and the slider
-Preview puts the live values back into the FC store even when a firmware calculation fails, so the PID tab's Save never
-finds a proposal there.
+(a getter, a function or a class instance is refused: `apply:proposal_not_plain_data`; Vue proxies are read through),
+and the rechecks require the store's decoded inputs and result to still be the objects the authorization recomputed
+against, each input the same object and log (`binding:analysis_changed_since_authorization`; an edit deeper inside a
+decoded log is not detected). The comparison (`canonicalText`) serializes plain data only, without `toJSON`. Restore's
+confirmation binds the current tune and the backup's target (`restoreHash`) when it carries the preview hash, as the
+interface's always does.
+
+The slider Preview (`previewTune`) runs the firmware calculation through the shared FC store, where MSPHelper decodes its
+replies and the PID tab's Save would write them. It therefore needs the slider route's whole write authority, so an
+unauthorized proposal never enters that store (today: Preview is refused while Apply is, since GyroCore Safety blocks),
+and it puts the live values back even when a calculation fails.
 
 Open risks: MSP has no atomic check-and-write. The last check runs synchronously before the first SET is handed to
 `MSP.promise`, and `MSP_STATUS_EX` is re-read before every SET, but a change on the craft between that read and the SET
 (a profile switch, arming) is caught only afterwards (stage `write` / `verify`); the transport may queue or retry a
-request after the check. Separate Apply / Restore calls with distinct tokens are not serialized against each other.
+request after the check, and a calculation reply arriving after its timeout is still decoded into the FC store
+(authorized Previews only). Separate Apply / Restore calls with distinct tokens, and upstream saves, are not serialized
+against each other. A Restore token without the preview hash binds the backup id only.
 The binding proves that the proposal follows from the decoded inputs in the store, not that those inputs are the
 currently imported files (a stale calculation that republishes them, audit P1-7, is not fixed here).
 

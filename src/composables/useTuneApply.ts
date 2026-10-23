@@ -51,7 +51,7 @@ import { useFlightControllerStore } from "@/stores/fc";
 import { useConnectionStore } from "@/stores/connection";
 import { validateTuningSliders } from "@/composables/useTuningSliders";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
-import { authorizeCompositeApply, liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
+import { liveCompositeBlocks } from "@/gyrocore/tuning/authorize";
 import type { CompositeGateState } from "@/gyrocore/tuning/authorize";
 import type { ProposedSliders } from "@/composables/useAutotune";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
@@ -81,7 +81,6 @@ import {
     type TuneSnapshot,
 } from "@/gyrocore/tuning/tuneSnapshot";
 import { newBackupId, sameUid, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
-import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import {
     MIN_ABSOLUTE_API,
     SLIDER_MODE_KEYS,
@@ -391,18 +390,16 @@ export interface TunePreview {
 
 /**
  * Read-only preview of an Apply: identity, live tune, and the values the flight controller
- * itself calculates for the composite. Writes nothing and needs no release: it is what the
- * user confirms, and the first hardware check of the route.
+ * itself calculates for the composite. Writes nothing to the craft, and it is what the user
+ * confirms. The firmware calculation runs through the shared FC store (MSPHelper decodes its
+ * replies there), where the PID tab's Save could pick the proposal up: so the preview needs the
+ * same write authority as the Apply, and an unauthorized proposal never enters that store.
  */
 export async function previewTune(
     proposed: ProposedSliders,
     compositeId: string | null | undefined,
 ): Promise<TunePreview> {
-    const gateState = useChirpQualificationStore().gateState();
-    const composite = authorizeCompositeApply(gateState, compositeId, proposed).composite;
-    if (!composite || composite.id !== compositeId) {
-        throw new ApplyBlockedError(["apply:no_composite"]);
-    }
+    const { gateState, composite } = assertSliderWriteAuthorized(proposed, compositeId);
     assertConnectedReal();
     const live = await readLiveTune(composite, logHeaders(gateState, composite), { ...proposed });
     return { before: live.before, expected: live.expected, hash: snapshotHash(live.expected) };

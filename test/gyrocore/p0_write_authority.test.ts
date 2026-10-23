@@ -604,6 +604,50 @@ describe("independent review: attempts to get past the authority", () => {
         expect(writes()).toEqual([]);
     });
 
+    it("decoded inputs emptied in place during the live reads stop the Apply (round 2)", async () => {
+        gate.binding = false;
+        const p = proposal();
+        analysed(p);
+        let changed = false;
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (!changed && code === MSPCodes.MSP_PID) {
+                changed = true;
+                useAutotuneV2Store().inputs!.length = 0;
+                gate.fresh = null;
+            }
+            return false;
+        };
+        const err = await denial(apply(p));
+        expect(err.reasons).toEqual(["binding:analysis_changed_since_authorization"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a decoded input replaced in place during the live reads stops the Apply (round 2)", async () => {
+        gate.binding = false;
+        const p = proposal();
+        analysed(p);
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (code === MSPCodes.MSP_PID) {
+                const inputs = useAutotuneV2Store().inputs!;
+                inputs[0] = { ...inputs[0] };
+            }
+            return false;
+        };
+        const err = await denial(apply(p));
+        expect(err.reasons).toEqual(["binding:analysis_changed_since_authorization"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a sparse array whose hole is filled by a named property is not plain data (round 2)", () => {
+        const malformed: unknown[] = [1, , 3];
+        Object.defineProperty(malformed, "extra", { value: 2, enumerable: true });
+        expect(() => canonicalText(malformed)).toThrow(TypeError);
+        expect(() => plainCopy(malformed)).toThrow(TypeError);
+        const named: unknown[] = [1, 2];
+        Object.defineProperty(named, "x", { value: 3, enumerable: true });
+        expect(() => canonicalText(named)).toThrow(TypeError);
+    });
+
     it("a proposal whose toJSON impersonates the analysis is refused", async () => {
         gate.binding = false;
         const original = proposal();
