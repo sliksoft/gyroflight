@@ -842,6 +842,9 @@
     "gyroflightV2NothingWritten": {
         "message": "This attempt sent no SET command and did not write EEPROM: it changed nothing on the flight controller."
     },
+    "gyroflightV2StageUnknownWrite": {
+        "message": "This attempt stopped with an error outside the tracked write stages: whether a SET command was sent is not recorded."
+    },
     "gyroflightV2NotReverified": {
         "message": "The flight controller was not read back after this failure: its current configuration is not verified and not confirmed to match the backup. Another PID profile may be active, or values may have changed outside this attempt. Reconnect, check the active PID profile and read the values again before another Apply or Restore."
     },
@@ -906,6 +909,9 @@
     },
     "gyroflightV2Need_chirp_to_higher_frequency_for_sensitivity_peak": {
         "message": "a CHIRP that reaches higher frequencies (sensitivity peak)"
+    },
+    "gyroflightV2Need_chirp_with_finer_frequency_resolution": {
+        "message": "a CHIRP analysed with finer frequency resolution (longer sweep / FFT segments), so the loop between frequency points is resolved"
     },
     "gyroflightV2Need_log_gyro_unfilt": { "message": "blackbox logging of gyroUnfilt" },
     "gyroflightV2Need_bidirectional_dshot_erpm_logging": { "message": "bidirectional DShot with eRPM logging" },

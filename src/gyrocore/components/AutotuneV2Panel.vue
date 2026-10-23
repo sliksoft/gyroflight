@@ -219,12 +219,15 @@
             <!-- What the flight controller holds now, against the backup taken before the write. -->
             <template v-if="outcome.status === 'failed'">
                 <!--
-                    No SET was sent (a check, a fresh read or the backup failed first). That says what
-                    this attempt did, not what the craft holds now: nothing was read back after the
-                    failure, and another PID profile may be active.
+                    Stage "prepare": no SET was sent (a check or a fresh read failed first). No stage: an
+                    error outside the write route's stages, where a sent SET is not recorded either way.
+                    Neither says what the craft holds now: nothing was read back after the failure, and
+                    another PID profile may be active.
                 -->
                 <div v-if="!outcome.stage || outcome.stage === 'prepare'" data-gyrocore="v2-nothing-written">
-                    <p>{{ $t("gyroflightV2NothingWritten") }}</p>
+                    <p :data-gyrocore="outcome.stage ? 'v2-no-set' : 'v2-set-unrecorded'">
+                        {{ $t(outcome.stage ? "gyroflightV2NothingWritten" : "gyroflightV2StageUnknownWrite") }}
+                    </p>
                     <p class="text-yellow-500" data-gyrocore="v2-not-reverified">
                         {{ $t("gyroflightV2NotReverified") }}
                     </p>

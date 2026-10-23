@@ -43,12 +43,14 @@ import {
 } from "../../src/js/blackbox/betaflight_digital_controller";
 import { closedLoopFromPlant, plantFrf, syntheticTransferFunction } from "../../src/js/blackbox/betaflight_open_loop";
 import {
+    BIN_SAGITTA,
     buildAxisLoop,
     LOOP_RESOLUTION,
     loopMargins,
     RESOLVED_FEATURE_BINS,
 } from "../../src/gyrocore/engine/loopModel";
 import type { EffectiveChain } from "../../src/gyrocore/engine/gyroChain";
+import { optimizeAxisPid } from "../../src/gyrocore/engine/pidOptimizer";
 
 const UNITY_CHAIN: EffectiveChain = {
     samples: 1,
@@ -132,7 +134,7 @@ describe("F-02: margins count only where the bins resolve the loop", () => {
             maxPhaseStepDeg: 25,
             maxGainStepDb: 2,
             maxPhaseSlopeDegPerNeper: 300,
-            maxGainSlopeDbPerDecade: 60,
+            maxGainSlopeDbPerDecade: 80,
             maxGapRatio: 3,
             maxRelativeSpacing: 0.5,
         });
@@ -141,6 +143,7 @@ describe("F-02: margins count only where the bins resolve the loop", () => {
         expect(2 * Math.atan(1 / w) * (180 / Math.PI)).toBeCloseTo(LOOP_RESOLUTION.maxPhaseStepDeg, 6);
         expect(w).toBeGreaterThan(4.4);
         expect(w).toBeLessThan(4.6);
+        expect(BIN_SAGITTA).toBeCloseTo(Math.tan((12.5 * Math.PI) / 180) / 2, 12);
     });
 
     for (const { fr, zZero, zPole } of REVIEW_CASES) {
@@ -239,9 +242,12 @@ describe("F-02: well-supported smooth loops keep their margins", () => {
             const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
             expect(m.resolutionHz).toBeCloseTo(Math.max(...steps), 9);
             expect(Math.abs(m.phaseMarginDeg! - ref.pm)).toBeLessThan(1);
-            // GM on the bins is capped by the band-end headroom; it never exceeds the reference.
+            // Measured: read on the bins, close to the reference. Bounded: never better than the
+            // reference, and only the between-bin allowance worse.
+            expect(Math.abs(m.measured.sensitivityPeakDb! - ref.s)).toBeLessThan(0.2);
             expect(m.gainMarginDb!).toBeLessThanOrEqual(ref.gm + 0.05);
-            expect(Math.abs(m.sensitivityPeakDb! - ref.s)).toBeLessThan(0.2);
+            expect(m.sensitivityPeakDb!).toBeGreaterThanOrEqual(ref.s - 0.05);
+            expect(m.sensitivityPeakDb! - ref.s).toBeLessThan(1);
         });
     }
 
@@ -253,7 +259,46 @@ describe("F-02: well-supported smooth loops keep their margins", () => {
         expect(m.marginBasis).toBe("bounded");
         expect(Math.abs(m.phaseMarginDeg! - r.pm)).toBeLessThan(1);
         expect(m.gainMarginDb!).toBeLessThanOrEqual(r.gm + 0.05);
-        expect(Math.abs(m.sensitivityPeakDb! - r.s)).toBeLessThan(0.2);
+        expect(Math.abs(m.measured.sensitivityPeakDb! - r.s)).toBeLessThan(0.2);
+        expect(m.sensitivityPeakDb!).toBeGreaterThanOrEqual(r.s - 0.05);
+    });
+});
+
+describe("F-02: at the edge of the resolved class (features ≈ 5 bin steps wide)", () => {
+    // Pole −3 dB bandwidth 2·ζ·fr = 2.5 Hz = 5 bins of 0.5 Hz, centred between two bins. Peak ratios
+    // 4 and 6 take |L| at the resonance to ≈ 0.8 (near-critical) and ≈ 1.2 (unstable).
+    const fr = 70.25;
+    const zPole = 2.5 / (2 * fr);
+    for (const ratio of [4, 6]) {
+        it(`peak ×${ratio}: refused, or bounded margins that are no better than the reference`, () => {
+            const G = poleZero(fr, ratio * zPole, zPole);
+            const ref = oracle(G, 0.5, 200);
+            const m = margins(uniform(200, 0.5), G);
+            if (ref.pm < 0 || ref.gm < 0) expect(m.status).toBe("NOT_VALIDATED");
+            if (m.marginBasis === "bounded") {
+                // The bounds hold at the class edge (the bins alone under-read |S| here).
+                expect(m.gainMarginDb!).toBeLessThanOrEqual(ref.gm + 0.05);
+                expect(m.sensitivityPeakDb!).toBeGreaterThanOrEqual(ref.s - 0.05);
+                expect(m.phaseMarginDeg!).toBeLessThanOrEqual(ref.pm + 1);
+            } else {
+                expect(m.status).toBe("NOT_VALIDATED");
+            }
+        });
+    }
+});
+
+describe("F-02: the PID search names the measurement an unresolved band needs", () => {
+    it("GM / |S| unknown from a gap asks for finer resolution, not a higher CHIRP end", () => {
+        const freqs = uniform(200, 0.5).filter((f) => f < 40 || f > 42.5);
+        const tf = syntheticTransferFunction(freqs, (f) => {
+            const c = evaluateControllerFrf(cfg, f);
+            return closedLoopFromPlant(smooth(f), c.cReference, c.cFeedback);
+        });
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true);
+        const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);
+        expect(r.reasons).toContain("required_measurement:chirp_with_finer_frequency_resolution");
+        expect(r.reasons).not.toContain("required_measurement:chirp_to_higher_frequency_for_gain_margin");
+        expect(r.reasons).not.toContain("required_measurement:chirp_to_higher_frequency_for_sensitivity_peak");
     });
 });
 

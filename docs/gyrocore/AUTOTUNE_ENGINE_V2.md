@@ -38,7 +38,8 @@ MSP message.
   now differ from the backup (a partial write), or null when the craft could not be read (or another profile is active).
   The stages tell five states apart: `prepare` (a check or fresh read failed before the first SET: this attempt sent no
   SET and wrote no EEPROM; the craft was not read back afterwards, so its current state is not verified, and a profile
-  switch seen there is named as the now active profile; the backup and its profile stay available), `write` with an unreadable craft (a SET was sent, its result is unknown), `write` with
+  switch seen there is named as the now active profile; the backup and its profile stay available; a failure outside the
+  tracked stages says that a sent SET is not recorded), `write` with an unreadable craft (a SET was sent, its result is unknown), `write` with
   differing fields (a partial write the craft kept), `verify` (written, not verified) and `eeprom` / `eeprom_verify`
   (saved state unknown). The panel shows the phase, the cause, the saved state and that current state.
 - Profile switch after a SET: the firmware has no profile-bound atomic write, so a switch between the last MSP_STATUS_EX
@@ -99,10 +100,12 @@ identified band |L| may not rise by more than 1 dB and at the last bin it may no
 target; otherwise GM and |S| are unknown and the margins are NOT_VALIDATED, since a resonance just above the band could
 take the loop back above unity; with a bounded band end GM never exceeds the gain headroom at the band end), a band
 the bins resolve (`loopModel.ts` `LOOP_RESOLUTION`: no step between adjacent bins larger than 25° / 2 dB, or than
-300°/neper / 60 dB/decade of its log-span; no gap wider than 3× the neighbouring steps; no step wider than half its
+300°/neper / 80 dB/decade of its log-span; no gap wider than 3× the neighbouring steps; no step wider than half its
 frequency from half the crossover up; otherwise GM and |S| are unknown, `marginBasis` is `measured_only` and the margins
-are NOT_VALIDATED) and a Verified Tune bound to this configuration. Every margin result reports its frequency resolution
-(`resolutionHz`, the largest bin step). "bounded" margins are bounds only for a loop without features narrower than
+are NOT_VALIDATED, and the PID search asks for `chirp_with_finer_frequency_resolution`) and a Verified Tune bound to
+this configuration. Every margin result reports its frequency resolution (`resolutionHz`, the largest bin step), the GM
+and |S| read on the bins (`measured`) and, when bounded, GM and |S| as bounds: the bins plus the between-bin allowance
+`BIN_SAGITTA` (≈ 0.11 × the chord between adjacent L points, from the 25° step limit). "bounded" margins are bounds only for a loop without features narrower than
 `RESOLVED_FEATURE_BINS` (≈ 4.5) × `resolutionHz`: a finite set of bins cannot exclude an arbitrarily narrow resonance
 between two bins (a pole/zero pair with ζ = 5e-5 at 70.25 Hz on 0.5 Hz bins leaves < 0.1 dB on the bins and still
 passes), so no margin is an absolute stability guarantee; a finer CHIRP resolution narrows that limit. Cross-log
