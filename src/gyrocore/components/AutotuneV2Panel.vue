@@ -479,7 +479,15 @@ function evidenceDetails(axis: string, m: LoopMargins, pidReasons: string[]): st
     }
     if (ev.assumptions.length)
         out.push(i18n.getMessage("gyroflightV2EvidenceAssumptions", [ev.assumptions.join(", ")]));
-    const needs = [...new Set([...m.reasons, ...pidReasons].filter((r) => MARGIN_NEEDS.has(r)))];
+    const needs = [
+        ...new Set(
+            [...m.reasons, ...pidReasons].filter(
+                (r) =>
+                    MARGIN_NEEDS.has(r) ||
+                    /^required_measurement:chirp_(roll|pitch|yaw)_meeting_qualification$/.test(r),
+            ),
+        ),
+    ];
     if (ev.level !== "VALIDATED" && needs.length) {
         out.push(i18n.getMessage("gyroflightV2EvidenceNeeded", [needs.map(measurementText).join("; ")]));
     }

@@ -930,7 +930,7 @@
         "message": "a CHIRP that reaches higher frequencies (sensitivity peak)"
     },
     "gyroflightV2Need_chirp_with_finer_frequency_resolution": {
-        "message": "a CHIRP analysed with finer frequency resolution (longer sweep / FFT segments), so the loop between frequency points is resolved"
+        "message": "a CHIRP analysed with finer frequency resolution (a longer sweep or longer FFT segments), so the loop between frequency points is resolved"
     },
     "gyroflightV2Need_chirp_finer_resolution_model_class_qualification": {
         "message": "a CHIRP flight of the same craft and tune, identified at a frequency resolution at least 4.5× finer over the same band, to qualify the model assumption of the margin bounds"
