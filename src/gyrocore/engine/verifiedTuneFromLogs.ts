@@ -59,7 +59,7 @@ export interface VerifiedTuneAttempt {
     reasons: string[];
 }
 
-export function verifiedTuneFromLogs(logs: AutotuneLogInput[], createdAt?: string): VerifiedTuneAttempt {
+export function verifiedTuneFromLogs(logs: readonly AutotuneLogInput[], createdAt?: string): VerifiedTuneAttempt {
     // A flight imported twice (another name or hash) is one flight: never its own repeat.
     const groups = groupByTune(uniqueFlights(logs));
     if (groups.length < 2) {

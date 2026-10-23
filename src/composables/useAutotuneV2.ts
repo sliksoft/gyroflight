@@ -150,7 +150,7 @@ export function useAutotuneV2() {
     const dialog = useDialog();
 
     /** Engine inputs of every imported file (cached until a file is added). Newest import = highest order. */
-    async function buildInputs(): Promise<AutotuneLogInput[]> {
+    async function buildInputs(): Promise<readonly AutotuneLogInput[]> {
         if (store.inputs) return store.inputs;
         const inputs: AutotuneLogInput[] = [];
         const n = store.sources.length;
@@ -164,8 +164,11 @@ export function useAutotuneV2() {
                 inputs.push({ ...l, order: n - i });
             }
         }
-        // One flight carried by two files (renamed, re-saved) is kept once.
-        store.inputs = uniqueFlights(inputs);
+        // One flight carried by two files (renamed, re-saved) is kept once. Frozen: the write
+        // authority pins these objects, and nothing may edit them in place after the calculation.
+        store.inputs = Object.freeze(
+            uniqueFlights(inputs).map((l) => Object.freeze({ ...l, channels: Object.freeze({ ...l.channels }) })),
+        );
         return store.inputs;
     }
 

@@ -39,7 +39,7 @@ export type ConfirmationSubject =
           compositeId: string;
           sliders: Record<string, number>;
           /** snapshotHash of the read-only preview the user saw (useTuneApply.previewTune). */
-          preview?: string;
+          preview: string;
       }
     | {
           kind: "absolute";
@@ -47,9 +47,20 @@ export type ConfirmationSubject =
           /** The absolute values the user confirmed, by CLI name. */
           change: Record<string, number>;
           /** absoluteHash of the read-only preview the user saw (useTuneApply.previewAbsoluteTune). */
-          preview?: string;
+          preview: string;
       }
-    | { kind: "restore"; backupId: string; preview?: string };
+    | {
+          kind: "restore";
+          backupId: string;
+          /** restoreHash of the read-only preview the user saw: the craft's tune then and the backup's target. */
+          preview: string;
+      };
+
+/** What the route itself knows before it has read the craft: the subject without the preview hash. */
+export type ConfirmationRequest =
+    | Omit<Extract<ConfirmationSubject, { kind: "apply" }>, "preview">
+    | Omit<Extract<ConfirmationSubject, { kind: "absolute" }>, "preview">
+    | Omit<Extract<ConfirmationSubject, { kind: "restore" }>, "preview">;
 
 interface Issued {
     subject: ConfirmationSubject;
@@ -58,7 +69,7 @@ interface Issued {
 
 const issued = new Map<string, Issued>();
 
-function sameSubject(a: ConfirmationSubject, b: ConfirmationSubject): boolean {
+function sameSubject(a: ConfirmationSubject, b: ConfirmationRequest): boolean {
     if (a.kind === "apply" && b.kind === "apply") {
         const keys = new Set([...Object.keys(a.sliders), ...Object.keys(b.sliders)]);
         return a.compositeId === b.compositeId && [...keys].every((k) => a.sliders[k] === b.sliders[k]);
@@ -87,13 +98,13 @@ export function issueConfirmation(subject: ConfirmationSubject, now = Date.now()
 }
 
 /**
- * Throws unless `token` confirms exactly `subject` (the preview hash is not compared here: the
- * caller checks it once it has recomputed the preview). Returns what was confirmed. A token is
- * spent even when it does not match.
+ * Throws unless `token` confirms exactly `subject` and carries the hash of the preview the user saw
+ * (the hash itself is compared by the caller once it has recomputed the preview: every route
+ * refuses when it differs). Returns what was confirmed. A token is spent even when it does not match.
  */
 export function consumeConfirmation(
     token: string | null | undefined,
-    subject: ConfirmationSubject,
+    subject: ConfirmationRequest,
     now = Date.now(),
 ): ConfirmationSubject {
     if (!token) {
@@ -109,6 +120,10 @@ export function consumeConfirmation(
     }
     if (!sameSubject(entry.subject, subject)) {
         throw new ApplyBlockedError(["apply:confirmation_mismatch"]);
+    }
+    // A confirmation of no particular preview binds nothing the craft holds: never a write.
+    if (typeof entry.subject.preview !== "string" || !entry.subject.preview) {
+        throw new ApplyBlockedError(["apply:confirmation_without_preview"]);
     }
     return entry.subject;
 }

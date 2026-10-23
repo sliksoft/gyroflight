@@ -58,6 +58,9 @@ import {
 } from "../../src/composables/useTuneApply";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
+
+/** A token bound to a preview the route never reaches: the test expects a refusal before the hash is compared. */
+const UNREAD_PREVIEW = "test:preview-not-read";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
 import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
@@ -134,7 +137,7 @@ describe("release contract on the engine's own proposal", () => {
         const p = withoutVt.proposal!;
         const err = (await applyAbsoluteTune(
             p,
-            issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...p.change } }),
+            issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...p.change }, preview: UNREAD_PREVIEW }),
         ).then(
             () => null,
             (e: unknown) => e,

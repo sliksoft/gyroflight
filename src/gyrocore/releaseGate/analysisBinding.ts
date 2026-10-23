@@ -145,15 +145,17 @@ export function pinAnalysis(): AnalysisPin {
 function analysisChanged(since: AnalysisPin): boolean {
     const store = useAutotuneV2Store();
     const now = store.inputs ?? [];
-    return (
-        store.inputs !== since.inputs ||
-        store.result !== since.result ||
-        now.length !== since.logs.length ||
-        now.some(
-            (l, i) =>
-                l !== since.logs[i].input || l.sha256 !== since.logs[i].sha256 || l.logIndex !== since.logs[i].logIndex,
-        )
-    );
+    if (store.inputs !== since.inputs || store.result !== since.result || now.length !== since.logs.length) {
+        return true;
+    }
+    // By index over the pinned logs, not over `now`: an iteration of `now` skips a deleted entry.
+    for (let i = 0; i < since.logs.length; i++) {
+        const pinned = since.logs[i];
+        if (!(i in now)) return true;
+        const l = now[i];
+        if (l !== pinned.input || l.sha256 !== pinned.sha256 || l.logIndex !== pinned.logIndex) return true;
+    }
+    return false;
 }
 
 /**

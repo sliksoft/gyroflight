@@ -75,9 +75,11 @@ import {
     issueConfirmation,
     resetConfirmations,
 } from "../../src/gyrocore/tuning/applyConfirmation";
+
 import type { AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
 import type { AbsoluteValues } from "../../src/gyrocore/tuning/absoluteTune";
 import { air65FirmwareState, createFirmwareFc, FIRMWARE_WRITE_CODES, type FirmwareState } from "./harness/mspFirmware";
+import { FAULT_FREE_FIRMWARE, previewedHash, UNREAD_PREVIEW } from "./harness/previewConfirmation";
 
 function headersFor(s: FirmwareState): [string, string][] {
     const p = s.p;
@@ -132,8 +134,21 @@ function proposal(change: AbsoluteValues = CHANGE, state = air65FirmwareState())
 
 const codes = () => route.fc.calls.map((c) => c.code);
 const writes = () => codes().filter((c) => FIRMWARE_WRITE_CODES.has(c));
-const confirm = (p: AbsoluteProposal, preview?: string) =>
-    issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...p.change }, ...(preview ? { preview } : {}) });
+/** The user's confirmation of `p`, bound to the read-only preview of the craft as it is now. */
+const confirm = async (p: AbsoluteProposal, preview?: string) =>
+    issueConfirmation({
+        kind: "absolute",
+        proposalId: p.id,
+        change: { ...p.change },
+        preview: preview ?? (await previewedHash(route.fc, FAULT_FREE_FIRMWARE(), () => previewAbsoluteTune(p))),
+    });
+/** Restore's confirmation, bound to its read-only preview. */
+const confirmRestore = async (backupId: string) =>
+    issueConfirmation({
+        kind: "restore",
+        backupId,
+        preview: await previewedHash(route.fc, FAULT_FREE_FIRMWARE(), () => previewAbsoluteRestore(backupId)),
+    });
 
 async function failure(p: Promise<unknown>) {
     return p.then(
@@ -179,7 +194,7 @@ describe("apply: only the confirmed values, verified, then saved", () => {
         const before = structuredClone(route.fc.ram);
         const pv = await previewAbsoluteTune(p);
         route.fc.calls = [];
-        const res = await applyAbsoluteTune(p, confirm(p, pv.hash));
+        const res = await applyAbsoluteTune(p, await confirm(p, pv.hash));
         expect(res.status).toBe("verified");
         expect(writes()).toEqual([
             MSPCodes.MSP_SET_PID,
@@ -212,7 +227,7 @@ describe("apply: only the confirmed values, verified, then saved", () => {
 
     it("a filter-only change writes MSP_SET_FILTER_CONFIG only", async () => {
         const p = proposal({ gyro_lpf2_static_hz: 280 });
-        await applyAbsoluteTune(p, confirm(p));
+        await applyAbsoluteTune(p, await confirm(p));
         expect(writes()).toEqual([MSPCodes.MSP_SET_FILTER_CONFIG, MSPCodes.MSP_EEPROM_WRITE]);
         expect(route.fc.eeprom.p.gyro_lpf2_static_hz).toBe(280);
     });
@@ -222,7 +237,7 @@ describe("apply: only the confirmed values, verified, then saved", () => {
         route.fc.ram.sliders.slider_dterm_filter = 1;
         const lpfBefore = { ...route.fc.ram.p };
         const p = proposal({ p_roll: 60 });
-        await applyAbsoluteTune(p, confirm(p));
+        await applyAbsoluteTune(p, await confirm(p));
         expect(writes()).toEqual([MSPCodes.MSP_SET_SIMPLIFIED_TUNING, MSPCodes.MSP_SET_PID, MSPCodes.MSP_EEPROM_WRITE]);
         const s = route.fc.eeprom;
         expect([s.sliders.slider_pids_mode, s.sliders.slider_dterm_filter, s.sliders.slider_gyro_filter]).toEqual([
@@ -243,7 +258,7 @@ describe("apply: only the confirmed values, verified, then saved", () => {
     it("reports a reboot request from MSP_STATUS_EX", async () => {
         route.fc.rebootRequired = true;
         const p = proposal({ dyn_notch_count: 3 });
-        expect((await applyAbsoluteTune(p, confirm(p))).rebootRequired).toBe(true);
+        expect((await applyAbsoluteTune(p, await confirm(p))).rebootRequired).toBe(true);
     });
 });
 
@@ -253,18 +268,23 @@ describe("gates before any write", () => {
         expect(((await failure(applyAbsoluteTune(p, null))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_missing",
         ]);
-        const other = issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...CHANGE, p_roll: 61 } });
+        const other = issueConfirmation({
+            kind: "absolute",
+            proposalId: p.id,
+            change: { ...CHANGE, p_roll: 61 },
+            preview: UNREAD_PREVIEW,
+        });
         expect(((await failure(applyAbsoluteTune(p, other))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_mismatch",
         ]);
         const old = issueConfirmation(
-            { kind: "absolute", proposalId: p.id, change: { ...CHANGE } },
+            { kind: "absolute", proposalId: p.id, change: { ...CHANGE }, preview: UNREAD_PREVIEW },
             Date.now() - CONFIRMATION_TTL_MS - 1,
         );
         expect(((await failure(applyAbsoluteTune(p, old))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_expired",
         ]);
-        const restore = issueConfirmation({ kind: "restore", backupId: "x" });
+        const restore = issueConfirmation({ kind: "restore", backupId: "x", preview: UNREAD_PREVIEW });
         expect(((await failure(applyAbsoluteTune(p, restore))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_mismatch",
         ]);
@@ -274,7 +294,7 @@ describe("gates before any write", () => {
     it("the real release contract stops an unreleased proposal before any MSP", async () => {
         route.release = false;
         const p = proposal();
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as ApplyBlockedError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as ApplyBlockedError;
         expect(err).toBeInstanceOf(ApplyBlockedError);
         expect(err.reasons.some((r) => r.startsWith("independent_validation:"))).toBe(true);
         expect(err.reasons.some((r) => r.startsWith("phase_margin:"))).toBe(true);
@@ -306,7 +326,7 @@ describe("gates before any write", () => {
         it(`${name} -> ${reason}, nothing written`, async () => {
             const p = proposal();
             mutate(route.fc);
-            const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as ApplyBlockedError;
+            const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as ApplyBlockedError;
             expect(err).toBeInstanceOf(ApplyBlockedError);
             expect(err.reasons).toContain(reason);
             expect(writes()).toEqual([]);
@@ -326,7 +346,7 @@ describe("gates before any write", () => {
         it(`${name} -> ${reason}`, async () => {
             if (api) route.fc.apiVersion = api;
             const p = proposal(change);
-            const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as ApplyBlockedError;
+            const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as ApplyBlockedError;
             expect(err.reasons).toContain(reason);
             expect(writes()).toEqual([]);
         });
@@ -336,7 +356,7 @@ describe("gates before any write", () => {
         const p = proposal({ p_roll: 60 }, air65FirmwareState());
         const pv = await previewAbsoluteTune(p);
         route.fc.ram.p.gyro_hardware_lpf = 1; // not logged, but part of what the user saw
-        const err = (await failure(applyAbsoluteTune(p, confirm(p, pv.hash)))) as ApplyBlockedError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p, pv.hash)))) as ApplyBlockedError;
         expect(err.reasons).toEqual(["apply:preview_changed"]);
         expect(writes()).toEqual([]);
     });
@@ -346,7 +366,7 @@ describe("failed writes: never shown as success, never saved, the partial state 
     it("timeout on the filter write after PIDs were written", async () => {
         route.fc.faults[MSPCodes.MSP_SET_FILTER_CONFIG] = "timeout";
         const p = proposal();
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect(err).toBeInstanceOf(TuneWriteError);
         expect([err.stage, err.saved]).toEqual(["write", "no"]);
         expect(err.changedFromBackup).toEqual(
@@ -360,7 +380,7 @@ describe("failed writes: never shown as success, never saved, the partial state 
     it("the firmware answers MSP_SET_FILTER_CONFIG with an error after storing part of it", async () => {
         route.fc.errorAfterDecode.add(MSPCodes.MSP_SET_FILTER_CONFIG);
         const p = proposal({ p_roll: 60, dterm_lpf1_static_hz: 90 });
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect([err.stage, err.saved]).toEqual(["write", "no"]);
         // Both blocks reached RAM before the error: the report says so, nothing was saved.
         expect(err.changedFromBackup).toEqual(["pid:p_roll 56→60", "filter:dterm_lpf1_static_hz 75→90"]);
@@ -371,7 +391,7 @@ describe("failed writes: never shown as success, never saved, the partial state 
     it("a disconnect during verification: not saved", async () => {
         route.fc.faultsAfterWrites.push({ after: 1, code: MSPCodes.MSP_PID_ADVANCED, fault: "disconnect" });
         const p = proposal({ p_roll: 60 });
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect([err.stage, err.saved]).toEqual(["verify", "no"]);
         expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
     });
@@ -379,7 +399,7 @@ describe("failed writes: never shown as success, never saved, the partial state 
     it("the firmware acknowledges but keeps its values: verification fails, not saved", async () => {
         route.fc.ignoreWrite.add(MSPCodes.MSP_SET_FILTER_CONFIG);
         const p = proposal({ dterm_lpf1_static_hz: 80 });
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect([err.stage, err.saved]).toEqual(["verify", "no"]);
         expect(err.mismatches).toEqual(["filter:dterm_lpf1_static_hz expected 80 read 75"]);
         expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
@@ -388,14 +408,14 @@ describe("failed writes: never shown as success, never saved, the partial state 
     it("EEPROM write times out: saved state unknown", async () => {
         route.fc.faults[MSPCodes.MSP_EEPROM_WRITE] = "timeout";
         const p = proposal({ p_roll: 60 });
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect([err.stage, err.saved]).toEqual(["eeprom", "unknown"]);
     });
 
     it("EEPROM write refused (armed in the meantime): not saved", async () => {
         route.fc.faultsAfterWrites.push({ after: 1, code: MSPCodes.MSP_EEPROM_WRITE, fault: "unsupported" });
         const p = proposal({ p_roll: 60 });
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect([err.stage, err.saved]).toEqual(["eeprom", "no"]);
         expect(route.fc.eeprom.pids[0][0]).toBe(56);
     });
@@ -403,7 +423,7 @@ describe("failed writes: never shown as success, never saved, the partial state 
     it("the firmware changes a value when it reloads the saved config: reported, not hidden", async () => {
         route.fc.adjustOnReload = (s) => (s.p.dyn_notch_q = 250);
         const p = proposal({ dyn_notch_q: 280 });
-        const err = (await failure(applyAbsoluteTune(p, confirm(p)))) as TuneWriteError;
+        const err = (await failure(applyAbsoluteTune(p, await confirm(p)))) as TuneWriteError;
         expect([err.stage, err.saved]).toEqual(["eeprom_verify", "yes_adjusted"]);
         expect(err.mismatches).toEqual(["filter:dyn_notch_q expected 280 read 250"]);
     });
@@ -415,7 +435,7 @@ describe("restore: the backup exactly, slider modes included", () => {
         const original = structuredClone(route.fc.ram);
         route.fc.eeprom = structuredClone(original);
         const p = proposal(CHANGE, original);
-        const res = await applyAbsoluteTune(p, confirm(p));
+        const res = await applyAbsoluteTune(p, await confirm(p));
         expect(route.fc.eeprom.sliders.slider_pids_mode).toBe(0);
 
         const pv = await previewAbsoluteRestore(res.backupId);
@@ -436,7 +456,7 @@ describe("restore: the backup exactly, slider modes included", () => {
 
     it("refuses another craft, other firmware, another MSP API, or the v1 Restore", async () => {
         const p = proposal({ p_roll: 60 });
-        const res = await applyAbsoluteTune(p, confirm(p));
+        const res = await applyAbsoluteTune(p, await confirm(p));
         for (const [mutate, reason] of [
             [(fc: FirmwareFc) => (fc.uid = [9, 9, 9]), "restore:different_craft"],
             [(fc: FirmwareFc) => (fc.version = "2026.12.0"), "restore:firmware_changed"],
@@ -445,7 +465,7 @@ describe("restore: the backup exactly, slider modes included", () => {
             const saved = structuredClone(route.fc);
             mutate(route.fc);
             route.fc.calls = [];
-            const token = issueConfirmation({ kind: "restore", backupId: res.backupId });
+            const token = issueConfirmation({ kind: "restore", backupId: res.backupId, preview: UNREAD_PREVIEW });
             const err = (await failure(restoreAbsoluteTune(res.backupId, token))) as ApplyBlockedError;
             expect(err.reasons).toContain(reason);
             expect(writes()).toEqual([]);

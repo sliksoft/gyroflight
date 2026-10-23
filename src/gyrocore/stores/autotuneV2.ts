@@ -86,8 +86,11 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
     const preview = ref<AutotuneV2Preview | null>(null);
     const outcome = ref<AutotuneV2Outcome | null>(null);
     const busy = ref(false);
-    /** Decoded engine inputs of the current sources (rebuilt when a source is added). */
-    const inputs = shallowRef<AutotuneLogInput[] | null>(null);
+    /**
+     * Decoded engine inputs of the current sources (rebuilt when a source is added). Published
+     * frozen (useAutotuneV2 buildInputs): what an Apply was authorized against cannot change in place.
+     */
+    const inputs = shallowRef<readonly AutotuneLogInput[] | null>(null);
     /** Outcome of the last "create Verified Tune" (the record itself goes to the Verified Tune store). */
     const verifiedTuneAttempt = ref<{ verdict: "PASS" | "FAIL" | "NONE"; id: string | null; reasons: string[] } | null>(
         null,

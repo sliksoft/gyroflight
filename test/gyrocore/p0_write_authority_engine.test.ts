@@ -58,7 +58,7 @@ vi.mock("@/gyrocore/productLock/productApply", async () =>
     (await import("./harness/productRelease")).releasedProductApply(),
 );
 
-import { applyAbsoluteTune } from "../../src/composables/useTuneApply";
+import { applyAbsoluteTune, previewAbsoluteTune } from "../../src/composables/useTuneApply";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import { evaluateRelease, type AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
@@ -67,7 +67,9 @@ import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { useVerifiedTuneStore } from "../../src/gyrocore/stores/verifiedTunes";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
+
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
+import { FAULT_FREE_FIRMWARE, previewedHash } from "./harness/previewConfirmation";
 import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
@@ -97,8 +99,17 @@ beforeEach(() => {
 });
 
 const writes = () => gate.fc.calls.map((c) => c.code).filter((c) => FIRMWARE_WRITE_CODES.has(c));
-const apply = (p: AbsoluteProposal) =>
-    applyAbsoluteTune(p, issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...p.change } }));
+/** Apply with the user's confirmation, bound to the read-only preview of the craft as it is now. */
+const apply = async (p: AbsoluteProposal) =>
+    applyAbsoluteTune(
+        p,
+        issueConfirmation({
+            kind: "absolute",
+            proposalId: p.id,
+            change: { ...p.change },
+            preview: await previewedHash(gate.fc, FAULT_FREE_FIRMWARE(), () => previewAbsoluteTune(p)),
+        }),
+    );
 
 async function denial(p: Promise<unknown>): Promise<ApplyBlockedError> {
     const err = await p.then(

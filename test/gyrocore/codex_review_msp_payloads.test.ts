@@ -64,6 +64,9 @@ import {
 } from "../../src/composables/useTuneApply";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
+
+/** A token bound to a preview the route never reaches: the test expects a refusal before the hash is compared. */
+const UNREAD_PREVIEW = "test:preview-not-read";
 import {
     absoluteSnapshotIssues,
     changeSetIssues,
@@ -176,7 +179,12 @@ describe("P2-02: CRC-valid short replies stop Preview, Apply and Restore before 
             const e1 = (await failure(previewAbsoluteTune(p))) as ApplyBlockedError;
             expect(e1).toBeInstanceOf(ApplyBlockedError);
             expect(e1.reasons.some((r) => r.startsWith("fc:reply_too_short:"))).toBe(true);
-            const token = issueConfirmation({ kind: "absolute", proposalId: p.id, change: { ...p.change } });
+            const token = issueConfirmation({
+                kind: "absolute",
+                proposalId: p.id,
+                change: { ...p.change },
+                preview: UNREAD_PREVIEW,
+            });
             const e2 = (await failure(applyAbsoluteTune(p, token))) as ApplyBlockedError;
             expect(e2).toBeInstanceOf(ApplyBlockedError);
             expect(writes()).toEqual([]);
@@ -194,7 +202,10 @@ describe("P2-02: CRC-valid short replies stop Preview, Apply and Restore before 
             const e = (await failure(previewAbsoluteRestore(res.backupId))) as ApplyBlockedError;
             expect(e).toBeInstanceOf(ApplyBlockedError);
             const e2 = (await failure(
-                restoreAbsoluteTune(res.backupId, issueConfirmation({ kind: "restore", backupId: res.backupId })),
+                restoreAbsoluteTune(
+                    res.backupId,
+                    issueConfirmation({ kind: "restore", backupId: res.backupId, preview: UNREAD_PREVIEW }),
+                ),
             )) as ApplyBlockedError;
             expect(e2).toBeInstanceOf(ApplyBlockedError);
             expect(writes().length).toBe(before);
