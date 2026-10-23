@@ -32,7 +32,9 @@ import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import type { CompositeGateState } from "@/gyrocore/tuning/authorize";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 import { SLIDER_KEYS } from "@/gyrocore/tuning/merge";
+import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { evaluateSafety, type SafetyResult } from "./evaluate";
+import { BLOCK_MISSING_ANALYSIS } from "./pipeline";
 
 export function safetyForComposite(state: CompositeGateState, composite: CompositeRecommendation | null): SafetyResult {
     const log = state.report?.logs.find((l) => l.logIndex === composite?.logIndex) ?? null;
@@ -58,4 +60,34 @@ export function assertSafetyAuthorized(
         throw new ApplyBlockedError(reasons.map((r) => `safety:${r}`));
     }
     return safety;
+}
+
+export const SAFETY_NOT_EVALUATED_ABSOLUTE = "safety_not_evaluated:absolute_values";
+
+/** GyroCore Safety's verdict on an absolute proposal, bound to its id and its exact change. */
+export interface AbsoluteSafetyResult {
+    status: "PASS" | "BLOCK";
+    proposalId: string;
+    change: Record<string, number>;
+    blocks: string[];
+    analysisEvidence: "available" | "not_available";
+    authorized: boolean;
+}
+
+/**
+ * The Safety step for the absolute route. GyroCore Safety evaluates a slider composite only
+ * (evaluate.ts); it has no evaluation of absolute PID / filter / feedforward values, and no
+ * analysis evidence exists, so the reference's missing-analysis verdict decides: BLOCK. The
+ * engine's own absolute evidence contract (engine/safetyEvidence.ts) is a release condition, not
+ * this step. Write-path tests replace this module (test/gyrocore/harness/safetyRelease.ts).
+ */
+export function absoluteSafetyAuthorization(proposal: AbsoluteProposal): AbsoluteSafetyResult {
+    return {
+        status: "BLOCK",
+        proposalId: proposal.id,
+        change: { ...proposal.change },
+        blocks: [SAFETY_NOT_EVALUATED_ABSOLUTE, BLOCK_MISSING_ANALYSIS],
+        analysisEvidence: "not_available",
+        authorized: false,
+    };
 }

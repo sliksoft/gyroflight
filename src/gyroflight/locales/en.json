@@ -822,6 +822,13 @@
     },
     "gyroflightV2Cond_safety_evidence": { "message": "Safety evidence complete" },
     "gyroflightV2Cond_items_validated": { "message": "Every value to write is itself validated" },
+    "gyroflightV2Cond_analysis_binding": {
+        "message": "The proposal is the current analysis's own, recomputed from the imported logs when you click"
+    },
+    "gyroflightV2Cond_gyrocore_safety": { "message": "GyroCore Safety passes for these absolute values" },
+    "gyroflightV2Cond_product_lock": {
+        "message": "Product release: Safety analysis evidence and the Verified Tune stored for this craft"
+    },
     "gyroflightV2Cond_fc_identity": { "message": "Checked when you click: same craft, board and firmware, disarmed" },
     "gyroflightV2Cond_current_config": {
         "message": "Checked when you click: the flight controller still holds the logged values"

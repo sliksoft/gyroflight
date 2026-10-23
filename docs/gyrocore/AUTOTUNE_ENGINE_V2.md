@@ -20,7 +20,9 @@ MSP message.
 - Fields: every firmware-held value of `MSP_PID` (all rows), `MSP_PID_ADVANCED` and `MSP_FILTER_CONFIG`, by CLI name, in
   firmware order (Betaflight 2026.6.2 `msp.c`), with `settings.c` ranges. Deprecated slots MSPHelper decodes but the
   firmware ignores are not fields. `tpa_rate` is the raw U8. RPM fade / Q / weights need API 1.48; the route needs 1.45.
-- Gates before any MSP: release contract, single-use confirmation bound to the preview hash.
+- Gates before any MSP: the write authority (`gyrocore/releaseGate/writeAuthority.ts`, below), then the single-use
+  confirmation bound to the preview hash. The authority runs again after the live reads (before the backup) and right
+  before the first SET; a step that no longer holds there stops the Apply at stage `prepare` with nothing sent.
 - Live checks: UID, board, firmware, Betaflight, disarmed, API; every logged profile- and filter-scoped value equals the
   live one (the blackbox header has no PID profile index, so the logged profile is identified by its values); change-set
   checks (range, read-only, API, `d_max ≥ D` or 0, dynamic min ≤ max — what `validateAndFixConfig` would undo).
@@ -50,6 +52,28 @@ MSP message.
 - Restore: only into the PID profile the backup was read from (a backup without a profile index is refused); slider
   modes and sliders first, then all three blocks exactly, verify, save, read again.
 
+## Write authority (`gyrocore/releaseGate/writeAuthority.ts`)
+
+One authority for both Apply routes, in the project's gate order (composite → Safety → product lock, then the route's
+live readback and recheck). Each step is recomputed from the stores on every call; nothing a proposal carries counts as
+authorization by itself. Any missing, malformed or unevaluable evidence is `APPLY_DENIED` with the step's reasons.
+
+| Step             | Slider route (`applyTune`)                  | Absolute route (`applyAbsoluteTune`)                                                                                                                                                                                                                            |
+| ---------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| composite        | `assertCompositeApplyAuthorized`            | `analysis_binding` (`analysisBinding.ts`): the proposal equals, field for field, the current analysis's releasable proposal (analysis `done`); at the write point the engine runs again on the decoded inputs and the Verified Tune store and must reproduce it |
+| release contract | (none: the slider route has no v2 contract) | `evaluateRelease` (below)                                                                                                                                                                                                                                       |
+| Safety           | `assertSafetyAuthorized`                    | `absoluteSafetyAuthorization` (`safety/authorize.ts`), bound to the proposal id and change. GyroCore Safety has no evaluation of absolute values: always BLOCK `missing_required_analysis`                                                                      |
+| product lock     | `assertProductApplyReleased`                | `productApplyBlocks` with Safety's evidence and the Verified Tune this browser holds now; the record the proposal carries must be that one (`independent_pid_validation_not_current`)                                                                           |
+
+Consequence: the absolute route is denied in every case today, whatever the release contract says, until GyroCore
+Safety gains an evaluation of absolute values. Write-path tests release the steps they do not test through the harnesses
+in `test/gyrocore/harness/` (`analysisBindingRelease`, `safetyRelease`, `productRelease`). Restore is not a proposal and
+stays outside the authority (own confirmation, same UID / firmware / profile, backup first).
+
+Open risk: MSP has no atomic check-and-write. The last check runs synchronously before the first SET is sent, and
+`MSP_STATUS_EX` is re-read before every SET, but a change on the craft between that read and the SET (a profile switch,
+arming) is caught only afterwards (stage `write` / `verify`).
+
 ## Release contract (`gyrocore/releaseGate/`)
 
 Pre-write conditions, each computed from evidence the proposal carries: `measurement`, `model_quality`, `phase_margin`
@@ -77,8 +101,8 @@ repeat (a flight imported twice is one flight). The engine attests only when the
 configuration, and then searches PID candidates only on the record's segment (the contract's own predicate).
 
 The v1 slider route reads the same record but stays blocked: GyroCore Safety's slider path is unchanged (it still returns
-`missing_required_analysis`) and the composite phase-margin hold remains. The satisfiable contract is the absolute
-route's; this was deliberate.
+`missing_required_analysis`) and the composite phase-margin hold remains. The release contract is one step of the
+absolute route's write authority, not the whole of it: GyroCore Safety blocks that route too (see "Write authority").
 
 ## Engine (`gyrocore/engine/`)
 

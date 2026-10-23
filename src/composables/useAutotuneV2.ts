@@ -40,15 +40,16 @@ import {
 } from "@/composables/useTuneApply";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { runAutotuneV2, type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
-import { buildLogInputs, pickPrimary, uniqueFlights } from "@/gyrocore/engine/logInput";
+import { buildLogInputs, uniqueFlights } from "@/gyrocore/engine/logInput";
 import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
-import { evaluateRelease, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
+import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
+import { currentAnalysisInput } from "@/gyrocore/releaseGate/analysisBinding";
+import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
 import { useAutotuneV2Store, type AutotuneV2Outcome } from "@/gyrocore/stores/autotuneV2";
 import type { TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 import { issueConfirmation } from "@/gyrocore/tuning/applyConfirmation";
-import { loggedAbsoluteValues, type AbsoluteDiffRow } from "@/gyrocore/tuning/absoluteTune";
-import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
+import type { AbsoluteDiffRow } from "@/gyrocore/tuning/absoluteTune";
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
     const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes as BufferSource);
@@ -174,18 +175,11 @@ export function useAutotuneV2() {
         store.state = "calculating";
         store.errorMessage = "";
         try {
-            const picked = pickPrimary(await buildInputs());
-            if (!picked) throw new Error(i18n.getMessage("gyroflightV2NoChirp"));
-            const id = logIdentity(picked.primary.headerPairs);
-            const firmware = id.firmwareRevision?.split(/\s+/)[1] ?? null;
-            store.result = runAutotuneV2({
-                ...picked,
-                verifiedTune: useVerifiedTuneStore().forCraft(
-                    id.uid,
-                    firmware,
-                    loggedAbsoluteValues(picked.primary.headerPairs),
-                ),
-            });
+            await buildInputs();
+            // The same input the write authority recomputes at Apply (analysisBinding.ts).
+            const input = currentAnalysisInput();
+            if (!input) throw new Error(i18n.getMessage("gyroflightV2NoChirp"));
+            store.result = runAutotuneV2(input);
             store.state = "done";
         } catch (err) {
             store.state = "error";
@@ -218,10 +212,13 @@ export function useAutotuneV2() {
         await calculate();
     }
 
-    /** The proposal Apply may write: VALIDATED items only, and only when its release contract holds. */
+    /**
+     * The proposal Apply may write: VALIDATED items only, and only when the write authority allows
+     * it (without the recomputation, which Apply itself runs).
+     */
     function releasedProposal(): AbsoluteProposal | null {
         const p = store.result?.releasableProposal ?? null;
-        return p && evaluateRelease(p).released ? p : null;
+        return p && absoluteWriteDecision(p, { recompute: false }).verdict === "APPLY_ALLOWED" ? p : null;
     }
 
     /** Read-only: identity, live values, and every value the proposal would change. Writes nothing. */
