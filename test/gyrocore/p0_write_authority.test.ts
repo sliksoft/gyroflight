@@ -115,7 +115,13 @@ vi.mock("@/gyrocore/productLock/productApply", async () => {
 });
 
 import MSPCodes from "../../src/js/msp/MSPCodes";
-import { applyAbsoluteTune, TuneWriteError, useTuneApply } from "../../src/composables/useTuneApply";
+import {
+    applyAbsoluteTune,
+    previewAbsoluteRestore,
+    restoreAbsoluteTune,
+    TuneWriteError,
+    useTuneApply,
+} from "../../src/composables/useTuneApply";
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
@@ -123,7 +129,7 @@ import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { useVerifiedTuneStore } from "../../src/gyrocore/stores/verifiedTunes";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { absoluteWriteDecision } from "../../src/gyrocore/releaseGate/writeAuthority";
-import { canonicalText } from "../../src/gyrocore/releaseGate/analysisBinding";
+import { analysisBindingIssues, canonicalText, plainCopy } from "../../src/gyrocore/releaseGate/analysisBinding";
 import {
     RELEASE_INDEPENDENT_VALIDATION_NOT_CURRENT,
     type ProductReleaseEvidence,
@@ -544,3 +550,169 @@ async function proposalFailure(p: Promise<unknown>): Promise<Error & { stage?: s
         (e: unknown) => e as Error,
     );
 }
+
+// Negative cases designed by the independent review (Codex, 2026-10-23) against 63a7e2df.
+describe("independent review: attempts to get past the authority", () => {
+    it("a proposal shared with the store and changed after the confirmation is refused before any write", async () => {
+        gate.binding = false;
+        analysed(proposal());
+        const p = useAutotuneV2Store().result!.releasableProposal!;
+        const token = confirm(p);
+        let changed = false;
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (!changed && code === MSPCodes.MSP_API_VERSION) {
+                changed = true;
+                p.change.p_roll = 61;
+            }
+            return false;
+        };
+        const err = await denial(applyAbsoluteTune(p, token));
+        expect(err.reasons).toEqual(["binding:proposal_differs_from_analysis"]);
+        expect(writes()).toEqual([]);
+        expect(gate.fc.ram.pids[0][0]).not.toBe(61);
+    });
+
+    it("decoded inputs that vanish after the backup stop the Apply before the first SET", async () => {
+        gate.binding = false;
+        const p = proposal();
+        analysed(p);
+        let changed = false;
+        gate.fc.disconnectWhen = () => {
+            if (!changed && backups().length > 0) {
+                changed = true;
+                useAutotuneV2Store().inputs = null;
+                gate.fresh = null;
+            }
+            return false;
+        };
+        const err = await proposalFailure(apply(p));
+        expect(err).toMatchObject({ stage: "prepare", saved: "no" });
+        expect(err.message).toContain("binding:analysis_changed_since_authorization");
+        expect(writes()).toEqual([]);
+    });
+
+    it("a result replaced by an identical recalculation after the authorization stops the Apply", async () => {
+        gate.binding = false;
+        const p = proposal();
+        analysed(p);
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (code === MSPCodes.MSP_PID) analysed(p);
+            return false;
+        };
+        const err = await denial(apply(p));
+        expect(err.reasons).toEqual(["binding:analysis_changed_since_authorization"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a proposal whose toJSON impersonates the analysis is refused", async () => {
+        gate.binding = false;
+        const original = proposal();
+        analysed(original);
+        const forged = structuredClone(original);
+        forged.change.p_roll = 250;
+        Object.defineProperty(forged, "toJSON", { value: () => original });
+        expect(() => analysisBindingIssues(forged, { recompute: true })).toThrow(TypeError);
+        expect(failedSteps(forged)).toContain("analysis_binding");
+        const err = await denial(applyAbsoluteTune(forged, confirm(forged)));
+        expect(err.reasons).toEqual(["apply:proposal_not_plain_data"]);
+        nothingReachedTheCraft();
+    });
+
+    it("a proposal with a getter or a function inside is refused before any MSP", async () => {
+        const p = proposal();
+        Object.defineProperty(p.change, "p_roll", { get: () => 60, enumerable: true });
+        (p as unknown as { hook: () => void }).hook = () => undefined;
+        const err = await denial(apply(p));
+        expect(err.reasons).toEqual(["apply:proposal_not_plain_data"]);
+        nothingReachedTheCraft();
+    });
+
+    it("a Verified Tune lookup that throws denies (product_lock:evaluation_failed), nothing reaches the craft", async () => {
+        gate.product = false;
+        const spy = vi.spyOn(useVerifiedTuneStore(), "forCraft").mockImplementation(() => {
+            throw new Error("store failure");
+        });
+        try {
+            const err = await denial(apply(proposal()));
+            expect(err.reasons).toContain("product_lock:evaluation_failed");
+            nothingReachedTheCraft();
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("one token, two concurrent Applies: the second is refused", async () => {
+        const p = proposal();
+        const token = confirm(p);
+        const first = applyAbsoluteTune(p, token);
+        const second = applyAbsoluteTune(p, token);
+        expect((await denial(second)).reasons).toEqual(["apply:confirmation_unknown_or_used"]);
+        expect((await first).status).toBe("verified");
+    });
+
+    it("a proposal carrying a Verified Tune from the reactive store is copied, not refused", async () => {
+        const { reactive } = await import("vue");
+        const p = proposal();
+        const records = reactive({ list: [verifiedTuneAllAxesFixture(0.9, 0.7)] });
+        p.release.independentValidation = records.list.filter(() => true)[0];
+        expect(() => structuredClone(p)).toThrow();
+        const copy = plainCopy(p);
+        expect(canonicalText(copy)).toBe(canonicalText(p));
+        copy.release.independentValidation!.id = "changed";
+        expect(p.release.independentValidation!.id).not.toBe("changed");
+        expect((await apply(p)).status).toBe("verified");
+    });
+
+    it("canonical text cannot be made to collide or to read through accessors", () => {
+        expect(canonicalText(undefined)).not.toBe(canonicalText("\u0000undefined"));
+        expect(canonicalText(NaN)).not.toBe(canonicalText("\u0000number:NaN"));
+        expect(canonicalText(1)).not.toBe(canonicalText("1"));
+        expect(canonicalText(null)).not.toBe(canonicalText("null"));
+        const withGetter = {};
+        Object.defineProperty(withGetter, "a", { get: () => 1, enumerable: true });
+        expect(() => canonicalText(withGetter)).toThrow(TypeError);
+        expect(() => canonicalText(new Map())).toThrow(TypeError);
+        expect(() => canonicalText(new Float64Array(2))).toThrow(TypeError);
+        expect(() => canonicalText([1, , 3])).toThrow(TypeError);
+        expect(() => canonicalText({ f: () => 1 })).toThrow(TypeError);
+    });
+});
+
+describe("Restore writes what the user confirmed", () => {
+    async function seed() {
+        const res = await apply(proposal());
+        const pv = await previewAbsoluteRestore(res.backupId);
+        const token = issueConfirmation({ kind: "restore", backupId: res.backupId, preview: pv.hash });
+        gate.fc.calls = [];
+        return { backupId: res.backupId, token };
+    }
+
+    it("a backup target replaced after the preview is refused, nothing written", async () => {
+        const { backupId, token } = await seed();
+        const store = useTuneBackupStore();
+        const changed = structuredClone(store.get(backupId)!);
+        changed.absolute!.values.p_roll = 61;
+        expect(store.save(changed)).toBe(true);
+        const err = await denial(restoreAbsoluteTune(backupId, token));
+        expect(err.reasons).toEqual(["restore:preview_changed"]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a backup replaced in storage while the Restore runs does not change what is written", async () => {
+        const { backupId, token } = await seed();
+        const store = useTuneBackupStore();
+        const original = store.get(backupId)!.absolute!.values.p_roll;
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (code === MSPCodes.MSP_SET_SIMPLIFIED_TUNING) {
+                const changed = structuredClone(store.get(backupId)!);
+                changed.absolute!.values.p_roll = 61;
+                store.save(changed);
+            }
+            return false;
+        };
+        const r = await restoreAbsoluteTune(backupId, token);
+        expect(r.status).toBe("verified");
+        expect(store.get(backupId)!.absolute!.values.p_roll).toBe(61);
+        expect(gate.fc.ram.pids[0][0]).toBe(original);
+    });
+});

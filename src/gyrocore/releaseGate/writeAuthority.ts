@@ -46,7 +46,7 @@ import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 import { absoluteSafetyAuthorization, assertSafetyAuthorized } from "@/gyrocore/safety/authorize";
 import { assertProductApplyReleased, productApplyBlocks } from "@/gyrocore/productLock/productApply";
 import { evaluateRelease, type AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
-import { analysisBindingIssues, canonicalText } from "@/gyrocore/releaseGate/analysisBinding";
+import { analysisBindingIssues, canonicalText, type AnalysisPin } from "@/gyrocore/releaseGate/analysisBinding";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
@@ -88,11 +88,12 @@ export function assertSliderWriteAuthorized(
 
 /**
  * Every step for an absolute proposal, each evaluated (so the interface can name all that is
- * missing). `recompute`: run the engine again for the binding step (the write point does).
+ * missing). `recompute`: run the engine again for the binding step (the write point does);
+ * `since`: the analysis the Apply was first authorized against (the rechecks).
  */
 export function absoluteWriteDecision(
     proposal: AbsoluteProposal,
-    { recompute }: { recompute: boolean },
+    { recompute, since }: { recompute: boolean; since?: AnalysisPin },
 ): WriteAuthorityDecision {
     const steps: WriteAuthorityStep[] = [];
     // A step that cannot be evaluated (a malformed proposal, a failing store) blocks; it never passes.
@@ -106,7 +107,7 @@ export function absoluteWriteDecision(
         steps.push({ name, passed: !r.length, reasons: r });
     };
 
-    add("analysis_binding", () => analysisBindingIssues(proposal, { recompute }).map((r) => `binding:${r}`));
+    add("analysis_binding", () => analysisBindingIssues(proposal, { recompute, since }).map((r) => `binding:${r}`));
     add("release_contract", () => evaluateRelease(proposal).blocks);
 
     let safetyEvidence = "not_available";
@@ -146,8 +147,11 @@ export function absoluteWriteDecision(
 }
 
 /** Throws ApplyBlockedError with every step's reasons unless the absolute write is allowed. */
-export function assertAbsoluteWriteAuthorized(proposal: AbsoluteProposal, { recompute }: { recompute: boolean }): void {
-    const decision = absoluteWriteDecision(proposal, { recompute });
+export function assertAbsoluteWriteAuthorized(
+    proposal: AbsoluteProposal,
+    opts: { recompute: boolean; since?: AnalysisPin },
+): void {
+    const decision = absoluteWriteDecision(proposal, opts);
     if (decision.verdict !== "APPLY_ALLOWED") {
         throw new ApplyBlockedError(decision.blocks);
     }

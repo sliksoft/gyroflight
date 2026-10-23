@@ -94,6 +94,7 @@ vi.mock("@/gyrocore/tuning/authorize", async () => {
 
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { useConnectionStore } from "../../src/stores/connection";
+import { useFlightControllerStore } from "../../src/stores/fc";
 import { useAutotune } from "../../src/composables/useAutotune";
 import { previewRestore, previewTune, restoreTune, TuneWriteError } from "../../src/composables/useTuneApply";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
@@ -291,6 +292,26 @@ describe("the gates again, right before the write", () => {
         expect(codes()).toContain(MSPCodes.MSP_PID);
         expect(writes()).toEqual([]);
         expect(useTuneBackupStore().backups).toEqual([]);
+    });
+});
+
+describe("Preview leaves no proposal in the shared FC store (the PID tab's Save writes that store)", () => {
+    it.each([
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_PID,
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_DTERM,
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO,
+    ])("a firmware calculation that fails (code %i) puts the live values back", async (failing) => {
+        const c = await load();
+        expect(route.craft.sliders.slider_pi_gain).not.toBe(CHANGE.slider_pi_gain);
+        route.craft.faults[failing] = "timeout";
+        expect(await failure(previewTune(CHANGE, c.id))).toBeInstanceOf(Error);
+        expect(writes()).toEqual([]);
+        const fc = useFlightControllerStore();
+        expect(fc.tuningSliders.slider_pi_gain).toBe(route.craft.sliders.slider_pi_gain);
+        expect(fc.tuningSliders.slider_d_gain).toBe(route.craft.sliders.slider_d_gain);
+        expect(fc.pids.slice(0, 3).map((r) => r.slice(0, 3).map(Number))).toEqual(
+            route.craft.pids.slice(0, 3).map((r) => r.slice(0, 3)),
+        );
     });
 });
 
