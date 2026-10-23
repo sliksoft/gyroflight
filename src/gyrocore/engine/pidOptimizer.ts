@@ -208,8 +208,19 @@ export function optimizeAxisPid(
         outcome = "targets_not_reachable";
         reasons.push("no_candidate_meets_all_targets");
     }
-    if (pick.m.gainMarginDb === null) reasons.push("required_measurement:chirp_to_higher_frequency_for_gain_margin");
-    if (pick.m.sensitivityPeakDb === null)
+    // GM / |S| unknown because the bins do not resolve the loop (loopModel LOOP_RESOLUTION) needs a
+    // finer CHIRP resolution; unknown because the band ends too early needs a higher CHIRP end.
+    const has = (re: RegExp) => pick.m.reasons.some((r) => re.test(r));
+    const unresolved = has(/^(loop_unresolved_between_bins|identified_band_has_gaps|identified_band_too_coarse)/);
+    const gmBandEnd = has(
+        /^(loop_gain_(rising|near_unity|above_one)_at_band_end|phase_crossover_outside_identified_band)/,
+    );
+    const sBandEnd = has(/^sensitivity_peak_outside_identified_band/);
+    if (unresolved && (pick.m.gainMarginDb === null || pick.m.sensitivityPeakDb === null))
+        reasons.push("required_measurement:chirp_with_finer_frequency_resolution");
+    if (pick.m.gainMarginDb === null && (gmBandEnd || !unresolved))
+        reasons.push("required_measurement:chirp_to_higher_frequency_for_gain_margin");
+    if (pick.m.sensitivityPeakDb === null && (sBandEnd || !unresolved))
         reasons.push("required_measurement:chirp_to_higher_frequency_for_sensitivity_peak");
     const changed = !same(pick.v);
     if (changed && pick.m.status !== "VALIDATED") reasons.push(...pick.m.reasons.map((r) => `margins:${r}`));

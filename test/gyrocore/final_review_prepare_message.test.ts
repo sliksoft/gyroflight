@@ -187,6 +187,33 @@ describe("F-03: the prepare-stage message claims only what is known", () => {
         expect(q(failed, '[data-gyrocore="v2-profile-switch"]')).toBeNull();
     }, 600_000);
 
+    it("Restore with a profile switch before the first SET: the backup named is the one taken before the restore", async () => {
+        const store = useAutotuneV2Store();
+        store.result = released;
+        store.state = "done";
+        expect(await useAutotuneV2().confirmAndApply()).toBe("verified");
+        const applied = useTuneBackupStore().backups.find((b) => b.reason === "before_absolute_apply")!;
+        const writesBefore = writes().length;
+        let statusReads = 0;
+        mocks.after = (code) => {
+            if (code === MSPCodes.MSP_STATUS_EX && ++statusReads === 4) selectPidProfile(mocks.fc, 1);
+        };
+        expect(await useAutotuneV2().confirmAndRestore(applied)).toBe("failed");
+        expect(writes().length).toBe(writesBefore); // no SET of the restore
+        const o = outcome();
+        expect(o.action).toBe("restore");
+        expect(o.stage).toBe("prepare");
+        expect(o.prepareProfileSwitch).toEqual({ from: 0, to: 1 });
+        const safety = useTuneBackupStore().backups.find((b) => b.id === o.backupId)!;
+        expect(safety.reason).toBe("before_restore");
+        expect(safety.id).not.toBe(applied.id);
+        const { box, failed } = await render();
+        expect(failed.textContent).not.toMatch(EQUALITY);
+        expect(q(box, '[data-gyrocore="v2-no-set"]')).not.toBeNull();
+        expect(q(box, '[data-gyrocore="v2-prepare-profile"]')!.textContent).toContain("from profile 1 to profile 2");
+        expect(q(box, '[data-gyrocore="v2-backup-kept"]')!.textContent).toContain("PID profile 1");
+    }, 600_000);
+
     it("link lost before the first SET: not re-verified, no profile claim, backup kept", async () => {
         let statusReads = 0;
         const { box, failed } = await applyAndRender(
@@ -219,6 +246,12 @@ describe("F-03: the prepare-stage message claims only what is known", () => {
         };
         const { box, failed } = await render();
         expect(failed.textContent).not.toMatch(EQUALITY);
+        // Outside the tracked stages a sent SET is not recorded: no "no SET was sent" claim either.
+        expect(q(box, '[data-gyrocore="v2-no-set"]')).toBeNull();
+        expect(q(box, '[data-gyrocore="v2-set-unrecorded"]')!.textContent!.trim()).toBe(
+            messages.gyroflightV2StageUnknownWrite.message,
+        );
+        expect(failed.textContent).not.toContain(messages.gyroflightV2NothingWritten.message);
         expect(q(box, '[data-gyrocore="v2-not-reverified"]')).not.toBeNull();
         expect(q(box, '[data-gyrocore="v2-backup-kept"]')).toBeNull();
         expect(q(failed, '[data-gyrocore="v2-failed-backup"]')).toBeNull();
