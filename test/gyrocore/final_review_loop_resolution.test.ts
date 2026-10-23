@@ -23,7 +23,11 @@
  * Codex final review F-02: a narrow pole/zero resonance between two 0.5 Hz bins (70.25, 100.25 or
  * 150.25 Hz) took the loop above unity while loopMargins reported VALIDATED PM / GM / |S| from the
  * bins alone. The bins now have to resolve the loop (loopModel.ts LOOP_RESOLUTION) before margins
- * count as bounds; the resolution is reported (resolutionHz) and the basis named (marginBasis).
+ * count as bounds; the resolution is reported and the basis named (evidence.resolutionHz /
+ * evidence.level). Bounds the bins resolve are MODEL_CONDITIONAL until a finer, independent log
+ * qualifies the model class (final_review_f02_evidence.test.ts): here that qualification is
+ * absent, so "would be VALIDATED" means MODEL_CONDITIONAL with the model-class reasons as the only
+ * blockers (conditionalOnly).
  *
  * References are independent of the code under test: the exact analytic |L| at the resonance, and
  * PM / GM / |S| of the analytic loop on a 0.002 Hz grid with this file's own crossing search.
@@ -73,6 +77,14 @@ const poleZero =
 
 const loopOf = (G: G) => (f: number) => cmul(G(f), evaluateControllerFrf(cfg, f).cFeedback);
 const db = (x: number) => 20 * Math.log10(x);
+
+/** The blockers of bounds without a model-class qualification (and nothing else open). */
+const MODEL_CLASS_REASONS = [
+    "model_class_not_qualified",
+    "model_class_qualification_missing",
+    "required_measurement:chirp_finer_resolution_model_class_qualification",
+];
+const conditionalOnly = (m: { reasons: string[] }) => JSON.stringify(m.reasons) === JSON.stringify(MODEL_CLASS_REASONS);
 
 function margins(freqs: number[], G: G) {
     const tf = syntheticTransferFunction(freqs, (f) => {
@@ -152,10 +164,10 @@ describe("F-02: margins count only where the bins resolve the loop", () => {
             expect(cmag(loopOf(poleZero(fr, zZero, zPole))(fr))).toBeGreaterThan(1);
             const m = margins(uniform(200, 0.5), poleZero(fr, zZero, zPole));
             expect(m.status).toBe("NOT_VALIDATED");
-            expect(m.marginBasis).toBe("measured_only");
+            expect(m.evidence.level).toBe("MEASURED");
             expect(m.gainMarginDb).toBeNull();
             expect(m.sensitivityPeakDb).toBeNull();
-            expect(m.resolutionHz).toBeCloseTo(0.5, 9);
+            expect(m.evidence.resolutionHz).toBeCloseTo(0.5, 9);
             const lo = (Math.floor(fr * 2) / 2).toFixed(1);
             const hi = (Math.floor(fr * 2) / 2 + 0.5).toFixed(1);
             const step = m.reasons.find((r) => r.startsWith("loop_unresolved_between_bins:"));
@@ -170,7 +182,7 @@ describe("F-02: margins count only where the bins resolve the loop", () => {
             expect(m.reasons.some((r) => r.startsWith("loop_gain_reenters_unity:"))).toBe(true);
             expect(m.phaseMarginDeg!).toBeLessThan(0);
             expect(m.gainMarginDb).toBeNull();
-            expect(m.resolutionHz).toBeCloseTo(0.5, 6);
+            expect(m.evidence.resolutionHz).toBeCloseTo(0.5, 6);
         });
     }
 
@@ -179,8 +191,8 @@ describe("F-02: margins count only where the bins resolve the loop", () => {
         const gap = margins(holes, smooth);
         expect(gap.status).toBe("NOT_VALIDATED");
         expect(gap.reasons).toContain("identified_band_has_gaps");
-        expect(gap.marginBasis).toBe("measured_only");
-        expect(gap.resolutionHz).toBeCloseTo(3.5, 9); // 39.5 → 43.0 Hz
+        expect(gap.evidence.level).toBe("MEASURED");
+        expect(gap.evidence.resolutionHz).toBeCloseTo(3.5, 9); // 39.5 → 43.0 Hz
         const sparse = margins([1, 5, 10, 20, 40, 60, 80, 100], smooth);
         expect(sparse.status).toBe("NOT_VALIDATED");
         expect(sparse.reasons.some((r) => r.startsWith("identified_band_too_coarse:5.0-10.0Hz"))).toBe(true);
@@ -219,8 +231,9 @@ describe("F-02: margins count only where the bins resolve the loop", () => {
         ] as const) {
             const m = margins(uniform(200, 0.5), shaped(rise, endDb));
             expect(m.reasons.filter((r) => r.startsWith("loop_unresolved"))).toEqual([]);
-            expect(m.status).toBe(ok ? "VALIDATED" : "NOT_VALIDATED");
-            expect(m.marginBasis).toBe(ok ? "bounded" : "measured_only");
+            expect(m.status).toBe("NOT_VALIDATED");
+            expect(conditionalOnly(m)).toBe(ok);
+            expect(m.evidence.level).toBe(ok ? "MODEL_CONDITIONAL" : "MEASURED");
         }
     });
 });
@@ -234,13 +247,13 @@ describe("F-02: well-supported smooth loops keep their margins", () => {
         ["jittered 0.5 Hz", jittered(200, 0.5)],
     ];
     for (const [name, freqs] of grids) {
-        it(`smooth plant on a ${name} grid: VALIDATED, bounded, margins match the independent reference`, () => {
+        it(`smooth plant on a ${name} grid: model-conditional bounds that match the independent reference`, () => {
             const m = margins(freqs, smooth);
-            expect(m.reasons).toEqual([]);
-            expect(m.status).toBe("VALIDATED");
-            expect(m.marginBasis).toBe("bounded");
+            expect(m.reasons).toEqual(MODEL_CLASS_REASONS);
+            expect(m.status).toBe("NOT_VALIDATED");
+            expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
             const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
-            expect(m.resolutionHz).toBeCloseTo(Math.max(...steps), 9);
+            expect(m.evidence.resolutionHz).toBeCloseTo(Math.max(...steps), 9);
             expect(Math.abs(m.phaseMarginDeg! - ref.pm)).toBeLessThan(1);
             // Measured: read on the bins, close to the reference. Bounded: never better than the
             // reference, and only the between-bin allowance worse.
@@ -251,12 +264,12 @@ describe("F-02: well-supported smooth loops keep their margins", () => {
         });
     }
 
-    it("a resonance the bins resolve (ζ 0.05 / 0.1 at 70 Hz, 7 Hz wide) stays VALIDATED with the reference margins", () => {
+    it("a resonance the bins resolve (ζ 0.05 / 0.1 at 70 Hz, 7 Hz wide) keeps model-conditional reference margins", () => {
         const G = poleZero(70, 0.1, 0.05);
         const r = oracle(G, 0.5, 200);
         const m = margins(uniform(200, 0.5), G);
-        expect(m.status).toBe("VALIDATED");
-        expect(m.marginBasis).toBe("bounded");
+        expect(conditionalOnly(m)).toBe(true);
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
         expect(Math.abs(m.phaseMarginDeg! - r.pm)).toBeLessThan(1);
         expect(m.gainMarginDb!).toBeLessThanOrEqual(r.gm + 0.05);
         expect(Math.abs(m.measured.sensitivityPeakDb! - r.s)).toBeLessThan(0.2);
@@ -275,7 +288,7 @@ describe("F-02: at the edge of the resolved class (features ≈ 5 bin steps wide
             const ref = oracle(G, 0.5, 200);
             const m = margins(uniform(200, 0.5), G);
             if (ref.pm < 0 || ref.gm < 0) expect(m.status).toBe("NOT_VALIDATED");
-            if (m.marginBasis === "bounded") {
+            if (m.evidence.level === "MODEL_CONDITIONAL") {
                 // The bounds hold at the class edge (the bins alone under-read |S| here).
                 expect(m.gainMarginDb!).toBeLessThanOrEqual(ref.gm + 0.05);
                 expect(m.sensitivityPeakDb!).toBeGreaterThanOrEqual(ref.s - 0.05);
@@ -303,17 +316,19 @@ describe("F-02: the PID search names the measurement an unresolved band needs", 
 });
 
 describe("F-02: the validity limit is stated, not removed", () => {
-    it("a pair narrower than the resolved feature width leaves no trace and still reads as bounded", () => {
+    it("a pair narrower than the resolved feature width leaves no trace: bounds only MODEL_CONDITIONAL, never VALIDATED", () => {
         // Both bandwidths far below RESOLVED_FEATURE_BINS × 0.5 Hz: each bin moves < 0.1 dB and
-        // ~7°, yet |L(fr)| ≈ 2. No finite set of bins can exclude this; the docs and the report
-        // say so, and "bounded" means bounded for features at least that wide.
+        // ~7°, yet |L(fr)| ≈ 2. No finite set of bins can exclude this, so the bounds carry that
+        // model assumption explicitly and do not count as VALIDATED (Codex final acceptance F-02).
         const fr = 70.25;
         const G = poleZero(fr, 0.0005, 0.00005);
         expect(cmag(loopOf(G)(fr))).toBeGreaterThan(1);
         const m = margins(uniform(200, 0.5), G);
-        expect(2 * 0.0005 * fr).toBeLessThan(RESOLVED_FEATURE_BINS * m.resolutionHz!);
-        expect(m.marginBasis).toBe("bounded");
-        expect(m.status).toBe("VALIDATED");
+        expect(2 * 0.0005 * fr).toBeLessThan(RESOLVED_FEATURE_BINS * m.evidence.resolutionHz!);
+        expect(m.evidence.minFeatureWidthHz).toBeCloseTo(RESOLVED_FEATURE_BINS * 0.5, 9);
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(m.status).toBe("NOT_VALIDATED");
+        expect(m.reasons).toEqual(MODEL_CLASS_REASONS);
         // The same loop on bins that resolve the pair is refused.
         expect(margins(refined(fr), G).status).toBe("NOT_VALIDATED");
     });

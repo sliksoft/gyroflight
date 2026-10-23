@@ -62,7 +62,7 @@ import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/
 import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 let blocked: AutotuneV2Result;
@@ -77,6 +77,8 @@ beforeAll(() => {
         others: [repeat],
         // A measured gain reduction from the logged tune: its segment carries the released proposal.
         verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
+        // SIMULATION: a synthetic finer second flight qualifies the margins' model class.
+        modelClassQualification: simulatedQualificationLog(),
         createdAt: "2026-10-22T00:00:00Z",
     });
 }, 600_000);
@@ -206,5 +208,39 @@ describe("AutotuneV2Panel", () => {
         await flush();
         expect((q(c, '[data-gyrocore="v2-preview"]') as HTMLButtonElement).disabled).toBe(true);
         expect((q(c, '[data-gyrocore="v2-apply"]') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("margin evidence: MODEL_CONDITIONAL bounds are never green and say what they assume and need (F-02)", async () => {
+        const c = mount(blocked);
+        await flush();
+        const rows = c.querySelectorAll('[data-gyrocore="v2-margins"] tbody tr');
+        expect(rows.length).toBeGreaterThan(0);
+        for (const row of rows) {
+            expect(row.getAttribute("data-evidence")).toBe("MODEL_CONDITIONAL");
+            expect(row.getAttribute("data-state")).toBe("NOT_VALIDATED");
+            expect(row.querySelector(".text-green-500")).toBeNull();
+            // Bounds, the measured values, and the frequency resolution.
+            expect(row.textContent).toContain("gyroflightV2Measured");
+            expect(row.textContent).toContain("0.50 Hz");
+        }
+        const roll = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="roll"]')!;
+        expect(roll.textContent).toContain("gyroflightV2EvidenceRange|roll|2.0|100.0|0.50");
+        expect(roll.textContent).toContain("gyroflightV2EvidenceConditional|2.26");
+        expect(roll.textContent).toContain("no_loop_feature_narrower_than:2.26Hz");
+        expect(roll.textContent).toContain(
+            "gyroflightV2EvidenceNeeded|chirp_finer_resolution_model_class_qualification",
+        );
+        expect(q(c, '[data-gyrocore="v2-evidence-legend"]')).not.toBeNull();
+    });
+
+    it("margin evidence: a qualified model shows VALIDATED in green with its qualification (SIMULATION)", async () => {
+        const c = mount(released);
+        await flush();
+        const roll = q(c, '[data-gyrocore="v2-margins"] tbody tr[data-axis="roll"]')!;
+        expect(roll.getAttribute("data-evidence")).toBe("VALIDATED");
+        expect(roll.querySelector(".text-green-500")).not.toBeNull();
+        const detail = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="roll"]')!;
+        expect(detail.textContent).toContain("gyroflightV2EvidenceQualified|5a5a5a5a|0.100|0.451");
+        expect(detail.textContent).not.toContain("gyroflightV2EvidenceNeeded");
     });
 });

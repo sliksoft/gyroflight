@@ -111,6 +111,14 @@ describe.skipIf(!present)("AIR65: autotune engine v2 end to end (local only)", (
             // No Verified Tune: independent prediction and the release stay blocked.
             expect(r.parts.find((p) => p.part === "independent_gain_prediction")!.status).toBe("BLOCKED");
             if (r.proposal) expect(evaluateRelease(r.proposal).released).toBe(false);
+            // No finer, independent qualification log: no margin is VALIDATED evidence, and each
+            // carries its resolution and band (Codex final acceptance F-02).
+            for (const m of Object.values(r.margins).flatMap((x) => [x!.current, x!.proposed])) {
+                expect(m.evidence.level).not.toBe("VALIDATED");
+                expect(m.status).not.toBe("VALIDATED");
+                expect(m.evidence.qualification).toBeNull();
+                if (m.phaseMarginDeg !== null) expect(m.evidence.resolutionHz).toBeGreaterThan(0);
+            }
         }
         writeReport("air65_autotune_v2", out);
     }, 1_800_000);

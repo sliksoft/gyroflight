@@ -38,6 +38,8 @@ import { verifiedTuneIssues, type VerifiedTune } from "../../src/gyrocore/releas
 import { productApplyBlocks } from "../../src/gyrocore/productLock/productApply";
 import { useVerifiedTuneStore } from "../../src/gyrocore/stores/verifiedTunes";
 import { FIXTURE_FIRMWARE, FIXTURE_UID, fixtureHeaders, verifiedTuneFixture } from "./harness/verifiedTuneFixture";
+// SIMULATION: synthetic qualified margin evidence, contract logic only (never flight evidence).
+import { simulatedQualifiedEvidence } from "./harness/marginEvidenceFixture";
 
 // The fixture record's baseline log: the proposal starts from exactly that configuration.
 const HEADERS = fixtureHeaders();
@@ -49,6 +51,8 @@ function margins(axis: "roll" | "pitch" | "yaw", pm = 50, gm = 9, s = 4) {
         phaseMarginDeg: pm,
         gainMarginDb: gm,
         sensitivityPeakDb: s,
+        measured: { phaseMarginDeg: pm, gainMarginDb: gm, sensitivityPeakDb: s },
+        evidence: simulatedQualifiedEvidence(pm, gm, s),
         reasons: [],
     };
 }
@@ -184,6 +188,35 @@ describe("release contract", () => {
             "PM below target",
             { margins: [margins("roll", RELEASE_TARGETS.minPhaseMarginDeg - 1)] },
             "phase_margin:pm_below_target:roll:39",
+        ],
+        [
+            "PM not validated (robustness too)",
+            { margins: [{ ...margins("roll"), status: "NOT_VALIDATED", reasons: ["dyn_notch_centres_unknown"] }] },
+            "robustness:margins_not_validated:roll",
+        ],
+        [
+            "model-conditional margins (phase margin)",
+            {
+                margins: [
+                    {
+                        ...margins("roll"),
+                        evidence: { ...margins("roll").evidence, level: "MODEL_CONDITIONAL", qualification: null },
+                    },
+                ],
+            },
+            "phase_margin:margin_evidence_model_conditional:roll",
+        ],
+        [
+            "model-conditional margins (robustness)",
+            {
+                margins: [
+                    {
+                        ...margins("roll"),
+                        evidence: { ...margins("roll").evidence, level: "MODEL_CONDITIONAL", qualification: null },
+                    },
+                ],
+            },
+            "robustness:margin_evidence_model_conditional:roll",
         ],
         ["gain margin low", { margins: [margins("roll", 50, 4)] }, "robustness:gain_margin_below_target:roll:4"],
         ["|S| peak high", { margins: [margins("roll", 50, 9, 7)] }, "robustness:sensitivity_peak_above_target:roll:7"],

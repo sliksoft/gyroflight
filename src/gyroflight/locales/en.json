@@ -789,6 +789,25 @@
     "gyroflightV2Axis": { "message": "Axis" },
     "gyroflightV2ChainFit": { "message": "Filter chain vs logged gyro" },
     "gyroflightV2Crossover": { "message": "Crossover" },
+    "gyroflightV2Resolution": { "message": "Resolution" },
+    "gyroflightV2Evidence": { "message": "Evidence" },
+    "gyroflightV2Measured": { "message": "measured" },
+    "gyroflightV2EvidenceLegend": {
+        "message": "PM, GM and |S| are bounds; the line below each is the value measured on the frequency points. MEASURED: read on the frequency points only, not a bound. MODEL_CONDITIONAL: bounds that hold only under the stated model assumptions, not qualified by an independent measurement, so not release evidence. VALIDATED: bounds whose model class an independent, finer CHIRP log qualified."
+    },
+    "gyroflightV2EvidenceRange": { "message": "$1: valid for $2–$3 Hz, frequency resolution $4 Hz." },
+    "gyroflightV2EvidenceConditional": {
+        "message": "Bounds hold only if the loop has no feature narrower than $1 Hz between the frequency points. This is a model assumption, not qualified by an independent finer measurement."
+    },
+    "gyroflightV2EvidenceMeasuredOnly": {
+        "message": "Read on the frequency points only: GM and |S| bounds are unknown."
+    },
+    "gyroflightV2EvidenceQualified": {
+        "message": "Model class qualified by log $1 (resolution $2 Hz). Remaining limit: features narrower than $3 Hz."
+    },
+    "gyroflightV2EvidenceQualificationNotPassed": { "message": "Qualification by log $1: $2 ($3)." },
+    "gyroflightV2EvidenceAssumptions": { "message": "Assumptions: $1" },
+    "gyroflightV2EvidenceNeeded": { "message": "Needed: $1" },
     "gyroflightV2NoChange": { "message": "No change is proposed." },
     "gyroflightV2Written": { "message": "Applied" },
     "gyroflightV2NotValidatedNote": {
@@ -912,6 +931,9 @@
     },
     "gyroflightV2Need_chirp_with_finer_frequency_resolution": {
         "message": "a CHIRP analysed with finer frequency resolution (longer sweep / FFT segments), so the loop between frequency points is resolved"
+    },
+    "gyroflightV2Need_chirp_finer_resolution_model_class_qualification": {
+        "message": "a CHIRP flight of the same craft and tune, identified at a frequency resolution at least 4.5× finer over the same band, to qualify the model assumption of the margin bounds"
     },
     "gyroflightV2Need_log_gyro_unfilt": { "message": "blackbox logging of gyroUnfilt" },
     "gyroflightV2Need_bidirectional_dshot_erpm_logging": { "message": "bidirectional DShot with eRPM logging" },

@@ -53,7 +53,8 @@ MSP message.
 ## Release contract (`gyrocore/releaseGate/`)
 
 Pre-write conditions, each computed from evidence the proposal carries: `measurement`, `model_quality`, `phase_margin`
-(validated, ≥ 40°), `robustness` (GM ≥ 6 dB, |S| ≤ 6 dB), `independent_validation` (a Verified Tune for this craft and
+(validated, ≥ 40°), `robustness` (GM ≥ 6 dB, |S| ≤ 6 dB; both conditions require the same margin evidence to be
+VALIDATED, see "Margin evidence" below, and fail closed on missing or malformed evidence), `independent_validation` (a Verified Tune for this craft and
 firmware, measured from exactly this log's configuration, whose measured segment covers the change: see below), `safety_evidence` (absolute-route evidence contract) and
 `items_validated` (every value to write is VALIDATED). Checked on the click: `fc_identity`, `current_config`, `readback`.
 The v1 slider route takes the same Verified Tune for its `independent_pid_validation_missing` condition.
@@ -101,14 +102,40 @@ target; otherwise GM and |S| are unknown and the margins are NOT_VALIDATED, sinc
 take the loop back above unity; with a bounded band end GM never exceeds the gain headroom at the band end), a band
 the bins resolve (`loopModel.ts` `LOOP_RESOLUTION`: no step between adjacent bins larger than 25° / 2 dB, or than
 300°/neper / 80 dB/decade of its log-span; no gap wider than 3× the neighbouring steps; no step wider than half its
-frequency from half the crossover up; otherwise GM and |S| are unknown, `marginBasis` is `measured_only` and the margins
-are NOT_VALIDATED, and the PID search asks for `chirp_with_finer_frequency_resolution`) and a Verified Tune bound to
-this configuration. Every margin result reports its frequency resolution (`resolutionHz`, the largest bin step), the GM
-and |S| read on the bins (`measured`) and, when bounded, GM and |S| as bounds: the bins plus the between-bin allowance
-`BIN_SAGITTA` (≈ 0.11 × the chord between adjacent L points, from the 25° step limit). "bounded" margins are bounds only for a loop without features narrower than
-`RESOLVED_FEATURE_BINS` (≈ 4.5) × `resolutionHz`: a finite set of bins cannot exclude an arbitrarily narrow resonance
-between two bins (a pole/zero pair with ζ = 5e-5 at 70.25 Hz on 0.5 Hz bins leaves < 0.1 dB on the bins and still
-passes), so no margin is an absolute stability guarantee; a finer CHIRP resolution narrows that limit. Cross-log
+frequency from half the crossover up; otherwise GM and |S| are unknown, the evidence level is `MEASURED` and the margins
+are NOT_VALIDATED, and the PID search asks for `chirp_with_finer_frequency_resolution`), a Verified Tune bound to
+this configuration, and evidence level `VALIDATED` (below). Every margin result reports PM, GM and |S| read on the
+bins (`measured`) and, when the bins resolve the loop, PM, GM and |S| as bounds: the bins plus the between-bin allowance
+`BIN_SAGITTA` (≈ 0.11 × the chord between adjacent L points, from the 25° step limit).
+
+Margin evidence (`loopModel.ts` `MarginEvidence`, Codex final acceptance F-02). Bounds read on discrete bins hold only
+for a model class: a loop without features narrower than `RESOLVED_FEATURE_BINS` (≈ 4.5) × the resolution. A finite set
+of bins cannot exclude an arbitrarily narrow resonance between two bins (a pole/zero pair with ζ = 5e-5 at 70.25 Hz on
+0.5 Hz bins leaves < 0.1 dB on the bins, while |L(70.25 Hz)| ≈ 2). Each result therefore carries one evidence level
+with its resolution (`resolutionHz`, the largest bin step), validity band (`bandHz`), the narrowest feature the bounds
+account for (`minFeatureWidthHz`), the assumptions as codes, and the qualification:
+
+| Level               | Meaning                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `MEASURED`          | read on the bins only; GM and \|S\| bounds unknown. A research result, never a bound.            |
+| `MODEL_CONDITIONAL` | bounds under the stated assumptions, not independently qualified. Shown, never release evidence. |
+| `VALIDATED`         | those bounds with the model class qualified by a finer, independent CHIRP log (below).           |
+| `INSUFFICIENT`      | no margins could be read.                                                                        |
+
+`status` is VALIDATED only with level `VALIDATED` and no other reason, and `marginEvidenceIssues` is the one check
+that promotes bounds to VALIDATED; the release contract runs it again on what reaches it, for `phase_margin` and
+`robustness` alike, and also refuses a qualification from the proposal's own log or bounds better than the
+qualification measured. Qualification (`MODEL_CLASS_QUALIFICATION`, engine input `modelClassQualification`): a CHIRP log
+of another flight with the same craft, firmware and configuration (the cross-log identity rules), identified at a
+resolution with `RESOLVED_FEATURE_BINS` × its step ≤ the primary's step, over the same band. With the candidate
+controller its loop must be resolved with a bounded band end and no unity re-entry, and its PM / GM / |S| may not be
+worse than the primary's bounds by more than 5° / 1.5 dB (the M5-A scatter): otherwise `FAIL`, the bounds are void
+(`MEASURED`, the worse PM). Too coarse, too short or no margins: `INSUFFICIENT`, the margins stay `MODEL_CONDITIONAL`.
+`PASS`: the reported margins are the worse of both logs. The remaining limit is the finer log's own class (features
+narrower than `RESOLVED_FEATURE_BINS` × its step); no margin is an absolute stability guarantee. No producer of a
+qualification log exists in the app yet (the CHIRP analysis picks its Welch segment length from the sample rate
+alone, `chirp/qualification.ts` `chooseSegmentSize`), so the app shows the requirement
+`chirp_finer_resolution_model_class_qualification` instead of releasing. Cross-log
 reproducibility counts only an independent flight of the same craft,
 firmware and configuration: not the same file, not the same samples, and not the same flight trimmed, re-exported or
 time-shifted (`logInput.ts` `FLIGHT_WINDOW`: flights are identified by content-anchored 256-sample gyroADC windows,

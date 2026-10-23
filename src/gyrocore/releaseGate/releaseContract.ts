@@ -27,6 +27,10 @@
  *   model_quality         plant identification and the notch-aware gyro chain validated
  *   phase_margin          predicted PM validated and above target on every changed axis
  *   robustness            predicted gain margin and |S| peak inside target
+ *                         Both rest on the same margin evidence (engine/loopModel MarginEvidence) and
+ *                         both require it VALIDATED: bounds that are only MODEL_CONDITIONAL (the
+ *                         model class not qualified by a finer, independent CHIRP log), MEASURED, or
+ *                         carried with missing / malformed / inconsistent metadata pass neither.
  *   independent_validation a Verified Tune for this craft/firmware whose measured baseline is
  *                         this log's configuration and whose measured segment covers the change
  *   safety_evidence       the absolute-route Safety evidence contract is complete
@@ -45,6 +49,7 @@ import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import { loggedAbsoluteValues, type AbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { validatedRegionIssues, verifiedTuneIssues, type VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
+import { marginEvidenceIssues, type LoopMargins, type MarginEvidence } from "@/gyrocore/engine/loopModel";
 
 export const RELEASE_TARGETS = Object.freeze({
     minPhaseMarginDeg: 40,
@@ -72,10 +77,54 @@ export interface AxisMargins {
     axis: "roll" | "pitch" | "yaw";
     /** "VALIDATED" only when the loop model has no open blocker (engine/loopModel.ts). */
     status: "VALIDATED" | "NOT_VALIDATED" | "UNAVAILABLE";
+    /** Bounds: the values the targets are checked on. */
     phaseMarginDeg: number | null;
     gainMarginDb: number | null;
     sensitivityPeakDb: number | null;
+    /** Values read on the bins (research result); never checked against the targets. */
+    measured: LoopMargins["measured"];
+    /** Level, resolution, band, assumptions and qualification of the bounds (marginEvidenceIssues). */
+    evidence: MarginEvidence;
     reasons: string[];
+}
+
+/**
+ * Why one axis' margins are not release evidence, for phase_margin and robustness alike. Fail-closed
+ * on anything missing or malformed. Beyond the evidence itself: the qualification must come from
+ * another log than the proposal's, and the bounds may not be better than what it measured (the
+ * engine reports the worse of both).
+ */
+function marginReleaseIssues(m: AxisMargins, log: AbsoluteProposal["log"]): string[] {
+    const out: string[] = [];
+    if (m.status !== "VALIDATED") out.push(`margins_${String(m.status).toLowerCase()}`);
+    out.push(...marginEvidenceIssues(m.evidence));
+    const q = m.evidence?.qualification;
+    if (q && typeof q === "object") {
+        if (q.source?.sha256 === log.sha256 && q.source?.logIndex === log.logIndex) {
+            out.push("model_class_qualification_is_proposal_log");
+        }
+        const eps = 1e-9;
+        if (
+            !(
+                typeof m.phaseMarginDeg === "number" &&
+                typeof q.phaseMarginDeg === "number" &&
+                m.phaseMarginDeg <= q.phaseMarginDeg + eps
+            ) ||
+            !(
+                typeof m.gainMarginDb === "number" &&
+                typeof q.gainMarginDb === "number" &&
+                m.gainMarginDb <= q.gainMarginDb + eps
+            ) ||
+            !(
+                typeof m.sensitivityPeakDb === "number" &&
+                typeof q.sensitivityPeakDb === "number" &&
+                m.sensitivityPeakDb >= q.sensitivityPeakDb - eps
+            )
+        ) {
+            out.push("margins_better_than_qualification");
+        }
+    }
+    return out;
 }
 
 export interface AbsoluteReleaseEvidence {
@@ -168,8 +217,12 @@ export function evaluateRelease(proposal: AbsoluteProposal): ReleaseDecision {
             rob.push(`margins_missing:${axis}`);
             continue;
         }
+        // One evidence check for both conditions: unqualified evidence passes neither.
+        const evidence = marginReleaseIssues(m, proposal.log).map((r) => `${r}:${axis}`);
+        pm.push(...evidence);
+        rob.push(...evidence);
         if (m.status !== "VALIDATED")
-            pm.push(`pm_${m.status.toLowerCase()}:${axis}`, ...m.reasons.map((r) => `${axis}:${r}`));
+            pm.push(`pm_${String(m.status).toLowerCase()}:${axis}`, ...(m.reasons ?? []).map((r) => `${axis}:${r}`));
         else if (!(m.phaseMarginDeg !== null && m.phaseMarginDeg >= RELEASE_TARGETS.minPhaseMarginDeg)) {
             pm.push(`pm_below_target:${axis}:${m.phaseMarginDeg}`);
         }
