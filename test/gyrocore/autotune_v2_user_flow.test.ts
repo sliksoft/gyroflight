@@ -33,7 +33,8 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FirmwareFc } from "./harness/mspFirmware";
-import type { AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
+import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
+import { pickPrimary } from "../../src/gyrocore/engine/logInput";
 
 const mocks = vi.hoisted(() => ({
     fc: undefined as unknown as FirmwareFc,
@@ -64,7 +65,7 @@ import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation"
 import { useConnectionStore } from "../../src/stores/connection";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
 import { air65FirmwareState, createFirmwareFc } from "./harness/mspFirmware";
-import { SYNTH_HEADERS, syntheticLogInput } from "./harness/syntheticLog";
+import { SYNTH_HEADERS, simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 
 const BASE: Record<string, [number, number, number]> = { roll: [56, 79, 30], pitch: [82, 117, 61], yaw: [56, 79, 0] };
 // P / I −10 %, D −30 %: a change the CHIRP can resolve (scaling all three together cannot), in
@@ -138,6 +139,22 @@ describe("user flow: baseline, gain change, Verified Tune, Apply, Restore", () =
         importLog("baseline-again.bbl", syntheticLogInput("5".repeat(64), { pids: BASE }));
         await v2.calculate();
         expect(store.state).toBe("done");
+        // The app has no qualification log for the margins' model class (Codex final acceptance
+        // F-02): the bounds stay MODEL_CONDITIONAL, the measurement is named, nothing is released.
+        expect(v2.releasedProposal()).toBeNull();
+        for (const m of Object.values(store.result!.margins))
+            expect(m!.proposed.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(store.result!.parts.find((p) => p.part === "phase_margin_robustness")!.requiredMeasurements).toContain(
+            "required_measurement:chirp_finer_resolution_model_class_qualification",
+        );
+        // SIMULATION: the same engine run with a synthetic finer flight of the baseline tune as that
+        // qualification (contract logic only, never flight evidence). Apply is still the user's click.
+        const picked = pickPrimary(store.inputs!)!;
+        store.result = runAutotuneV2({
+            ...picked,
+            verifiedTune: useVerifiedTuneStore().records[0],
+            modelClassQualification: simulatedQualificationLog({ pids: BASE }),
+        });
         const released = v2.releasedProposal();
         expect(released).not.toBeNull();
         expect(released!.log.sha256).toBe("1".repeat(64));

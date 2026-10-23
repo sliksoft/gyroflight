@@ -27,7 +27,8 @@
  * to D (so the D_max boost the sweep measured stays the same) and never drops below D.
  *
  * The result is a prediction. Its status follows the margins: BLOCKED while they are not
- * VALIDATED (loopModel.ts), so the release contract keeps it from being written. With a Verified
+ * VALIDATED (loopModel.ts; MODEL_CONDITIONAL bounds are not), so the release contract keeps it
+ * from being written. The search itself reads the numbers only. With a Verified
  * Tune bound to this configuration, candidates are taken only on its measured segment (the
  * same predicate the release contract applies).
  */
@@ -211,7 +212,10 @@ export function optimizeAxisPid(
     // GM / |S| unknown because the bins do not resolve the loop (loopModel LOOP_RESOLUTION) needs a
     // finer CHIRP resolution; unknown because the band ends too early needs a higher CHIRP end.
     const has = (re: RegExp) => pick.m.reasons.some((r) => re.test(r));
-    const unresolved = has(/^(loop_unresolved_between_bins|identified_band_has_gaps|identified_band_too_coarse)/);
+    // A finer qualification log that contradicts the model class (loopModel) counts as unresolved too.
+    const unresolved = has(
+        /^(loop_unresolved_between_bins|identified_band_has_gaps|identified_band_too_coarse|model_class_qualification_failed)/,
+    );
     const gmBandEnd = has(
         /^(loop_gain_(rising|near_unity|above_one)_at_band_end|phase_crossover_outside_identified_band)/,
     );

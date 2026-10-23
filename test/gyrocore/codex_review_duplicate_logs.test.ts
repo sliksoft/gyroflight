@@ -48,13 +48,15 @@ import { flightFingerprint } from "../../src/gyrocore/engine/logInput";
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 import { FIXTURE_FIRMWARE, FIXTURE_UID, verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const record = () => verifiedTuneAllAxesFixture(0.9, 0.7);
 const AT = "2026-10-22T00:00:00Z";
+// SIMULATION: a synthetic finer second flight qualifies the margins' model class (contract logic only).
+const QUALIFICATION = simulatedQualificationLog();
 const run = (primary: AutotuneLogInput, others: AutotuneLogInput[]) =>
-    runAutotuneV2({ primary, others, verifiedTune: record(), createdAt: AT });
+    runAutotuneV2({ primary, others, verifiedTune: record(), modelClassQualification: QUALIFICATION, createdAt: AT });
 const released = (r: AutotuneV2Result) => !!r.releasableProposal && evaluateRelease(r.releasableProposal).released;
 
 function withHeader(log: AutotuneLogInput, key: string, value: string): AutotuneLogInput {

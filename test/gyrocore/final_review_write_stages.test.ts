@@ -76,7 +76,7 @@ import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/
 import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES, profilePart, selectPidProfile } from "./harness/mspFirmware";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 let released: AutotuneV2Result;
@@ -85,6 +85,8 @@ beforeAll(() => {
         primary: syntheticLogInput("e".repeat(64)),
         others: [syntheticLogInput("f".repeat(64))],
         verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
+        // SIMULATION: a synthetic finer second flight qualifies the margins' model class.
+        modelClassQualification: simulatedQualificationLog(),
         createdAt: "2026-10-22T00:00:00Z",
     });
 }, 600_000);

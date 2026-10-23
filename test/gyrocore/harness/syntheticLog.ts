@@ -108,6 +108,8 @@ export interface SyntheticLogOptions {
     pids?: Partial<Record<"roll" | "pitch" | "yaw", [number, number, number]>>;
     /** Plant gain factor of this flight (≠ 1: the craft behaved differently than predicted). */
     plantScale?: number;
+    /** Step of the identified CHIRP bins, 1–100 Hz (default 0.5 Hz). */
+    binStepHz?: number;
 }
 
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
@@ -154,7 +156,8 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         );
         return Float64Array.from(sd.d, (v) => (Number.isFinite(v) ? v : 0));
     });
-    const freqs = Array.from({ length: 199 }, (_, i) => 1 + i * 0.5);
+    const step = o.binStepHz ?? 0.5;
+    const freqs = Array.from({ length: Math.round(99 / step) + 1 }, (_, i) => 1 + i * step);
     const sweep = (k: number) => ({ start: Math.round((1 + 3.3 * k) * FS), end: Math.round((4 + 3.3 * k) * FS) });
     const log: AutotuneLogInput = {
         sha256,
@@ -204,4 +207,13 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         log.chirp[name] = { tf, ...w, state: "usable" };
     });
     return log;
+}
+
+/**
+ * SIMULATION ONLY: a synthetic second flight of the same craft and tune, identified on 0.1 Hz bins,
+ * standing in for the model-class qualification log (autotuneV2 modelClassQualification) in
+ * software-contract tests. It is no real measurement and never AIR65 or any other flight evidence.
+ */
+export function simulatedQualificationLog(opts: Omit<SyntheticLogOptions, "binStepHz"> = {}): AutotuneLogInput {
+    return syntheticLogInput("5a".repeat(32), { ...opts, binStepHz: 0.1 });
 }

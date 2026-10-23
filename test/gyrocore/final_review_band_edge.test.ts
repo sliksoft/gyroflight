@@ -108,20 +108,30 @@ describe("R-2: the band end must be bounded before GM and |S| count", () => {
         expect(m.reasons.find((r) => r.startsWith("loop_gain_near_unity_at_band_end:"))).toMatch(/-3\.\d/);
     });
 
-    it("positive: resonance at 150 Hz (band to 100 Hz) stays VALIDATED; GM is capped by the band-end headroom", () => {
+    it("positive: resonance at 150 Hz (band to 100 Hz) keeps bounds; GM is capped by the band-end headroom", () => {
         const { m, L } = identify(100, resonant(150));
-        expect(m.status).toBe("VALIDATED");
-        expect(m.reasons).toEqual([]);
+        // Bounds, open only on the model class (no finer independent log here: Codex final acceptance F-02).
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(m.reasons).toEqual([
+            "model_class_not_qualified",
+            "model_class_qualification_missing",
+            "required_measurement:chirp_finer_resolution_model_class_qualification",
+        ]);
         expect(m.gainMarginDb).not.toBeNull();
         const headroom = -db(Math.max(...[90, 92, 94, 96, 98, 100].map(L)));
         expect(m.gainMarginDb!).toBeLessThanOrEqual(headroom + 0.01);
         expect(m.sensitivityPeakDb).not.toBeNull();
     });
 
-    it("positive: the smooth, well-damped plant is VALIDATED with the same margins as before", () => {
+    it("positive: the smooth, well-damped plant keeps the same margins as before (bounds, model-conditional)", () => {
         const { m } = identify(200, smooth);
-        expect(m.status).toBe("VALIDATED");
-        expect(m.reasons).toEqual([]);
+        // Bounds, open only on the model class (no finer independent log here: Codex final acceptance F-02).
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(m.reasons).toEqual([
+            "model_class_not_qualified",
+            "model_class_qualification_missing",
+            "required_measurement:chirp_finer_resolution_model_class_qualification",
+        ]);
         expect(m.crossoverHz!).toBeCloseTo(9.64, 1);
         expect(m.phaseMarginDeg!).toBeCloseTo(86.7, 0);
         expect(m.gainMarginDb!).toBeCloseTo(12.97, 1);

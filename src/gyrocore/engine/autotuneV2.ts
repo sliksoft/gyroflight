@@ -29,6 +29,8 @@
  *   3. identifies the plant per axis (M3) with the controller in force during the sweep;
  *   4. computes current margins, then absolute PID, filter and feedforward proposals;
  *   5. assembles the release evidence and one AbsoluteProposal for Compare / Apply.
+ * Margin bounds stay MODEL_CONDITIONAL unless `modelClassQualification` (a finer CHIRP log of
+ * another flight with the same craft and configuration) qualifies them (loopModel MarginEvidence).
  * Every part reports VALIDATED / PARTIAL / BLOCKED with its reasons, and every missing
  * measurement as `required_measurement:*`. Nothing here writes to a flight controller.
  */
@@ -140,6 +142,12 @@ export interface AutotuneV2Input {
     /** Further logs flown with the same tune (cross-log plant reproducibility). */
     others: AutotuneLogInput[];
     verifiedTune: VerifiedTune | null;
+    /**
+     * A CHIRP log of another flight with this craft, firmware and configuration, identified at a
+     * finer frequency resolution: qualifies the model class of the margin bounds
+     * (loopModel MODEL_CLASS_QUALIFICATION). Absent or null: the bounds stay MODEL_CONDITIONAL.
+     */
+    modelClassQualification?: AutotuneLogInput | null;
     createdAt?: string;
 }
 
@@ -340,6 +348,20 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     }
     const chainOk = (a: number) => validation[a]?.controlBand === "PASS";
 
+    // The model-class qualification counts only from an independent flight of this craft, firmware
+    // and configuration (the same identity rules as a cross-log reference).
+    const qLog = input.modelClassQualification ?? null;
+    const qualificationRejected = qLog
+        ? crossLogReferenceIssues(log, qLog, input.others).map((r) => `model_class_qualification_rejected:${r}`)
+        : [];
+    const qualificationFor = (name: AxisName, ai: 0 | 1 | 2) => {
+        const qc = qLog && !qualificationRejected.length ? qLog.chirp[name] : undefined;
+        if (!qLog || !qc || qc.state !== "usable") return null;
+        const qh = headerMap(qLog.headerPairs);
+        const qctl = analyzeAxisController(qLog, qh, ai, qc, flightMask(qLog.channels.rcThrottle));
+        return qctl ? { tf: qc.tf, cfg: qctl.cfg, source: { sha256: qLog.sha256, logIndex: qLog.logIndex } } : null;
+    };
+
     // 2-3. Controller in force, D path, plant per axis with a CHIRP measurement.
     const axes: Partial<Record<AxisName, AxisAnalysis>> = {};
     const dtermReport: AutotuneV2Result["dterm"] = [];
@@ -352,7 +374,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (ctl.dterm) dtermReport.push({ axis: name, accepted: ctl.accepted, nrmse: ctl.nrmse });
         const eff = sim && chainCfg ? effectiveChainFrf(sim, chainCfg, axis, c.start, c.end) : null;
         axes[name] = {
-            loop: buildAxisLoop(axis, c.tf, ctl.cfg, eff, chainOk(axis), attested),
+            loop: buildAxisLoop(axis, c.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis)),
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,
             window: [c.start, c.end],
@@ -549,6 +571,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                 phaseMarginDeg: proposed.phaseMarginDeg,
                 gainMarginDb: proposed.gainMarginDb,
                 sensitivityPeakDb: proposed.sensitivityPeakDb,
+                measured: proposed.measured,
+                evidence: proposed.evidence,
                 reasons: proposed.reasons,
             });
         }
@@ -670,6 +694,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                   : "BLOCKED",
             [
                 ...new Set(pmAll.flatMap((m) => m.reasons)),
+                ...qualificationRejected,
                 ...(attested ? [] : ["required_measurement:gain_change_chirp_flight_plus_baseline_repeat"]),
             ],
         ),

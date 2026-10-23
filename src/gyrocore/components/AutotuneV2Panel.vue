@@ -88,23 +88,51 @@
                         <th>PM</th>
                         <th>GM</th>
                         <th>|S|</th>
+                        <th>{{ $t("gyroflightV2Resolution") }}</th>
+                        <th>{{ $t("gyroflightV2Evidence") }}</th>
                         <th>{{ $t("gyroflightPartState") }}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="row in marginRows" :key="row.axis" :data-axis="row.axis">
+                    <tr
+                        v-for="row in marginRows"
+                        :key="row.axis"
+                        :data-axis="row.axis"
+                        :data-evidence="row.evidence"
+                        :data-state="row.status"
+                    >
                         <td>{{ row.axis }}</td>
                         <td>{{ row.chain }}</td>
                         <td>{{ row.fc }}</td>
-                        <td>{{ row.pm }}</td>
-                        <td>{{ row.gm }}</td>
-                        <td>{{ row.s }}</td>
-                        <td :class="row.status === 'VALIDATED' ? 'text-green-500' : 'text-yellow-500'">
+                        <td>
+                            {{ row.pm }}<br /><span class="text-dimmed"
+                                >{{ $t("gyroflightV2Measured") }} {{ row.pmMeasured }}</span
+                            >
+                        </td>
+                        <td>
+                            {{ row.gm }}<br /><span class="text-dimmed"
+                                >{{ $t("gyroflightV2Measured") }} {{ row.gmMeasured }}</span
+                            >
+                        </td>
+                        <td>
+                            {{ row.s }}<br /><span class="text-dimmed"
+                                >{{ $t("gyroflightV2Measured") }} {{ row.sMeasured }}</span
+                            >
+                        </td>
+                        <td>{{ row.resolution }}</td>
+                        <td :class="evidenceClass(row.evidence)" class="font-bold">{{ row.evidence }}</td>
+                        <td :class="row.validated ? 'text-green-500' : 'text-yellow-500'">
                             {{ row.status }}
                         </td>
                     </tr>
                 </tbody>
             </table>
+            <p class="text-sm text-dimmed" data-gyrocore="v2-evidence-legend">{{ $t("gyroflightV2EvidenceLegend") }}</p>
+            <ul class="text-sm" data-gyrocore="v2-margin-evidence">
+                <li v-for="row in marginRows" :key="row.axis" :data-axis="row.axis" :data-evidence="row.evidence">
+                    <span v-for="(line, k) in row.details" :key="k" class="block">{{ line }}</span>
+                </li>
+            </ul>
 
             <!-- 3. Compare -->
             <h4 class="font-bold mt-3" data-step="v2-compare">3. {{ $t("gyroflightStepCompare") }}</h4>
@@ -303,6 +331,7 @@ import { useAutotuneV2 } from "@/composables/useAutotuneV2";
 import { useAutotuneV2Store, type AutotuneV2Source } from "@/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
+import { RESOLVED_FEATURE_BINS, type LoopMargins } from "@/gyrocore/engine/loopModel";
 
 const v2 = useAutotuneV2Store();
 const connection = useConnectionStore();
@@ -374,6 +403,7 @@ const marginRows = computed(() => {
         if (!m) return [];
         const chain = r.chain.validation[i];
         const band = chain?.fit?.bands.find((b) => b.loHz === 20);
+        const ev = m.proposed.evidence;
         return [
             {
                 axis,
@@ -384,11 +414,85 @@ const marginRows = computed(() => {
                 pm: `${fmt(m.current.phaseMarginDeg)} → ${fmt(m.proposed.phaseMarginDeg)}°`,
                 gm: `${fmt(m.current.gainMarginDb)} → ${fmt(m.proposed.gainMarginDb)} dB`,
                 s: `${fmt(m.current.sensitivityPeakDb)} → ${fmt(m.proposed.sensitivityPeakDb)} dB`,
+                pmMeasured: `${fmt(m.current.measured?.phaseMarginDeg)} → ${fmt(m.proposed.measured?.phaseMarginDeg)}°`,
+                gmMeasured: `${fmt(m.current.measured?.gainMarginDb)} → ${fmt(m.proposed.measured?.gainMarginDb)} dB`,
+                sMeasured: `${fmt(m.current.measured?.sensitivityPeakDb)} → ${fmt(m.proposed.measured?.sensitivityPeakDb)} dB`,
+                resolution: `${fmt(ev?.resolutionHz, 2)} Hz`,
+                evidence: ev?.level ?? "INSUFFICIENT",
                 status: m.proposed.status,
+                // Green only for VALIDATED margins on VALIDATED evidence (never for MODEL_CONDITIONAL).
+                validated: m.proposed.status === "VALIDATED" && ev?.level === "VALIDATED",
+                details: evidenceDetails(axis, m.proposed, r.pid.find((p) => p.axis === axis)?.reasons ?? []),
             },
         ];
     });
 });
+
+/** The measurements that would give the margins a better basis (loopModel / pidOptimizer name them). */
+const MARGIN_NEEDS = new Set([
+    "required_measurement:chirp_finer_resolution_model_class_qualification",
+    "required_measurement:chirp_with_finer_frequency_resolution",
+    "required_measurement:chirp_to_higher_frequency_for_gain_margin",
+    "required_measurement:chirp_to_higher_frequency_for_sensitivity_peak",
+]);
+
+/**
+ * What the proposed margins rest on, in words: range, assumptions, qualification, what is still
+ * needed. `pidReasons` adds the needs the PID search derives from the margins (finer resolution,
+ * higher CHIRP end).
+ */
+function evidenceDetails(axis: string, m: LoopMargins, pidReasons: string[]): string[] {
+    const ev = m.evidence;
+    if (!ev) return [];
+    const out: string[] = [];
+    if (ev.bandHz) {
+        out.push(
+            i18n.getMessage("gyroflightV2EvidenceRange", [
+                axis,
+                fmt(ev.bandHz[0]),
+                fmt(ev.bandHz[1]),
+                fmt(ev.resolutionHz, 2),
+            ]),
+        );
+    }
+    if (ev.level === "MEASURED") out.push(i18n.getMessage("gyroflightV2EvidenceMeasuredOnly"));
+    if (ev.level === "MODEL_CONDITIONAL") {
+        out.push(i18n.getMessage("gyroflightV2EvidenceConditional", [fmt(ev.minFeatureWidthHz, 2)]));
+    }
+    const q = ev.qualification;
+    if (q && q.verdict === "PASS" && ev.level === "VALIDATED") {
+        out.push(
+            i18n.getMessage("gyroflightV2EvidenceQualified", [
+                q.source.sha256.slice(0, 8),
+                fmt(q.resolutionHz, 3),
+                fmt(q.resolutionHz === null ? null : q.resolutionHz * RESOLVED_FEATURE_BINS, 3),
+            ]),
+        );
+    } else if (q) {
+        out.push(
+            i18n.getMessage("gyroflightV2EvidenceQualificationNotPassed", [
+                q.source.sha256.slice(0, 8),
+                q.verdict,
+                q.reasons.slice(0, 3).join(", ") || "--",
+            ]),
+        );
+    }
+    if (ev.assumptions.length)
+        out.push(i18n.getMessage("gyroflightV2EvidenceAssumptions", [ev.assumptions.join(", ")]));
+    const needs = [...new Set([...m.reasons, ...pidReasons].filter((r) => MARGIN_NEEDS.has(r)))];
+    if (ev.level !== "VALIDATED" && needs.length) {
+        out.push(i18n.getMessage("gyroflightV2EvidenceNeeded", [needs.map(measurementText).join("; ")]));
+    }
+    return out;
+}
+
+function evidenceClass(level: string) {
+    return level === "VALIDATED"
+        ? "text-green-500"
+        : level === "MODEL_CONDITIONAL"
+          ? "text-orange-500"
+          : "text-yellow-500";
+}
 
 const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !!b.absolute) : []));
 

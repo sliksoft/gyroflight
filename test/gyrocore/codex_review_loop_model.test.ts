@@ -147,10 +147,16 @@ describe("P1-04: a loop that comes back above unity is not validated", () => {
         expect(m.phaseMarginDeg!).toBeLessThan(80);
     });
 
-    it("positive control: the same plant without the resonance is VALIDATED", () => {
+    it("positive control: the same plant without the resonance has bounds, open only on the model class", () => {
         const m = loopMargins(resonantLoop(200, false).loop);
-        expect(m.reasons).toEqual([]);
-        expect(m.status).toBe("VALIDATED");
+        // Without a finer, independent log the bounds are MODEL_CONDITIONAL (Codex final acceptance F-02).
+        expect(m.reasons).toEqual([
+            "model_class_not_qualified",
+            "model_class_qualification_missing",
+            "required_measurement:chirp_finer_resolution_model_class_qualification",
+        ]);
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(m.status).toBe("NOT_VALIDATED");
         expect(m.crossoverHz!).toBeGreaterThan(9);
         expect(m.crossoverHz!).toBeLessThan(11);
     });

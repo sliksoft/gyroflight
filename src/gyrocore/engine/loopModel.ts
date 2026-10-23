@@ -35,8 +35,10 @@
  *
  * A margin is VALIDATED only when the chain model reproduced this log's gyroADC
  * (validateChain), the chain barely moved at the crossover during the sweep, the crossover
- * lies inside the identified band, and a Verified Tune for this craft attests the
- * prediction method (verifiedTune.ts). The model alone never validates.
+ * lies inside the identified band, a Verified Tune for this craft attests the prediction
+ * method (verifiedTune.ts), and the model class the bounds assume (no loop feature narrower than
+ * the bins resolve) is qualified by an independent, finer measurement (MarginEvidence). The model
+ * alone never validates.
  */
 
 import {
@@ -163,9 +165,13 @@ export const BAND_END = Object.freeze({ tailFraction: 0.1, minTailBins: 4, maxTa
  * Validity limit, stated rather than solved: a finite set of bins cannot exclude an arbitrarily
  * narrow, unmeasured resonance. A pole/zero pair whose both bandwidths are well below the bin
  * step (fr = 70.25 Hz, ζ_zero = 5e-4, ζ_pole = 5e-5 on 0.5 Hz bins: steps of about 14°, |L(fr)| ≈ 2)
- * passes these checks. "bounded" margins (LoopMargins.marginBasis) therefore hold for a loop
+ * passes these checks. Bounds (MarginEvidence level MODEL_CONDITIONAL / VALIDATED) therefore hold for a loop
  * without features narrower than RESOLVED_FEATURE_BINS × resolutionHz; they are not an absolute
  * stability guarantee. A finer CHIRP resolution (longer FFT segments) narrows that limit.
+ *
+ * That assumption is therefore carried as evidence, not hidden in the status: such bounds are
+ * MODEL_CONDITIONAL (MarginEvidence) until an independent finer measurement qualifies the class
+ * (MODEL_CLASS_QUALIFICATION); only then are they VALIDATED.
  */
 export const LOOP_RESOLUTION = Object.freeze({
     maxPhaseStepDeg: 25,
@@ -187,6 +193,146 @@ export const RESOLVED_FEATURE_BINS = 1 / Math.tan(((LOOP_RESOLUTION.maxPhaseStep
  * review F-02: at the edge of the resolved class the bins alone under-read |S| by ≈ 0.5 dB).
  */
 export const BIN_SAGITTA = Math.tan(((LOOP_RESOLUTION.maxPhaseStepDeg / 2) * Math.PI) / 180) / 2;
+
+/**
+ * What qualifies the model class of bounded margins (Codex final acceptance review, F-02). The bounds
+ * assume a loop without features narrower than RESOLVED_FEATURE_BINS × resolutionHz; the bins
+ * themselves cannot show that. A second CHIRP log of the same craft and configuration, from another
+ * flight (logInput.crossLogReferenceIssues), identified at a resolution fine enough to resolve every
+ * such feature — RESOLVED_FEATURE_BINS × its resolution ≤ the primary's resolution, so it resolves
+ * anything at least one primary bin step wide — over the same band, qualifies it when, with the
+ * same candidate controller:
+ *
+ *   - its own loop is resolved and its band end bounded (LOOP_RESOLUTION, BAND_END), with no
+ *     unity re-entry: otherwise it shows what the primary bins could not (verdict FAIL);
+ *   - its PM / GM / |S| bounds are not worse than the primary's by more than the log-to-log scatter
+ *     (maxPmDeficitDeg / maxGainDeficitDb: the M5-A reproducibility band, verifiedTune.ts
+ *     toleranceFloor) (FAIL beyond it).
+ *
+ * A qualification that is too coarse, does not cover the band or cannot read margins is
+ * INSUFFICIENT: the margins stay MODEL_CONDITIONAL. With PASS the reported margins are the worse of
+ * both logs. What remains is the finer log's own class (features narrower than RESOLVED_FEATURE_BINS
+ * × its resolution), stated in MarginEvidence.assumptions: no finite measurement removes it.
+ */
+export const MODEL_CLASS_QUALIFICATION = Object.freeze({ maxPmDeficitDeg: 5, maxGainDeficitDb: 1.5 });
+
+/**
+ * What the margins rest on (one level per result; LoopMargins.status is VALIDATED only with level
+ * VALIDATED and no other reason):
+ *
+ *   MEASURED           read on the identified bins only (interpolated between them); GM and |S|
+ *                      bounds unknown. A research result, never a bound.
+ *   MODEL_CONDITIONAL  bounds of the continuous loop under stated assumptions (no feature narrower
+ *                      than minFeatureWidthHz, the loop between bins within BIN_SAGITTA of the
+ *                      chord, the band end bounded), the assumptions not independently qualified.
+ *   VALIDATED          those bounds with the model class qualified (MODEL_CLASS_QUALIFICATION).
+ *   INSUFFICIENT       no margins could be read.
+ */
+export type MarginEvidenceLevel = "MEASURED" | "MODEL_CONDITIONAL" | "VALIDATED" | "INSUFFICIENT";
+export const MARGIN_EVIDENCE_LEVELS: readonly MarginEvidenceLevel[] = [
+    "MEASURED",
+    "MODEL_CONDITIONAL",
+    "VALIDATED",
+    "INSUFFICIENT",
+];
+
+export interface ModelClassQualification {
+    /** The independent log whose finer identification was checked against the bounds. */
+    source: { sha256: string; logIndex: number };
+    /** Largest bin step of that identification (Hz). */
+    resolutionHz: number | null;
+    bandHz: [number, number] | null;
+    verdict: "PASS" | "FAIL" | "INSUFFICIENT";
+    /** The candidate's margins read on the finer bins (bounds when its own loop is resolved). */
+    phaseMarginDeg: number | null;
+    gainMarginDb: number | null;
+    sensitivityPeakDb: number | null;
+    reasons: string[];
+}
+
+export interface MarginEvidence {
+    level: MarginEvidenceLevel;
+    /** Largest step between two adjacent identified bins (Hz): the frequency resolution of the margins. */
+    resolutionHz: number | null;
+    /** Identified band the margins are read on (first, last bin): the range of validity. */
+    bandHz: [number, number] | null;
+    /** Narrowest loop feature the bounds account for (RESOLVED_FEATURE_BINS × resolutionHz); null: no bounds. */
+    minFeatureWidthHz: number | null;
+    /** What the margins assume, as codes (shown with the margins). */
+    assumptions: string[];
+    qualification: ModelClassQualification | null;
+}
+
+const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+const validBand = (b: unknown): b is [number, number] =>
+    Array.isArray(b) && b.length === 2 && finite(b[0]) && finite(b[1]) && b[0] >= 0 && b[0] < b[1];
+
+/**
+ * Why `evidence` does not carry VALIDATED margins: the one check that promotes bounds to VALIDATED
+ * (loopMargins) and that the release contract repeats on whatever reaches it. Fail-closed: missing,
+ * malformed or inconsistent metadata is an issue, never a pass.
+ */
+export function marginEvidenceIssues(evidence: unknown): string[] {
+    if (!evidence || typeof evidence !== "object") return ["margin_evidence_missing"];
+    const e = evidence as Partial<MarginEvidence>;
+    const out: string[] = [];
+    if (e.level !== "VALIDATED") {
+        out.push(
+            MARGIN_EVIDENCE_LEVELS.includes(e.level as MarginEvidenceLevel)
+                ? `margin_evidence_${(e.level as string).toLowerCase()}`
+                : "margin_evidence_level_invalid",
+        );
+    }
+    const r = e.resolutionHz;
+    const rOk = finite(r) && r > 0;
+    if (!rOk) out.push("margin_evidence_resolution_invalid");
+    if (!validBand(e.bandHz)) out.push("margin_evidence_band_invalid");
+    if (
+        !rOk ||
+        !finite(e.minFeatureWidthHz) ||
+        Math.abs(e.minFeatureWidthHz - RESOLVED_FEATURE_BINS * r) > 1e-9 * RESOLVED_FEATURE_BINS * r
+    ) {
+        out.push("margin_evidence_feature_width_invalid");
+    }
+    if (!Array.isArray(e.assumptions) || !e.assumptions.length) out.push("margin_evidence_assumptions_missing");
+    const q = e.qualification as Partial<ModelClassQualification> | null | undefined;
+    if (!q || typeof q !== "object") {
+        out.push("model_class_qualification_missing");
+        return out;
+    }
+    if (q.verdict !== "PASS") {
+        out.push(
+            q.verdict === "FAIL" || q.verdict === "INSUFFICIENT"
+                ? `model_class_qualification_${q.verdict.toLowerCase()}`
+                : "model_class_qualification_verdict_invalid",
+        );
+    }
+    if (!q.source || typeof q.source.sha256 !== "string" || !q.source.sha256 || !Number.isInteger(q.source.logIndex)) {
+        out.push("model_class_qualification_source_invalid");
+    }
+    if (!(
+        finite(q.resolutionHz) &&
+        q.resolutionHz > 0 &&
+        rOk &&
+        q.resolutionHz * RESOLVED_FEATURE_BINS <= r * (1 + 1e-9)
+    )) {
+        out.push("model_class_qualification_not_finer");
+    }
+    if (
+        !validBand(q.bandHz) ||
+        !validBand(e.bandHz) ||
+        !rOk ||
+        q.bandHz[0] > e.bandHz[0] + r ||
+        q.bandHz[1] < e.bandHz[1] - r
+    ) {
+        out.push("model_class_qualification_band_not_covered");
+    }
+    if (!finite(q.phaseMarginDeg) || !finite(q.gainMarginDb) || !finite(q.sensitivityPeakDb)) {
+        out.push("model_class_qualification_margins_missing");
+    }
+    if (!Array.isArray(q.reasons) || q.reasons.length) out.push("model_class_qualification_has_reasons");
+    return out;
+}
 
 /**
  * Rise (dB) of the least-squares line through (f, dB) from the first to the last point. Each point
@@ -315,6 +461,11 @@ export interface AxisLoop {
     chainValidated: boolean;
     /** A Verified Tune for this craft / firmware passed (the only attestation). */
     attested: boolean;
+    /**
+     * The plant identified at a finer resolution from another flight of the same craft and
+     * configuration (MODEL_CLASS_QUALIFICATION), or null.
+     */
+    qualification: { plant: IdentifiedPlant; source: { sha256: string; logIndex: number } } | null;
 }
 
 export interface LoopCandidate {
@@ -333,20 +484,17 @@ export interface LoopMargins {
     /** Chain phase spread at the crossover over the sweep (°). */
     chainSpreadDeg: number | null;
     okBins: number;
-    /** Largest step between two adjacent identified bins (Hz): the frequency resolution of the margins. */
-    resolutionHz: number | null;
     /**
-     * "bounded": the bins resolve the loop (LOOP_RESOLUTION) and the band end is bounded (BAND_END),
-     * so PM / GM / |S| bound the loop for features at least RESOLVED_FEATURE_BINS × resolutionHz wide.
-     * "measured_only": values read on the bins, not a bound (GM and |S| are then unknown).
-     * null: no margins.
+     * What the values above rest on: level, resolution, band, model-class assumptions and their
+     * qualification. MEASURED leaves GM and |S| unknown; MODEL_CONDITIONAL and VALIDATED make PM /
+     * GM / |S| bounds (with a PASS qualification: the worse of both logs).
      */
-    marginBasis: "bounded" | "measured_only" | null;
+    evidence: MarginEvidence;
     /**
-     * GM and |S| as read on the bins (interpolated between them), whatever the basis: the measured
-     * values. gainMarginDb / sensitivityPeakDb above are the bounds (null when not bounded).
+     * PM, GM and |S| as read on the primary's bins (interpolated between them), whatever the
+     * evidence: the measured values, a research result. The top-level values are the bounds.
      */
-    measured: { gainMarginDb: number | null; sensitivityPeakDb: number | null };
+    measured: { phaseMarginDeg: number | null; gainMarginDb: number | null; sensitivityPeakDb: number | null };
     reasons: string[];
 }
 
@@ -358,10 +506,33 @@ export function buildAxisLoop(
     chain: EffectiveChain | null,
     chainValidated: boolean,
     attested: boolean,
+    /**
+     * A finer CHIRP T of the same axis from another flight with the same configuration, and the
+     * controller in force during that sweep (default: `cfg`).
+     */
+    qualification: {
+        tf: TransferFunction;
+        cfg?: DigitalControllerConfig;
+        source: { sha256: string; logIndex: number };
+    } | null = null,
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
-    const plant = extractPlantFromClosedLoop(tf, cfg, { missingFilterInfo: missing, coherenceMin: LOOP_MIN_COHERENCE });
-    return { axis, plant, cfg, chain, chainValidated, attested };
+    const opts = { missingFilterInfo: missing, coherenceMin: LOOP_MIN_COHERENCE };
+    const plant = extractPlantFromClosedLoop(tf, cfg, opts);
+    return {
+        axis,
+        plant,
+        cfg,
+        chain,
+        chainValidated,
+        attested,
+        qualification: qualification
+            ? {
+                  plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
+                  source: { ...qualification.source },
+              }
+            : null,
+    };
 }
 
 function unwrap(phases: number[]): number[] {
@@ -392,26 +563,47 @@ export function candidateLoop(loop: AxisLoop, cand: LoopCandidate): { f: number;
     return out;
 }
 
-export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cfg }): LoopMargins {
-    const pts = candidateLoop(loop, cand);
+/** What the bins of one loop show (loopMargins): margins, their basis and the reasons on the way. */
+interface LoopRead {
+    /** A downward unity crossing was found: PM and the rest were read. */
+    ok: boolean;
+    fc: number | null;
+    pm: number | null;
+    /** GM / |S| bounds (null when not bounded) and the values read on the bins. */
+    gm: number | null;
+    gmRead: number | null;
+    gmHz: number | null;
+    sPeak: number | null;
+    sRead: number | null;
+    sPeakHz: number | null;
+    /** The bins resolve the loop (LOOP_RESOLUTION) and the band end is bounded (BAND_END). */
+    bounded: boolean;
+    resolutionHz: number | null;
+    bandHz: [number, number] | null;
+    reasons: string[];
+}
+
+/** PM, GM and |S| on the identified bins of a loop, with the basis they have (unchanged math). */
+function readLoop(pts: { f: number; L: Complex }[]): LoopRead {
     const reasons: string[] = [];
-    const empty: LoopMargins = {
-        status: "UNAVAILABLE",
-        crossoverHz: null,
-        phaseMarginDeg: null,
-        gainMarginDb: null,
-        sensitivityPeakDb: null,
-        delayMarginMs: null,
-        chainSpreadDeg: null,
-        okBins: pts.length,
+    const read: LoopRead = {
+        ok: false,
+        fc: null,
+        pm: null,
+        gm: null,
+        gmRead: null,
+        gmHz: null,
+        sPeak: null,
+        sRead: null,
+        sPeakHz: null,
+        bounded: false,
         resolutionHz: pts.length > 1 ? Math.max(...pts.slice(1).map((p, i) => p.f - pts[i].f)) : null,
-        marginBasis: null,
-        measured: { gainMarginDb: null, sensitivityPeakDb: null },
+        bandHz: pts.length > 1 ? [pts[0].f, pts[pts.length - 1].f] : null,
         reasons,
     };
     if (pts.length < 4) {
         reasons.push("too_few_identified_bins");
-        return empty;
+        return read;
     }
     const mag = pts.map((p) => cmag(p.L));
     const ph = unwrap(pts.map((p) => cphaseDeg(p.L)));
@@ -426,7 +618,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     const lastBin = pts.length - 1;
     if (!crossings.some((c) => c.down)) {
         reasons.push(mag[0] < 1 ? "loop_gain_below_one_in_band" : "crossover_outside_identified_band");
-        return { ...empty, status: "NOT_VALIDATED" };
+        return read;
     }
     if (crossings.length > 1) reasons.push(`ambiguous_crossovers:${crossings.length}`);
     const at = (c: { i: number }) => {
@@ -533,11 +725,102 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         }
         sPeak = 20 * Math.log10(1 / Math.max(closest, 1e-12));
     }
+    return { ...read, ok: true, fc, pm, gm, gmRead, gmHz, sPeak, sRead, sPeakHz, bounded };
+}
+
+/** Reasons of a finer loop that show what the primary bins could not: they contradict its model class. */
+const CONTRADICTS_CLASS =
+    /^(ambiguous_crossovers|loop_gain_reenters_unity|loop_unresolved_between_bins|identified_band_has_gaps|identified_band_too_coarse|loop_gain_above_one_at_band_end)/;
+
+/** Check the primary's bounds against the finer, independent identification (MODEL_CLASS_QUALIFICATION). */
+function qualifyModelClass(loop: AxisLoop, cand: LoopCandidate, primary: LoopRead): ModelClassQualification | null {
+    const q = loop.qualification;
+    if (!q) return null;
+    const fine = readLoop(candidateLoop({ ...loop, plant: q.plant }, cand));
+    const Q = MODEL_CLASS_QUALIFICATION;
+    const fail: string[] = [];
+    const insufficient: string[] = [];
+    const r = primary.resolutionHz;
+    if (!fine.ok) insufficient.push("qualification_margins_unavailable", ...fine.reasons);
+    if (!(fine.resolutionHz !== null && r !== null && fine.resolutionHz * RESOLVED_FEATURE_BINS <= r * (1 + 1e-9))) {
+        insufficient.push(
+            `qualification_not_finer:${fine.resolutionHz?.toFixed(3)}Hz>${r !== null ? (r / RESOLVED_FEATURE_BINS).toFixed(3) : "?"}Hz`,
+        );
+    }
+    if (
+        !fine.bandHz ||
+        !primary.bandHz ||
+        r === null ||
+        fine.bandHz[0] > primary.bandHz[0] + r ||
+        fine.bandHz[1] < primary.bandHz[1] - r
+    ) {
+        insufficient.push("qualification_band_not_covered");
+    }
+    if (fine.ok) {
+        fail.push(...fine.reasons.filter((x) => CONTRADICTS_CLASS.test(x)).map((x) => `qualification:${x}`));
+        if (!fine.bounded && !fail.length) {
+            insufficient.push(...fine.reasons.map((x) => `qualification:${x}`));
+        }
+        if (fine.pm! < primary.pm! - Q.maxPmDeficitDeg) {
+            fail.push(`qualification_pm_below_bound:${fine.pm!.toFixed(1)}<${primary.pm!.toFixed(1)}deg`);
+        }
+        if (fine.gm !== null && primary.gm !== null && fine.gm < primary.gm - Q.maxGainDeficitDb) {
+            fail.push(`qualification_gm_below_bound:${fine.gm.toFixed(1)}<${primary.gm.toFixed(1)}dB`);
+        }
+        if (fine.sPeak !== null && primary.sPeak !== null && fine.sPeak > primary.sPeak + Q.maxGainDeficitDb) {
+            fail.push(`qualification_s_above_bound:${fine.sPeak.toFixed(1)}>${primary.sPeak.toFixed(1)}dB`);
+        }
+        if ((fine.gm === null) !== (primary.gm === null) || (fine.sPeak === null) !== (primary.sPeak === null)) {
+            insufficient.push("qualification_margins_unavailable");
+        }
+    }
+    return {
+        source: { ...q.source },
+        resolutionHz: fine.resolutionHz,
+        bandHz: fine.bandHz,
+        verdict: fail.length ? "FAIL" : insufficient.length ? "INSUFFICIENT" : "PASS",
+        phaseMarginDeg: fine.pm,
+        gainMarginDb: fine.gm,
+        sensitivityPeakDb: fine.sPeak,
+        reasons: [...new Set([...fail, ...insufficient])],
+    };
+}
+
+const MODEL_CLASS_NEED = "required_measurement:chirp_finer_resolution_model_class_qualification";
+
+export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cfg }): LoopMargins {
+    const pts = candidateLoop(loop, cand);
+    const read = readLoop(pts);
+    const reasons = read.reasons;
+    const evidence: MarginEvidence = {
+        level: "INSUFFICIENT",
+        resolutionHz: read.resolutionHz,
+        bandHz: read.bandHz,
+        minFeatureWidthHz: null,
+        assumptions: [],
+        qualification: null,
+    };
+    if (!read.ok) {
+        return {
+            status: pts.length < 4 ? "UNAVAILABLE" : "NOT_VALIDATED",
+            crossoverHz: null,
+            phaseMarginDeg: null,
+            gainMarginDb: null,
+            sensitivityPeakDb: null,
+            delayMarginMs: null,
+            chainSpreadDeg: null,
+            okBins: pts.length,
+            evidence,
+            measured: { phaseMarginDeg: null, gainMarginDb: null, sensitivityPeakDb: null },
+            reasons,
+        };
+    }
+    const fc = read.fc!;
     // The chain model is validated on CHAIN_VALIDATED_BAND_HZ only: a crossover outside it, or a
     // candidate filter change judged above it, is not backed by that validation.
     const [bandLo, bandHi] = CHAIN_VALIDATED_BAND_HZ;
     if (fc < bandLo || fc > bandHi) reasons.push("crossover_outside_chain_validated_band");
-    if (cand.chain && loop.chain && [gmHz, sPeakHz].some((f) => f !== null && f > bandHi)) {
+    if (cand.chain && loop.chain && [read.gmHz, read.sPeakHz].some((f) => f !== null && f > bandHi)) {
         reasons.push("chain_change_judged_outside_validated_band");
     }
     const spread = loop.chain ? loop.chain.spread(fc).phaseDeg : null;
@@ -545,8 +828,56 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     if (spread === null) reasons.push("chain_spread_unknown");
     else if (spread > MAX_CHAIN_SPREAD_DEG) reasons.push(`chain_moves_at_crossover:${spread.toFixed(1)}deg`);
     if (!loop.attested) reasons.push("independent_validation_missing");
+
+    // Evidence (MarginEvidence): bins that do not resolve the loop give measured values only; bins
+    // that do give bounds under the model class, VALIDATED only once a finer, independent
+    // identification qualifies it. A qualification that contradicts the class voids the bounds.
+    let pm = read.pm!;
+    let gm = read.gm;
+    let sPeak = read.sPeak;
+    if (!read.bounded) {
+        evidence.level = "MEASURED";
+        evidence.assumptions = ["values_read_on_bins_only"];
+    } else {
+        const width = RESOLVED_FEATURE_BINS * read.resolutionHz!;
+        evidence.level = "MODEL_CONDITIONAL";
+        evidence.minFeatureWidthHz = width;
+        evidence.assumptions = [
+            `no_loop_feature_narrower_than:${width.toFixed(2)}Hz`,
+            "loop_between_bins_within_bin_sagitta",
+            `loop_above_band_end_bounded_by_tail:${read.bandHz![1].toFixed(1)}Hz`,
+        ];
+        const q = qualifyModelClass(loop, cand, read);
+        evidence.qualification = q;
+        if (q?.verdict === "PASS") {
+            // The worse of both logs; a value either leaves unknown stays unknown.
+            const both = (a: number | null, b: number | null, f: (x: number, y: number) => number) =>
+                a === null || b === null ? null : f(a, b);
+            pm = both(pm, q.phaseMarginDeg, Math.min) ?? pm;
+            gm = both(gm, q.gainMarginDb, Math.min);
+            sPeak = both(sPeak, q.sensitivityPeakDb, Math.max);
+        }
+        const issues = marginEvidenceIssues({ ...evidence, level: "VALIDATED" });
+        if (!issues.length) {
+            evidence.level = "VALIDATED";
+            evidence.assumptions.push(
+                `qualified_down_to_feature_width:${(RESOLVED_FEATURE_BINS * q!.resolutionHz!).toFixed(3)}Hz`,
+            );
+        } else if (q?.verdict === "FAIL") {
+            // The finer flight shows what the bins could not: no bounds, and the worse PM.
+            evidence.level = "MEASURED";
+            evidence.minFeatureWidthHz = null;
+            evidence.assumptions = ["values_read_on_bins_only"];
+            if (q.phaseMarginDeg !== null) pm = Math.min(pm, q.phaseMarginDeg);
+            gm = null;
+            sPeak = null;
+            reasons.push("model_class_qualification_failed", ...q.reasons, MODEL_CLASS_NEED);
+        } else {
+            reasons.push("model_class_not_qualified", ...issues, ...(q?.reasons ?? []), MODEL_CLASS_NEED);
+        }
+    }
     return {
-        status: reasons.length ? "NOT_VALIDATED" : "VALIDATED",
+        status: !reasons.length && evidence.level === "VALIDATED" ? "VALIDATED" : "NOT_VALIDATED",
         crossoverHz: fc,
         phaseMarginDeg: pm,
         gainMarginDb: gm,
@@ -554,9 +885,8 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         delayMarginMs: fc > 0 ? (pm / (360 * fc)) * 1000 : null,
         chainSpreadDeg: spread,
         okBins: pts.length,
-        resolutionHz: empty.resolutionHz,
-        marginBasis: bounded ? "bounded" : "measured_only",
-        measured: { gainMarginDb: gmRead, sensitivityPeakDb: sRead },
+        evidence,
+        measured: { phaseMarginDeg: read.pm, gainMarginDb: read.gmRead, sensitivityPeakDb: read.sRead },
         reasons,
     };
 }

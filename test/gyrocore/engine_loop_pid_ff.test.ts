@@ -44,8 +44,10 @@ import type { ChainSimulation, EffectiveChain } from "../../src/gyrocore/engine/
 
 const FREQS = Array.from({ length: 199 }, (_, i) => 1 + i * 0.5);
 
-function tfFor(cfg: DigitalControllerConfig, K: number) {
-    return syntheticTransferFunction(FREQS, (f) => {
+const FINE_FREQS = Array.from({ length: 991 }, (_, i) => 1 + i * 0.1);
+
+function tfFor(cfg: DigitalControllerConfig, K: number, freqs = FREQS) {
+    return syntheticTransferFunction(freqs, (f) => {
         const frf = evaluateControllerFrf(cfg, f);
         return closedLoopFromPlant(plantFrf(f, { K, motorHz: 40, delayS: 0.002 }), frf.cReference, frf.cFeedback);
     });
@@ -86,7 +88,9 @@ describe("loop margins on a synthetic loop", () => {
         expect(Math.abs(m.phaseMarginDeg! - t.pm)).toBeLessThan(0.3);
         expect(m.sensitivityPeakDb!).toBeCloseTo(t.s, 1);
         expect(m.gainMarginDb).not.toBeNull();
-        expect(m.status).toBe("VALIDATED");
+        // Bounds the bins resolve, model class not qualified by a finer independent log: MODEL_CONDITIONAL.
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(m.status).toBe("NOT_VALIDATED");
     });
 
     it("is VALIDATED only with a validated chain, a steady chain and an attestation", () => {
@@ -127,7 +131,12 @@ describe("PID search", () => {
     const current = { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 40 };
 
     it("with margin to spare it raises bandwidth and stays inside every target", () => {
-        const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true);
+        // SIMULATION: a synthetic finer identification (0.1 Hz) of the same plant stands in for the
+        // model-class qualification log; contract logic only, never flight evidence.
+        const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true, {
+            tf: tfFor(cfg, 40, FINE_FREQS),
+            source: { sha256: "5".repeat(64), logIndex: 0 },
+        });
         const r = optimizeAxisPid(loop, current);
         expect(r.outcome).toBe("improved");
         expect(r.proposedMargins.crossoverHz!).toBeGreaterThan(r.currentMargins.crossoverHz!);
@@ -135,7 +144,13 @@ describe("PID search", () => {
         expect(r.proposed.dMax).toBeGreaterThanOrEqual(r.proposed.d);
         // At most MAX_STEP, plus the integer rounding of the firmware value.
         expect(Math.abs(r.proposed.p - current.p)).toBeLessThanOrEqual(0.3 * current.p + 0.5);
+        expect(r.proposedMargins.evidence.level).toBe("VALIDATED");
         expect(r.status).toBe("VALIDATED");
+        // Without the qualification the same search proposes the same values, but never as VALIDATED.
+        const bare = optimizeAxisPid(buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true), current);
+        expect(bare.proposed).toEqual(r.proposed);
+        expect(bare.proposedMargins.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(bare.status).toBe("BLOCKED");
     });
 
     it("with too little margin it restores the targets instead of chasing bandwidth", () => {
