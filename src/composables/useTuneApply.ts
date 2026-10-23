@@ -105,6 +105,7 @@ import {
 } from "@/gyrocore/tuning/absoluteTune";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { assertAbsoluteWriteAuthorized, assertSliderWriteAuthorized } from "@/gyrocore/releaseGate/writeAuthority";
+import { pinAnalysis, plainCopy } from "@/gyrocore/releaseGate/analysisBinding";
 
 /**
  * Where a write transaction stopped. "prepare": before the first SET was sent (a check or a fresh
@@ -239,6 +240,16 @@ async function firmwareCalculation(
     const fcStore = useFlightControllerStore();
     loadStore(before);
     Object.assign(fcStore.tuningSliders, proposed);
+    // The proposal and the firmware's answers sit in the shared store only while calculating: a
+    // failed calculation must not leave them for the PID tab's Save to write.
+    try {
+        return await calculateInStore(fcStore);
+    } finally {
+        loadStore(before);
+    }
+}
+
+async function calculateInStore(fcStore: ReturnType<typeof useFlightControllerStore>): Promise<FirmwareCalculation> {
     await readOk(
         MSPCodes.MSP_CALCULATE_SIMPLIFIED_PID,
         "fc:calculation_missing",
@@ -264,7 +275,6 @@ async function firmwareCalculation(
         mspHelper.crunch(MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO),
     );
     const gyroFilters = pick(fcStore.filterConfig as unknown as Record<string, unknown>, GYRO_FILTER_KEYS);
-    loadStore(before);
     return { pids, advanced, dtermFilters, gyroFilters };
 }
 
@@ -457,8 +467,16 @@ export interface RestorePreview {
     backup: TuneBackup;
     fc: FcIdentity;
     current: TuneSnapshot;
-    /** snapshotHash(current): pass it in the confirmation so Restore refuses if the craft changed. */
+    /**
+     * The craft's current tune and the backup's target: pass it in the confirmation so Restore
+     * refuses if either changed (restoreHash).
+     */
     hash: string;
+}
+
+/** What a Restore confirmation binds: what the craft holds now and what the backup puts back. */
+function restoreHash(current: string, target: string): string {
+    return `${current}:${target}`;
 }
 
 /** Read-only checks before a Restore: a sound backup of this craft, same firmware, disarmed. */
@@ -496,7 +514,7 @@ async function readRestoreTarget(backupId: string): Promise<RestorePreview> {
         throw new ApplyBlockedError(blocked);
     }
     const current = await readSnapshot("fc:live_readback_missing");
-    return { backup, fc, current, hash: snapshotHash(current) };
+    return { backup, fc, current, hash: restoreHash(snapshotHash(current), snapshotHash(backup.snapshot)) };
 }
 
 /** Read-only preview of a Restore: what is on the craft now, against the backup. */
@@ -508,11 +526,14 @@ export async function previewRestore(backupId: string): Promise<RestorePreview> 
 export async function restoreTune(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readRestoreTarget(backupId);
-    if (confirmed.preview !== undefined && confirmed.preview !== snapshotHash(current)) {
+    const target = backup.snapshot;
+    if (
+        confirmed.preview !== undefined &&
+        confirmed.preview !== restoreHash(snapshotHash(current), snapshotHash(target))
+    ) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, current, null);
-    const target = backup.snapshot;
 
     const fcStore = useFlightControllerStore();
     loadStore({ ...current, sliders: target.sliders, filters: target.filters });
@@ -856,25 +877,35 @@ export async function applyAbsoluteTune(
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
+    // What is authorized, confirmed and written is this copy: plain data the caller can no longer
+    // change while the Apply awaits (a getter, a function or a class instance is refused).
+    let authorized: AbsoluteProposal;
+    try {
+        authorized = plainCopy(proposal);
+    } catch {
+        throw new ApplyBlockedError(["apply:proposal_not_plain_data"]);
+    }
     // 1. The write authority (the engine recomputed for this proposal, release contract, GyroCore
     // Safety, product lock) and the user's confirmation, before any MSP.
-    assertAbsoluteWriteAuthorized(proposal, { recompute: true });
+    const since = pinAnalysis();
+    assertAbsoluteWriteAuthorized(authorized, { recompute: true });
     const confirmed = consumeConfirmation(confirmation, {
         kind: "absolute",
-        proposalId: proposal.id,
-        change: { ...proposal.change },
+        proposalId: authorized.id,
+        change: { ...authorized.change },
     });
     assertConnectedReal();
 
     // 2. Identity, live values against the log, and the expected result (read-only).
-    const { fc, before, expected } = await readLiveAbsolute(proposal);
+    const { fc, before, expected } = await readLiveAbsolute(authorized);
     if (confirmed.preview !== undefined && confirmed.preview !== absoluteHash(expected)) {
         throw new ApplyBlockedError(["apply:preview_changed"]);
     }
 
-    // 3. The authority again (the reads above awaited), backup (every firmware-held value), the write
-    // with the authority once more right before its first SET, then verify and save.
-    const recheck = () => assertAbsoluteWriteAuthorized(proposal, { recompute: false });
+    // 3. The authority again against the same analysis (the reads above awaited), backup (every
+    // firmware-held value), the write with the authority once more right before its first SET,
+    // then verify and save.
+    const recheck = () => assertAbsoluteWriteAuthorized(authorized, { recompute: false, since });
     recheck();
     const backup = storeBackup("before_absolute_apply", fc, v1Snapshot(), null, before);
     await writeAbsoluteBlocks(before, expected, before, backup.id, false, recheck);
@@ -933,7 +964,12 @@ async function readAbsoluteRestoreTarget(backupId: string): Promise<{
 /** Read-only preview of restoring an absolute backup: every value that would change back. */
 export async function previewAbsoluteRestore(backupId: string): Promise<AbsoluteRestorePreview> {
     const { backup, current } = await readAbsoluteRestoreTarget(backupId);
-    return { backup, current, changes: absoluteDiff(current, backup.absolute), hash: absoluteHash(current) };
+    return {
+        backup,
+        current,
+        changes: absoluteDiff(current, backup.absolute),
+        hash: restoreHash(absoluteHash(current), absoluteHash(backup.absolute)),
+    };
 }
 
 /** Write an absolute backup back exactly (slider modes first, then all three blocks), verify, save. */
@@ -943,11 +979,14 @@ export async function restoreAbsoluteTune(
 ): Promise<AbsoluteWriteResult> {
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readAbsoluteRestoreTarget(backupId);
-    if (confirmed.preview !== undefined && confirmed.preview !== absoluteHash(current)) {
+    const target = backup.absolute;
+    if (
+        confirmed.preview !== undefined &&
+        confirmed.preview !== restoreHash(absoluteHash(current), absoluteHash(target))
+    ) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current);
-    const target = backup.absolute;
     await writeAbsoluteBlocks(current, target, current, safety.id, true);
     const verified = await verifyAbsoluteAndSave(target, current, safety.id);
     return { status: "verified", backupId: safety.id, expected: target, ...verified };

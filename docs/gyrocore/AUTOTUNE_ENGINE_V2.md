@@ -70,9 +70,20 @@ Safety gains an evaluation of absolute values. Write-path tests release the step
 in `test/gyrocore/harness/` (`analysisBindingRelease`, `safetyRelease`, `productRelease`). Restore is not a proposal and
 stays outside the authority (own confirmation, same UID / firmware / profile, backup first).
 
-Open risk: MSP has no atomic check-and-write. The last check runs synchronously before the first SET is sent, and
-`MSP_STATUS_EX` is re-read before every SET, but a change on the craft between that read and the SET (a profile switch,
-arming) is caught only afterwards (stage `write` / `verify`).
+Binding details: `applyAbsoluteTune` authorizes, confirms and writes a plain-data copy of the proposal taken on entry
+(a getter, a function or a class instance is refused: `apply:proposal_not_plain_data`; Vue proxies are read through), and the rechecks require the store's decoded
+inputs and result to still be the objects the authorization recomputed against
+(`binding:analysis_changed_since_authorization`). The comparison (`canonicalText`) serializes plain data only, without
+`toJSON`. Restore's confirmation binds the current tune and the backup's target (`restoreHash`), and the slider
+Preview puts the live values back into the FC store even when a firmware calculation fails, so the PID tab's Save never
+finds a proposal there.
+
+Open risks: MSP has no atomic check-and-write. The last check runs synchronously before the first SET is handed to
+`MSP.promise`, and `MSP_STATUS_EX` is re-read before every SET, but a change on the craft between that read and the SET
+(a profile switch, arming) is caught only afterwards (stage `write` / `verify`); the transport may queue or retry a
+request after the check. Separate Apply / Restore calls with distinct tokens are not serialized against each other.
+The binding proves that the proposal follows from the decoded inputs in the store, not that those inputs are the
+currently imported files (a stale calculation that republishes them, audit P1-7, is not fixed here).
 
 ## Release contract (`gyrocore/releaseGate/`)
 

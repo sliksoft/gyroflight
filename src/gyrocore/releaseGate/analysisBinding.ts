@@ -31,6 +31,7 @@
  * reproduce it.
  */
 
+import { toRaw } from "vue";
 import { pickPrimary } from "@/gyrocore/engine/logInput";
 import { runAutotuneV2, type AutotuneV2Input } from "@/gyrocore/engine/autotuneV2";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
@@ -60,37 +61,95 @@ export function currentAnalysisInput(): AutotuneV2Input | null {
 }
 
 /**
- * Exact text of a value: object keys sorted, and undefined, NaN and ±Infinity kept apart from null
- * (JSON.stringify would drop or merge them).
+ * A plain object's or array's own fields (a Vue proxy is read through toRaw). Anything that is not
+ * plain data throws: an accessor, a non-enumerable property (toJSON), a symbol key, a sparse array,
+ * a class instance, Map or typed array.
+ */
+function plainFields(value: object): { isArray: boolean; entries: [string, unknown][] } {
+    const o = toRaw(value) as Record<string, unknown>;
+    const isArray = Array.isArray(o);
+    const proto = Object.getPrototypeOf(o);
+    if (proto !== (isArray ? Array.prototype : Object.prototype) && !(proto === null && !isArray)) {
+        throw new TypeError("not plain data: prototype");
+    }
+    const keys = Object.getOwnPropertyNames(o).filter((k) => !(isArray && k === "length"));
+    for (const k of keys) {
+        const d = Object.getOwnPropertyDescriptor(o, k)!;
+        if (!("value" in d) || !d.enumerable) throw new TypeError(`not plain data: property ${k}`);
+    }
+    if (Object.getOwnPropertySymbols(o).length) throw new TypeError("not plain data: symbol key");
+    if (isArray && keys.length !== (o as unknown as unknown[]).length)
+        throw new TypeError("not plain data: sparse array");
+    return { isArray, entries: keys.map((k) => [k, o[k]]) };
+}
+
+function assertPlainPrimitive(value: unknown): void {
+    if (typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
+        throw new TypeError(`not plain data: ${typeof value}`);
+    }
+}
+
+/**
+ * Exact text of plain data: object keys sorted, every type tagged (a string never reads as a
+ * number, undefined or null). Serializes what code reading the value sees: no toJSON (plainFields).
  */
 export function canonicalText(value: unknown): string {
-    return JSON.stringify(value === undefined ? "\u0000undefined" : value, (_key, v: unknown) => {
-        if (v === undefined) return "\u0000undefined";
-        if (typeof v === "number" && !Number.isFinite(v)) return `\u0000number:${v}`;
-        if (v && typeof v === "object" && !Array.isArray(v)) {
-            const o = v as Record<string, unknown>;
-            return Object.fromEntries(
-                Object.keys(o)
-                    .sort()
-                    .map((k) => [k, o[k]]),
-            );
-        }
-        return v;
-    });
+    if (value === null || typeof value !== "object") {
+        assertPlainPrimitive(value);
+        if (value === null) return "null";
+        if (value === undefined) return "undefined";
+        if (typeof value === "number") return `#${Object.is(value, -0) ? 0 : value}`;
+        return typeof value === "string" ? JSON.stringify(value) : String(value);
+    }
+    const { isArray, entries } = plainFields(value);
+    if (isArray) return `[${entries.map(([, v]) => canonicalText(v)).join(",")}]`;
+    return `{${entries
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => `${JSON.stringify(k)}:${canonicalText(v)}`)
+        .join(",")}}`;
+}
+
+/** A deep copy of plain data that shares nothing with `value`; throws on what is not plain data. */
+export function plainCopy<T>(value: T): T {
+    if (value === null || typeof value !== "object") {
+        assertPlainPrimitive(value);
+        return value;
+    }
+    const { isArray, entries } = plainFields(value);
+    return (
+        isArray ? entries.map(([, v]) => plainCopy(v)) : Object.fromEntries(entries.map(([k, v]) => [k, plainCopy(v)]))
+    ) as T;
+}
+
+/** The analysis an Apply was authorized against: the decoded inputs and the result, by identity. */
+export interface AnalysisPin {
+    inputs: unknown;
+    result: unknown;
+}
+
+export function pinAnalysis(): AnalysisPin {
+    const store = useAutotuneV2Store();
+    return { inputs: store.inputs, result: store.result };
 }
 
 /**
  * Why `proposal` is not the current analysis's releasable proposal; empty when it is.
- * `recompute`: run the engine again on the current inputs (the write point); without it the
- * proposal is compared with the stored result only (the interface, and the recheck right before
- * the first SET, which follows a recomputation in the same Apply).
+ * `recompute`: run the engine again on the current inputs (the write point). `since`: the analysis
+ * the Apply was authorized against; the inputs and the result must still be those objects (the
+ * rechecks after the live reads, which do not recompute).
  */
-export function analysisBindingIssues(proposal: AbsoluteProposal, { recompute }: { recompute: boolean }): string[] {
+export function analysisBindingIssues(
+    proposal: AbsoluteProposal,
+    { recompute, since }: { recompute: boolean; since?: AnalysisPin },
+): string[] {
     const store = useAutotuneV2Store();
     if (store.state !== "done") return [`analysis_not_done:${store.state}`];
     const current = store.result?.releasableProposal ?? null;
     if (!current) return ["no_releasable_proposal"];
     if (canonicalText(proposal) !== canonicalText(current)) return ["proposal_differs_from_analysis"];
+    if (since && (store.inputs !== since.inputs || store.result !== since.result)) {
+        return ["analysis_changed_since_authorization"];
+    }
     if (!recompute) return [];
     const input = currentAnalysisInput();
     if (!input) return ["analysis_inputs_missing"];
