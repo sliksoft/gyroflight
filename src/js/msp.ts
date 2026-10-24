@@ -31,6 +31,7 @@ import {
     mspRequestRefusal,
     reportRefusedWrite,
     writeRefused,
+    WriteRetryRefusedError,
     type WritePermit,
 } from "../composables/fcWriteGuard";
 
@@ -62,7 +63,7 @@ export interface MspRequest {
     attempts?: number;
     start?: number;
     timer?: ReturnType<typeof setTimeout> | null;
-    /** Gyroflight: the write check again, for a parked request when it is released. */
+    /** Gyroflight: the write check again, for a parked request when it is released and before a retry. */
     recheck?: () => string[] | null;
 }
 
@@ -358,6 +359,19 @@ const MSP = {
         }
 
         const entry = this.cli_queue.shift()!;
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): checked again now that it would go out (the
+        // state may have changed while it waited in the queue). Nothing is sent; the caller is told.
+        const refused = cliCommandRefusal(entry.command);
+        if (refused) {
+            try {
+                if (entry.callback) entry.callback([], writeRefused(refused));
+                else reportRefusedWrite(`CLI "${entry.command.split(/\s/)[0]}"`, refused);
+            } catch (callbackError) {
+                console.error("CLI callback threw on a refused write:", callbackError);
+            }
+            this._process_cli_queue();
+            return;
+        }
         this.cli_in_flight = entry;
         this.cli_buffer.length = 0;
         this.cli_output.length = 0;
@@ -545,6 +559,7 @@ const MSP = {
             notifyTimeout,
             attempts: 1,
             start: performance.now(),
+            recheck,
         };
 
         // errorAware entries always arm their own timer (even when deduped) so an awaiter
@@ -586,6 +601,26 @@ const MSP = {
      * @returns {void}
      */
     _on_timeout(obj: MspRequest) {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a retry is a new transmission, checked again.
+        // Refused, it is not resent and ends now; the first attempt may have run on the FC.
+        const retryRefused = (obj.attempts ?? 1) < this.MAX_RETRIES ? obj.recheck?.() : null;
+        if (retryRefused) {
+            clearTimeout(obj.timer ?? undefined);
+            obj.timer = null;
+            if (!obj.errorAware) {
+                reportRefusedWrite(`MSP ${obj.code} retry`, retryRefused);
+                return;
+            }
+            const at = this.callbacks.indexOf(obj);
+            if (at !== -1) this.callbacks.splice(at, 1);
+            try {
+                errorAwareCallback(obj)?.(null, new WriteRetryRefusedError(retryRefused));
+            } catch (callbackError) {
+                console.error("MSP callback threw on a refused retry:", callbackError);
+            }
+            this._release_parked(obj.code);
+            return;
+        }
         if ((obj.attempts ?? 1) < this.MAX_RETRIES) {
             obj.attempts = (obj.attempts ?? 1) + 1;
             console.warn(

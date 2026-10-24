@@ -186,8 +186,35 @@ describe("MSP requests from any caller while the craft's state is uncertain", ()
         const secondErr = rejected(second);
         await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 1));
         expect(await secondErr).toBeInstanceOf(ApplyBlockedError);
-        // Only the first one's (re)transmissions reached the port.
+        // Only the first one's single transmission reached the port: its retries are refused too.
+        expect(sentCodes()).toEqual([MSPCodes.MSP_SET_PID]);
         expect(sent.mock.calls.every(([b]) => new Uint8Array(b as ArrayBuffer)[5] === 1)).toBe(true);
+    });
+
+    it("a SET sent while the state was known is not retransmitted once it is uncertain (Codex WP8 final review P0)", async () => {
+        const { WriteRetryRefusedError, WriteRefusedError } = await import("../../src/composables/fcWriteGuard");
+        const err = rejected(MSP.promise(MSPCodes.MSP_SET_PID, [1, 2, 3]));
+        expect(sentCodes()).toEqual([MSPCodes.MSP_SET_PID]);
+        uncertain();
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 1));
+        const e = await err;
+        // It went out once and may have run: never reported as "not sent".
+        expect(e).toBeInstanceOf(WriteRetryRefusedError);
+        expect(e).not.toBeInstanceOf(WriteRefusedError);
+        expect(sentCodes()).toEqual([MSPCodes.MSP_SET_PID]);
+    });
+
+    it("an EEPROM write over the callback API is not retransmitted once the state is uncertain", async () => {
+        MSP.send_message(MSPCodes.MSP_EEPROM_WRITE, false, false, () => undefined);
+        uncertain();
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 1));
+        expect(sentCodes()).toEqual([MSPCodes.MSP_EEPROM_WRITE]);
+    });
+
+    it("reads stay readable while uncertain: MSP_BEEPER_CONFIG (Configuration tab) goes out", () => {
+        uncertain();
+        void MSP.promise(MSPCodes.MSP_BEEPER_CONFIG).catch(() => undefined);
+        expect(sentCodes()).toEqual([MSPCodes.MSP_BEEPER_CONFIG]);
     });
 
     it("an entry with an unknown craft (UID not read yet) refuses SETs too", async () => {
@@ -222,6 +249,30 @@ describe("the MSP CLI (Presets, Backups, AutoRestore, flight plan, VTX and port 
         expect(sentText()).toEqual(["get p_roll\n"]);
     });
 
+    it("a `save` queued behind another command is checked again when it would go out (Codex WP8 final review P0)", async () => {
+        const first = rejected(cliSend("get p_roll", { timeoutMs: 100 }));
+        const queued = rejected(cliSend("save"));
+        expect(sentText()).toEqual(["get p_roll\n"]);
+        uncertain();
+        await vi.advanceTimersByTimeAsync(5000);
+        await first;
+        expect(await queued).toBeInstanceOf(ApplyBlockedError);
+        expect(sentText()).toEqual(["get p_roll\n"]);
+    });
+
+    it("edit bytes are refused: the firmware would not erase what the check erased (Codex WP8 final review P0)", async () => {
+        uncertain();
+        expect(await rejected(cliSend(`save ${"\u007f".repeat(5)}get`))).toBeInstanceOf(ApplyBlockedError);
+        expect(await rejected(cliSend(`save ${"\b".repeat(5)}get`))).toBeInstanceOf(ApplyBlockedError);
+        expect(sentText()).toEqual([]);
+    });
+
+    it("`sensor_hardware` (sensor detection) is a read and goes out", () => {
+        uncertain();
+        void cliSend("sensor_hardware").catch(() => undefined);
+        expect(sentText()).toEqual(["sensor_hardware\n"]);
+    });
+
     it("an unknown command is not taken for a read", async () => {
         uncertain();
         expect(await rejected(cliSend("frobnicate"))).toBeInstanceOf(ApplyBlockedError);
@@ -241,6 +292,14 @@ describe("the CLI tab's raw serial line (useCli) while uncertain", () => {
         cli.sendLine("diff all");
         cli.sendLine("exit");
         expect(sentText()).toEqual(["get p_roll\n", "diff all\n", "exit\n"]);
+    });
+
+    it("a line with backspaces is refused: `save get` would run, not `get` (Codex WP8 final review P0)", () => {
+        uncertain();
+        const cli = useCli();
+        cli.sendLine(`save ${"\b".repeat(5)}get`);
+        cli.sendLine(`save ${"\u007f".repeat(5)}get`);
+        expect(sentText()).toEqual([]);
     });
 
     it("tab completion is refused: the firmware's line buffer would hold text the guard never saw", () => {
@@ -299,5 +358,24 @@ describe("the inventory of MSP codes", () => {
         }
         // A code the table does not know is a write.
         expect(classifyMsp(0x7fff, undefined)).toBe("write");
+    });
+});
+
+describe("AutoRestore (the flasher's config restore) while uncertain", () => {
+    it("a refused save is a failed restore, never success (Codex WP8 final review P1)", async () => {
+        uncertain();
+        const { default: autoRestore } = await import("../../src/js/utils/AutoRestore");
+        vi.spyOn(serial, "disconnect").mockResolvedValue(true as never);
+        const results: unknown[] = [];
+        const ar = autoRestore as unknown as {
+            _callback: ((r: unknown) => void) | null;
+            _finishWithSave: (errors: unknown[]) => Promise<void>;
+        };
+        ar._callback = (r) => results.push(r);
+        const done = ar._finishWithSave([]);
+        await vi.advanceTimersByTimeAsync(5000);
+        await done;
+        expect(results).toEqual([expect.objectContaining({ success: false })]);
+        expect(sentText()).toEqual([]);
     });
 });

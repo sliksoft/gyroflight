@@ -77,6 +77,17 @@ export class WriteRefusedError extends ApplyBlockedError {
 export const writeRefused = (reasons: string[]) => new WriteRefusedError(reasons);
 
 /**
+ * A write that went out once and whose retransmission the write check refused: the craft may have
+ * run it (its answer was lost), so this is not "not sent" (no WriteRefusedError).
+ */
+export class WriteRetryRefusedError extends ApplyBlockedError {
+    constructor(reasons: string[]) {
+        super([...reasons, "fc:write_retry_refused"]);
+        this.name = "WriteRetryRefusedError";
+    }
+}
+
+/**
  * A Gyroflight write transaction's authority for its own writes: why the write with `code` must not
  * go out now (empty: it may). Asked right before the request is queued and when a parked one is
  * released.
@@ -167,6 +178,7 @@ const READ_MSP_CODES: ReadonlySet<number> = new Set([
     MSPCodes.MSP_PITOT,
     MSPCodes.MSP_WING,
     MSPCodes.MSP_OSD_CANVAS,
+    MSPCodes.MSP_BEEPER_CONFIG,
     // Runs only out commands for each code it carries (mspFcProcessOutCommand, no in commands).
     MSPCodes.MSP_MULTIPLE_MSP,
     MSPCodes.MSP_MODE_RANGES_EXTRA,
@@ -212,7 +224,17 @@ export function classifyMsp(code: number, data: ArrayLike<number> | false | unde
 }
 
 /** CLI commands that only print (cli.c); exit reboots without saving. Every other command is a write. */
-const READ_CLI: ReadonlySet<string> = new Set(["get", "dump", "diff", "version", "status", "help", "tasks", "exit"]);
+const READ_CLI: ReadonlySet<string> = new Set([
+    "get",
+    "dump",
+    "diff",
+    "version",
+    "status",
+    "help",
+    "tasks",
+    "sensor_hardware",
+    "exit",
+]);
 
 /** Why a write by anyone but a Gyroflight transaction must not go out now; empty when it may. */
 function foreignWriteIssues(): string[] {
@@ -244,25 +266,26 @@ function cliCommand(line: string): string {
 }
 
 /**
- * Why `text` must not be sent to a CLI whose line buffer holds `pending` (null: send it). Replays the
- * firmware's line editor; while a write would be refused, every line it ends must be a read.
+ * Why `text` must not be sent to a CLI whose line buffer holds `pending` (null: send it). While a
+ * write would be refused, every line `text` ends must be a read, and `text` must hold printable
+ * characters and line ends only: the firmware's editing differs by mode (interactive: 0x7f deletes,
+ * 0x08 is dropped; MSP CLI: both dropped; cli.c processCharacterInteractive / processCharacter), so
+ * an edited line is refused rather than guessed at. Tab completion is refused the same way.
  */
 export function cliInputRefusal(pending: string, text: string): string[] | null {
     const issues = foreignWriteIssues();
     if (!issues.length) return null;
     let line = pending;
     for (const ch of text) {
-        if (ch === "\b" || ch === "\u007f") {
-            line = line.slice(0, -1);
-        } else if (ch === "\r" || ch === "\n") {
+        if (ch === "\r" || ch === "\n") {
             const cmd = cliCommand(line);
             const name = cmd.split(/\s+/)[0]?.toLowerCase() ?? "";
             if (cmd && !READ_CLI.has(name)) return [...issues, `cli:not_read_only:${name}`];
             line = "";
         } else if (ch === "\t") {
             return [...issues, "cli:completion"];
-        } else if (ch < " ") {
-            return [...issues, "cli:control_character"];
+        } else if (ch < " " || ch === "\u007f") {
+            return [...issues, "cli:edit_or_control_character"];
         } else {
             line += ch;
         }

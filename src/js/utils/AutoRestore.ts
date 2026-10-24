@@ -31,6 +31,8 @@ import semver from "semver";
 import { useFlightControllerStore } from "../../stores/fc";
 import { addTimeout, removeTimeout } from "../timers";
 import { useConnectionStore } from "../../stores/connection";
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused save is a failed restore.
+import { WriteRefusedError } from "../../composables/fcWriteGuard";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 2000;
 const CONNECT_TIMEOUT_MS = 10000;
@@ -261,9 +263,19 @@ class AutoRestore {
 
         gui_log(i18n.getMessage("buttonSaving"));
         this._saving = true;
-        MSP.send_cli_command("save");
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a save the write check refuses (uncertain FC
+        // state) was never sent; the restore failed, the FC does not reboot.
+        let refused: WriteRefusedError | null = null;
+        MSP.send_cli_command("save", (_lines, error) => {
+            if (error instanceof WriteRefusedError) refused = error;
+        });
         await new Promise((resolve) => setTimeout(resolve, SAVE_FLUSH_MS));
 
+        if (refused) {
+            this._saving = false;
+            this._cleanup(false, (refused as WriteRefusedError).message);
+            return;
+        }
         this._cleanup(true, null);
     }
 
