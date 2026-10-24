@@ -111,8 +111,17 @@ export function absoluteWriteDecision(
     add("release_contract", () => evaluateRelease(proposal).blocks);
 
     let safetyEvidence = "not_available";
+    // The record this browser holds now for the logged craft (Safety and the product lock alike).
+    const currentRecord = () => {
+        const id = logIdentity(proposal.log.headerPairs);
+        return useVerifiedTuneStore().forCraft(
+            id.uid,
+            id.firmwareRevision?.split(/\s+/)[1] ?? null,
+            loggedAbsoluteValues(proposal.log.headerPairs),
+        );
+    };
     add("gyrocore_safety", () => {
-        const safety = absoluteSafetyAuthorization(proposal);
+        const safety = absoluteSafetyAuthorization(proposal, { verifiedTune: currentRecord() });
         // Bound to exactly this proposal and change, as the slider route binds Safety to its sliders.
         const bound =
             safety.proposalId === proposal.id && canonicalText(safety.change) === canonicalText(proposal.change);

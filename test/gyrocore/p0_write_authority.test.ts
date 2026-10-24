@@ -267,10 +267,15 @@ describe("each step alone denies, before any MSP and without a backup", () => {
         ],
         ["release contract", () => (gate.release = false), "release_contract", ["measurement:measurement_invalid"]],
         [
-            "GyroCore Safety (it has no evaluation of absolute values)",
+            // WP6: Safety now evaluates absolute values (absoluteEvaluate.ts) and still never
+            // authorizes while the hardware validation has not been executed.
+            "GyroCore Safety (evaluated, not hardware-validated)",
             () => (gate.safety = false),
             "gyrocore_safety",
-            ["safety:safety_not_evaluated:absolute_values", "safety:missing_required_analysis"],
+            [
+                "safety:absolute_safety:validated_starting_configuration:no_verified_tune",
+                "safety:absolute_safety:not_hardware_validated",
+            ],
         ],
         [
             "a released Safety result bound to another proposal",
@@ -440,7 +445,7 @@ describe("the authority again, right before the craft changes", () => {
             return false;
         };
         const err = await denial(apply(proposal()));
-        expect(err.reasons).toEqual(expect.arrayContaining(["safety:missing_required_analysis"]));
+        expect(err.reasons).toEqual(expect.arrayContaining(["safety:absolute_safety:not_hardware_validated"]));
         expect(writes()).toEqual([]);
         expect(backups()).toEqual([]);
     });

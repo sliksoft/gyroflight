@@ -33,8 +33,9 @@ import type { CompositeGateState } from "@/gyrocore/tuning/authorize";
 import type { CompositeRecommendation } from "@/gyrocore/tuning/composite";
 import { SLIDER_KEYS } from "@/gyrocore/tuning/merge";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
+import type { VerifiedTune } from "@/gyrocore/releaseGate/verifiedTune";
 import { evaluateSafety, type SafetyResult } from "./evaluate";
-import { BLOCK_MISSING_ANALYSIS } from "./pipeline";
+import { evaluateAbsoluteSafety, type AbsoluteSafetyCheck } from "./absoluteEvaluate";
 
 export function safetyForComposite(state: CompositeGateState, composite: CompositeRecommendation | null): SafetyResult {
     const log = state.report?.logs.find((l) => l.logIndex === composite?.logIndex) ?? null;
@@ -62,8 +63,6 @@ export function assertSafetyAuthorized(
     return safety;
 }
 
-export const SAFETY_NOT_EVALUATED_ABSOLUTE = "safety_not_evaluated:absolute_values";
-
 /** GyroCore Safety's verdict on an absolute proposal, bound to its id and its exact change. */
 export interface AbsoluteSafetyResult {
     status: "PASS" | "BLOCK";
@@ -72,22 +71,30 @@ export interface AbsoluteSafetyResult {
     blocks: string[];
     analysisEvidence: "available" | "not_available";
     authorized: boolean;
+    /** Every check of the evaluation (absoluteEvaluate.ts), for the interface. */
+    checks: AbsoluteSafetyCheck[];
 }
 
 /**
- * The Safety step for the absolute route. GyroCore Safety evaluates a slider composite only
- * (evaluate.ts); it has no evaluation of absolute PID / filter / feedforward values, and no
- * analysis evidence exists, so the reference's missing-analysis verdict decides: BLOCK. The
- * engine's own absolute evidence contract (engine/safetyEvidence.ts) is a release condition, not
- * this step. Write-path tests replace this module (test/gyrocore/harness/safetyRelease.ts).
+ * The Safety step for the absolute route: GyroCore Safety's evaluation of absolute PID / filter /
+ * feedforward values (absoluteEvaluate.ts), against the Verified Tune this browser holds now. It
+ * authorizes only when every check passes and the hardware validation has been executed
+ * (ABSOLUTE_SAFETY_POLICY): today never. Write-path tests replace this module
+ * (test/gyrocore/harness/safetyRelease.ts).
  */
-export function absoluteSafetyAuthorization(proposal: AbsoluteProposal): AbsoluteSafetyResult {
+export function absoluteSafetyAuthorization(
+    proposal: AbsoluteProposal,
+    context: { verifiedTune: VerifiedTune | null } = { verifiedTune: null },
+): AbsoluteSafetyResult {
+    const e = evaluateAbsoluteSafety(proposal, context);
+    const authorized = e.blocks.length === 0;
     return {
-        status: "BLOCK",
+        status: authorized ? "PASS" : "BLOCK",
         proposalId: proposal.id,
         change: { ...proposal.change },
-        blocks: [SAFETY_NOT_EVALUATED_ABSOLUTE, BLOCK_MISSING_ANALYSIS],
-        analysisEvidence: "not_available",
-        authorized: false,
+        blocks: e.blocks,
+        analysisEvidence: e.analysisEvidence,
+        authorized,
+        checks: e.checks,
     };
 }

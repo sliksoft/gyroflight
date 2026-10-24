@@ -263,6 +263,24 @@
                     <span class="font-bold">·</span> {{ $t(`gyroflightV2Cond_${name}`) }}
                 </li>
             </ul>
+            <p v-if="safetyChecks.length" class="text-sm font-bold mt-1">{{ $t("gyroflightV2SafetyChecksTitle") }}</p>
+            <ul class="text-sm" data-gyrocore="v2-safety-checks">
+                <li v-for="c in safetyChecks" :key="c.name" :data-check="c.name" :data-status="c.status">
+                    <span
+                        :class="
+                            c.status === 'PASS'
+                                ? 'text-green-500'
+                                : c.status === 'FAIL'
+                                  ? 'text-red-500'
+                                  : 'text-yellow-500'
+                        "
+                    >
+                        {{ c.status }}
+                    </span>
+                    {{ c.name
+                    }}<span v-if="c.reasons.length" class="text-dimmed"> ({{ c.reasons.slice(0, 3).join("; ") }})</span>
+                </li>
+            </ul>
             <p class="text-sm text-dimmed">{{ $t("gyroflightApplyOnClick") }}</p>
             <UncertainStateNotice />
             <UButton
@@ -417,6 +435,10 @@ import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
 import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
+import { evaluateAbsoluteSafety } from "@/gyrocore/safety/absoluteEvaluate";
+import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
+import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
+import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { RESOLVED_FEATURE_BINS, type LoopMargins } from "@/gyrocore/engine/loopModel";
 
 const v2 = useAutotuneV2Store();
@@ -424,6 +446,7 @@ const connection = useConnectionStore();
 const fc = useFlightControllerStore();
 const backupStore = useTuneBackupStore();
 const transactionStates = useFcTransactionStore();
+const verifiedTunes = useVerifiedTuneStore();
 const { calculate, createVerifiedTune, preview, releasedProposal, confirmAndApply, confirmAndRestore } =
     useAutotuneV2();
 
@@ -476,6 +499,19 @@ const contract = computed(() => {
     if (!p) return [];
     const authority = absoluteWriteDecision(p, { recompute: false }).steps.filter((s) => s.name !== "release_contract");
     return [...evaluateRelease(p).conditions, ...authority];
+});
+
+/** GyroCore Safety's checks of that proposal (absoluteEvaluate.ts), against the record this browser holds. */
+const safetyChecks = computed(() => {
+    const p = v2.result?.releasableProposal ?? v2.result?.proposal;
+    if (!p) return [];
+    const id = logIdentity(p.log.headerPairs);
+    const verifiedTune = verifiedTunes.forCraft(
+        id.uid,
+        id.firmwareRevision?.split(/\s+/)[1] ?? null,
+        loggedAbsoluteValues(p.log.headerPairs),
+    );
+    return evaluateAbsoluteSafety(p, { verifiedTune }).checks;
 });
 
 const canPreview = computed(() => !!v2.result?.proposal && connected.value && !connection.virtualMode);
