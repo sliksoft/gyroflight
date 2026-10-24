@@ -47,6 +47,8 @@ export interface MspResponse {
     length: number;
     crcError: boolean;
     unsupported: number;
+    /** Gyroflight: how many times the request went out before this answer (a retry: more than 1). */
+    attempts?: number;
 }
 
 /**
@@ -269,6 +271,15 @@ const MSP = {
     },
 
     _dispatch_message(expectedChecksum: number) {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F04 review): a request frame ('<', an
+        // echo of what this app sent) is no answer; taken for one it would "acknowledge" a write.
+        if (this.message_direction === 0) {
+            console.log(`MSP: ignored a request frame (code ${this.code}) on the receive side`);
+            this.message_length_received = 0;
+            this.state = 0;
+            this.crcError = false;
+            return;
+        }
         if (this.message_checksum === expectedChecksum) {
             // message received, store dataview
             this.dataView = new MspDataView(this.message_buffer, 0, this.message_length_expected);
@@ -1043,6 +1054,8 @@ const BYTE_HANDLERS: Partial<Record<number, (this: typeof MSP, chunk: number) =>
                 this.message_direction = 0;
                 break;
             case this.symbols.UNSUPPORTED:
+                // Gyroflight: the firmware's error answer (it does not keep an earlier '<').
+                this.message_direction = 1;
                 this.unsupported = 1;
                 break;
         }

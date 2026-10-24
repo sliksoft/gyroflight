@@ -196,7 +196,7 @@ function decodeLedMask(mask: number, layout: LedMaskLayout): LedStripEntry {
 }
 
 // Settles one pending request with the frame that answers it.
-function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspFrame) {
+function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspFrame, attempts?: number) {
     const { code, dataView: data, crcError } = frame;
     const response: MspResponse = {
         command: code,
@@ -204,6 +204,7 @@ function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspF
         length: data ? data.byteLength : 0,
         crcError,
         unsupported: frame.unsupported,
+        attempts,
     };
     // Legacy callbacks receive the original DataView with the crcError flag so they can choose
     // how to handle CRC errors; errorAware callbacks reject on crcError and otherwise receive the
@@ -437,7 +438,7 @@ class MspHelper {
             dataHandler.callbacks.splice(i, 1);
 
             if (typeof entry.callback === "function") {
-                deliverResponse(entry.callback, entry.errorAware, dataHandler);
+                deliverResponse(entry.callback, entry.errorAware, dataHandler, entry.attempts);
             }
         }
     }
@@ -1449,7 +1450,8 @@ const DECODERS: Partial<Record<number, Decoder>> = {
     },
 
     [MSPCodes.MSP_EEPROM_WRITE]() {
-        console.log("Settings Saved in EEPROM");
+        // Gyroflight (audit WP8-F04): what the answer proves is judged by eepromSave.ts.
+        console.log("MSP_EEPROM_WRITE answered");
     },
 
     [MSPCodes.MSP_SET_CURRENT_METER_CONFIG]() {

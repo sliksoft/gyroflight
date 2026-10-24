@@ -151,7 +151,15 @@ export function usePortsConfiguration(
         updateFeatures();
 
         const saveEeprom = () => {
-            void saveAndReboot().then(() => gui_log(i18n.getMessage("portsEepromSave")));
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F04): an unconfirmed save is shown.
+            void saveAndReboot().then(
+                () => gui_log(i18n.getMessage("portsEepromSave")),
+                (err: unknown) => {
+                    console.error("Ports save failed:", err);
+                    const tagged = (err as { saveFailureMessage?: string } | null)?.saveFailureMessage;
+                    gui_log(tagged ?? i18n.getMessage("configurationSaveFailed"));
+                },
+            );
         };
 
         mspHelper.sendSerialConfig(() => {

@@ -199,6 +199,28 @@ describe("WP8-F04 Save and Reboot (writeConfiguration): saved only on the firmwa
     });
 });
 
+describe("Codex review of F04: what counts as the firmware's ACK", () => {
+    it("an echo of the request ('$M<') is no ACK: no saved log, no reboot", async () => {
+        const done = outcome(useReboot().saveAndReboot());
+        await vi.advanceTimersByTimeAsync(150);
+        const code = MSPCodes.MSP_EEPROM_WRITE;
+        MSP.read({ data: new Uint8Array([0x24, 0x4d, 0x3c, 0, code, code]).buffer });
+        await vi.advanceTimersByTimeAsync(10);
+        expect(eepromLogged()).toBe(false);
+        await vi.advanceTimersByTimeAsync(5 * MSP.TIMEOUT);
+        expect(((await done) as EepromSaveError).persistence).toBe("unknown");
+        expect(reboot.tabSwitch).not.toHaveBeenCalled();
+    });
+
+    it("a refusal of a retry (the first attempt's answer lost) leaves persistence unknown, not 'not saved'", async () => {
+        const done = outcome(useReboot().saveToEeprom());
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT + 50); // the first attempt went unanswered, a retry went out
+        expect(sentCodes.filter((c) => c === MSPCodes.MSP_EEPROM_WRITE).length).toBeGreaterThan(1);
+        reply(MSPCodes.MSP_EEPROM_WRITE, { error: true });
+        expect(((await done) as EepromSaveError).persistence).toBe("unknown");
+    });
+});
+
 describe("WP8-F04 saveToEeprom (PID, Receiver, Motors, ... tabs)", () => {
     it("ACK: resolves and logs saved", async () => {
         const done = outcome(useReboot().saveToEeprom());
