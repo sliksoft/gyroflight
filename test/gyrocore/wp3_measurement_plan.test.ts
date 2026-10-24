@@ -46,6 +46,7 @@ import {
     QUALIFICATION_BAND_EXTENSION,
     RESOLVED_FEATURE_BINS,
     UNCERTAINTY,
+    type AnalysisProvenance,
 } from "../../src/gyrocore/engine/loopModel";
 import { PLAN, planMeasurement } from "../../src/gyrocore/engine/measurementPlan";
 import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
@@ -68,11 +69,19 @@ const T = (g: G) => (f: number) => {
     return closedLoopFromPlant(g(f), c.cReference, c.cFeedback);
 };
 const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
-function plan(g: G, coherence: (f: number) => number, freqs = uniform(200, 0.5)) {
+const pow2 = (x: number) => 2 ** Math.ceil(Math.log2(x));
+/** The standard analysis of the synthetic bins (0.5 Hz: a segment of 8192 at 4 kHz). */
+const ANALYSIS = { segmentSamples: 8192, sampleRateHz: 4000, windowSamples: 80000, segments: 18 };
+function plan(
+    g: G,
+    coherence: (f: number) => number,
+    freqs = uniform(200, 0.5),
+    analysis: AnalysisProvenance | null = ANALYSIS,
+) {
     const tf = syntheticTransferFunctionWithCoherence(freqs, T(g), coherence);
     const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { sweep: SWEEP });
     const m = loopMargins(loop);
-    return { p: planMeasurement("roll", loop, m, 4000, SWEEP), m, loop };
+    return { p: planMeasurement("roll", loop, m, 4000, SWEEP, analysis), m, loop };
 }
 
 describe("the plan follows the evidence rules", () => {
@@ -151,6 +160,33 @@ describe("the plan follows the evidence rules", () => {
             "required_measurement:chirp_finer_resolution_model_class_qualification",
         );
         expect(loopMargins(loop)).toEqual(m);
+    });
+});
+
+describe("the plan asks only for what a flight can deliver", () => {
+    it("a finer primary resolution than the standard analysis's segment is not asked of the next flight", () => {
+        // The import analyses 4 kHz with 2048-sample segments, whatever the sweep: 1.95 Hz bins.
+        const fixed = { ...ANALYSIS, segmentSamples: 2048 };
+        const { p } = plan(smooth, () => 0.995, uniform(200, 0.5), fixed);
+        expect(4000 / p.resolutionHz.primary!).toBeGreaterThan(2048);
+        expect(p.segmentSamples).toMatchObject({ primary: 2048, executable: 2048 });
+        expect(p.diagnostics).toContain(
+            `primary_resolution_needs_finer_analysis:2048<${pow2(4000 / p.resolutionHz.primary!)}`,
+        );
+        expect(p.requiredMeasurements).not.toContain("required_measurement:chirp_with_finer_frequency_resolution");
+        // The finer resolution is the qualification's (its own finer analysis); the sweep is planned at 2048.
+        expect(p.requiredMeasurements).toContain(
+            "required_measurement:chirp_finer_resolution_model_class_qualification",
+        );
+        const Ts = 2048 / 4000;
+        expect(p.sweep!.durationS).toBeGreaterThanOrEqual((Ts * (UNCERTAINTY.minWelchSegments + 1)) / 2);
+    });
+
+    it("without the standard analysis's segment, no primary segment or sweep is planned", () => {
+        const { p } = plan(smooth, () => 0.995, uniform(200, 0.5), null);
+        expect(p.segmentSamples.primary).toBeNull();
+        expect(p.sweep).toBeNull();
+        expect(p.diagnostics).toContain("primary_analysis_segment_unknown");
     });
 });
 

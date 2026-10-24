@@ -397,9 +397,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (!qLog || !qc || qc.state !== "usable") return null;
         const qh = headerMap(qLog.headerPairs);
         const qctl = analyzeAxisController(qLog, qh, ai, qc, flightMask(qLog.channels.rcThrottle));
-        // Its plant rests on the controller reconstructed for that flight: with a D path, only when
-        // the logged D term validated it (as the primary's model quality requires).
-        if (qctl?.dterm && !qctl.accepted) {
+        // Its plant rests on the controller reconstructed for that flight: with D > 0, only when the
+        // D path was reconstructed and the logged D term validated it (as the primary's model
+        // quality requires); missing D headers leave no D path, which is not a validated one.
+        if (qctl && qctl.cfg.axis.d > 0 && !(qctl.dterm && qctl.accepted)) {
             qualificationAxisRejected.push(`model_class_qualification_rejected:dterm_path_not_validated:${name}`);
             return null;
         }
@@ -715,7 +716,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     const { margins, safety, proposal } = full;
     // Informative: the band, resolution and averages the next flight needs for this craft's own loop.
     const measurementPlan = analysed.map((name) =>
-        planMeasurement(name, axes[name]!.loop, margins[name]!.current, log.sampleRateHz, sweepFromHeaders(h)),
+        planMeasurement(
+            name,
+            axes[name]!.loop,
+            margins[name]!.current,
+            log.sampleRateHz,
+            sweepFromHeaders(h),
+            log.chirp[name]?.analysis ?? null,
+        ),
     );
 
     // Part summary for the interface and the report.
