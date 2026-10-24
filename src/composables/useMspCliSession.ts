@@ -25,6 +25,8 @@ import MSP from "../js/msp";
 import { useFlightControllerStore } from "@/stores/fc";
 import { cancelRebootReconnect, scheduleRebootReconnect } from "../js/serial_backend";
 import { WriteRefusedError } from "./fcWriteGuard";
+import { gui_log } from "../js/gui_log";
+import { i18n } from "../js/localization";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 2000;
 const SAVE_COMMAND_TIMEOUT_MS = 5000;
@@ -261,11 +263,30 @@ export function findCliSettingAllowedValues(lines: string[] | null | undefined):
     return null;
 }
 
+/**
+ * `save` and, when the FC resets for it, wait for the reconnect. Gyroflight hook
+ * (docs/gyrocore/UPSTREAM.md, audit WP8-F01): `ok` only when the firmware confirmed it saved
+ * (cliSaveConfirmed); otherwise the result says what is known, and the user is told here, so no
+ * caller can present an unconfirmed save as done.
+ */
 export async function saveAndReconnect(): Promise<SaveAndReconnectResult> {
+    const result = await saveOnce();
+    const warning = SAVE_WARNINGS[result.persistence];
+    if (warning) gui_log(i18n.getMessage(warning));
+    return result;
+}
+
+const SAVE_WARNINGS: Record<CliSavePersistence, string | null> = {
+    confirmed: null,
+    not_verified: "gyroflightCliSaveNotVerified",
+    not_saved: "gyroflightRestoreSaveNotSaved",
+    unknown: "gyroflightRestoreSaveNotDelivered",
+};
+
+async function saveOnce(): Promise<SaveAndReconnectResult> {
     try {
         const lines = await sendSave();
-        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): the firmware answered and did
-        // not reset, so it saved only if it said so; no reboot to wait for.
+        // The firmware answered and did not reset, so it saved only if it said so; no reboot to wait for.
         return cliSaveConfirmed(lines)
             ? { ok: true, error: null, persistence: "confirmed" }
             : { ok: false, error: new Error("save: the firmware did not save"), persistence: "not_saved" };
@@ -273,15 +294,15 @@ export async function saveAndReconnect(): Promise<SaveAndReconnectResult> {
         if (deliveredWhole(error)) {
             // The whole command went out and no answer ended it: the port closed (the FC is
             // rebooting) or it timed out. Saved only on the firmware's own word.
-            const persistence = cliSaveConfirmed(outputSoFar(error)) ? "confirmed" : "not_verified";
-            if (persistence === "not_verified") console.warn("save: sent, but the FC did not confirm it saved");
             scheduleReconnect();
-            return { ok: true, error: null, persistence };
+            return cliSaveConfirmed(outputSoFar(error))
+                ? { ok: true, error: null, persistence: "confirmed" }
+                : { ok: false, error: new Error("save: sent, not confirmed by the FC"), persistence: "not_verified" };
         }
         console.error("sendSave failed:", error);
         if (error instanceof WriteRefusedError || Reflect.get(Object(error), "notSent") === true) {
-            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): refused by the write check or never left
-            // the queue; the FC does not reboot, so there is no reconnect to wait for.
+            // Refused by the write check or never left the queue; the FC does not reboot, so there
+            // is no reconnect to wait for.
             return { ok: false, error, persistence: "not_saved" };
         }
         // Part of it may have gone out (it may still reset the FC): the link is set up again.

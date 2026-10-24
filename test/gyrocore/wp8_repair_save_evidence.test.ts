@@ -42,6 +42,11 @@ vi.mock("../../src/js/serial_backend", () => ({
     reinitializeConnection: vi.fn(),
 }));
 
+const log = vi.hoisted(() => ({ gui: vi.fn() }));
+vi.mock("../../src/js/gui_log", () => ({ gui_log: log.gui }));
+// Each message is its key, so the warning a test looks for cannot be an empty text.
+vi.mock("../../src/js/localization", () => ({ i18n: { getMessage: (key: string) => key } }));
+
 import MSP from "../../src/js/msp";
 import { serial } from "../../src/js/serial";
 import { useConnectionStore } from "../../src/stores/connection";
@@ -83,6 +88,7 @@ beforeEach(() => {
     MSP.cli_session_uncertain = false;
     MSP.state = MSP.decoder_states.IDLE;
     reconnect.schedule.mockClear();
+    log.gui.mockClear();
 });
 
 afterEach(() => {
@@ -240,11 +246,27 @@ describe("WP8-F01 MSP CLI save (Presets, Backups): saveAndReconnect", () => {
         expect(reconnect.schedule).toHaveBeenCalledTimes(1);
     });
 
-    it("closed after a delivered save without firmware output: not verified", async () => {
+    it("closed after a delivered save without firmware output: not verified, not ok, and the user is told", async () => {
         const result = saveAndReconnect();
         await settle();
         MSP.disconnect_cleanup();
-        expect(await result).toEqual(expect.objectContaining({ persistence: "not_verified" }));
+        expect(await result).toEqual(expect.objectContaining({ ok: false, persistence: "not_verified" }));
+        expect(log.gui).toHaveBeenCalledWith("gyroflightCliSaveNotVerified");
+    });
+
+    it("a confirmed save tells the user nothing extra (the caller reports its success)", async () => {
+        const result = saveAndReconnect();
+        await settle();
+        feed(SAVE_OUTPUT);
+        MSP.disconnect_cleanup();
+        expect((await result).ok).toBe(true);
+        expect(log.gui).not.toHaveBeenCalled();
+    });
+
+    it("a save not taken whole by the transport is reported to the user", async () => {
+        bytesFor = () => 0;
+        await saveAndReconnect();
+        expect(log.gui).toHaveBeenCalledWith("gyroflightRestoreSaveNotDelivered");
     });
 
     it("a save the transport did not take whole is not reported as accepted; the uncertain link is set up again", async () => {
