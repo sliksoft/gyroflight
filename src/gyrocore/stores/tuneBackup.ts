@@ -49,6 +49,11 @@ export interface TuneBackup {
     snapshot: TuneSnapshot;
     /** Absolute route: every firmware-held PID / PID_ADVANCED / FILTER_CONFIG value and the slider modes. */
     absolute?: AbsoluteSnapshot;
+    /**
+     * Taken by a Restore while the craft held the result of a write nobody verified: kept to show
+     * what was there, never a Restore target (useTuneApply refuses it).
+     */
+    unverified?: true;
 }
 
 function readStorage(): TuneBackup[] {

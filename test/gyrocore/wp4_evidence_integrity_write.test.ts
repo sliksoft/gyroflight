@@ -54,6 +54,11 @@ vi.mock("../../src/js/msp", () => ({
         promise: vi.fn(async (code: number, data?: number[]) =>
             (await import("./harness/mspFirmware")).firmwarePromise(gate.fc, code, data),
         ),
+        // The callback API of upstream's save-and-reboot: recorded, answered at once.
+        send_message: vi.fn((code: number, _data: unknown, _cb: unknown, callback?: () => void) => {
+            gate.fc.calls.push({ code, data: [] });
+            callback?.();
+        }),
     },
 }));
 vi.mock("@/composables/useDialog", () => ({ useDialog: () => ({ showYesNo: async () => true }) }));
@@ -134,6 +139,7 @@ import {
     TRANSACTION_STATE_UNREADABLE,
     TRANSACTION_STORAGE_KEY,
     useFcTransactionStore,
+    type UncertainTransaction,
 } from "../../src/gyrocore/stores/fcTransactionState";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { valuesFromStore } from "../../src/gyrocore/tuning/absoluteTune";
@@ -368,6 +374,21 @@ describe("an unverified outcome blocks every further Apply on that craft", () =>
     });
 });
 
+/** An open entry of this craft as another write (another profile, page or tab) left it. */
+function other(e: Partial<UncertainTransaction>): UncertainTransaction {
+    return {
+        uid: [...gate.fc.uid] as [number, number, number],
+        action: "absolute_apply",
+        stage: "write",
+        saved: "no",
+        backupId: "bk-other",
+        profiles: [1],
+        detail: "",
+        at: "2026-10-24T00:00:00Z",
+        ...e,
+    };
+}
+
 describe("WP8 review: the lock covers what it claims, and only evidence clears it", () => {
     async function uncertainOnProfile0() {
         gate.fc.corruptReplyAfterExecute = new Set([MSPCodes.MSP_EEPROM_WRITE]);
@@ -377,26 +398,18 @@ describe("WP8 review: the lock covers what it claims, and only evidence clears i
         return err;
     }
 
-    it("a Restore of profile 0 clears the entries of profile 0 only, never one a profile switch spread to profile 1", async () => {
+    it("a Restore of profile 0 is refused while an entry a profile switch spread to profile 1 is open: nothing written", async () => {
         const err = await uncertainOnProfile0();
         const states = useFcTransactionStore();
         expect(states.forUid(gate.fc.uid)[0].profiles).toEqual([0]);
-        states.record({
-            uid: [...gate.fc.uid] as [number, number, number],
-            action: "absolute_apply",
-            stage: "write",
-            saved: "no",
-            backupId: "bk-other",
-            profiles: [0, 1],
-            detail: "fc:pid_profile_changed:0->1",
-            at: "2026-10-24T00:00:00Z",
-        });
-        const back = await restoreAbsoluteTune(err.backupId, await confirmRestore(err.backupId));
-        expect(back.status).toBe("verified");
-        expect(states.forUid(gate.fc.uid).map((e) => e.backupId)).toEqual(["bk-other"]);
-        expect((await denial(apply(proposal({ p_roll: 61 })))).reasons).toEqual([
-            "fc:transaction_state_uncertain:bk-other:write:no",
-        ]);
+        const token = await confirmRestore(err.backupId);
+        states.record(other({ backupId: "bk-other", profiles: [0, 1], detail: "fc:pid_profile_changed:0->1" }));
+        gate.fc.calls = [];
+        const refused = await denial(restoreAbsoluteTune(err.backupId, token));
+        expect(refused.reasons).toEqual(["restore:uncertain_state_not_covered:bk-other:write:no"]);
+        // Its EEPROM save would have persisted profile 1's unverified RAM too.
+        expect(writes()).toEqual([]);
+        expect(states.forUid(gate.fc.uid).map((e) => e.backupId)).toEqual(["bk-other", err.backupId]);
     });
 
     it("the transaction is stored as pending before its first SET (a page closed mid-write keeps it)", async () => {
@@ -460,5 +473,162 @@ describe("WP8 review: the lock covers what it claims, and only evidence clears i
             gate.fc.apiVersion,
         );
         for (const key of Object.keys(CHANGE)) expect(now[key]).toBe(live.values[key]);
+    });
+});
+
+describe("WP8 review round 2: Restore covers one profile and one route, and never runs past what it does not cover", () => {
+    async function uncertain() {
+        gate.fc.corruptReplyAfterExecute = new Set([MSPCodes.MSP_EEPROM_WRITE]);
+        const err = await writeFailure(apply(proposal()));
+        gate.fc.corruptReplyAfterExecute = new Set();
+        gate.fc.calls = [];
+        return err;
+    }
+
+    async function refusedRestore(backupId: string, inject: () => void): Promise<ApplyBlockedError> {
+        const token = await confirmRestore(backupId);
+        inject();
+        gate.fc.calls = [];
+        const refused = await denial(restoreAbsoluteTune(backupId, token));
+        expect(writes()).toEqual([]);
+        return refused;
+    }
+
+    it("a page closed mid-write on profile 1 (pending) keeps the craft locked through a Restore of profile 0", async () => {
+        const err = await uncertain();
+        const states = useFcTransactionStore();
+        const refused = await refusedRestore(err.backupId, () =>
+            states.record(other({ id: "tx-p1", stage: "in_progress", saved: "unknown", profiles: [1] })),
+        );
+        expect(refused.reasons).toEqual(["restore:uncertain_state_not_covered:bk-other:in_progress:unknown"]);
+        expect(states.forUid(gate.fc.uid)).toHaveLength(2);
+    });
+
+    it("an entry with unknown profiles (null) is covered by no Restore", async () => {
+        const err = await uncertain();
+        const refused = await refusedRestore(err.backupId, () =>
+            useFcTransactionStore().record(other({ profiles: null, stage: "in_progress", saved: "unknown" })),
+        );
+        expect(refused.reasons).toEqual(["restore:uncertain_state_not_covered:bk-other:in_progress:unknown"]);
+    });
+
+    it("a slider-route entry on the same profile is not covered by the absolute Restore (another route, other blocks)", async () => {
+        const err = await uncertain();
+        const refused = await refusedRestore(err.backupId, () =>
+            useFcTransactionStore().record(other({ action: "apply", profiles: [0] })),
+        );
+        expect(refused.reasons).toEqual(["restore:uncertain_state_not_covered:bk-other:write:no"]);
+    });
+
+    it("a pending entry of profile 0 is covered by a verified Restore of profile 0", async () => {
+        const err = await uncertain();
+        const states = useFcTransactionStore();
+        const token = await confirmRestore(err.backupId);
+        states.record(other({ id: "tx-p0", stage: "in_progress", saved: "unknown", profiles: [0] }));
+        expect((await restoreAbsoluteTune(err.backupId, token)).status).toBe("verified");
+        expect(states.forUid(gate.fc.uid)).toEqual([]);
+    });
+
+    it("the backup a recovery Restore takes of the unverified state is never a Restore target", async () => {
+        const err = await uncertain();
+        const back = await restoreAbsoluteTune(err.backupId, await confirmRestore(err.backupId));
+        expect(back.status).toBe("verified");
+        const taken = useTuneBackupStore().get(back.backupId)!;
+        expect(taken).toMatchObject({ reason: "before_restore", unverified: true });
+        gate.fc.calls = [];
+        // Writing it back would put the unverified (possibly partial) write on the craft again.
+        const refused = await denial(previewAbsoluteRestore(back.backupId));
+        expect(refused.reasons).toEqual(["restore:backup_unverified"]);
+        const token = issueConfirmation({ kind: "restore", backupId: back.backupId, preview: "any" });
+        expect((await denial(restoreAbsoluteTune(back.backupId, token))).reasons).toEqual([
+            "restore:backup_unverified",
+        ]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a Restore on a craft with a known state takes an ordinary backup", async () => {
+        expect((await apply(proposal())).status).toBe("verified");
+        const first = backups()[0];
+        const back = await restoreAbsoluteTune(first.id, await confirmRestore(first.id));
+        expect(useTuneBackupStore().get(back.backupId)?.unverified).toBeUndefined();
+    });
+
+    it("unreadable storage is never overwritten: a Restore refuses, and a new page still finds it unreadable", async () => {
+        expect((await apply(proposal())).status).toBe("verified");
+        const first = backups()[0];
+        const token = await confirmRestore(first.id);
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, "{not json");
+        setActivePinia(createPinia());
+        gate.fc.calls = [];
+        expect((await denial(restoreAbsoluteTune(first.id, token))).reasons).toEqual([TRANSACTION_STATE_UNREADABLE]);
+        expect(writes()).toEqual([]);
+        expect(localStorage.getItem(TRANSACTION_STORAGE_KEY)).toBe("{not json");
+        // Even a record or settle on this page leaves the unreadable storage as it is.
+        useFcTransactionStore().record(other({}));
+        expect(localStorage.getItem(TRANSACTION_STORAGE_KEY)).toBe("{not json");
+        setActivePinia(createPinia());
+        expect(useFcTransactionStore().unreadable).toBe(true);
+    });
+
+    it("storage that turns unreadable after the page loaded (another tab) blocks the next Apply", async () => {
+        useFcTransactionStore();
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, "[1,2]");
+        const next = await denial(apply(proposal()));
+        expect(next.reasons).toEqual([TRANSACTION_STATE_UNREADABLE]);
+        expect(writes()).toEqual([]);
+    });
+
+    it("an entry another tab stored after this page loaded blocks this page's Apply and its upstream saves", async () => {
+        const states = useFcTransactionStore();
+        expect(states.forUid(gate.fc.uid)).toEqual([]);
+        // Tab A's failure, written straight to the shared storage; this page's store never saw it.
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-a" })]));
+        expect((await denial(apply(proposal()))).reasons).toEqual(["fc:transaction_state_uncertain:bk-other:write:no"]);
+        useFlightControllerStore().config.uid = [...gate.fc.uid];
+        await expect(useReboot().saveToEeprom()).rejects.toBeInstanceOf(ApplyBlockedError);
+        expect(writes()).toEqual([]);
+    });
+
+    it("an upstream EEPROM save reads the storage too: another tab's entry refuses it on its own", async () => {
+        useFcTransactionStore();
+        useFlightControllerStore().config.uid = [...gate.fc.uid];
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-a" })]));
+        await expect(useReboot().saveToEeprom()).rejects.toBeInstanceOf(ApplyBlockedError);
+        expect(writes()).toEqual([]);
+    });
+
+    it("this page's next record keeps the entry another tab stored (it starts from the storage, not its cache)", async () => {
+        const states = useFcTransactionStore();
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-a" })]));
+        states.record(other({ id: "tx-b", backupId: "bk-b" }));
+        const stored = JSON.parse(localStorage.getItem(TRANSACTION_STORAGE_KEY)!) as UncertainTransaction[];
+        expect(stored.map((e) => e.id)).toEqual(["tx-b", "tx-a"]);
+    });
+
+    it("the slider Restore covers the slider route's entries of its own profile only", () => {
+        const st = useFcTransactionStore();
+        const uid = [...gate.fc.uid] as [number, number, number];
+        for (const [backupId, action, profiles] of [
+            ["s0", "apply", [0]],
+            ["s1", "apply", [1]],
+            ["sn", "restore", null],
+            ["a0", "absolute_apply", [0]],
+        ] as const) {
+            st.record(other({ backupId, action, profiles: profiles ? [...profiles] : null }));
+        }
+        const ids = (l: UncertainTransaction[]) => l.map((e) => e.backupId).sort();
+        expect(ids(st.notCoveredByRestore(uid, { route: "slider", profile: 0 }))).toEqual(["a0", "s1", "sn"]);
+        expect(st.notCoveredByRestore(uid, { route: "slider", profile: null })).toHaveLength(4);
+        expect(st.resolveByRestore(uid, { route: "slider", profile: 0 })).toBe(true);
+        expect(ids(st.forUid(uid))).toEqual(["a0", "s1", "sn"]);
+    });
+
+    it("save-and-reboot checks again when its delayed EEPROM write goes out", async () => {
+        Object.assign(useFlightControllerStore().config, { uid: [...gate.fc.uid], armingDisabled: true });
+        const saving = useReboot().saveAndReboot();
+        // A Gyroflight write in another tab ends unverified during the 100 ms delay.
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-a" })]));
+        await expect(saving).rejects.toBeInstanceOf(ApplyBlockedError);
+        expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
     });
 });

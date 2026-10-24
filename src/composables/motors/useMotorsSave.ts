@@ -26,6 +26,7 @@ import { mspHelper } from "@/js/msp/MSPHelper";
 import { getTracking } from "@/js/Analytics";
 import { useSaving } from "@/composables/useSaving";
 import { useReboot } from "@/composables/useReboot";
+import { assertNoUncertainWriteOnConnectedCraft } from "@/gyrocore/stores/fcTransactionState";
 import type { MotorsState } from "./useMotorsState";
 
 export interface MotorsSaveOptions {
@@ -90,6 +91,10 @@ export function useMotorsSave({
             stopAllMotors(zeroThrottleValue.value);
             // Give time for motor stop command to be processed
             await new Promise((resolve) => setTimeout(resolve, 100));
+
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): this save writes the shared filter block;
+            // no SET on a craft whose last Gyroflight write ended unverified.
+            assertNoUncertainWriteOnConnectedCraft();
 
             // Send feature config FIRST (for MOTOR_STOP, ESC_SENSOR, 3D features)
             await MSP.promise(MSPCodes.MSP_SET_FEATURE_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_FEATURE_CONFIG));
