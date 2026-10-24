@@ -162,12 +162,8 @@
                             </td>
                             <td>{{ p.averages.now ?? "--" }} / {{ p.averages.needed ?? "--" }}</td>
                             <td>
-                                {{ p.sweep ? `${num(p.sweep.durationS, 0)} × ${p.sweep.repeats}` : "--" }};
-                                {{
-                                    p.qualificationSweep
-                                        ? `${num(p.qualificationSweep.durationS, 0)} × ${p.qualificationSweep.repeats}`
-                                        : "--"
-                                }}
+                                {{ p.sweep ? num(p.sweep.durationS, 0) : "--" }};
+                                {{ p.qualificationSweep ? num(p.qualificationSweep.durationS, 0) : "--" }}
                             </td>
                             <td>{{ p.diagnostics.join(", ") || "--" }}</td>
                         </tr>

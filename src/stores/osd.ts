@@ -35,6 +35,7 @@ import { useDirtyState } from "../composables/useDirtyState";
 import { MspBuffer } from "../js/msp/mspBytes";
 import type { MspResponse } from "../js/msp";
 import { useConnectionStore } from "../stores/connection";
+import { assertNoUncertainWriteOnConnectedCraft } from "@/gyrocore/stores/fcTransactionState";
 
 /** An alarm threshold as `OSD.msp.decode` builds it; only `value` is written back. */
 export interface OsdAlarm {
@@ -538,6 +539,9 @@ export const useOsdStore = defineStore("osd", () => {
 
         await beforePersist?.();
 
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): no save on a craft whose last Gyroflight write
+        // ended unverified; it would write or persist those values.
+        assertNoUncertainWriteOnConnectedCraft();
         await MSP.promise(MSPCodes.MSP_EEPROM_WRITE);
         captureSnapshot(savedSnapshot);
     };

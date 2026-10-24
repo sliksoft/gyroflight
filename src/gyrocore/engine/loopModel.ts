@@ -240,9 +240,11 @@ export const QUALIFICATION_BAND_EXTENSION = 1.5;
  *                        unbounded. Design parameter, not calibrated.
  *   maxCoverageRelErr 0.5  a ±2 ε of half the loop gain or more leaves no meaningful bound.
  *
- * The bounds take the worst of the nominal loop and four corners in which every bin's L is moved by
- * the same signed ±2 ε in gain and in phase (a common error shifts the crossover; per-bin errors that
- * cancel would bound less). Model-dependent: the formula is not validated against repeated flights.
+ * The bounds hold for every loop inside the per-bin uncertainty set (uncertainBounds: each bin's L
+ * within ±2 ε in gain and phase, independently and in either direction, and the resolved-class
+ * allowance between bins): PM over every step where |L| can cross unity, GM over every step whose
+ * phase can reach −180°, |S| from the closest approach of that set to −1. Model-dependent: the
+ * formula is not validated against repeated flights.
  */
 export const UNCERTAINTY = Object.freeze({ coverage: 2, minWelchSegments: 8, maxCoverageRelErr: 0.5 });
 
@@ -788,17 +790,27 @@ export function candidateLoop(loop: AxisLoop, cand: LoopCandidate): LoopPoint[] 
     return out;
 }
 
-/** Identified bins candidateLoop leaves out because their uncertainty is too large. */
-function binsDroppedForUncertainty(loop: AxisLoop): number {
+/** Frequencies of the identified bins candidateLoop leaves out because their uncertainty is too large. */
+function binsDroppedForUncertainty(loop: AxisLoop): number[] {
     const relErr = loop.uncertainty?.relErr;
-    if (!relErr) return 0;
-    let n = 0;
+    if (!relErr) return [];
+    const out: number[] = [];
     for (const b of loop.plant.bins) {
         if (b.status !== "ok" || !b.G || !(b.coherence >= LOOP_MIN_COHERENCE)) continue;
         const err = relErr.get(b.frequencyHz);
-        if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr) n++;
+        if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr) out.push(b.frequencyHz);
     }
-    return n;
+    return out;
+}
+
+/**
+ * Bins left out above the lowest kept one: an unresolved interval inside the band (a poorly
+ * identified resonance would vanish with them), or a band end that moved down. Only the low edge,
+ * where |T·C_fb| ≈ |C_ref| amplifies the error, may drop out.
+ */
+function unidentifiedInsideBand(loop: AxisLoop, pts: LoopPoint[]): string[] {
+    const inside = binsDroppedForUncertainty(loop).filter((f) => pts.length > 0 && f > pts[0].f);
+    return inside.length ? [`unidentified_bins_inside_band:${inside.length}`] : [];
 }
 
 /**
@@ -1010,6 +1022,24 @@ function readLoop(pts: LoopPoint[]): LoopRead {
 const CONTRADICTS_CLASS =
     /^(ambiguous_crossovers|loop_gain_reenters_unity|loop_unresolved_between_bins|identified_band_has_gaps|identified_band_too_coarse|loop_gain_above_one_at_band_end)/;
 
+/**
+ * Distance from −1 to the annular sector {ρ e^{jθ} : ρ ∈ [rhoLo, rhoHi], θ ∈ [thLo, thHi]} (radians,
+ * unwrapped). −1 sits at angle π + 2πm.
+ */
+export function sectorDistanceToMinusOne(rhoLo: number, rhoHi: number, thLo: number, thHi: number): number {
+    const m = Math.round((thLo + thHi) / 2 / (2 * Math.PI) - 0.5);
+    let gap = Infinity;
+    for (const k of [m - 1, m, m + 1]) {
+        const at = Math.PI + 2 * Math.PI * k;
+        gap = Math.min(gap, at < thLo ? thLo - at : at > thHi ? at - thHi : 0);
+    }
+    if (gap === 0) return 1 < rhoLo ? rhoLo - 1 : 1 > rhoHi ? 1 - rhoHi : 0;
+    // Nearest boundary ray, at angle `gap` from −1: the closest point on it within [rhoLo, rhoHi].
+    const g = Math.min(gap, Math.PI);
+    const t = Math.min(rhoHi, Math.max(rhoLo, Math.cos(g)));
+    return Math.sqrt(1 + t * t - 2 * t * Math.cos(g));
+}
+
 /** Bounds of a loop with its measurement uncertainty folded in (UNCERTAINTY); `uncertainty` null: unknown. */
 interface UncertainBounds {
     pm: number;
@@ -1035,28 +1065,97 @@ function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): 
     if (k * maxRelErr >= UNCERTAINTY.maxCoverageRelErr) {
         return unknown([`margin_uncertainty_too_large:${(k * maxRelErr).toFixed(3)}`]);
     }
-    let { pm, gm, sPeak } = nominal;
-    for (const sm of [1, -1]) {
-        for (const sp of [1, -1]) {
-            const moved = pts.map((p) => {
-                const g = 1 + sm * k * p.err!;
-                const a = sp * k * p.err!;
-                return {
-                    ...p,
-                    L: {
-                        re: g * (p.L.re * Math.cos(a) - p.L.im * Math.sin(a)),
-                        im: g * (p.L.re * Math.sin(a) + p.L.im * Math.cos(a)),
-                    },
-                };
-            });
-            const r = readLoop(moved);
-            if (!r.ok || !r.bounded || (r.gm === null) !== (gm === null) || (r.sPeak === null) !== (sPeak === null)) {
-                return unknown(["margin_uncertainty_changes_what_the_bins_show"]);
-            }
-            pm = Math.min(pm, r.pm!);
-            if (gm !== null) gm = Math.min(gm, r.gm!);
-            if (sPeak !== null) sPeak = Math.max(sPeak, r.sPeak!);
+    // Per bin, the true L lies in {L · g · e^{jφ} : |g − 1| ≤ e, |φ| ≤ e} with e = k ε (independent
+    // per bin, any sign): inside the disc of radius |L| δ, δ = |(1 + e) e^{je} − 1| (the farthest
+    // point of that set), with |L| between |L|(1 − e) and |L|(1 + e) and the phase within ±e.
+    // Between two bins the loop stays within the sagitta allowance of the chord between the true
+    // endpoints (the resolved model class), so of the measured chord plus both radii.
+    const n = pts.length;
+    const mag = pts.map((p) => cmag(p.L));
+    const ph = unwrap(pts.map((p) => cphaseDeg(p.L)));
+    const e = pts.map((p) => k * p.err!);
+    const eDeg = e.map((x) => (x * 180) / Math.PI);
+    const r = pts.map(
+        (_, i) => mag[i] * cmag({ re: (1 + e[i]) * Math.cos(e[i]) - 1, im: (1 + e[i]) * Math.sin(e[i]) }),
+    );
+    const chord = (i: number) => cmag({ re: pts[i].L.re - pts[i - 1].L.re, im: pts[i].L.im - pts[i - 1].L.im });
+    const allowance = (i: number) => BIN_SAGITTA * (chord(i) + r[i - 1] + r[i]) + Math.max(r[i - 1], r[i]);
+
+    // The band end must stay below unity and below the gain-margin target over the whole set.
+    if (mag[n - 1] * (1 + e[n - 1]) >= 10 ** (BAND_END.maxBandEndDb / 20)) {
+        return unknown(["margin_uncertainty_band_end_not_bounded"]);
+    }
+    // PM: on every step, the stretch t ∈ [0, 1] where |L| can be at unity (between bins |L| is read
+    // in dB along the step, as readLoop does, here for the low and the high end of the set); the
+    // phase there, less its ±e. Those steps must form one run (one crossing).
+    const db = (x: number) => 20 * Math.log10(x);
+    const crossing: { i: number; phase: number }[] = [];
+    for (let i = 1; i < n; i++) {
+        const up = [db(mag[i - 1] * (1 + e[i - 1])), db(mag[i] * (1 + e[i]))];
+        const lo = [db(mag[i - 1] * (1 - e[i - 1])), db(mag[i] * (1 - e[i]))];
+        // {t : up(t) ≥ 0 and lo(t) ≤ 0} for two linear functions on [0, 1].
+        let t0 = 0;
+        let t1 = 1;
+        for (const [g, sign] of [
+            [up, 1],
+            [lo, -1],
+        ] as const) {
+            const a0 = sign * g[0];
+            const a1 = sign * g[1];
+            if (a0 < 0 && a1 < 0) t1 = -1;
+            else if (a0 < 0) t0 = Math.max(t0, a0 / (a0 - a1));
+            else if (a1 < 0) t1 = Math.min(t1, a0 / (a0 - a1));
         }
+        if (t0 > t1) continue;
+        const at = (t: number) => ph[i - 1] + t * (ph[i] - ph[i - 1]);
+        crossing.push({ i, phase: Math.min(at(t0), at(t1)) - Math.max(eDeg[i - 1], eDeg[i]) });
+    }
+    if (!crossing.length || crossing.some((c, j) => j > 0 && c.i !== crossing[j - 1].i + 1)) {
+        return unknown(["margin_uncertainty_changes_what_the_bins_show:unity_crossings"]);
+    }
+    const pm = Math.min(nominal.pm, ...crossing.map((c) => 180 + c.phase));
+    // GM: every step whose phase range (± e) reaches −180° − 360° m, and the tail's headroom.
+    let gm = nominal.gm;
+    if (gm !== null) {
+        let worst = 0;
+        for (let i = 1; i < n; i++) {
+            const lo = Math.min(ph[i - 1], ph[i]) - Math.max(eDeg[i - 1], eDeg[i]);
+            const hi = Math.max(ph[i - 1], ph[i]) + Math.max(eDeg[i - 1], eDeg[i]);
+            if (Math.ceil((lo + 180) / 360) * 360 - 180 <= hi) {
+                worst = Math.max(worst, Math.max(mag[i - 1] * (1 + e[i - 1]), mag[i] * (1 + e[i])) + allowance(i));
+            }
+        }
+        const tailFrom = pts[n - 1].f - BAND_END.tailFraction * (pts[n - 1].f - pts[0].f);
+        for (let i = 0; i < n; i++) if (pts[i].f >= tailFrom) worst = Math.max(worst, mag[i] * (1 + e[i]));
+        if (!(worst < 1)) return unknown(["margin_uncertainty_changes_what_the_bins_show:phase_crossover"]);
+        gm = Math.min(gm, -20 * Math.log10(worst));
+    }
+    // |S|: the closest any point of the set (and between the bins) can come to −1. Two lower bounds
+    // of that distance per step, the larger kept (both hold): the measured chord less the discs
+    // around its ends, and the annular sector that holds both ends' sets and the chord between them
+    // (tighter where |L| is large and its disc wide).
+    let sPeak = nominal.sPeak;
+    if (sPeak !== null) {
+        let closest = Infinity;
+        const rad = (x: number) => (x * Math.PI) / 180;
+        for (let i = 1; i < n; i++) {
+            const a = { re: pts[i - 1].L.re + 1, im: pts[i - 1].L.im };
+            const d = { re: pts[i].L.re - pts[i - 1].L.re, im: pts[i].L.im - pts[i - 1].L.im };
+            const dd = d.re * d.re + d.im * d.im;
+            const t = dd > 0 ? Math.min(1, Math.max(0, -(a.re * d.re + a.im * d.im) / dd)) : 0;
+            const byDisc = Math.hypot(a.re + t * d.re, a.im + t * d.im) - allowance(i);
+            const thLo = Math.min(rad(ph[i - 1]) - e[i - 1], rad(ph[i]) - e[i]);
+            const thHi = Math.max(rad(ph[i - 1]) + e[i - 1], rad(ph[i]) + e[i]);
+            const span = thHi - thLo;
+            const rhoLo =
+                span >= Math.PI ? 0 : Math.min(mag[i - 1] * (1 - e[i - 1]), mag[i] * (1 - e[i])) * Math.cos(span / 2);
+            const rhoHi = Math.max(mag[i - 1] * (1 + e[i - 1]), mag[i] * (1 + e[i]));
+            const bySector =
+                sectorDistanceToMinusOne(rhoLo, rhoHi, thLo, thHi) - BIN_SAGITTA * (chord(i) + r[i - 1] + r[i]);
+            closest = Math.min(closest, Math.max(byDisc, bySector));
+        }
+        if (!(closest > 0)) return unknown(["margin_uncertainty_changes_what_the_bins_show:sensitivity"]);
+        sPeak = Math.max(sPeak, 20 * Math.log10(1 / closest));
     }
     return {
         pm,
@@ -1116,7 +1215,10 @@ function qualifyModelClass(
             insufficient.push(...fine.reasons.map((x) => `qualification:${x}`));
         }
         // The qualification's margins carry their own uncertainty, as the primary's do.
-        fb = fine.bounded ? uncertainBounds(finePts, fine, q.uncertainty) : null;
+        const qLoop = { ...loop, plant: q.plant, uncertainty: q.uncertainty };
+        const fineHoles = unidentifiedInsideBand(qLoop, finePts);
+        insufficient.push(...fineHoles.map((x) => `qualification:${x}`));
+        fb = fine.bounded && !fineHoles.length ? uncertainBounds(finePts, fine, q.uncertainty) : null;
         if (fb && !fb.uncertainty) insufficient.push(...fb.reasons.map((x) => `qualification:${x}`));
         const fpm = fb?.pm ?? fine.pm!;
         const fgm = fb ? fb.gm : fine.gm;
@@ -1195,8 +1297,11 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     let pm = read.pm!;
     let gm = read.gm;
     let sPeak = read.sPeak;
-    // The measurement uncertainty widens the bounds; unknown uncertainty leaves no bounds.
-    const ub = read.bounded ? uncertainBounds(pts, read, loop.uncertainty) : null;
+    // The measurement uncertainty widens the bounds; unknown uncertainty, or bins left out as
+    // unidentified inside the band, leave no bounds.
+    const holes = unidentifiedInsideBand(loop, pts);
+    reasons.push(...holes);
+    const ub = read.bounded && !holes.length ? uncertainBounds(pts, read, loop.uncertainty) : null;
     if (ub && !ub.uncertainty) reasons.push(...ub.reasons);
     if (!read.bounded || !ub?.uncertainty) {
         evidence.level = "MEASURED";
@@ -1208,7 +1313,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         pm = ub.pm;
         gm = ub.gm;
         sPeak = ub.sPeak;
-        evidence.uncertainty = { ...ub.uncertainty, droppedBins: binsDroppedForUncertainty(loop) };
+        evidence.uncertainty = { ...ub.uncertainty, droppedBins: binsDroppedForUncertainty(loop).length };
         const width = RESOLVED_FEATURE_BINS * read.resolutionHz!;
         evidence.level = "MODEL_CONDITIONAL";
         evidence.minFeatureWidthHz = width;

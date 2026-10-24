@@ -391,11 +391,18 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     const qualificationRejected = qLog
         ? crossLogReferenceIssues(log, qLog, input.others).map((r) => `model_class_qualification_rejected:${r}`)
         : [];
+    const qualificationAxisRejected: string[] = [];
     const qualificationFor = (name: AxisName, ai: 0 | 1 | 2) => {
         const qc = qLog && !qualificationRejected.length ? qLog.chirp[name] : undefined;
         if (!qLog || !qc || qc.state !== "usable") return null;
         const qh = headerMap(qLog.headerPairs);
         const qctl = analyzeAxisController(qLog, qh, ai, qc, flightMask(qLog.channels.rcThrottle));
+        // Its plant rests on the controller reconstructed for that flight: with a D path, only when
+        // the logged D term validated it (as the primary's model quality requires).
+        if (qctl?.dterm && !qctl.accepted) {
+            qualificationAxisRejected.push(`model_class_qualification_rejected:dterm_path_not_validated:${name}`);
+            return null;
+        }
         return qctl
             ? {
                   tf: qc.tf,
@@ -783,6 +790,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                     ...measurementPlan.flatMap((p) => p.requiredMeasurements),
                 ]),
                 ...qualificationRejected,
+                ...qualificationAxisRejected,
                 ...(attested ? [] : ["required_measurement:gain_change_chirp_flight_plus_baseline_repeat"]),
             ],
         ),

@@ -85,7 +85,11 @@ import {
     type TuneSnapshot,
 } from "@/gyrocore/tuning/tuneSnapshot";
 import { newBackupId, sameUid, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
-import { useFcTransactionStore, type UncertainTransaction } from "@/gyrocore/stores/fcTransactionState";
+import {
+    TRANSACTION_STATE_NOT_STORED,
+    useFcTransactionStore,
+    type UncertainTransaction,
+} from "@/gyrocore/stores/fcTransactionState";
 import {
     MIN_ABSOLUTE_API,
     SLIDER_MODE_KEYS,
@@ -320,11 +324,13 @@ function eepromReplyState(reply: MspReply): "saved" | "no" | "unknown" {
  * After the write was sent: read back, compare, save only when everything matches, and read
  * again after the save (the firmware reloads and validates its config there).
  */
-async function verifyAndSave(expected: TuneSnapshot, backupId: string): Promise<TuneSnapshot> {
+async function verifyAndSave(expected: TuneSnapshot, backupId: string, backup: TuneSnapshot): Promise<TuneSnapshot> {
     let readback: TuneSnapshot;
     try {
         readback = await readSnapshot("fc:verify_readback_missing");
     } catch (err) {
+        // Unread: the shared store keeps no value of this write (the PID tab's Save would send it).
+        loadStore(backup);
         throw new TuneWriteError("verify", "no", backupId, errorText(err));
     }
     const mismatches = snapshotMismatches(expected, readback);
@@ -374,38 +380,89 @@ function assertTransactionStateKnown(uid: readonly number[] | null | undefined):
     }
 }
 
+/** One write transaction's record in fcTransactionState: begun right before its first SET. */
+interface Transaction {
+    /**
+     * Store the transaction as pending (read back) right after the backup and before the first SET;
+     * throws, so no SET is sent, when the browser does not keep it.
+     */
+    begin(uid: [number, number, number] | null, backupId: string, profiles: number[] | null): void;
+}
+
 /**
- * Runs one write transaction; a failure after its first SET is recorded as an uncertain state of
- * the craft the backup was taken from (the error is rethrown unchanged). A verified Restore makes
- * the craft's state known again.
+ * Runs one write transaction. Once begun, it is pending in fcTransactionState; at the end the entry
+ * is removed (verified, or stopped before the first SET) or replaced by the failure, with the PID
+ * profiles it may have changed (a profile switch adds the other one). A verified Restore then
+ * resolves the earlier entries it covers (fcTransactionState.resolveByRestore), never more.
  */
-async function transaction<T>(action: UncertainTransaction["action"], run: () => Promise<T>): Promise<T> {
+async function transaction<T extends { backupId: string }>(
+    action: UncertainTransaction["action"],
+    run: (tx: Transaction) => Promise<T>,
+): Promise<T> {
+    const states = useFcTransactionStore();
+    // A holder, not a variable: begin() assigns it from a closure.
+    const rec: { begun: { id: string; uid: [number, number, number]; profiles: number[] | null } | null } = {
+        begun: null,
+    };
+    const tx: Transaction = {
+        begin(uid, backupId, profiles) {
+            if (!uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
+            const id = `tx-${newBackupId().slice(3)}`;
+            const ok = states.recordPending({
+                id,
+                uid,
+                action,
+                stage: "in_progress",
+                saved: "unknown",
+                backupId,
+                profiles,
+                detail: "",
+                at: new Date().toISOString(),
+            });
+            if (!ok) throw new ApplyBlockedError([TRANSACTION_STATE_NOT_STORED]);
+            rec.begun = { id, uid, profiles };
+        },
+    };
     try {
-        const result = await run();
-        if (action === "restore" || action === "absolute_restore") {
-            // Written, read back, saved and read again: the craft the backup belongs to is known.
-            const uid = useTuneBackupStore().get((result as { backupId: string }).backupId)?.uid;
-            if (uid) useFcTransactionStore().resolve(uid);
+        const result = await run(tx);
+        const b = rec.begun;
+        if (b) {
+            states.settle(b.id, null);
+            // Written, read back, saved and read again: what this Restore covers is known again.
+            if (action === "absolute_restore" && b.profiles?.length === 1) {
+                states.resolveByRestore(b.uid, { route: "absolute", profile: b.profiles[0] });
+            } else if (action === "restore") {
+                states.resolveByRestore(b.uid, { route: "slider" });
+            }
         }
         return result;
     } catch (err) {
-        if (err instanceof TuneWriteError && err.stage !== "prepare") {
-            const uid = useTuneBackupStore().get(err.backupId)?.uid ?? useFlightControllerStore().config.uid;
-            if (Array.isArray(uid) && uid.length === 3) {
-                useFcTransactionStore().record({
-                    uid: [uid[0], uid[1], uid[2]],
+        const b = rec.begun;
+        if (b) {
+            if (err instanceof TuneWriteError && err.stage !== "prepare") {
+                const sw = profileSwitchOf(err.message);
+                const profiles =
+                    b.profiles && sw ? (sw.to === null ? null : [...new Set([...b.profiles, sw.to])]) : b.profiles;
+                states.settle(b.id, {
+                    uid: b.uid,
                     action,
                     stage: err.stage,
                     saved: err.saved,
                     backupId: err.backupId,
+                    profiles,
                     detail: err.message,
                     at: new Date().toISOString(),
                 });
+            } else {
+                states.settle(b.id, null);
             }
         }
         throw err;
     }
 }
+
+const uid3 = (u: readonly number[] | null | undefined): [number, number, number] | null =>
+    Array.isArray(u) && u.length === 3 ? [u[0], u[1], u[2]] : null;
 
 function assertConnectedReal() {
     if (useConnectionStore().virtualMode) {
@@ -493,10 +550,11 @@ export async function applyTune(
     compositeId: string | null | undefined,
     confirmation: string | null | undefined,
 ): Promise<TuneWriteResult> {
-    return transaction("apply", () => applyTuneOnce(proposed, compositeId, confirmation));
+    return transaction("apply", (tx) => applyTuneOnce(tx, proposed, compositeId, confirmation));
 }
 
 async function applyTuneOnce(
+    tx: Transaction,
     proposed: ProposedSliders,
     compositeId: string | null | undefined,
     confirmation: string | null | undefined,
@@ -526,6 +584,7 @@ async function applyTuneOnce(
 
     // 5. Backup, then the write itself.
     const backup = storeBackup("before_apply", fc, before, composite.id);
+    tx.begin(uid3(fc.uid), backup.id, null);
     const fcStore = useFlightControllerStore();
     loadStore(before);
     // Object.keys widens to string[]; the keys are the proposal's own slider fields.
@@ -550,7 +609,7 @@ async function applyTuneOnce(
     }
 
     // 6. Read back, compare with the firmware's own calculation, save only on a full match.
-    const after = await verifyAndSave(expected, backup.id);
+    const after = await verifyAndSave(expected, backup.id, before);
     return { status: "verified", backupId: backup.id, expected, readback: after };
 }
 
@@ -615,10 +674,14 @@ export async function previewRestore(backupId: string): Promise<RestorePreview> 
 
 /** Write a stored backup back to the craft it was taken from, then verify and save. */
 export async function restoreTune(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
-    return transaction("restore", () => restoreTuneOnce(backupId, confirmation));
+    return transaction("restore", (tx) => restoreTuneOnce(tx, backupId, confirmation));
 }
 
-async function restoreTuneOnce(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
+async function restoreTuneOnce(
+    tx: Transaction,
+    backupId: string,
+    confirmation: string | null | undefined,
+): Promise<TuneWriteResult> {
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readRestoreTarget(backupId);
     const target = backup.snapshot;
@@ -626,6 +689,7 @@ async function restoreTuneOnce(backupId: string, confirmation: string | null | u
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, current, null);
+    tx.begin(uid3(fc.uid), safety.id, null);
 
     const fcStore = useFlightControllerStore();
     loadStore({ ...current, sliders: target.sliders, filters: target.filters });
@@ -654,7 +718,7 @@ async function restoreTuneOnce(backupId: string, confirmation: string | null | u
     } catch (err) {
         throw new TuneWriteError("write", "no", safety.id, errorText(err));
     }
-    const after = await verifyAndSave(target, safety.id);
+    const after = await verifyAndSave(target, safety.id, current);
     return { status: "verified", backupId: safety.id, expected: target, readback: after };
 }
 
@@ -869,6 +933,8 @@ async function verifyAbsoluteAndSave(
     try {
         readback = await readAbsoluteSnapshot("fc:verify_readback_missing", expected.apiVersion, profile);
     } catch (err) {
+        // Unread: the shared store keeps no value of this write (the PID tab's Save would send it).
+        putBackInStore(backup);
         throw new TuneWriteError("verify", "no", backupId, errorText(err), [], null);
     }
     const mismatches = absoluteMismatches(expected, readback);
@@ -996,10 +1062,11 @@ export async function applyAbsoluteTune(
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
-    return transaction("absolute_apply", () => applyAbsoluteTuneOnce(proposal, confirmation));
+    return transaction("absolute_apply", (tx) => applyAbsoluteTuneOnce(tx, proposal, confirmation));
 }
 
 async function applyAbsoluteTuneOnce(
+    tx: Transaction,
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
@@ -1036,6 +1103,7 @@ async function applyAbsoluteTuneOnce(
     const recheck = () => assertAbsoluteWriteAuthorized(authorized, { recompute: false, since });
     recheck();
     const backup = storeBackup("before_absolute_apply", fc, v1Snapshot(), null, before);
+    tx.begin(uid3(fc.uid), backup.id, [before.pidProfile!]);
     await writeAbsoluteBlocks(before, expected, before, backup.id, false, recheck);
     const verified = await verifyAbsoluteAndSave(expected, before, backup.id);
     return { status: "verified", backupId: backup.id, expected, ...verified };
@@ -1105,10 +1173,11 @@ export async function restoreAbsoluteTune(
     backupId: string,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
-    return transaction("absolute_restore", () => restoreAbsoluteTuneOnce(backupId, confirmation));
+    return transaction("absolute_restore", (tx) => restoreAbsoluteTuneOnce(tx, backupId, confirmation));
 }
 
 async function restoreAbsoluteTuneOnce(
+    tx: Transaction,
     backupId: string,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
@@ -1119,6 +1188,7 @@ async function restoreAbsoluteTuneOnce(
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current);
+    tx.begin(uid3(fc.uid), safety.id, [current.pidProfile!]);
     await writeAbsoluteBlocks(current, target, current, safety.id, true);
     const verified = await verifyAbsoluteAndSave(target, current, safety.id);
     return { status: "verified", backupId: safety.id, expected: target, ...verified };
@@ -1173,7 +1243,7 @@ export async function checkTransactionState(): Promise<TransactionStateCheck> {
     }
     if (!open.length) return { resolved: true, reasons: [] };
     if (reasons.length) return { resolved: false, reasons };
-    return states.resolve(fc.uid)
+    return states.resolveEntries(open)
         ? { resolved: true, reasons: [] }
         : { resolved: false, reasons: ["state:not_stored"] };
 }

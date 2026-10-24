@@ -28,7 +28,7 @@
 
 import { describe, expect, it } from "vitest";
 import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
-import { finestWelchSegment } from "../../src/gyrocore/engine/logInput";
+import { crossLogReferenceIssues, finestWelchSegment } from "../../src/gyrocore/engine/logInput";
 import { assessModelQualification, qualificationCandidates } from "../../src/gyrocore/engine/modelQualification";
 import { UNCERTAINTY } from "../../src/gyrocore/engine/loopModel";
 import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
@@ -145,4 +145,44 @@ describe("the producer picks an independent flight and lets the engine decide", 
         for (const m of Object.values(r.margins)) expect(m!.current.evidence.level).toBe("MODEL_CONDITIONAL");
         expect(r.releasableProposal).toBeNull();
     }, 600_000);
+});
+
+describe("WP8 review: what a qualification flight must itself show", () => {
+    it("its controller must be reconstructed with a validated D path (no logged D term: not used)", () => {
+        const noD = { ...QUAL, sha256: "f6".repeat(32), channels: { ...QUAL.channels, axisD: null } };
+        const r = runAutotuneV2({ primary, others: [], verifiedTune: null, modelClassQualification: noD });
+        const part = r.parts.find((p) => p.part === "phase_margin_robustness")!;
+        expect(part.reasons).toContain("model_class_qualification_rejected:dterm_path_not_validated:roll");
+        expect(r.margins.roll!.current.evidence.qualification).toBeNull();
+    }, 600_000);
+
+    it("its finer analysis must itself be coherent over the sweep (not only the standard one)", () => {
+        const incoherent = {
+            ...QUAL,
+            sha256: "a7".repeat(32),
+            chirp: Object.fromEntries(
+                Object.entries(QUAL.chirp).map(([a, c]) => {
+                    const tf = { ...c!.fine!.tf, coherence: c!.fine!.tf.coherence.map(() => 0.5) };
+                    return [a, { ...c!, fine: { tf, analysis: c!.fine!.analysis } }];
+                }),
+            ),
+        };
+        const { all } = qualificationCandidates({ primary, others: [incoherent as AutotuneLogInput] });
+        expect(all[0].rejected.some((r) => r.startsWith("qualification_axis_fine_analysis_not_coherent:roll:"))).toBe(
+            true,
+        );
+    });
+
+    it("the whole configuration the models read must match (e.g. rpm_filter_lpf_hz, gyro_lpf1_dyn_expo)", () => {
+        for (const [key, value] of [
+            ["rpm_filter_lpf_hz", "77"],
+            ["gyro_lpf1_dyn_expo", "9"],
+        ] as const) {
+            const other = {
+                ...QUAL,
+                headerPairs: [...QUAL.headerPairs.filter(([k]) => k !== key), [key, value] as const],
+            };
+            expect(crossLogReferenceIssues(primary, other)).toContain(`cross_log_config_differs:${key}`);
+        }
+    });
 });

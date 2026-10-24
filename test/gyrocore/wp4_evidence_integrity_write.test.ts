@@ -130,10 +130,17 @@ import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import {
+    TRANSACTION_STATE_NOT_STORED,
     TRANSACTION_STATE_UNREADABLE,
     TRANSACTION_STORAGE_KEY,
     useFcTransactionStore,
 } from "../../src/gyrocore/stores/fcTransactionState";
+import { useFlightControllerStore } from "../../src/stores/fc";
+import { valuesFromStore } from "../../src/gyrocore/tuning/absoluteTune";
+import { usePidTuningMsp } from "../../src/composables/pidTuning/usePidTuningMsp";
+import { useReboot } from "../../src/composables/useReboot";
+
+const localStorageSet = Storage.prototype.setItem;
 
 import type { AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
 import type { AutotuneLogInput, AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
@@ -358,5 +365,100 @@ describe("an unverified outcome blocks every further Apply on that craft", () =>
         const err = await writeFailure(apply(proposal()));
         expect(err.stage).toBe("prepare");
         expect(useFcTransactionStore().forUid(gate.fc.uid)).toEqual([]);
+    });
+});
+
+describe("WP8 review: the lock covers what it claims, and only evidence clears it", () => {
+    async function uncertainOnProfile0() {
+        gate.fc.corruptReplyAfterExecute = new Set([MSPCodes.MSP_EEPROM_WRITE]);
+        const err = await writeFailure(apply(proposal()));
+        gate.fc.corruptReplyAfterExecute = new Set();
+        gate.fc.calls = [];
+        return err;
+    }
+
+    it("a Restore of profile 0 clears the entries of profile 0 only, never one a profile switch spread to profile 1", async () => {
+        const err = await uncertainOnProfile0();
+        const states = useFcTransactionStore();
+        expect(states.forUid(gate.fc.uid)[0].profiles).toEqual([0]);
+        states.record({
+            uid: [...gate.fc.uid] as [number, number, number],
+            action: "absolute_apply",
+            stage: "write",
+            saved: "no",
+            backupId: "bk-other",
+            profiles: [0, 1],
+            detail: "fc:pid_profile_changed:0->1",
+            at: "2026-10-24T00:00:00Z",
+        });
+        const back = await restoreAbsoluteTune(err.backupId, await confirmRestore(err.backupId));
+        expect(back.status).toBe("verified");
+        expect(states.forUid(gate.fc.uid).map((e) => e.backupId)).toEqual(["bk-other"]);
+        expect((await denial(apply(proposal({ p_roll: 61 })))).reasons).toEqual([
+            "fc:transaction_state_uncertain:bk-other:write:no",
+        ]);
+    });
+
+    it("the transaction is stored as pending before its first SET (a page closed mid-write keeps it)", async () => {
+        let pendingAtFirstSet: unknown = null;
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (pendingAtFirstSet === null && FIRMWARE_WRITE_CODES.has(code)) {
+                pendingAtFirstSet = JSON.parse(localStorage.getItem(TRANSACTION_STORAGE_KEY) ?? "[]");
+            }
+            return false;
+        };
+        expect((await apply(proposal())).status).toBe("verified");
+        expect(pendingAtFirstSet).toEqual([expect.objectContaining({ stage: "in_progress", saved: "unknown" })]);
+        // Settled: nothing left once verified.
+        expect(useFcTransactionStore().forUid(gate.fc.uid)).toEqual([]);
+    });
+
+    it("no SET when the browser does not keep the pending entry", async () => {
+        const p = proposal();
+        const token = await confirm(p);
+        // The browser refuses this one key (a full quota); everything else is stored as usual.
+        const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+            if (key === TRANSACTION_STORAGE_KEY) throw new Error("quota");
+            localStorageSet.call(this, key, value);
+        });
+        try {
+            const err = await denial(applyAbsoluteTune(p, token));
+            expect(err.reasons).toEqual([TRANSACTION_STATE_NOT_STORED]);
+        } finally {
+            spy.mockRestore();
+        }
+        expect(writes()).toEqual([]);
+    });
+
+    it("the shared upstream saves refuse on that craft: the PID tab's write and the EEPROM save", async () => {
+        await uncertainOnProfile0();
+        useFlightControllerStore().config.uid = [...gate.fc.uid];
+        await expect(usePidTuningMsp().writePidTuningConfig()).rejects.toBeInstanceOf(ApplyBlockedError);
+        await expect(useReboot().saveToEeprom()).rejects.toBeInstanceOf(ApplyBlockedError);
+        expect(writes()).toEqual([]);
+    });
+
+    it("a verify read that fails after the SETs leaves the backup's values in the shared store, not the proposal's", async () => {
+        const p = proposal();
+        const live = (await previewAbsoluteTune(p)).before;
+        gate.fc.calls = [];
+        let sets = 0;
+        gate.fc.disconnectWhen = (_fc, code) => {
+            if (FIRMWARE_WRITE_CODES.has(code)) sets++;
+            // The link drops on the first read after the last SET of the write.
+            return sets >= 3 && code === MSPCodes.MSP_PID;
+        };
+        const err = await writeFailure(apply(p));
+        expect(err.stage).toBe("verify");
+        const fc = useFlightControllerStore();
+        const now = valuesFromStore(
+            {
+                pids: fc.pids,
+                advancedTuning: fc.advancedTuning as unknown as Record<string, unknown>,
+                filterConfig: fc.filterConfig as unknown as Record<string, unknown>,
+            },
+            gate.fc.apiVersion,
+        );
+        for (const key of Object.keys(CHANGE)) expect(now[key]).toBe(live.values[key]);
     });
 });
