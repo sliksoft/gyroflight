@@ -117,6 +117,16 @@ export function buildLogInputs(
                 end: firstAtOrAfter(t, m.endTimeUs),
                 state: m.state,
                 qualificationReasons: m.apply.blocked.filter((r) => r.startsWith("measurement:")),
+                ...(m.segmentSize && m.sampleRate.effectiveRateHz
+                    ? {
+                          analysis: {
+                              segmentSamples: m.segmentSize,
+                              sampleRateHz: m.sampleRate.effectiveRateHz,
+                              windowSamples: m.sampleCount,
+                              segments: m.diagnostics!.transferFunction.numSegments,
+                          },
+                      }
+                    : {}),
             };
         }
         const iterations = ch.loopIteration;

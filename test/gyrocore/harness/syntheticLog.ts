@@ -110,6 +110,14 @@ export interface SyntheticLogOptions {
     plantScale?: number;
     /** Step of the identified CHIRP bins, 1–100 Hz (default 0.5 Hz). */
     binStepHz?: number;
+    /** Highest identified bin (default 100 Hz). */
+    maxHz?: number;
+    /**
+     * SIMULATION: the Welch analysis the bins claim to come from (segment samples follow from the
+     * bin step; every axis' sweep window then spans `windowS` seconds, the axes' windows
+     * overlapping); without it the transfer function carries no analysis provenance.
+     */
+    welch?: { segments: number; windowS: number };
 }
 
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
@@ -160,8 +168,12 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         return Float64Array.from(sd.d, (v) => (Number.isFinite(v) ? v : 0));
     });
     const step = o.binStepHz ?? 0.5;
-    const freqs = Array.from({ length: Math.round(99 / step) + 1 }, (_, i) => 1 + i * step);
-    const sweep = (k: number) => ({ start: Math.round((1 + 3.3 * k) * FS), end: Math.round((4 + 3.3 * k) * FS) });
+    const maxHz = o.maxHz ?? 100;
+    const freqs = Array.from({ length: Math.round((maxHz - 1) / step) + 1 }, (_, i) => 1 + i * step);
+    const sweep = (k: number) =>
+        o.welch
+            ? { start: Math.round(0.5 * FS), end: Math.round((0.5 + o.welch.windowS) * FS) }
+            : { start: Math.round((1 + 3.3 * k) * FS), end: Math.round((4 + 3.3 * k) * FS) };
     const log: AutotuneLogInput = {
         sha256,
         logIndex: 0,
@@ -208,7 +220,22 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
                 im: g * (T.re * Math.sin(ph) + T.im * Math.cos(ph)),
             };
         });
-        log.chirp[name] = { tf, ...w, state: "usable" };
+        if (o.welch) tf.numSegments = o.welch.segments;
+        log.chirp[name] = {
+            tf,
+            ...w,
+            state: "usable",
+            ...(o.welch
+                ? {
+                      analysis: {
+                          segmentSamples: Math.round(FS / step),
+                          sampleRateHz: FS,
+                          windowSamples: w.end - w.start,
+                          segments: o.welch.segments,
+                      },
+                  }
+                : {}),
+        };
     });
     return log;
 }
@@ -217,7 +244,18 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
  * SIMULATION ONLY: a synthetic second flight of the same craft and tune, identified on 0.1 Hz bins,
  * standing in for the model-class qualification log (autotuneV2 modelClassQualification) in
  * software-contract tests. It is no real measurement and never AIR65 or any other flight evidence.
+ * Its band reaches 160 Hz (QUALIFICATION_BAND_EXTENSION × the primary's 100 Hz, and more), and
+ * its bins claim the Welch analysis that 0.1 Hz takes: 40 000-sample segments, 8 of them at 50 %
+ * overlap, so a 45 s sweep window, which the log holds.
  */
-export function simulatedQualificationLog(opts: Omit<SyntheticLogOptions, "binStepHz"> = {}): AutotuneLogInput {
-    return syntheticLogInput("5a".repeat(32), { ...opts, binStepHz: 0.1 });
+export function simulatedQualificationLog(
+    opts: Omit<SyntheticLogOptions, "binStepHz" | "maxHz" | "welch"> = {},
+): AutotuneLogInput {
+    return syntheticLogInput("5a".repeat(32), {
+        seconds: 46,
+        ...opts,
+        binStepHz: 0.1,
+        maxHz: 160,
+        welch: { segments: 8, windowS: 45 },
+    });
 }

@@ -38,10 +38,18 @@ export function simulatedQualifiedEvidence(pm: number, gm: number, s: number, re
         bandHz: [1, 100],
         minFeatureWidthHz: RESOLVED_FEATURE_BINS * resolutionHz,
         assumptions: ["simulation_only_not_flight_evidence"],
+        // The bounds include a (simulated) measurement uncertainty, as the release contract requires.
+        uncertainty: {
+            coverage: 2,
+            averages: [1, 1],
+            maxRelErr: 0.01,
+            nominal: { phaseMarginDeg: pm, gainMarginDb: gm, sensitivityPeakDb: s },
+        },
         qualification: {
             source: { sha256: SIMULATED_QUALIFICATION_SHA, logIndex: 0 },
             resolutionHz: fine,
-            bandHz: [1, 100],
+            // QUALIFICATION_BAND_EXTENSION × the band end and more (audit P1-2).
+            bandHz: [1, 160],
             verdict: "PASS",
             phaseMarginDeg: pm,
             gainMarginDb: gm,

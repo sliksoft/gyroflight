@@ -933,6 +933,23 @@
         "message": "a CHIRP flight with changed PIDs plus a repeat with the current PIDs"
     },
     "gyroflightV2Need_second_chirp_flight_same_tune": { "message": "a second CHIRP flight with the same tune" },
+    "gyroflightV2Need_chirp_covering_the_crossover": {
+        "message": "a CHIRP sweep whose identified band contains the loop crossover"
+    },
+    "gyroflightV2Need_chirp_repeats_or_longer_sweep_for_averages": {
+        "message": "more averages at the crossover: repeated CHIRP sweeps or a longer sweep (see the measurement plan)"
+    },
+    "gyroflightV2PlanTitle": { "message": "Measurement plan for the next CHIRP flight (informative)" },
+    "gyroflightV2PlanHelp": {
+        "message": "Derived from this flight's own loop: the band, frequency resolution, Welch segment length and averages the margin evidence needs, and what the data show. Model-dependent figures; they release nothing."
+    },
+    "gyroflightV2PlanAxis": { "message": "Axis" },
+    "gyroflightV2PlanBand": { "message": "Band (Hz)" },
+    "gyroflightV2PlanResolution": { "message": "Resolution now / needed / qualification (Hz)" },
+    "gyroflightV2PlanSegment": { "message": "Segment (samples)" },
+    "gyroflightV2PlanAverages": { "message": "Averages now / needed" },
+    "gyroflightV2PlanSweep": { "message": "Sweep (s) / repeats; qualification (s)" },
+    "gyroflightV2PlanDiagnostics": { "message": "What the data show" },
     "gyroflightV2Need_complete_log_of_an_independent_flight": {
         "message": "the complete blackbox log of another flight (from its arming, not an excerpt): an export from inside a log, or one without session data, cannot be shown to be another flight"
     },

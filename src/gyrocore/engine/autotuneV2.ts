@@ -75,14 +75,17 @@ import {
     buildAxisLoop,
     loopMargins,
     validateChain,
+    type AnalysisProvenance,
     type AxisLoop,
     type ChainValidation,
     type LoopMargins,
+    type SweepInfo,
 } from "./loopModel";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
+import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { crossLogReferenceIssues } from "./logInput";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
@@ -98,6 +101,8 @@ export interface ChirpAxisInput {
     state: string;
     /** The qualification's measurement:* reasons (why it was rejected or warned). */
     qualificationReasons?: string[];
+    /** Where `tf`'s resolution comes from: Welch segment, sample rate, window and segment count. */
+    analysis?: AnalysisProvenance;
 }
 
 export interface AutotuneLogInput {
@@ -198,6 +203,8 @@ export interface AutotuneV2Result {
     proposal: AbsoluteProposal | null;
     /** The VALIDATED items only, with their own margins and evidence: the only thing Apply may write. */
     releasableProposal: AbsoluteProposal | null;
+    /** What the next CHIRP flight must measure per axis (measurementPlan.ts; informative only). */
+    measurementPlan: AxisMeasurementPlan[];
 }
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
@@ -234,6 +241,17 @@ export function controllerConfigFromHeaders(
         chirpLagHz: nums(h, "chirp_lag_freq_hz")?.[0],
         chirpLeadHz: nums(h, "chirp_lead_freq_hz")?.[0],
     };
+}
+
+/**
+ * The CHIRP sweep the log's headers describe (Betaflight chirp.c: exponential from
+ * chirp_frequency_start to _end over chirp_time_seconds), or null when any is missing.
+ */
+export function sweepFromHeaders(h: Record<string, string>): SweepInfo | null {
+    const f0 = nums(h, "chirp_frequency_start_deci_hz")?.[0];
+    const f1 = nums(h, "chirp_frequency_end_deci_hz")?.[0];
+    const t = nums(h, "chirp_time_seconds")?.[0];
+    return f0 && f1 && t && f1 > f0 && f0 > 0 && t > 0 ? { f0Hz: f0 / 10, f1Hz: f1 / 10, durationS: t } : null;
 }
 
 export function flightMask(rc: ArrayLike<number>): Uint8Array {
@@ -372,7 +390,16 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (!qLog || !qc || qc.state !== "usable") return null;
         const qh = headerMap(qLog.headerPairs);
         const qctl = analyzeAxisController(qLog, qh, ai, qc, flightMask(qLog.channels.rcThrottle));
-        return qctl ? { tf: qc.tf, cfg: qctl.cfg, source: { sha256: qLog.sha256, logIndex: qLog.logIndex } } : null;
+        return qctl
+            ? {
+                  tf: qc.tf,
+                  cfg: qctl.cfg,
+                  source: { sha256: qLog.sha256, logIndex: qLog.logIndex },
+                  sweep: sweepFromHeaders(qh),
+                  // The window the analysis claims must lie in the qualification's own samples.
+                  analysis: qc.analysis && qc.analysis.windowSamples <= qc.end - qc.start ? qc.analysis : null,
+              }
+            : null;
     };
 
     // 2-3. Controller in force, D path, plant per axis with a CHIRP measurement.
@@ -387,7 +414,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (ctl.dterm) dtermReport.push({ axis: name, accepted: ctl.accepted, nrmse: ctl.nrmse });
         const eff = sim && chainCfg ? effectiveChainFrf(sim, chainCfg, axis, c.start, c.end) : null;
         axes[name] = {
-            loop: buildAxisLoop(axis, c.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis)),
+            loop: buildAxisLoop(axis, c.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis), {
+                sweep: sweepFromHeaders(h),
+                analysis: c.analysis ?? null,
+            }),
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,
             window: [c.start, c.end],
@@ -664,6 +694,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     const validatedItems = items.filter((it) => it.status === "VALIDATED");
     const releasable = validatedItems.length ? build(validatedItems).proposal : null;
     const { margins, safety, proposal } = full;
+    // Informative: the band, resolution and averages the next flight needs for this craft's own loop.
+    const measurementPlan = analysed.map((name) =>
+        planMeasurement(name, axes[name]!.loop, margins[name]!.current, log.sampleRateHz, sweepFromHeaders(h)),
+    );
 
     // Part summary for the interface and the report.
     const part = (p: PartReport["part"], status: PartReport["status"], reasons: string[]): PartReport => ({
@@ -732,7 +766,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                   ? "PARTIAL"
                   : "BLOCKED",
             [
-                ...new Set(pmAll.flatMap((m) => m.reasons)),
+                ...new Set([
+                    ...pmAll.flatMap((m) => m.reasons),
+                    ...measurementPlan.flatMap((p) => p.requiredMeasurements),
+                ]),
                 ...qualificationRejected,
                 ...(attested ? [] : ["required_measurement:gain_change_chirp_flight_plus_baseline_repeat"]),
             ],
@@ -764,5 +801,6 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         parts,
         proposal,
         releasableProposal: releasable,
+        measurementPlan,
     };
 }
