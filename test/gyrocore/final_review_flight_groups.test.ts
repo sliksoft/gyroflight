@@ -71,10 +71,14 @@ function chain(
     const opts = pids ? { pids } : {};
     const a = { ...syntheticLogInput(seedA, opts), order: 1 };
     const c0 = syntheticLogInput(seedC, opts);
+    // C continues A's session: A's clock 11 s on, and its first frame is not the session's first
+    // (an export from inside the session; logInput.ts flightRelation).
+    const t0 = a.channels.timeUs[0] + 11_000_000 - c0.channels.timeUs[0];
     const c: AutotuneLogInput = {
         ...c0,
         order: 3,
-        channels: { ...c0.channels, timeUs: Float64Array.from(c0.channels.timeUs, (t) => t + 11_000_000) },
+        channels: { ...c0.channels, timeUs: Float64Array.from(c0.channels.timeUs, (t) => t + t0) },
+        session: { firstIteration: 11 * 4000, startDatetime: null },
     };
     const join = (x: ArrayLike<number>, y: ArrayLike<number>) =>
         Float64Array.from([...Array.from(x).slice(SPLIT), ...Array.from(y).slice(0, TAKE)]);
@@ -88,6 +92,8 @@ function chain(
         ...a,
         sha256: `b${seedA.slice(1)}`,
         order: 2,
+        // B starts inside the session too (at A's sample SPLIT).
+        session: { firstIteration: SPLIT, startDatetime: null },
         channels: {
             ...ca,
             timeUs: join(ca.timeUs, cc.timeUs),
@@ -152,7 +158,10 @@ describe("F-01: overlapping fragments are one flight, transitively", () => {
     });
 
     it("the engine groups its own inputs: C is the primary's flight through B, even when handed over directly", () => {
-        expect(crossLogReferenceIssues(A, C)).toEqual([]); // the pair alone carries no evidence
+        // The pair alone shows no overlap, which proves nothing: independence unproven (audit P1-1).
+        expect(crossLogReferenceIssues(A, C)).toEqual([
+            `cross_log_independence_unproven:session_start_not_in_log:${C.sha256}:0`,
+        ]);
         expect(crossLogReferenceIssues(A, C, [B, C])).toEqual([`cross_log_duplicate_of_primary:${C.sha256}:0`]);
         const r = runAutotuneV2({
             primary: A,
@@ -199,15 +208,21 @@ describe("F-01: overlapping fragments are one flight, transitively", () => {
         ]) {
             expect(uniqueFlights(logs).map((l) => l.sha256)).toEqual([c.sha256]); // the longest
         }
-        expect(uniqueFlights([a, c])).toHaveLength(2); // without the bridge: no evidence they are one flight
+        // Without the bridge nothing shows they are one flight; they are not merged (nor independent).
+        expect(uniqueFlights([a, c])).toHaveLength(2);
     });
 });
 
-describe("F-01: independent flights still count", () => {
-    it("A and C without the bridge are two flights (no evidence links them) and release", () => {
-        const { picked, released: ok } = released([A, C]);
+describe("F-01: independent flights still count; unproven ones do not", () => {
+    // Audit P1-1 (2026-10-23): this case released before. Two fragments of one flight without the
+    // bridge share no sample, so the absence of an overlap proves nothing; C does not hold its
+    // session's start, so its independence from A is unproven and it is no reference.
+    it("A and C without the bridge: independence unproven, C is no reference, nothing released", () => {
+        const { picked, r, released: ok } = released([A, C]);
         expect(picked.others).toHaveLength(1);
-        expect(ok).toBe(true);
+        expect(r.crossLogRejected).toContain(`cross_log_independence_unproven:session_start_not_in_log:${C.sha256}:0`);
+        expect(Object.keys(r.crossLogPlant)).toEqual([]);
+        expect(ok).toBe(false);
     }, 600_000);
 
     it("the A–B–C flight plus a truly independent flight D: D is the reference and the proposal releases", () => {
@@ -237,8 +252,12 @@ describe("F-01: a bridge between baseline and would-be repeat removes the repeat
         expect(r.reasons).toContain("verified_tune:no_baseline_repeat_m5a_floors_used");
     }, 600_000);
 
-    it("without the bridge, C is a repeat (no evidence it is A's flight)", () => {
+    // Audit P1-1: before, C counted as A's repeat here. Unproven independence is no repeat.
+    it("without the bridge, C is no repeat either: its independence from A is unproven", () => {
         const r = verifiedTuneFromLogs([candidate, A, C]);
-        expect(r.record?.baselineRepeat).toBeTruthy();
+        expect(r.record?.baselineRepeat ?? null).toBeNull();
+        expect(r.reasons).toContain(
+            `verified_tune:repeat_rejected:cross_log_independence_unproven:session_start_not_in_log:${C.sha256}:0`,
+        );
     }, 600_000);
 });

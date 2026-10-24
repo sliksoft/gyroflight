@@ -933,6 +933,9 @@
         "message": "a CHIRP flight with changed PIDs plus a repeat with the current PIDs"
     },
     "gyroflightV2Need_second_chirp_flight_same_tune": { "message": "a second CHIRP flight with the same tune" },
+    "gyroflightV2Need_complete_log_of_an_independent_flight": {
+        "message": "the complete blackbox log of another flight (from its arming, not an excerpt): an export from inside a log, or one without session data, cannot be shown to be another flight"
+    },
     "gyroflightV2Need_chirp_roll_meeting_qualification": {
         "message": "a roll CHIRP that passes qualification (coherence)"
     },

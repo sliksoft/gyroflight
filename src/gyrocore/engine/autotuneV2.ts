@@ -122,6 +122,13 @@ export interface AutotuneLogInput {
     /** Import order (higher = imported later). The blackbox header carries no usable date. */
     order?: number;
     /**
+     * Recording-session evidence (logInput.ts flightRelation): the first decoded loopIteration (0:
+     * the log holds its session's first frame, as the firmware starts every log; > 0 or null: an
+     * export from inside a session, or unknown) and the header's `Log start datetime` (null without
+     * an RTC). Absent: independence from other logs is unproven.
+     */
+    session?: { firstIteration: number | null; startDatetime: string | null };
+    /**
      * Set by uniqueFlights on the file kept for a flight carried by several files: the identity of
      * every one of them (this file included), so a later comparison still sees the files dropped
      * as copies, and the fragments that linked them.
@@ -129,12 +136,18 @@ export interface AutotuneLogInput {
     flightGroup?: readonly FlightFragment[];
 }
 
-/** What identifies one file's flight (logInput.ts sameFlight): file, sample fingerprint, gyro windows. */
+/**
+ * What identifies one file's flight (logInput.ts flightRelation): file, sample fingerprint, gyro
+ * windows, and the evidence of the recording session it comes from.
+ */
 export interface FlightFragment {
     sha256: string;
     logIndex: number;
     fingerprint: string;
     windows: ReadonlySet<string>;
+    session?: AutotuneLogInput["session"];
+    /** Logged time of the first sample (µs since the flight controller booted). */
+    firstTimeUs?: number | null;
 }
 
 export interface AutotuneV2Input {
@@ -702,6 +715,13 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                                 ]),
                       ])
                       .concat([...new Set(crossLogRejected.map((r) => r.split(":")[0]))])
+                      // A reference whose independence is unproven (an export from inside a session,
+                      // missing session data): the user needs the complete log of another flight.
+                      .concat(
+                          crossLogRejected.some((r) => r.startsWith("cross_log_independence_unproven:"))
+                              ? ["required_measurement:complete_log_of_an_independent_flight"]
+                              : [],
+                      )
                 : ["required_measurement:chirp_flight"],
         ),
         part(
