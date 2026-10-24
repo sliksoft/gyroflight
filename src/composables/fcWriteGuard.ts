@@ -213,10 +213,13 @@ export const RUNTIME_MSP_CODES: ReadonlySet<number> = new Set([
 
 export type MspClass = "read" | "runtime" | "write";
 
-/** What a request does to the craft. MSP2_CLI_SETTING sets a value when it carries "=" (msp.c). */
+/**
+ * What a request does to the craft. MSP2_CLI_SETTING sets a value when it carries "=" (msp.c),
+ * judged on the bytes msp.ts encodes: each value goes out as its low byte (0x13d is "=").
+ */
 export function classifyMsp(code: number, data: ArrayLike<number> | false | undefined): MspClass {
     if (code === MSPCodes.MSP2_CLI_SETTING) {
-        return data && Array.prototype.includes.call(data, 0x3d) ? "write" : "read";
+        return data && Array.prototype.some.call(data, (v: number) => (v & 0xff) === 0x3d) ? "write" : "read";
     }
     if (READ_MSP_CODES.has(code)) return "read";
     if (RUNTIME_MSP_CODES.has(code)) return "runtime";
@@ -268,9 +271,12 @@ function cliCommand(line: string): string {
 /**
  * Why `text` must not be sent to a CLI whose line buffer holds `pending` (null: send it). While a
  * write would be refused, every line `text` ends must be a read, and `text` must hold printable
- * characters and line ends only: the firmware's editing differs by mode (interactive: 0x7f deletes,
- * 0x08 is dropped; MSP CLI: both dropped; cli.c processCharacterInteractive / processCharacter), so
- * an edited line is refused rather than guessed at. Tab completion is refused the same way.
+ * ASCII (0x20-0x7e) and line ends only, so the characters checked here are the bytes the firmware
+ * gets: the MSP CLI encoder keeps each code point's low byte (U+010A goes out as LF), the CLI tab
+ * sends UTF-8 the firmware drops, and Unicode spaces split a command here but not in cli.c. The
+ * firmware's editing differs by mode (interactive: 0x7f deletes, 0x08 is dropped; MSP CLI: both
+ * dropped; cli.c processCharacterInteractive / processCharacter), so an edited line is refused
+ * rather than guessed at. Tab completion is refused the same way.
  */
 export function cliInputRefusal(pending: string, text: string): string[] | null {
     const issues = foreignWriteIssues();
@@ -284,8 +290,8 @@ export function cliInputRefusal(pending: string, text: string): string[] | null 
             line = "";
         } else if (ch === "\t") {
             return [...issues, "cli:completion"];
-        } else if (ch < " " || ch === "\u007f") {
-            return [...issues, "cli:edit_or_control_character"];
+        } else if (ch < " " || ch > "~") {
+            return [...issues, "cli:edit_control_or_non_ascii_character"];
         } else {
             line += ch;
         }
