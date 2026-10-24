@@ -76,8 +76,8 @@ beforeEach(() => {
     wire = [];
     transport = async (bytes) => ({ bytesSent: bytes.byteLength });
     (serial as unknown as { _protocol: unknown })._protocol = fakeProtocol();
-    backend.reinit.mockClear();
-    backend.dropUnknownMode.mockClear();
+    backend.reinit.mockReset();
+    backend.dropUnknownMode.mockReset();
 });
 
 afterEach(() => {
@@ -141,6 +141,43 @@ describe("WP8-F10 CLI exit: a reboot only for an exit that went out whole", () =
         release({ bytesSent: wire[0].length });
         await settle();
         expect(backend.reinit).toHaveBeenCalledTimes(1);
+    });
+
+    // Codex review of F10: disconnectCliModeUnknown runs prepareDisconnect, whose tab cleanup calls
+    // TABS.cli.cleanup again (CliTab.vue); that must neither send another exit nor block the cleanup.
+    it("the disconnect after a failed exit re-enters cleanup: no second exit, the cleanup goes on", async () => {
+        transport = async () => ({ bytesSent: 0 });
+        const cli = cliTab();
+        const tabCleanup = (cb?: () => void) => {
+            if (!cli.cleanup() && cb) cb();
+        };
+        const mounted = vi.fn();
+        backend.dropUnknownMode.mockImplementation(() => tabCleanup(mounted));
+        tabCleanup(() => undefined);
+        await settle();
+        expect(backend.dropUnknownMode).toHaveBeenCalledTimes(1);
+        expect(mounted).toHaveBeenCalledTimes(1);
+        expect(wire).toHaveLength(1);
+        expect(backend.reinit).not.toHaveBeenCalled();
+    });
+
+    it("a transport that never reports on the exit: after the deadline no reboot, the link is dropped; a late result changes nothing", async () => {
+        vi.useFakeTimers();
+        try {
+            let late: (r: { bytesSent: number }) => void = () => {};
+            transport = () => new Promise((resolve) => (late = resolve));
+            const cli = cliTab();
+            expect(cli.cleanup()).toBe(true);
+            await vi.advanceTimersByTimeAsync(2500);
+            expect(backend.dropUnknownMode).toHaveBeenCalledTimes(1);
+            expect(backend.reinit).not.toHaveBeenCalled();
+            late({ bytesSent: wire[0].length });
+            await vi.advanceTimersByTimeAsync(10);
+            expect(backend.reinit).not.toHaveBeenCalled();
+            expect(backend.dropUnknownMode).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("with an uncertain state the exit goes out behind the line clearing; delivery counts all of it", async () => {

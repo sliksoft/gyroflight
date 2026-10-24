@@ -45,6 +45,8 @@ import {
     reportRefusedWrite,
 } from "./fcWriteGuard";
 
+// Gyroflight (audit WP8-F10): how long leaving the CLI waits for the transport's result for `exit`.
+const EXIT_RESULT_TIMEOUT_MS = 2000;
 const backspaceCode = 8;
 const lineFeedCode = 10;
 const carriageReturnCode = 13;
@@ -258,8 +260,10 @@ export function useCli(): Cli {
     let flushing = false; // true during DOM mutations; prevents spurious scrollPinned flips
     let scrollRaf: number | null = null; // deferred scroll; separates DOM writes from scrollTop write (avoids forced reflow)
     let pastePollInterval: ReturnType<typeof setInterval> | null = null;
-    // Gyroflight (audit WP8-F10): an `exit` was handed to the transport and its result is not in.
+    // Gyroflight (audit WP8-F10): an `exit` was handed to the transport and its result is not in;
+    // or it did not go out whole, and the link is being dropped (no second `exit`).
     let exitPending = false;
+    let exitFailed = false;
     let supportPollInterval: ReturnType<typeof setInterval> | null = null;
 
     const flushOutput = () => {
@@ -906,24 +910,35 @@ export function useCli(): Cli {
         if (exitPending) {
             return true;
         }
+        if (exitFailed) {
+            // Re-entered from the disconnect below (tab cleanup): no second `exit`, let it finish.
+            return false;
+        }
+        let exitTimer: ReturnType<typeof setTimeout> | null = null;
+        const exitResult = (delivered: boolean) => {
+            if (!exitPending) return;
+            exitPending = false;
+            if (exitTimer) clearTimeout(exitTimer);
+            if (delivered) {
+                connectionStore.cliActive = false;
+                connectionStore.cliValid = false;
+                reinitializeConnection();
+            } else {
+                exitFailed = true;
+                gui_log(i18n.getMessage("gyroflightCliExitNotDelivered"));
+                disconnectCliModeUnknown();
+            }
+        };
         const exiting =
             connectionStore.connectionValid &&
             connectionStore.cliValid &&
             connectionStore.cliActive &&
-            send(commandAfterBuffer("exit\r"), (_result, delivered) => {
-                exitPending = false;
-                if (delivered) {
-                    connectionStore.cliActive = false;
-                    connectionStore.cliValid = false;
-                    reinitializeConnection();
-                } else {
-                    gui_log(i18n.getMessage("gyroflightCliExitNotDelivered"));
-                    disconnectCliModeUnknown();
-                }
-            });
+            send(commandAfterBuffer("exit\r"), (_result, delivered) => exitResult(delivered));
 
         if (exiting) {
             exitPending = true;
+            // A transport that never reports on it: the same as not sent whole (no reboot handoff).
+            exitTimer = setTimeout(() => exitResult(false), EXIT_RESULT_TIMEOUT_MS);
         } else {
             connectionStore.cliActive = false;
             connectionStore.cliValid = false;
