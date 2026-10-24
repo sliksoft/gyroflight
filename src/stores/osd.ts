@@ -36,6 +36,7 @@ import { MspBuffer } from "../js/msp/mspBytes";
 import type { MspResponse } from "../js/msp";
 import { useConnectionStore } from "../stores/connection";
 import { assertNoUncertainWriteOnConnectedCraft } from "@/gyrocore/stores/fcTransactionState";
+import { saveEeprom } from "../js/msp/eepromSave";
 
 /** An alarm threshold as `OSD.msp.decode` builds it; only `value` is written back. */
 export interface OsdAlarm {
@@ -542,7 +543,8 @@ export const useOsdStore = defineStore("osd", () => {
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md): no save on a craft whose last Gyroflight write
         // ended unverified; it would write or persist those values.
         assertNoUncertainWriteOnConnectedCraft();
-        await MSP.promise(MSPCodes.MSP_EEPROM_WRITE);
+        // Gyroflight hook (audit WP8-F04): saved only on the firmware's ACK (eepromSave.ts).
+        await saveEeprom();
         captureSnapshot(savedSnapshot);
     };
 

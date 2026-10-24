@@ -49,6 +49,7 @@ import type Features from "../Features";
 import type Beepers from "../Beepers";
 import { TABS, tabSwitchCleanup } from "../tab_adapters";
 import { assertNoUncertainWriteOnConnectedCraft } from "../../gyrocore/stores/fcTransactionState";
+import { saveEeprom } from "./eepromSave";
 
 // serial_backend's initFeaturesOnConnect (or VirtualFC) replaces the reset value null with these
 // instances before any feature or beeper MSP is exchanged.
@@ -824,18 +825,28 @@ class MspHelper {
                 onRefused?.(err);
                 return;
             }
-            MSP.send_message(MSPCodes.MSP_EEPROM_WRITE, false, false, function () {
-                gui_log(i18n.getMessage("configurationEepromSaved"));
-                console.log("Configuration saved to EEPROM");
-                if (reboot) {
-                    tabSwitchCleanup(function () {
-                        return reinitializeConnection();
-                    });
-                }
-                if (callback) {
-                    callback();
-                }
-            });
+            // Gyroflight hook (audit WP8-F04): saved only on the firmware's ACK (eepromSave.ts). A
+            // link lost before it went out, the firmware's refusal or a lost answer reaches
+            // onRefused (the legacy callback used to run on a disconnect as if it had saved).
+            saveEeprom().then(
+                () => {
+                    gui_log(i18n.getMessage("configurationEepromSaved"));
+                    console.log("Configuration saved to EEPROM");
+                    if (reboot) {
+                        tabSwitchCleanup(function () {
+                            return reinitializeConnection();
+                        });
+                    }
+                    if (callback) {
+                        callback();
+                    }
+                },
+                (err: unknown) => {
+                    console.error("EEPROM save not confirmed:", err);
+                    if (onRefused) onRefused(err);
+                    else gui_log(i18n.getMessage("gyroflightEepromNotConfirmed"));
+                },
+            );
         }, 100); // 100ms delay before sending MSP_EEPROM_WRITE to ensure that all settings have been received
     }
 }

@@ -55,6 +55,7 @@
 
 import MSP from "@/js/msp";
 import MSPCodes from "@/js/msp/MSPCodes";
+import { eepromReplyState } from "@/js/msp/eepromSave";
 import { mspHelper } from "@/js/msp/MSPHelper";
 import { bit_check } from "@/js/bit";
 import { useFlightControllerStore } from "@/stores/fc";
@@ -324,16 +325,6 @@ function storeBackup(
         throw new ApplyBlockedError(["apply:backup_not_stored"]);
     }
     return backup;
-}
-
-/**
- * The saved state an MSP_EEPROM_WRITE reply proves. Only the firmware's own error reply
- * (MSP_RESULT_ERROR: refused, e.g. armed) shows nothing was saved. No reply, a timeout or a corrupt
- * reply say nothing about whether the firmware ran the save before the answer was lost: unknown.
- */
-function eepromReplyState(reply: MspReply): "saved" | "no" | "unknown" {
-    if (!reply || reply.crcError) return "unknown";
-    return reply.unsupported ? "no" : "saved";
 }
 
 /**

@@ -1005,6 +1005,9 @@
         "message": "The save command did not reach the flight controller in full. Whether the configuration was saved is unknown: reconnect and check it before flying."
     },
     "gyroflightRestoreSaveNotSaved": { "message": "The configuration was not saved to EEPROM." },
+    "gyroflightEepromNotConfirmed": {
+        "message": "The flight controller did not confirm the save to EEPROM. Its RAM may hold the new values while EEPROM still holds the old ones: they are lost on the next power cycle. Check the connection and save again."
+    },
     "gyroflightCliExitNotDelivered": {
         "message": "Leaving the CLI failed: the exit command did not reach the flight controller in full, so it may still be in CLI mode. The connection was closed. Power-cycle the flight controller before connecting again."
     }
