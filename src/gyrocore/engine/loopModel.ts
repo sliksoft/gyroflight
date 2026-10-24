@@ -508,26 +508,32 @@ export function marginEvidenceIssues(evidence: unknown): string[] {
  * tail (a uniform grid weighs every point equally).
  */
 function lsqRiseDb(tail: { f: number; db: number }[]): number {
-    const n = tail.length;
-    if (n < 2) return 0;
-    const w = tail.map((_, j) =>
-        j === 0
-            ? tail[1].f - tail[0].f
-            : j === n - 1
-              ? tail[n - 1].f - tail[n - 2].f
-              : (tail[j + 1].f - tail[j - 1].f) / 2,
-    );
+    return lsqRiseCoefficients(tail.map((t) => t.f)).reduce((s, c, j) => s + c * tail[j].db, 0);
+}
+
+/**
+ * The rise of lsqRiseDb is linear in the dB values: Σ c_j dB_j with these c_j (all 0 when the
+ * frequencies give no slope), so its worst case over per-bin intervals is taken bin by bin.
+ */
+function lsqRiseCoefficients(f: readonly number[]): number[] {
+    const n = f.length;
+    if (n < 2) return f.map(() => 0);
+    const w = f.map((_, j) => (j === 0 ? f[1] - f[0] : j === n - 1 ? f[n - 1] - f[n - 2] : (f[j + 1] - f[j - 1]) / 2));
     const sw = w.reduce((s, x) => s + x, 0);
-    if (!(sw > 0)) return 0;
-    const mf = tail.reduce((s, t, j) => s + w[j] * t.f, 0) / sw;
-    const md = tail.reduce((s, t, j) => s + w[j] * t.db, 0) / sw;
-    let num = 0;
-    let den = 0;
-    for (const [j, t] of tail.entries()) {
-        num += w[j] * (t.f - mf) * (t.db - md);
-        den += w[j] * (t.f - mf) * (t.f - mf);
-    }
-    return den > 0 ? (num / den) * (tail[n - 1].f - tail[0].f) : 0;
+    if (!(sw > 0)) return f.map(() => 0);
+    const mf = f.reduce((s, x, j) => s + w[j] * x, 0) / sw;
+    const den = f.reduce((s, x, j) => s + w[j] * (x - mf) * (x - mf), 0);
+    return den > 0 ? f.map((x, j) => ((w[j] * (x - mf)) / den) * (f[n - 1] - f[0])) : f.map(() => 0);
+}
+
+/** First bin of the tail BAND_END judges: the top tailFraction of the band, at least minTailBins. */
+function tailStartIndex(pts: readonly LoopPoint[]): number {
+    const last = pts.length - 1;
+    const tailFrom = pts[last].f - BAND_END.tailFraction * (pts[last].f - pts[0].f);
+    return Math.min(
+        pts.findIndex((p) => p.f >= tailFrom),
+        pts.length - BAND_END.minTailBins,
+    );
 }
 
 /**
@@ -791,7 +797,7 @@ export function candidateLoop(loop: AxisLoop, cand: LoopCandidate): LoopPoint[] 
 }
 
 /** Frequencies of the identified bins candidateLoop leaves out because their uncertainty is too large. */
-function binsDroppedForUncertainty(loop: AxisLoop): number[] {
+export function binsDroppedForUncertainty(loop: AxisLoop): number[] {
     const relErr = loop.uncertainty?.relErr;
     if (!relErr) return [];
     const out: number[] = [];
@@ -851,7 +857,7 @@ function phaseIssues(pts: LoopPoint[], ph: number[], fc: number): string[] {
 }
 
 /** What the bins of one loop show (loopMargins): margins, their basis and the reasons on the way. */
-interface LoopRead {
+export interface LoopRead {
     /** A downward unity crossing was found: PM and the rest were read. */
     ok: boolean;
     fc: number | null;
@@ -937,11 +943,7 @@ function readLoop(pts: LoopPoint[]): LoopRead {
     // The loop is unknown above the last bin: the band end must be safely below unity and not
     // heading back up (BAND_END), or a crossover just outside the band is not excluded. The tail
     // is the top tailFraction of the band in frequency, whatever the spacing of its bins.
-    const tailFrom = pts[lastBin].f - BAND_END.tailFraction * (pts[lastBin].f - pts[0].f);
-    const tailStart = Math.min(
-        pts.findIndex((p) => p.f >= tailFrom),
-        pts.length - BAND_END.minTailBins,
-    );
+    const tailStart = tailStartIndex(pts);
     const tail = pts.slice(tailStart).map((p, j) => ({ f: p.f, db: 20 * Math.log10(mag[tailStart + j]) }));
     const tailRiseDb = lsqRiseDb(tail);
     const tailMaxDb = Math.max(...tail.map((t) => t.db));
@@ -1041,7 +1043,7 @@ export function sectorDistanceToMinusOne(rhoLo: number, rhoHi: number, thLo: num
 }
 
 /** Bounds of a loop with its measurement uncertainty folded in (UNCERTAINTY); `uncertainty` null: unknown. */
-interface UncertainBounds {
+export interface UncertainBounds {
     pm: number;
     gm: number | null;
     sPeak: number | null;
@@ -1049,12 +1051,69 @@ interface UncertainBounds {
     reasons: string[];
 }
 
+/** Distance from z to the segment [a, b]. */
+function segmentDistance(z: Complex, a: Complex, b: Complex): number {
+    const d = { re: b.re - a.re, im: b.im - a.im };
+    const dd = d.re * d.re + d.im * d.im;
+    const t = dd > 0 ? Math.min(1, Math.max(0, ((z.re - a.re) * d.re + (z.im - a.im) * d.im) / dd)) : 0;
+    return Math.hypot(a.re + t * d.re - z.re, a.im + t * d.im - z.im);
+}
+
 /**
- * The bounds `read` gives, widened by the measurement uncertainty: the worst of the nominal loop
- * and four corners with every bin's L moved by the same ±k ε in gain and phase. Unknown (null
- * uncertainty, with reasons) when ε is not known, too large, or a corner changes what the bins show.
+ * Distance from the segment [a, b] to the negative real half-axis {−x : x ≥ 0}: 0 when they meet;
+ * otherwise attained at an end of either (a, b, or the half-axis's end, the origin).
  */
-function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): UncertainBounds {
+export function distanceToNegativeRealAxis(a: Complex, b: Complex): number {
+    if ((a.im <= 0 && b.im >= 0) || (a.im >= 0 && b.im <= 0)) {
+        const t = a.im === b.im ? 0 : a.im / (a.im - b.im);
+        const x = a.im === b.im ? Math.min(a.re, b.re) : a.re + t * (b.re - a.re);
+        if (x <= 0) return 0;
+    }
+    const toAxis = (p: Complex) => (p.re <= 0 ? Math.abs(p.im) : Math.hypot(p.re, p.im));
+    return Math.min(toAxis(a), toAxis(b), segmentDistance({ re: 0, im: 0 }, a, b));
+}
+
+/** Whether some point within `rho` of the chord [a, b] can lie on the unit circle. */
+function capsuleMeetsUnitCircle(a: Complex, b: Complex, rho: number): boolean {
+    const near = segmentDistance({ re: 0, im: 0 }, a, b);
+    return near <= 1 + rho && Math.max(Math.hypot(a.re, a.im), Math.hypot(b.re, b.im)) >= 1 - rho;
+}
+
+/** Angle step (degrees) of capsulePmBound's scan of the unit circle. */
+const PM_SCAN_STEP_DEG = 0.01;
+
+/**
+ * The lowest PM (180° + phase, in the unwrapped frame of `phA`, `phB`) of any point of the unit
+ * circle within `rho` of the chord [a, b]; null when none is. The distance from the chord to
+ * e^{jθ} changes by at most |Δθ| (radians) along the circle, so admitting every scanned angle within
+ * rho + half a step, and subtracting half a step, keeps it a bound. The admitted points lie within
+ * asin(rho / (1 − rho)) of the chord's angles, which span [phA, phB] (a step below 180°); from
+ * rho = 1/2 on, the whole circle is scanned.
+ */
+export function capsulePmBound(a: Complex, b: Complex, phA: number, phB: number, rho: number): number | null {
+    if (!capsuleMeetsUnitCircle(a, b, rho)) return null;
+    const pad = (rho < 0.5 ? (Math.asin(rho / (1 - rho)) * 180) / Math.PI : 180) + PM_SCAN_STEP_DEG;
+    const lo = Math.min(phA, phB) - pad;
+    const hi = Math.max(phA, phB) + pad;
+    const slack = ((PM_SCAN_STEP_DEG / 2) * Math.PI) / 180;
+    for (let k = 0; lo + k * PM_SCAN_STEP_DEG <= hi + PM_SCAN_STEP_DEG; k++) {
+        // Lowest phase first: the first admitted angle gives the lowest PM.
+        const th = lo + k * PM_SCAN_STEP_DEG;
+        const z = { re: Math.cos((th * Math.PI) / 180), im: Math.sin((th * Math.PI) / 180) };
+        if (segmentDistance(z, a, b) <= rho + slack) return 180 + th - PM_SCAN_STEP_DEG / 2;
+    }
+    return null;
+}
+
+/**
+ * The bounds `read` gives, widened to hold for every loop the evidence admits: each bin's L inside
+ * its uncertainty set, and between two bins any curve within the sagitta allowance of the chord.
+ * Never better than the nominal values. Unknown (null uncertainty, with reasons) when ε is not
+ * known or too large, or when the admitted set changes what the bins show (another unity crossing,
+ * a phase crossover reaching unity, a band end or tail not bounded, −1 within reach). Exported for
+ * its adversarial tests (wp8_uncertainty_bounds.test.ts).
+ */
+export function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): UncertainBounds {
     const nominal = { pm: read.pm!, gm: read.gm, sPeak: read.sPeak };
     const unknown = (reasons: string[]) => ({ ...nominal, uncertainty: null, reasons });
     if (!u.relErr || pts.some((p) => !Number.isFinite(p.err))) {
@@ -1085,10 +1144,10 @@ function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): 
     if (mag[n - 1] * (1 + e[n - 1]) >= 10 ** (BAND_END.maxBandEndDb / 20)) {
         return unknown(["margin_uncertainty_band_end_not_bounded"]);
     }
+    const db = (x: number) => 20 * Math.log10(x);
     // PM: on every step, the stretch t ∈ [0, 1] where |L| can be at unity (between bins |L| is read
     // in dB along the step, as readLoop does, here for the low and the high end of the set); the
     // phase there, less its ±e. Those steps must form one run (one crossing).
-    const db = (x: number) => 20 * Math.log10(x);
     const crossing: { i: number; phase: number }[] = [];
     for (let i = 1; i < n; i++) {
         const up = [db(mag[i - 1] * (1 + e[i - 1])), db(mag[i] * (1 + e[i]))];
@@ -1113,15 +1172,25 @@ function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): 
     if (!crossing.length || crossing.some((c, j) => j > 0 && c.i !== crossing[j - 1].i + 1)) {
         return unknown(["margin_uncertainty_changes_what_the_bins_show:unity_crossings"]);
     }
-    const pm = Math.min(nominal.pm, ...crossing.map((c) => 180 + c.phase));
-    // GM: every step whose phase range (± e) reaches −180° − 360° m, and the tail's headroom.
+    // That reading interpolates; the bound is the lowest PM of any point of the unit circle within
+    // reach of an admitted curve (capsulePmBound).
+    let pmCurve = Infinity;
+    for (let i = 1; i < n; i++) {
+        const b = capsulePmBound(pts[i - 1].L, pts[i].L, ph[i - 1], ph[i], allowance(i));
+        if (b !== null) pmCurve = Math.min(pmCurve, b);
+    }
+    if (!Number.isFinite(pmCurve)) return unknown(["margin_uncertainty_changes_what_the_bins_show:unity_crossings"]);
+    const pm = Math.min(nominal.pm, pmCurve, ...crossing.map((c) => 180 + c.phase));
+    // GM: every step whose phase range (± e) reaches −180° − 360° m, or whose admitted curves can
+    // reach the negative real axis, and the tail's headroom.
     let gm = nominal.gm;
     if (gm !== null) {
         let worst = 0;
         for (let i = 1; i < n; i++) {
             const lo = Math.min(ph[i - 1], ph[i]) - Math.max(eDeg[i - 1], eDeg[i]);
             const hi = Math.max(ph[i - 1], ph[i]) + Math.max(eDeg[i - 1], eDeg[i]);
-            if (Math.ceil((lo + 180) / 360) * 360 - 180 <= hi) {
+            const reaches = distanceToNegativeRealAxis(pts[i - 1].L, pts[i].L) <= allowance(i);
+            if (reaches || Math.ceil((lo + 180) / 360) * 360 - 180 <= hi) {
                 worst = Math.max(worst, Math.max(mag[i - 1] * (1 + e[i - 1]), mag[i] * (1 + e[i])) + allowance(i));
             }
         }
@@ -1156,6 +1225,16 @@ function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): 
         }
         if (!(closest > 0)) return unknown(["margin_uncertainty_changes_what_the_bins_show:sensitivity"]);
         sPeak = Math.max(sPeak, 20 * Math.log10(1 / closest));
+    }
+    // The tail may not rise more than BAND_END allows for any gain error the bins admit (the rise is
+    // linear in the dB values: each bin at the end of its interval that raises it).
+    const tailStart = tailStartIndex(pts);
+    const worstRise = lsqRiseCoefficients(pts.slice(tailStart).map((p) => p.f)).reduce((sum, c, j) => {
+        const i = tailStart + j;
+        return sum + c * (db(mag[i]) + db(c > 0 ? 1 + e[i] : 1 - e[i]));
+    }, 0);
+    if (worstRise > BAND_END.maxTailRiseDb) {
+        return unknown(["margin_uncertainty_band_end_not_bounded:tail_rise"]);
     }
     return {
         pm,

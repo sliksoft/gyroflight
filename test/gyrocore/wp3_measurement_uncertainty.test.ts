@@ -39,6 +39,7 @@ import {
     syntheticTransferFunctionWithCoherence,
 } from "../../src/js/blackbox/betaflight_open_loop";
 import {
+    binsDroppedForUncertainty,
     buildAxisLoop,
     loopMargins,
     loopUncertainty,
@@ -117,14 +118,24 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         expect(noisy.phaseMarginDeg!).toBeLessThan(exact.phaseMarginDeg! - 0.5);
         expect(noisy.gainMarginDb!).toBeLessThan(exact.gainMarginDb!);
         expect(noisy.sensitivityPeakDb!).toBeGreaterThan(exact.sensitivityPeakDb!);
-        expect(noisy.evidence.uncertainty!.nominal.phaseMarginDeg).toBeCloseTo(exact.phaseMarginDeg!, 9);
+        // The nominal reading is the same; even without error the bound includes the between-bin allowance.
+        expect(noisy.evidence.uncertainty!.nominal.phaseMarginDeg).toBeCloseTo(
+            exact.evidence.uncertainty!.nominal.phaseMarginDeg!,
+            9,
+        );
+        expect(exact.phaseMarginDeg!).toBeLessThanOrEqual(exact.measured.phaseMarginDeg!);
     });
 
     it("a bin whose ±2ε reaches half its value is not identified: left out, counted", () => {
-        const m = marginsAt(0.99);
-        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
-        expect(m.evidence.uncertainty!.droppedBins).toBeGreaterThan(0);
+        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.99);
+        tf.numSegments = 32;
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true);
+        const m = loopMargins(loop);
+        expect(binsDroppedForUncertainty(loop).length).toBeGreaterThan(0);
         expect(m.evidence.bandHz![0]).toBeGreaterThan(2);
+        // At this ε the admitted loops between the bins can reach −180° near unity: no bounds, named.
+        expect(m.evidence.level).toBe("MEASURED");
+        expect(m.reasons).toContain("margin_uncertainty_changes_what_the_bins_show:phase_crossover");
     });
 
     it("an unidentified bin inside the band (a poorly measured resonance would vanish there) leaves no bounds", () => {

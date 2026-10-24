@@ -254,7 +254,10 @@ describe("F-02: well-supported smooth loops keep their margins", () => {
             expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
             const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
             expect(m.evidence.resolutionHz).toBeCloseTo(Math.max(...steps), 9);
-            expect(Math.abs(m.phaseMarginDeg! - ref.pm)).toBeLessThan(1);
+            // PM bounded like GM and |S|: never better than the reference, and only the between-bin
+            // allowance worse (largest on the coarsest grid).
+            expect(m.phaseMarginDeg!).toBeLessThanOrEqual(ref.pm + 0.05);
+            expect(ref.pm - m.phaseMarginDeg!).toBeLessThan(2);
             // Measured: read on the bins, close to the reference. Bounded: never better than the
             // reference, and only the between-bin allowance worse.
             expect(Math.abs(m.measured.sensitivityPeakDb! - ref.s)).toBeLessThan(0.2);

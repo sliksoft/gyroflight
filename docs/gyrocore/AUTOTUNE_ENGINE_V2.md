@@ -268,12 +268,18 @@ exponential Betaflight sweep (`sweepAverages`, from the log's chirp headers): T 
 an AIR65 crossover: 1, whatever the Welch segment count). Fewer than 8 Welch segments: uncertainty unknown, no bounds. A
 bin whose ±2 ε reaches half its value is not identified: below the lowest kept bin it is left out (counted), above it
 the margins stay unbounded (`unidentified_bins_inside_band`). The bounds hold for every loop in the per-bin uncertainty
-set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins the resolved-class allowance):
-PM over every step where |L| can be at unity (the stretch of the step where the gain band crosses 0 dB, its phase less
-±2 ε; those steps must form one run), GM over every step whose phase range can reach −180°, |S| from the larger of two
-lower bounds of the distance to −1 (the chord less the discs around its ends; the annular sector holding both ends'
-sets and the chord). A set that can reach a second crossing, −180° above unity, or −1 leaves no bounds
-(`margin_uncertainty_changes_what_the_bins_show:<which>`). `measured` keeps the values on the bins; the release contract requires the uncertainty with
+set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins any curve within the
+resolved-class allowance of the chord, i.e. within `allowance(i)` of the measured chord: the "capsule" of the step).
+PM: the lowest PM of any point of the unit circle inside a capsule (`capsulePmBound`, a scan of the circle that stays a
+bound by its Lipschitz slack), and the steps where the gain band can cross 0 dB must form one run. GM over every step
+whose phase range can reach −180° or whose capsule reaches the negative real axis (`distanceToNegativeRealAxis`). |S|
+from the larger of two lower bounds of the distance to −1 (the chord less the discs around its ends; the annular sector
+holding both ends' sets and the chord). The tail's least-squares rise is linear in the bins' dB values, so its worst
+case takes each tail bin at the end of its gain interval that raises it; above `BAND_END.maxTailRiseDb` there are no
+bounds (`margin_uncertainty_band_end_not_bounded:tail_rise`). A set that can reach a second crossing, −180° above unity,
+or −1 leaves no bounds (`margin_uncertainty_changes_what_the_bins_show:<which>`). Even without measurement error the PM
+bound is below the value read on the bins by the between-bin allowance (as GM and |S| already were); with a single
+average per bin near the crossover (AIR65) the allowance is wide and the bounds are low or absent. `measured` keeps the values on the bins; the release contract requires the uncertainty with
 VALIDATED evidence (`margin_evidence_uncertainty_missing`). Phase checks (`PHASE_CHECKS`): an unwrap step that, with
 ±2 σ at both bins, exceeds 90° is ambiguous; the absolute branch must be the rate plant's (phase in (−180°, 0°] at the
 lowest bin) plus the controller's; at least three bins in the octave around the crossover. Each failure leaves the

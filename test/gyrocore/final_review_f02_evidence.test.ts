@@ -137,10 +137,11 @@ describe("F-02 evidence: the Codex counterexample (70.25 Hz, ζ 5e-4 / 5e-5)", (
         expect(exact).toBeGreaterThan(2); // the loop really is above unity at fr
         const m = margins(uniform(200, 0.5), NARROW);
         // The analysis is kept (the same numbers as before the fix) ...
-        expect(m.phaseMarginDeg!).toBeCloseTo(86.66, 1);
+        expect(m.measured.phaseMarginDeg!).toBeCloseTo(86.66, 1);
         expect(m.gainMarginDb!).toBeCloseTo(12.94, 1);
         expect(m.sensitivityPeakDb!).toBeCloseTo(2.73, 1);
-        expect(m.measured.phaseMarginDeg).toBe(m.phaseMarginDeg);
+        // The PM bound includes the between-bin allowance: never above the reading.
+        expect(m.phaseMarginDeg!).toBeLessThanOrEqual(m.measured.phaseMarginDeg!);
         // ... with its basis explicit ...
         expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
         expect(m.evidence.resolutionHz).toBeCloseTo(0.5, 9);
