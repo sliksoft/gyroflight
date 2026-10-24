@@ -27,8 +27,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
+import {
+    controllerConfigFromHeaders,
+    runAutotuneV2,
+    type AutotuneLogInput,
+} from "../../src/gyrocore/engine/autotuneV2";
 import { crossLogReferenceIssues, finestWelchSegment } from "../../src/gyrocore/engine/logInput";
+import { dtermConfigFromHeaders } from "../../src/js/blackbox/betaflight_dterm_dynamic";
 import { assessModelQualification, qualificationCandidates } from "../../src/gyrocore/engine/modelQualification";
 import { UNCERTAINTY } from "../../src/gyrocore/engine/loopModel";
 import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
@@ -185,4 +190,57 @@ describe("WP8 review: what a qualification flight must itself show", () => {
             expect(crossLogReferenceIssues(primary, other)).toContain(`cross_log_config_differs:${key}`);
         }
     });
+
+    it("every header the controller and D-path reconstruction read is part of the comparison", () => {
+        const h = Object.fromEntries(QUAL.headerPairs);
+        const read = new Set<string>();
+        const recording = new Proxy(h, {
+            get: (t, k) => {
+                if (typeof k === "string") read.add(k);
+                return t[k as string];
+            },
+        });
+        for (const axis of [0, 1, 2] as const) {
+            const base = controllerConfigFromHeaders(recording, axis);
+            expect(base).not.toBeNull();
+            dtermConfigFromHeaders(recording, axis, base!.pidDt);
+        }
+        // The sweep settings shape the measurement, not the model: a repeat may sweep differently.
+        const measurement = /^chirp_(frequency_start_deci_hz|frequency_end_deci_hz|time_seconds)$/;
+        const keys = [...read].filter((k) => !measurement.test(k));
+        expect(keys).toEqual(expect.arrayContaining(["tpa_low_rate", "d_max_gain", "looptime"]));
+        for (const key of keys) {
+            const changed = h[key] === undefined ? "1" : h[key].replace(/\d+/, (d) => String(Number(d) + 1));
+            const other = {
+                ...QUAL,
+                headerPairs: [...QUAL.headerPairs.filter(([k]) => k !== key), [key, changed] as const],
+            };
+            expect(
+                crossLogReferenceIssues(primary, other).some((r) => r.startsWith("cross_log_config_differs:")),
+                key,
+            ).toBe(true);
+        }
+    });
+
+    it("a missing D header leaves no D path, and no D path is no validated one (tpa_low_always removed)", () => {
+        const noTpaLow = {
+            ...QUAL,
+            sha256: "e5".repeat(32),
+            headerPairs: QUAL.headerPairs.filter(([k]) => k !== "tpa_low_always"),
+        };
+        const h = Object.fromEntries(noTpaLow.headerPairs);
+        const base = controllerConfigFromHeaders(h, 0)!;
+        expect(base.axis.d).toBeGreaterThan(0);
+        expect(dtermConfigFromHeaders(h, 0, base.pidDt)).toBeNull();
+        // The configurations differ, so the identity rules reject it already; the guard must hold on its own too.
+        const asPrimary = { ...primary, headerPairs: primary.headerPairs.filter(([k]) => k !== "tpa_low_always") };
+        const r = runAutotuneV2({
+            primary: asPrimary,
+            others: [],
+            verifiedTune: null,
+            modelClassQualification: noTpaLow,
+        });
+        const part = r.parts.find((p) => p.part === "phase_margin_robustness")!;
+        expect(part.reasons).toContain("model_class_qualification_rejected:dterm_path_not_validated:roll");
+    }, 600_000);
 });

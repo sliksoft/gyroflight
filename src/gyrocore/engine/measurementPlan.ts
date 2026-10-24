@@ -54,6 +54,7 @@ import {
     QUALIFICATION_BAND_EXTENSION,
     RESOLVED_FEATURE_BINS,
     UNCERTAINTY,
+    type AnalysisProvenance,
     type AxisLoop,
     type LoopMargins,
     type SweepInfo,
@@ -77,8 +78,12 @@ export interface AxisMeasurementPlan {
     bandHz: { primary: [number, number] | null; qualification: [number, number] | null };
     /** Largest bin step that resolves the measured loop, and the one a qualification needs. */
     resolutionHz: { now: number | null; primary: number | null; qualification: number | null };
-    /** Welch segment length (samples, power of two) for those resolutions at this sample rate. */
-    segmentSamples: { primary: number | null; qualification: number | null };
+    /**
+     * Welch segment length (samples, power of two) for those resolutions at this sample rate. The
+     * primary one never exceeds the segment the standard analysis uses (`executable`): that segment
+     * is set by the sample rate, not by the flight, so no sweep can give the primary a finer one.
+     */
+    segmentSamples: { primary: number | null; qualification: number | null; executable: number | null };
     /** Independent averages at the crossover: available now and needed (PLAN.pmUncertaintyDeg). */
     averages: { now: number | null; needed: number | null };
     /**
@@ -144,6 +149,8 @@ export function planMeasurement(
     margins: LoopMargins,
     sampleRateHz: number,
     sweep: SweepInfo | null,
+    /** The standard analysis of this axis (its Welch segment is the one the next flight gets too). */
+    analysis: AnalysisProvenance | null,
 ): AxisMeasurementPlan {
     const pts = candidateLoop(loop, { cfg: loop.cfg });
     const fc = margins.crossoverHz;
@@ -154,7 +161,7 @@ export function planMeasurement(
         crossoverHz: fc,
         bandHz: { primary: null, qualification: null },
         resolutionHz: { now: margins.evidence.resolutionHz, primary: null, qualification: null },
-        segmentSamples: { primary: null, qualification: null },
+        segmentSamples: { primary: null, qualification: null, executable: analysis?.segmentSamples ?? null },
         averages: { now: loop.uncertainty.averages?.[0] ?? null, needed: null },
         sweep: null,
         qualificationSweep: null,
@@ -217,10 +224,14 @@ export function planMeasurement(
     plan.resolutionHz.primary = dfPrimary;
     plan.resolutionHz.qualification =
         Math.min(dfPrimary, margins.evidence.resolutionHz ?? dfPrimary) / RESOLVED_FEATURE_BINS;
-    plan.segmentSamples.primary = pow2(sampleRateHz / dfPrimary);
+    const wanted = pow2(sampleRateHz / dfPrimary);
+    const executable = plan.segmentSamples.executable;
+    plan.segmentSamples.primary = executable === null ? null : Math.min(wanted, executable);
     plan.segmentSamples.qualification = pow2(sampleRateHz / plan.resolutionHz.qualification);
-    if (margins.evidence.resolutionHz !== null && margins.evidence.resolutionHz > dfPrimary * (1 + 1e-9)) {
-        required.add("required_measurement:chirp_with_finer_frequency_resolution");
+    if (executable === null) diagnostics.push("primary_analysis_segment_unknown");
+    else if (wanted > executable) {
+        // Only the qualification's finer analysis (finestWelchSegment) reaches it: no flight changes the standard one.
+        diagnostics.push(`primary_resolution_needs_finer_analysis:${executable}<${wanted}`);
     }
 
     // Averages at the crossover for 2 σ of the phase within PLAN.pmUncertaintyDeg.
@@ -242,7 +253,7 @@ export function planMeasurement(
     } else {
         diagnostics.push("uncertainty_unknown_averages_not_planned");
     }
-    if (plan.bandHz.primary && plan.averages.needed !== null) {
+    if (plan.bandHz.primary && plan.averages.needed !== null && plan.segmentSamples.primary !== null) {
         // n averages per bin: the sweep dwells n segments Ts in each bin of width 1/Ts at fc,
         // T = n · Ts² · fc · ln(f1/f0) (sweepAverages solved for n).
         const sweepFor = (band: [number, number], segment: number) => {
@@ -253,7 +264,7 @@ export function planMeasurement(
             );
             return { f0Hz: band[0], f1Hz: band[1], durationS };
         };
-        plan.sweep = sweepFor(plan.bandHz.primary, plan.segmentSamples.primary);
+        plan.sweep = sweepFor(plan.bandHz.primary, plan.segmentSamples.primary!);
         plan.qualificationSweep = sweepFor(plan.bandHz.qualification!, plan.segmentSamples.qualification);
     }
     const octave = pts.filter((p) => p.f >= fc / Math.SQRT2 && p.f <= fc * Math.SQRT2).length;
