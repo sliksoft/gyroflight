@@ -27,7 +27,7 @@ import BuildApi from "../js/BuildApi";
 import CliAutoComplete from "../js/CliAutoComplete";
 import { gui_log } from "../js/gui_log";
 import { serial } from "../js/serial";
-import { reinitializeConnection } from "../js/serial_backend";
+import { disconnectCliModeUnknown, reinitializeConnection } from "../js/serial_backend";
 import FileSystem from "../js/FileSystem";
 import { ispConnected } from "../js/utils/connection";
 import { get as getConfig } from "../js/ConfigStorage";
@@ -50,7 +50,8 @@ const CLI_ENTRY_MARKER = "CLI";
 const CLI_PROMPT = "# ";
 const CLI_ENTRY_PROMPT = `\r\n${CLI_PROMPT}`;
 
-type SendCallback = (sendInfo: unknown) => void;
+/** Gyroflight: `delivered` is true only when the transport took every byte that was sent. */
+type SendCallback = (sendInfo: unknown, delivered: boolean) => void;
 
 /** What serial hands to read(): a read event carrying the bytes, or the bytes themselves. */
 type CliReadInfo = { data: ArrayBuffer } | ArrayBuffer | Uint8Array;
@@ -252,6 +253,8 @@ export function useCli(): Cli {
     let flushing = false; // true during DOM mutations; prevents spurious scrollPinned flips
     let scrollRaf: number | null = null; // deferred scroll; separates DOM writes from scrollTop write (avoids forced reflow)
     let pastePollInterval: ReturnType<typeof setInterval> | null = null;
+    // Gyroflight (audit WP8-F10): an `exit` was handed to the transport and its result is not in.
+    let exitPending = false;
     let supportPollInterval: ReturnType<typeof setInterval> | null = null;
 
     const flushOutput = () => {
@@ -337,7 +340,8 @@ export function useCli(): Cli {
             return false;
         }
         // serial.send never rejects: it logs a failure and reports it through the callback.
-        void serial.send(encoder.encode(out.text), callback);
+        const bytes = encoder.encode(out.text);
+        void serial.send(bytes, (result) => callback?.(result, result?.bytesSent === bytes.byteLength));
         return true;
     };
 
@@ -880,21 +884,39 @@ export function useCli(): Cli {
 
         // `exit` + MSP_REBOOT reboots the FC. Keep tab_switch_in_progress held across the
         // handoff; prepareDisconnect (run on every reboot path) releases it after the disconnect.
-        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused `exit` starts no reboot.
-        const rebooting =
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F10): a refused `exit` starts no
+        // reboot, and the handoff waits for the transport: only an `exit` it took whole leaves the
+        // CLI. Otherwise the FC may still be in it (the flags stay) and the link is dropped
+        // without MSP. The return value is "exit handed to the transport".
+        if (exitPending) {
+            return true;
+        }
+        const exiting =
             connectionStore.connectionValid &&
             connectionStore.cliValid &&
             connectionStore.cliActive &&
-            send(commandAfterBuffer("exit\r"), function () {
-                reinitializeConnection();
+            send(commandAfterBuffer("exit\r"), (_result, delivered) => {
+                exitPending = false;
+                if (delivered) {
+                    connectionStore.cliActive = false;
+                    connectionStore.cliValid = false;
+                    reinitializeConnection();
+                } else {
+                    gui_log(i18n.getMessage("gyroflightCliExitNotDelivered"));
+                    disconnectCliModeUnknown();
+                }
             });
 
-        connectionStore.cliActive = false;
-        connectionStore.cliValid = false;
+        if (exiting) {
+            exitPending = true;
+        } else {
+            connectionStore.cliActive = false;
+            connectionStore.cliValid = false;
+        }
 
         CliAutoComplete.cleanup();
 
-        return rebooting;
+        return exiting;
     };
 
     const adaptPhones = () => {

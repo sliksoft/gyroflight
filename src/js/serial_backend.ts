@@ -423,6 +423,20 @@ function softResetForReboot() {
     rebootLinkKept = true;
 }
 
+/**
+ * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F10): drop the link when the FC may still be
+ * in its CLI (an `exit` that did not go out whole). Like the Disconnect button, but without its
+ * MSP_SET_ARMING_DISABLED: in the CLI every MSP byte reaches the line editor. The user is told to
+ * power-cycle the FC before connecting again.
+ */
+export function disconnectCliModeUnknown() {
+    console.warn(`${logHead} CLI exit not delivered: the FC may still be in its CLI; dropping the link`);
+    prepareDisconnect();
+    closeRebootDialog();
+    getConnectionState().concludeReboot(false);
+    finishClose();
+}
+
 // Explicit disconnect entry point. Safer than `connectDisconnect()` for
 // callers that know they want to disconnect, because it does not flip back to
 // "connect" if `isConnected` has already been toggled off (e.g. when the UI
