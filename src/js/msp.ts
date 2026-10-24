@@ -69,6 +69,11 @@ export interface MspRequest {
     recheck?: () => string[] | null;
     /** Gyroflight: a write admitted under this page's shared write lease (no transaction permit). */
     foreignWrite?: boolean;
+    /**
+     * Gyroflight: how many times its bytes were handed to the transport (passed stillWanted); 0 when
+     * every attempt was stopped there; unset when the transport never asked.
+     */
+    wireSends?: number;
 }
 
 export type CliCallback = (lines: string[], error?: Error | null) => void;
@@ -83,6 +88,12 @@ interface CliQueueEntry {
     onDelivery?: (delivered: boolean) => void;
     /** Gyroflight: set when it leaves the queue; "pending" until the transport reports the bytes sent. */
     delivery?: "pending" | "delivered" | "failed";
+    /** Gyroflight: the CLI session (cli_generation) it was sent in. */
+    generation?: number;
+    /** Gyroflight: its reply, when it came before the transport reported the bytes sent. */
+    reply?: string[];
+    /** Gyroflight: why the write check stopped it right before its bytes went out. */
+    refusedAtWire?: string[];
 }
 
 /**
@@ -220,6 +231,8 @@ const MSP = {
     cli_drain_timer: null as Timer | null,
     cli_drain_grace_ms: 1000,
     cli_session_uncertain: false,
+    // Gyroflight: bumped when the link is set up again; a transport result of an older one is stale.
+    cli_generation: 0,
 
     SDCARD_STATE_NOT_PRESENT: 0,
     SDCARD_STATE_FATAL: 1,
@@ -443,7 +456,7 @@ const MSP = {
         this.cli_output.length = 0;
 
         this.cli_callback = (lines) => {
-            this._finish_cli([...lines], null);
+            this._cli_replied(entry, [...lines]);
         };
 
         if (entry.timeoutMs) {
@@ -459,25 +472,56 @@ const MSP = {
 
         entry.onSent?.();
         entry.delivery = "pending";
+        entry.generation = this.cli_generation;
         const frame = this.encode_message_cli(entry.command);
-        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01/F09): delivered only when the
-        // transport reports every byte; otherwise the command ends with an error and, as the
-        // firmware may hold part of it, the session is uncertain.
-        void Promise.resolve(serial.send(frame)).then((result) => {
-            const delivered = result?.bytesSent === frame.byteLength;
-            entry.delivery = delivered ? "delivered" : "failed";
-            try {
-                entry.onDelivery?.(delivered);
-            } catch (callbackError) {
-                console.error("CLI delivery callback threw:", callbackError);
-            }
-            if (delivered) return;
-            this.cli_session_uncertain = true;
-            if (this.cli_in_flight === entry) this._finish_cli([], new CliDeliveryError(entry.command));
-            else this._cli_session_lost();
-        });
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01/F03/F09): checked once more right
+        // before its bytes go out (the transport may have held it behind an earlier send), and
+        // delivered only when the transport reports every byte.
+        const stillWanted = () => {
+            if (this.cli_in_flight !== entry || entry.generation !== this.cli_generation) return false;
+            entry.refusedAtWire = cliCommandRefusal(entry.command) ?? undefined;
+            return !entry.refusedAtWire;
+        };
+        void Promise.resolve(serial.send(frame, undefined, { stillWanted })).then((result) =>
+            this._cli_delivered(entry, result?.bytesSent === frame.byteLength),
+        );
     },
-    _finish_cli(lines: string[], error: Error | null) {
+    /** Gyroflight: the transport's result for a CLI command (see _process_cli_queue). */
+    _cli_delivered(entry: CliQueueEntry, delivered: boolean) {
+        // Sent on a link that was set up again since: nothing of it concerns this session.
+        if (entry.generation !== this.cli_generation) return;
+        entry.delivery = delivered ? "delivered" : "failed";
+        try {
+            entry.onDelivery?.(delivered);
+        } catch (callbackError) {
+            console.error("CLI delivery callback threw:", callbackError);
+        }
+        const inFlight = this.cli_in_flight === entry;
+        if (delivered) {
+            if (inFlight && entry.reply) this._finish_cli(entry.reply, null);
+            return;
+        }
+        if (entry.refusedAtWire) {
+            // Stopped before any byte went out: refused, nothing to drain.
+            if (inFlight) this._finish_cli([], writeRefused(entry.refusedAtWire), false);
+            return;
+        }
+        // Part of it may have reached the firmware: the session is uncertain.
+        this.cli_session_uncertain = true;
+        if (inFlight) this._finish_cli([], new CliDeliveryError(entry.command));
+        else this._cli_session_lost();
+    },
+    /** Gyroflight: its reply (ETX) came; it succeeds only once its bytes are known to have gone out whole. */
+    _cli_replied(entry: CliQueueEntry, lines: string[]) {
+        if (this.cli_in_flight !== entry) return;
+        if (entry.delivery === "delivered") {
+            this._finish_cli(lines, null);
+            return;
+        }
+        entry.reply = lines;
+        this.cli_callback = null;
+    },
+    _finish_cli(lines: string[], error: Error | null, drain = true) {
         const entry = this.cli_in_flight;
         if (!entry) {
             return;
@@ -493,28 +537,29 @@ const MSP = {
             this.cli_timer = null;
         }
 
+        // Drain any in-flight or soon-to-arrive response before sending the
+        // next command; the decoder ends the drain on its ETX. Gyroflight: when
+        // the grace timer expires first, the session is uncertain. Set before
+        // the caller hears of it (audit WP8-F09), so a command it sends from its
+        // callback waits behind the drain.
+        if (error && drain && !this.cli_session_uncertain) {
+            this.cli_discarding = true;
+            if (this.cli_drain_timer) {
+                clearTimeout(this.cli_drain_timer);
+            }
+            this.cli_drain_timer = setTimeout(() => this._cli_drain_expired(), this.cli_drain_grace_ms);
+        }
+
         try {
             entry.callback?.(lines, error);
         } catch (callbackError) {
             console.error("CLI callback threw:", callbackError);
         }
 
-        if (error) {
-            if (this.cli_session_uncertain) {
-                this._cli_session_lost();
-                return;
-            }
-            // Drain any in-flight or soon-to-arrive response before sending the
-            // next command; the decoder ends the drain on its ETX. Gyroflight: when
-            // the grace timer expires first, the session is uncertain.
-            this.cli_discarding = true;
-            if (this.cli_drain_timer) {
-                clearTimeout(this.cli_drain_timer);
-            }
-            this.cli_drain_timer = setTimeout(() => this._cli_drain_expired(), this.cli_drain_grace_ms);
+        if (this.cli_session_uncertain) {
+            this._cli_session_lost();
             return;
         }
-
         this._process_cli_queue();
     },
     _end_cli_drain() {
@@ -556,6 +601,7 @@ const MSP = {
         this.cli_output.length = 0;
         this.cli_discarding = false;
         this.cli_session_uncertain = false;
+        this.cli_generation++;
 
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): only the command in flight
         // carries the caller's error, with whether all its bytes were sent and the text received for
@@ -695,11 +741,15 @@ const MSP = {
 
         // always send messages with data payload (even when there is a message already in the queue)
         if (data || !requestExists) {
-            void serial.send(bufferOut, (sendInfo: { bytesSent: number }) => {
-                if (sendInfo.bytesSent === bufferOut.byteLength && callback_sent) {
-                    callback_sent();
-                }
-            });
+            void serial.send(
+                bufferOut,
+                (sendInfo: { bytesSent: number }) => {
+                    if (sendInfo.bytesSent === bufferOut.byteLength && callback_sent) {
+                        callback_sent();
+                    }
+                },
+                { stillWanted: () => this._still_wanted(obj) },
+            );
         }
 
         return true;
@@ -737,7 +787,11 @@ const MSP = {
             const at = this.callbacks.indexOf(obj);
             if (at !== -1) this.callbacks.splice(at, 1);
             try {
-                errorAwareCallback(obj)?.(null, new WriteRetryRefusedError(retryRefused));
+                // Every attempt was stopped before its bytes reached the transport (stillWanted): not
+                // sent. Otherwise, or when that is not known, the first attempt may have run.
+                const error =
+                    obj.wireSends === 0 ? writeRefused(retryRefused) : new WriteRetryRefusedError(retryRefused);
+                errorAwareCallback(obj)?.(null, error);
             } catch (callbackError) {
                 console.error("MSP callback threw on a refused retry:", callbackError);
             }
@@ -749,7 +803,7 @@ const MSP = {
             console.warn(
                 `MSP: data request timed-out: ${obj.code} ID: ${serial.connectionId} TAB: ${useNavigationStore().activeTab} QUEUE: ${this.callbacks.length} (${this.callbacks.map((e) => e.code)})`,
             );
-            void serial.send(obj.requestBuffer);
+            void serial.send(obj.requestBuffer, undefined, { stillWanted: () => this._still_wanted(obj) });
             this._arm_timer(obj);
             return;
         }
@@ -819,11 +873,28 @@ const MSP = {
         this._arm_timer(entry);
         this.callbacks.push(entry);
 
-        void serial.send(entry.requestBuffer, (sendInfo: { bytesSent: number }) => {
-            if (sendInfo.bytesSent === entry.requestBuffer.byteLength && entry.callbackSent) {
-                entry.callbackSent();
-            }
-        });
+        void serial.send(
+            entry.requestBuffer,
+            (sendInfo: { bytesSent: number }) => {
+                if (sendInfo.bytesSent === entry.requestBuffer.byteLength && entry.callbackSent) {
+                    entry.callbackSent();
+                }
+            },
+            { stillWanted: () => this._still_wanted(entry) },
+        );
+    },
+    /**
+     * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F03): asked right before a request's bytes
+     * go to the transport, which may have held them behind an earlier send. A request that timed
+     * out or was cleared meanwhile, or that the write check would now refuse, does not go out late.
+     */
+    _still_wanted(obj: MspRequest): boolean {
+        if (!this.callbacks.includes(obj) || obj.recheck?.()) {
+            obj.wireSends ??= 0;
+            return false;
+        }
+        obj.wireSends = (obj.wireSends ?? 0) + 1;
+        return true;
     },
     /**
      * @param {number} code MSP command code

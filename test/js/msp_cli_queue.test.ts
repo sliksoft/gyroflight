@@ -57,7 +57,12 @@ describe("MSP CLI queue", () => {
         vi.restoreAllMocks();
     });
 
-    it("serialises commands in push order", () => {
+    // Gyroflight (audit WP8-F09): a reply counts once the transport reported the command's bytes sent.
+    const settled = async () => {
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+    };
+
+    it("serialises commands in push order", async () => {
         const order: Array<[string, string[]]> = [];
 
         MSP.send_cli_command("first", (lines) => order.push(["first", lines]));
@@ -66,10 +71,12 @@ describe("MSP CLI queue", () => {
         expect(serialSendSpy).toHaveBeenCalledTimes(1);
 
         MSP.read(toReadInfo(responseBytes("hello-first")));
+        await settled();
         expect(order).toEqual([["first", ["hello-first", ""]]]);
         expect(serialSendSpy).toHaveBeenCalledTimes(2);
 
         MSP.read(toReadInfo(responseBytes("hello-second")));
+        await settled();
         expect(order).toEqual([
             ["first", ["hello-first", ""]],
             ["second", ["hello-second", ""]],
@@ -89,7 +96,7 @@ describe("MSP CLI queue", () => {
         expect(MSP.cli_discarding).toBe(true);
     });
 
-    it("drains a late response in full before sending the next command", () => {
+    it("drains a late response in full before sending the next command", async () => {
         const results: Array<Record<string, unknown>> = [];
         MSP.send_cli_command("slow", (lines, error) => results.push({ cmd: "slow", error }), { timeoutMs: 100 });
         MSP.send_cli_command("fast", (lines, error) => results.push({ cmd: "fast", lines, error }));
@@ -109,6 +116,7 @@ describe("MSP CLI queue", () => {
         expect(serialSendSpy).toHaveBeenCalledTimes(2);
 
         MSP.read(toReadInfo(responseBytes("fast-response")));
+        await settled();
         expect(results[1]).toEqual({ cmd: "fast", lines: ["fast-response", ""], error: null });
     });
 

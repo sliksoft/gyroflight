@@ -27,7 +27,7 @@ import { gui_log } from "../gui_log";
 import { i18n } from "../localization";
 import { serial } from "../serial";
 // Gyroflight hook (docs/gyrocore/UPSTREAM.md): this backup reads the CLI over the raw serial line.
-import { interactiveCliText, reportRefusedWrite } from "../../composables/fcWriteGuard";
+import { interactiveCliStillAllowed, interactiveCliText, reportRefusedWrite } from "../../composables/fcWriteGuard";
 
 /**
  *
@@ -370,7 +370,7 @@ class AutoBackup {
         });
     }
 
-    private sendSerial(line: string, callback?: () => void) {
+    private sendSerial(line: string, callback?: () => void, stillWanted?: () => boolean) {
         const bufferOut = new ArrayBuffer(line.length);
         const bufView = new Uint8Array(bufferOut);
 
@@ -379,7 +379,7 @@ class AutoBackup {
             bufView[cKey] = line.codePointAt(cKey) ?? 0;
         }
 
-        void serial.send(bufferOut, callback);
+        void serial.send(bufferOut, callback, { stillWanted });
     }
 
     private sendCommand(line: string, callback?: () => void) {
@@ -390,7 +390,8 @@ class AutoBackup {
             reportRefusedWrite(`CLI "${line}"`, out.refused);
             return;
         }
-        this.sendSerial(out.text, callback);
+        // Checked again right before its bytes go out (audit WP8-F03).
+        this.sendSerial(out.text, callback, () => interactiveCliStillAllowed(`${line}\n`, out.text));
     }
 
     execute(callback: (result: boolean) => void) {

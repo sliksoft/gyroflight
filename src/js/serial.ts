@@ -71,6 +71,16 @@ export interface SerialSendResult {
     bytesSent: number;
 }
 
+/** Gyroflight (audit WP8-F03): options of one send. */
+export interface SerialSendOptions {
+    /**
+     * Asked right before the bytes go to the transport, once every earlier send has finished; false
+     * drops them (bytesSent 0). A request that timed out meanwhile, or that the write check would
+     * now refuse, must not go out late.
+     */
+    stillWanted?: () => boolean;
+}
+
 /** A device as a transport lists it. Bluetooth ids are strings ("unknown" for the vendor). */
 export interface SerialDevice {
     path: string;
@@ -131,6 +141,11 @@ class Serial extends EventTarget {
     logHead: string;
     _hasRawTcp: boolean;
     _protocols: ProtocolSlot[];
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F03): one send at a time, in call order,
+    // per connection (a new connection starts a new queue: a send stuck on the old one blocks
+    // nothing after it).
+    #sendQueue: Promise<unknown> = Promise.resolve();
+    #sendGeneration = 0;
 
     constructor() {
         super();
@@ -301,6 +316,7 @@ class Serial extends EventTarget {
         options?: SerialConnectOptions,
         callback?: (result: boolean | void) => void,
     ): Promise<boolean | void> {
+        this.#newSendQueue();
         // Select the appropriate protocol based directly on the port path
         let result: boolean | void = false;
         try {
@@ -323,6 +339,7 @@ class Serial extends EventTarget {
      * @returns Promise resolving to true if disconnection was successful
      */
     async disconnect(callback?: (result: boolean | void) => void): Promise<boolean | void> {
+        this.#newSendQueue();
         let result: boolean | void = false;
         try {
             result = (await this._protocol?.disconnect()) ?? false;
@@ -339,18 +356,33 @@ class Serial extends EventTarget {
      * The callback is invoked here and only here. Protocols must not be handed
      * it, or every transport that fires it internally would deliver it twice.
      */
-    async send(data: SerialPayload, callback?: (result: SerialSendResult) => void): Promise<SerialSendResult> {
-        let result: SerialSendResult;
-        try {
-            // Guard the method too: virtual mode has no send(), and that is a
-            // normal path, not an error to log.
-            result = (await this._protocol?.send?.(data)) ?? { bytesSent: 0 };
-        } catch (error) {
-            result = { bytesSent: 0 };
-            console.error(`${this.logHead} Error sending data:`, error);
-        }
+    async send(
+        data: SerialPayload,
+        callback?: (result: SerialSendResult) => void,
+        options?: SerialSendOptions,
+    ): Promise<SerialSendResult> {
+        const generation = this.#sendGeneration;
+        const run = async (): Promise<SerialSendResult> => {
+            if (generation !== this.#sendGeneration || options?.stillWanted?.() === false) return { bytesSent: 0 };
+            try {
+                // Guard the method too: virtual mode has no send(), and that is a
+                // normal path, not an error to log.
+                return (await this._protocol?.send?.(data)) ?? { bytesSent: 0 };
+            } catch (error) {
+                console.error(`${this.logHead} Error sending data:`, error);
+                return { bytesSent: 0 };
+            }
+        };
+        const queued = this.#sendQueue.then(run);
+        this.#sendQueue = queued.catch(() => undefined);
+        const result = await queued;
         callback?.(result);
         return result;
+    }
+
+    #newSendQueue(): void {
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
     }
 
     /**

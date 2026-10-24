@@ -38,7 +38,12 @@ import { addTimeout, removeTimeout } from "../js/timers";
 import { useAppInfoStore } from "../stores/appInfo";
 import { useConnectionStore } from "../stores/connection";
 // Gyroflight hook (docs/gyrocore/UPSTREAM.md): the CLI tab writes to the serial line directly.
-import { foreignWritesRefused, interactiveCliText, reportRefusedWrite } from "./fcWriteGuard";
+import {
+    foreignWritesRefused,
+    interactiveCliStillAllowed,
+    interactiveCliText,
+    reportRefusedWrite,
+} from "./fcWriteGuard";
 
 const backspaceCode = 8;
 const lineFeedCode = 10;
@@ -339,9 +344,19 @@ export function useCli(): Cli {
             writeLineToOutput(`###ERROR Gyroflight: not sent (${out.refused.join(", ")})`);
             return false;
         }
-        // serial.send never rejects: it logs a failure and reports it through the callback.
+        // serial.send never rejects: it logs a failure and reports it through the callback. Checked
+        // again right before its bytes go out (WP8-F03): it may wait behind an earlier send.
         const bytes = encoder.encode(out.text);
-        void serial.send(bytes, (result) => callback?.(result, result?.bytesSent === bytes.byteLength));
+        let stopped = false;
+        const stillWanted = () => (stopped = !interactiveCliStillAllowed(line, out.text)) === false;
+        void serial.send(
+            bytes,
+            (result) => {
+                if (stopped) writeLineToOutput("###ERROR Gyroflight: not sent (the state changed before it went out)");
+                callback?.(result, result?.bytesSent === bytes.byteLength);
+            },
+            { stillWanted },
+        );
         return true;
     };
 

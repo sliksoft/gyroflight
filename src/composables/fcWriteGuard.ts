@@ -373,6 +373,16 @@ export function interactiveCliText(text: string): { text: string; refused: null 
     return refused ? { text: null, refused } : { text: CLI_CLEAR_LINE + text, refused: null };
 }
 
+/**
+ * Whether `sent`, what interactiveCliText returned for `text` when it was admitted, may still go out
+ * now (audit WP8-F03: the transport may have held it behind an earlier send). Not when `text` would
+ * now be refused, nor when it went unchecked (writes were allowed) and writes are now refused.
+ */
+export function interactiveCliStillAllowed(text: string, sent: string): boolean {
+    const now = interactiveCliText(text);
+    return !now.refused && (now.text === sent || sent.startsWith(CLI_CLEAR_LINE));
+}
+
 interface LockManagerLike {
     request<T>(name: string, options: { ifAvailable: boolean }, cb: (lock: unknown) => Promise<T>): Promise<T>;
 }

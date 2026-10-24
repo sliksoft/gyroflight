@@ -151,6 +151,8 @@ class WebSerial extends EventTarget {
     // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F03): one logical send at a time, so the
     // chunks of a batched frame are never split by another send and sends reach the port in order.
     #sendQueue: Promise<unknown> = Promise.resolve();
+    // A new connection starts a new queue: a write stuck on the old port blocks nothing after it.
+    #sendGeneration = 0;
 
     constructor() {
         super();
@@ -316,6 +318,8 @@ class WebSerial extends EventTarget {
             console.log(`${logHead} Already connected, not connecting again`);
             return true;
         }
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
 
         this.openRequested = true;
         this.closeRequested = false;
@@ -406,6 +410,8 @@ class WebSerial extends EventTarget {
 
     // Update disconnect method
     async disconnect(): Promise<boolean> {
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
         // If already disconnected, just return
         if (!this.connected) {
             return true;
@@ -491,6 +497,8 @@ class WebSerial extends EventTarget {
     }
 
     forceClose(): void {
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
         // Best-effort teardown for page-unload (pagehide / beforeunload).
         // Instance refs are nulled immediately so the rest of the class sees a
         // disconnected state; the actual async teardown runs in a Promise chain
@@ -587,7 +595,10 @@ class WebSerial extends EventTarget {
      * was not open, less than the payload when it failed in the middle (the receiver got a cut frame).
      */
     send(data: WebSerialPayload, callback?: (result: WebSerialSendResult) => void): Promise<WebSerialSendResult> {
-        const result = this.#sendQueue.then(() => this.#sendNow(data));
+        const generation = this.#sendGeneration;
+        const result = this.#sendQueue.then(() =>
+            generation === this.#sendGeneration ? this.#sendNow(data) : { bytesSent: 0 },
+        );
         this.#sendQueue = result.catch(() => undefined);
         if (callback) {
             result.then(callback).catch((error) => console.error(`${logHead} send callback threw:`, error));
