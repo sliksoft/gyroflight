@@ -86,7 +86,7 @@ import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
-import { crossLogReferenceIssues } from "./logInput";
+import { crossLogReferenceIssues, sameFlight } from "./logInput";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 /** rcCommand[3] below this: on the ground / idle; the PID terms are not representative. */
@@ -103,6 +103,12 @@ export interface ChirpAxisInput {
     qualificationReasons?: string[];
     /** Where `tf`'s resolution comes from: Welch segment, sample rate, window and segment count. */
     analysis?: AnalysisProvenance;
+    /**
+     * The same window analysed with the longest Welch segment that still gives
+     * UNCERTAINTY.minWelchSegments segments (logInput.ts finestWelchSegment): the finer
+     * identification a model-class qualification can use (modelQualification.ts). Never `tf`.
+     */
+    fine?: { tf: TransferFunction; analysis: AnalysisProvenance };
 }
 
 export interface AutotuneLogInput {
@@ -505,6 +511,12 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     const crossLogPlant: AutotuneV2Result["crossLogPlant"] = {};
     const crossLogRejected: string[] = [];
     const references = input.others.filter((other) => {
+        // One flight is one piece of evidence: the model-class qualification's flight is not also
+        // the plant's reproducibility reference.
+        if (qLog && (other === qLog || sameFlight(other, qLog))) {
+            crossLogRejected.push(`cross_log_reference_is_the_qualification:${other.sha256}:${other.logIndex}`);
+            return false;
+        }
         const issues = crossLogReferenceIssues(log, other, input.others);
         crossLogRejected.push(...issues);
         return !issues.length;

@@ -30,7 +30,9 @@ import { FlightLog } from "@/blackbox-viewer/flightlog.js";
 import { FlightLogIndex } from "@/blackbox-viewer/flightlog_index.js";
 import { extractOptionalBlackboxChannels } from "@/js/blackbox/flight_metrics_analysis";
 import type { M4BblReport } from "@/js/blackbox/m4_bbl_integration";
-import type { ChirpMeasurement, ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
+import { WELCH_OVERLAP, type ChirpMeasurement, type ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
+import { welchTransferFunction } from "@/js/blackbox/spectral_analysis";
+import { UNCERTAINTY } from "./loopModel";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import type { AutotuneLogInput, ChirpAxisInput, FlightFragment } from "./autotuneV2";
@@ -39,6 +41,9 @@ import type { AxisName } from "./safetyEvidence";
 const FIELDS = [
     "loopIteration",
     "time",
+    "setpoint[0]",
+    "setpoint[1]",
+    "setpoint[2]",
     "gyroADC[0]",
     "gyroADC[1]",
     "gyroADC[2]",
@@ -87,6 +92,17 @@ function bestPerAxis(ms: ChirpMeasurement[]): Partial<Record<AxisName, ChirpMeas
     return out;
 }
 
+/**
+ * The longest power-of-two Welch segment a window of `windowSamples` samples analyses into at least
+ * UNCERTAINTY.minWelchSegments segments at 50 % overlap (n ≥ N · (K + 1) / 2), or null below 256
+ * samples. Its resolution is what the samples can give, nothing interpolated.
+ */
+export function finestWelchSegment(windowSamples: number): number | null {
+    const max = (2 * windowSamples) / (UNCERTAINTY.minWelchSegments + 1);
+    if (!(max >= 256)) return null;
+    return 2 ** Math.floor(Math.log2(max));
+}
+
 export function buildLogInputs(
     bytes: Uint8Array,
     sha256: string,
@@ -110,11 +126,42 @@ export function buildLogInputs(
             c && c.length === t.length ? c : null;
         const unfilt = [ch["gyroUnfilt[0]"], ch["gyroUnfilt[1]"], ch["gyroUnfilt[2]"]].map(aligned);
         const chirp: Partial<Record<AxisName, ChirpAxisInput>> = {};
+        const setpoint = [ch["setpoint[0]"], ch["setpoint[1]"], ch["setpoint[2]"]];
         for (const [axis, m] of Object.entries(best) as [AxisName, ChirpMeasurement][]) {
+            const start = firstAtOrAfter(t, m.startTimeUs);
+            const end = firstAtOrAfter(t, m.endTimeUs);
+            const ai = (["roll", "pitch", "yaw"] as const).indexOf(axis);
+            const fs = m.sampleRate.effectiveRateHz;
+            const N = finestWelchSegment(end - start);
+            const sp = aligned(setpoint[ai]);
+            // The finer identification for a model-class qualification: the same samples, the
+            // longest segment that still averages enough (never the qualified `tf` itself).
+            const fine =
+                fs && N && sp && N > (m.segmentSize ?? Infinity)
+                    ? (() => {
+                          const tf = welchTransferFunction(
+                              sp.subarray(start, end),
+                              (ch[`gyroADC[${ai}]`] as Float64Array).subarray(start, end),
+                              fs,
+                              N,
+                              WELCH_OVERLAP,
+                          );
+                          return {
+                              tf,
+                              analysis: {
+                                  segmentSamples: N,
+                                  sampleRateHz: fs,
+                                  windowSamples: end - start,
+                                  segments: tf.numSegments,
+                              },
+                          };
+                      })()
+                    : undefined;
             chirp[axis] = {
+                ...(fine ? { fine } : {}),
                 tf: m.diagnostics!.transferFunction,
-                start: firstAtOrAfter(t, m.startTimeUs),
-                end: firstAtOrAfter(t, m.endTimeUs),
+                start,
+                end,
                 state: m.state,
                 qualificationReasons: m.apply.blocked.filter((r) => r.startsWith("measurement:")),
                 ...(m.segmentSize && m.sampleRate.effectiveRateHz

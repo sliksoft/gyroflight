@@ -42,6 +42,7 @@ import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { runAutotuneV2, type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
 import { buildLogInputs, uniqueFlights } from "@/gyrocore/engine/logInput";
 import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
+import { assessModelQualification } from "@/gyrocore/engine/modelQualification";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { currentAnalysisInput } from "@/gyrocore/releaseGate/analysisBinding";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
@@ -190,6 +191,9 @@ export function useAutotuneV2() {
             const input = currentAnalysisInput();
             if (!input) throw new Error(i18n.getMessage("gyroflightV2NoChirp"));
             store.result = runAutotuneV2(input);
+            // Informative: what a model-class qualification from the imported logs would show. Its run
+            // is not the published result, so it never reaches the write authority (modelQualification.ts).
+            store.qualification = assessModelQualification(input).report;
             store.state = "done";
         } catch (err) {
             // A stale run leaves the newer files' state alone (addSource reset it to idle).
