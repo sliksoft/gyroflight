@@ -43,7 +43,13 @@ vi.mock("@/gyrocore/engine/logInput", async (importOriginal) => ({
 
 import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import { verifiedTuneFromLogs } from "../../src/gyrocore/engine/verifiedTuneFromLogs";
-import { compareAxis, MAX_REPEAT_TOLERANCE_FACTOR } from "../../src/gyrocore/releaseGate/verifiedTune";
+import {
+    compareAxis,
+    MAX_REPEAT_TOLERANCE_FACTOR,
+    verifiedTuneHash,
+    verifiedTuneIssues,
+    type VerifiedTune,
+} from "../../src/gyrocore/releaseGate/verifiedTune";
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
@@ -131,6 +137,25 @@ describe("P1-4: the baseline repeat", () => {
         expect(attempt.record!.verdict).toBe("PASS");
         expect(attempt.record!.comparisons.every((c) => c.scatterCappedBins === 0)).toBe(true);
         expect(typeof compareAxis).toBe("function");
+    }, 120_000);
+});
+
+describe("evidence built under superseded rules is not reused", () => {
+    it("a Verified Tune record of the previous kind (v2) is refused by name, even with a valid hash", () => {
+        const attempt = verifiedTuneFromLogs([
+            { ...syntheticLogInput("1".repeat(64), { pids: BASE }), order: 1 },
+            { ...syntheticLogInput("2".repeat(64), { pids: BASE }), order: 2 },
+            { ...syntheticLogInput("3".repeat(64), { pids: CAND }), order: 3 },
+        ]);
+        const { id: _id, ...body } = attempt.record!;
+        const old = { ...body, kind: "gyroflight.verified_tune.v2" } as unknown as Omit<VerifiedTune, "id">;
+        const v2 = { ...old, id: verifiedTuneHash(old) } as VerifiedTune;
+        const craft = { uid: attempt.record!.craft.uid, firmware: attempt.record!.craft.firmware };
+        expect(verifiedTuneIssues(attempt.record!, craft)).toEqual([]);
+        expect(verifiedTuneIssues(v2, craft)).toEqual([
+            "independent_pid_validation_missing",
+            "verified_tune:built_under_superseded_rules:gyroflight.verified_tune.v2",
+        ]);
     }, 120_000);
 });
 
