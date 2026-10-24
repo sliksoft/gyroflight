@@ -79,9 +79,10 @@ export interface AxisMeasurementPlan {
     /** Largest bin step that resolves the measured loop, and the one a qualification needs. */
     resolutionHz: { now: number | null; primary: number | null; qualification: number | null };
     /**
-     * Welch segment length (samples, power of two) for those resolutions at this sample rate. The
-     * primary one never exceeds the segment the standard analysis uses (`executable`): that segment
-     * is set by the sample rate, not by the flight, so no sweep can give the primary a finer one.
+     * Welch segment length (samples, power of two) at this sample rate. The primary one is the
+     * segment the standard analysis uses (`executable`): it is set by the sample rate, not by the
+     * flight, so the next flight gets that one whatever its resolution needs; the qualification's
+     * is the one its finer analysis needs.
      */
     segmentSamples: { primary: number | null; qualification: number | null; executable: number | null };
     /** Independent averages at the crossover: available now and needed (PLAN.pmUncertaintyDeg). */
@@ -226,7 +227,8 @@ export function planMeasurement(
         Math.min(dfPrimary, margins.evidence.resolutionHz ?? dfPrimary) / RESOLVED_FEATURE_BINS;
     const wanted = pow2(sampleRateHz / dfPrimary);
     const executable = plan.segmentSamples.executable;
-    plan.segmentSamples.primary = executable === null ? null : Math.min(wanted, executable);
+    // The next flight is analysed with the standard segment whatever it needs: its dwell is planned at that one.
+    plan.segmentSamples.primary = executable;
     plan.segmentSamples.qualification = pow2(sampleRateHz / plan.resolutionHz.qualification);
     if (executable === null) diagnostics.push("primary_analysis_segment_unknown");
     else if (wanted > executable) {

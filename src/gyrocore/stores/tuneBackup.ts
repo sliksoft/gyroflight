@@ -50,10 +50,22 @@ export interface TuneBackup {
     /** Absolute route: every firmware-held PID / PID_ADVANCED / FILTER_CONFIG value and the slider modes. */
     absolute?: AbsoluteSnapshot;
     /**
-     * Taken by a Restore while the craft held the result of a write nobody verified: kept to show
-     * what was there, never a Restore target (useTuneApply refuses it).
+     * Whether the craft's state was known when it was taken: false for the backup a Restore takes
+     * while the craft holds the result of a write nobody verified (kept to show what was there).
+     * Missing on backups taken before this was recorded.
      */
-    unverified?: true;
+    stateKnown?: boolean;
+}
+
+/**
+ * Why `b` must not be written back by a Restore; null when it may. An unverified state never; a
+ * before-Restore backup only with its provenance recorded (an older one may hold the partial
+ * result of a failed write it was taken after).
+ */
+export function restoreTargetIssue(b: TuneBackup): string | null {
+    if (b.stateKnown === false) return "restore:backup_unverified";
+    if (b.reason === "before_restore" && b.stateKnown !== true) return "restore:backup_provenance_unknown";
+    return null;
 }
 
 function readStorage(): TuneBackup[] {

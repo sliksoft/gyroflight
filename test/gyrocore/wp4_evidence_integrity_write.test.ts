@@ -137,6 +137,7 @@ import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning
 import {
     TRANSACTION_STATE_NOT_STORED,
     TRANSACTION_STATE_UNREADABLE,
+    TRANSACTION_ENTRY_PREFIX,
     TRANSACTION_STORAGE_KEY,
     useFcTransactionStore,
     type UncertainTransaction,
@@ -147,6 +148,13 @@ import { usePidTuningMsp } from "../../src/composables/pidTuning/usePidTuningMsp
 import { useReboot } from "../../src/composables/useReboot";
 
 const localStorageSet = Storage.prototype.setItem;
+
+/** The transaction entries as stored now (one key each). */
+function storedEntries(): UncertainTransaction[] {
+    return Object.keys(localStorage)
+        .filter((k) => k.startsWith(TRANSACTION_ENTRY_PREFIX))
+        .map((k) => JSON.parse(localStorage.getItem(k)!) as UncertainTransaction);
+}
 
 import type { AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
 import type { AutotuneLogInput, AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
@@ -416,7 +424,7 @@ describe("WP8 review: the lock covers what it claims, and only evidence clears i
         let pendingAtFirstSet: unknown = null;
         gate.fc.disconnectWhen = (_fc, code) => {
             if (pendingAtFirstSet === null && FIRMWARE_WRITE_CODES.has(code)) {
-                pendingAtFirstSet = JSON.parse(localStorage.getItem(TRANSACTION_STORAGE_KEY) ?? "[]");
+                pendingAtFirstSet = storedEntries();
             }
             return false;
         };
@@ -431,7 +439,7 @@ describe("WP8 review: the lock covers what it claims, and only evidence clears i
         const token = await confirm(p);
         // The browser refuses this one key (a full quota); everything else is stored as usual.
         const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-            if (key === TRANSACTION_STORAGE_KEY) throw new Error("quota");
+            if (key.startsWith(TRANSACTION_ENTRY_PREFIX)) throw new Error("quota");
             localStorageSet.call(this, key, value);
         });
         try {
@@ -534,7 +542,7 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         const back = await restoreAbsoluteTune(err.backupId, await confirmRestore(err.backupId));
         expect(back.status).toBe("verified");
         const taken = useTuneBackupStore().get(back.backupId)!;
-        expect(taken).toMatchObject({ reason: "before_restore", unverified: true });
+        expect(taken).toMatchObject({ reason: "before_restore", stateKnown: false });
         gate.fc.calls = [];
         // Writing it back would put the unverified (possibly partial) write on the craft again.
         const refused = await denial(previewAbsoluteRestore(back.backupId));
@@ -546,11 +554,28 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         expect(writes()).toEqual([]);
     });
 
+    it("a before-Restore backup stored before provenance was recorded is no Restore target", async () => {
+        expect((await apply(proposal())).status).toBe("verified");
+        const { stateKnown: _known, ...legacy } = {
+            ...backups()[0],
+            id: "bk-legacy",
+            reason: "before_restore" as const,
+        };
+        expect(useTuneBackupStore().save(legacy)).toBe(true);
+        gate.fc.calls = [];
+        expect((await denial(previewAbsoluteRestore("bk-legacy"))).reasons).toEqual([
+            "restore:backup_provenance_unknown",
+        ]);
+        expect(writes()).toEqual([]);
+    });
+
     it("a Restore on a craft with a known state takes an ordinary backup", async () => {
         expect((await apply(proposal())).status).toBe("verified");
         const first = backups()[0];
         const back = await restoreAbsoluteTune(first.id, await confirmRestore(first.id));
-        expect(useTuneBackupStore().get(back.backupId)?.unverified).toBeUndefined();
+        expect(useTuneBackupStore().get(back.backupId)?.stateKnown).toBe(true);
+        // And that one may be written back (undoing the Restore).
+        expect((await previewAbsoluteRestore(back.backupId)).backup.id).toBe(back.backupId);
     });
 
     it("unreadable storage is never overwritten: a Restore refuses, and a new page still finds it unreadable", async () => {
@@ -601,8 +626,11 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         const states = useFcTransactionStore();
         localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-a" })]));
         states.record(other({ id: "tx-b", backupId: "bk-b" }));
-        const stored = JSON.parse(localStorage.getItem(TRANSACTION_STORAGE_KEY)!) as UncertainTransaction[];
-        expect(stored.map((e) => e.id)).toEqual(["tx-b", "tx-a"]);
+        expect(
+            storedEntries()
+                .map((e) => e.id)
+                .sort(),
+        ).toEqual(["tx-a", "tx-b"]);
     });
 
     it("the slider Restore covers the slider route's entries of its own profile only", () => {
@@ -630,5 +658,79 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-a" })]));
         await expect(saving).rejects.toBeInstanceOf(ApplyBlockedError);
         expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
+    });
+
+    it("two tabs that both read an empty state and then store a pending entry each keep both (one key per entry)", () => {
+        const pinA = createPinia();
+        const pinB = createPinia();
+        setActivePinia(pinA);
+        const a = useFcTransactionStore();
+        setActivePinia(pinB);
+        const b = useFcTransactionStore();
+        a.sync();
+        b.sync();
+        expect(a.recordPending({ ...other({}), id: "tx-x", stage: "in_progress", backupId: "bk-x" })).toBe(true);
+        expect(b.recordPending({ ...other({}), id: "tx-y", stage: "in_progress", backupId: "bk-y" })).toBe(true);
+        // Tab A closes mid-write: its entry is still there for the next page.
+        setActivePinia(createPinia());
+        expect(
+            useFcTransactionStore()
+                .forUid(gate.fc.uid)
+                .map((e) => e.id)
+                .sort(),
+        ).toEqual(["tx-x", "tx-y"]);
+        // B settling its own transaction leaves A's.
+        b.settle("tx-y", null);
+        expect(storedEntries().map((e) => e.id)).toEqual(["tx-x"]);
+    });
+
+    it("an entry another page changed after it was read is not resolved by evidence about the old one", () => {
+        const st = useFcTransactionStore();
+        st.record(other({ id: "tx-c" }));
+        const seen = st.forUid(gate.fc.uid);
+        localStorage.setItem(
+            `${TRANSACTION_ENTRY_PREFIX  }tx-c`,
+            JSON.stringify(other({ id: "tx-c", saved: "unknown" })),
+        );
+        expect(st.resolveEntries(seen)).toBe(false);
+        expect(storedEntries()).toEqual([expect.objectContaining({ id: "tx-c", saved: "unknown" })]);
+    });
+
+    it("an unreadable entry key blocks every craft, and is left as it is", async () => {
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX  }tx-bad`, "{not json");
+        setActivePinia(createPinia());
+        expect((await denial(apply(proposal()))).reasons).toEqual([TRANSACTION_STATE_UNREADABLE]);
+        expect(localStorage.getItem(`${TRANSACTION_ENTRY_PREFIX  }tx-bad`)).toBe("{not json");
+        nothingReachedTheCraft();
+    });
+
+    it("an earlier-format list is moved to one key per entry and still blocks", async () => {
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([other({ id: "tx-old" })]));
+        setActivePinia(createPinia());
+        expect((await denial(apply(proposal()))).reasons).toEqual(["fc:transaction_state_uncertain:bk-other:write:no"]);
+        expect(localStorage.getItem(TRANSACTION_STORAGE_KEY)).toBeNull();
+        expect(storedEntries().map((e) => e.id)).toEqual(["tx-old"]);
+    });
+
+    it("the read-only check does not report a known state while another page added an entry during its reads", async () => {
+        gate.fc.faults[MSPCodes.MSP_SET_FILTER_CONFIG] = "timeout";
+        const err = await writeFailure(apply(proposal()));
+        expect(err).toMatchObject({ stage: "write", saved: "no" });
+        gate.fc.faults = {};
+        gate.fc.ram = structuredClone(gate.fc.eeprom);
+        gate.fc.profiles = structuredClone(gate.fc.eepromProfiles);
+        let injected = false;
+        gate.fc.disconnectWhen = (_fc, code) => {
+            // During the read-back the check compares (after it listed the open entries).
+            if (!injected && code === MSPCodes.MSP_PID) {
+                injected = true;
+                localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX  }tx-late`, JSON.stringify(other({ id: "tx-late" })));
+            }
+            return false;
+        };
+        const check = await checkTransactionState();
+        expect(check).toEqual({ resolved: false, reasons: ["state:bk-other:changed_during_check"] });
+        // Its own entry was resolved by the evidence; the late one stays.
+        expect(storedEntries().map((e) => e.id)).toEqual(["tx-late"]);
     });
 });

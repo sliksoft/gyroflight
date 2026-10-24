@@ -106,15 +106,15 @@ describe("the plan follows the evidence rules", () => {
             Math.min(p.resolutionHz.primary!, 0.5) / RESOLVED_FEATURE_BINS,
             9,
         );
-        // Power-of-two Welch segments at 4 kHz that give at least that resolution.
-        for (const [df, n] of [
-            [p.resolutionHz.primary!, p.segmentSamples.primary!],
-            [p.resolutionHz.qualification!, p.segmentSamples.qualification!],
-        ]) {
-            expect(Math.log2(n) % 1).toBe(0);
-            expect(4000 / n).toBeLessThanOrEqual(df + 1e-9);
-            expect(4000 / (n / 2)).toBeGreaterThan(df);
-        }
+        // The qualification: the power-of-two Welch segment at 4 kHz that gives at least its resolution.
+        const nq = p.segmentSamples.qualification!;
+        expect(Math.log2(nq) % 1).toBe(0);
+        expect(4000 / nq).toBeLessThanOrEqual(p.resolutionHz.qualification! + 1e-9);
+        expect(4000 / (nq / 2)).toBeGreaterThan(p.resolutionHz.qualification!);
+        // The primary: the standard analysis's own segment (finer than needed here), never a shorter one
+        // the import would not use (its dwell would be planned 16× too short at 512 against 2048).
+        expect(p.segmentSamples.primary).toBe(ANALYSIS.segmentSamples);
+        expect(4000 / p.segmentSamples.primary!).toBeLessThanOrEqual(p.resolutionHz.primary! + 1e-9);
     });
 
     it("averages: n ≥ (1 − γ²) κ² / (2 γ² σ²) at the crossover, σ = 2.5° / 2", () => {
