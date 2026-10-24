@@ -27,6 +27,7 @@ import { useConnectionStore } from "../stores/connection";
 import { pinia } from "./pinia_instance";
 // Gyroflight hook (docs/gyrocore/UPSTREAM.md): the one write check every request passes.
 import {
+    classifyMsp,
     cliCommandRefusal,
     mspRequestRefusal,
     reportRefusedWrite,
@@ -34,6 +35,7 @@ import {
     WriteRetryRefusedError,
     type WritePermit,
 } from "../composables/fcWriteGuard";
+import { writeLease } from "../composables/fcWriteLease";
 
 /** A request payload: the encoders read `.length` and index it, so an array-like of bytes. */
 export type MspPayload = ArrayLike<number> | false | undefined;
@@ -65,6 +67,8 @@ export interface MspRequest {
     timer?: ReturnType<typeof setTimeout> | null;
     /** Gyroflight: the write check again, for a parked request when it is released and before a retry. */
     recheck?: () => string[] | null;
+    /** Gyroflight: a write admitted under this page's shared write lease (no transaction permit). */
+    foreignWrite?: boolean;
 }
 
 export type CliCallback = (lines: string[], error?: Error | null) => void;
@@ -635,6 +639,7 @@ const MSP = {
         // uncertain. An awaiter gets the error; a callback caller gets no callback (never "saved").
         const recheck = () => mspRequestRefusal(code, data, permit);
         const refused = recheck();
+        const foreignWrite = !permit && classifyMsp(code, data) === "write";
         if (refused) {
             if (errorAware && callback_msp) callback_msp(null, writeRefused(refused));
             else reportRefusedWrite(`MSP ${code}`, refused);
@@ -659,6 +664,7 @@ const MSP = {
                     errorAware: true,
                     notifyTimeout,
                     recheck,
+                    foreignWrite,
                 });
                 return true;
             }
@@ -676,6 +682,7 @@ const MSP = {
             attempts: 1,
             start: performance.now(),
             recheck,
+            foreignWrite,
         };
 
         // errorAware entries always arm their own timer (even when deduped) so an awaiter
@@ -1094,4 +1101,16 @@ declare global {
 }
 
 window.MSP = MSP;
+
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F02): this page yields the write lease to
+// another page's transaction only while none of its own writes still awaits an answer (a retry is
+// pending) and no CLI command is in flight or queued.
+writeLease.setBusyProbe(
+    () =>
+        MSP.callbacks.some((e) => e.foreignWrite && e.timer) ||
+        [...MSP.parked.values()].some((q) => q.some((e) => e.foreignWrite)) ||
+        MSP.cli_in_flight !== null ||
+        MSP.cli_queue.length > 0,
+);
+
 export default MSP;

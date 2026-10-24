@@ -20,64 +20,97 @@
  */
 
 /*
- * The Web Locks API (navigator.locks) for the test environment: jsdom and Node 22 have none. This
- * stands in for the browser primitive, not for Gyroflight's lock: it implements the part of the
- * specification the write transaction uses (https://w3c.github.io/web-locks/): exclusive locks per
- * name, granted in request order, `ifAvailable` (granted at once or the callback gets null), and a
- * lock held until the callback's promise settles. Shared mode, `steal` and `signal` are not
- * modelled. All "pages" of a test share it, as all tabs of one origin share the browser's.
+ * The Web Locks API (navigator.locks) for the test environment: jsdom has none. This stands in for
+ * the browser primitive, not for Gyroflight's locks: it implements the part of the specification
+ * Gyroflight uses (https://w3c.github.io/web-locks/): per name a queue of requests granted in
+ * order; an exclusive lock conflicts with every other, shared locks only with exclusive ones; a
+ * request is granted only when it conflicts with no held lock and no request queued before it (so
+ * a shared request behind a pending exclusive one waits); `ifAvailable` (granted at once or the
+ * callback gets null); `signal` (aborting a request not yet granted rejects it with an AbortError);
+ * a lock held until the callback's promise settles. `steal` is not modelled. All "pages" of a test
+ * share it, as all tabs of one origin share the browser's.
  *
  * What it cannot show: that a real browser keeps a lock until the page closes and releases it then,
- * across processes. That is NOT_VALIDATED by these tests.
+ * across processes. The real-browser check is test/browser/crossTabWriteLease.browser.mjs.
  */
 
-type Grant = { name: string; mode: "exclusive" };
+type Mode = "exclusive" | "shared";
+type Grant = { name: string; mode: Mode };
 type Callback = (lock: Grant | null) => unknown;
 
-interface Waiter {
+interface Request {
     name: string;
+    mode: Mode;
     run: () => void;
 }
 
 export interface LockManagerShim {
-    request(name: string, a: Callback | { ifAvailable?: boolean; mode?: string }, b?: Callback): Promise<unknown>;
+    request(
+        name: string,
+        a: Callback | { ifAvailable?: boolean; mode?: Mode; signal?: AbortSignal },
+        b?: Callback,
+    ): Promise<unknown>;
     query(): Promise<{ held: Grant[]; pending: Grant[] }>;
 }
 
 export function createLockManager(): LockManagerShim {
-    const held = new Set<string>();
-    const waiting: Waiter[] = [];
+    const held: Grant[] = [];
+    const queue: Request[] = [];
 
-    const release = (name: string) => {
-        held.delete(name);
-        const i = waiting.findIndex((w) => w.name === name);
-        if (i !== -1) waiting.splice(i, 1)[0].run();
-    };
+    const conflicts = (name: string, mode: Mode, against: readonly { name: string; mode: Mode }[]) =>
+        against.some((o) => o.name === name && (mode === "exclusive" || o.mode === "exclusive"));
 
-    const hold = (name: string, cb: Callback): Promise<unknown> => {
-        held.add(name);
+    const grantable = (name: string, mode: Mode, before: readonly Request[]) =>
+        !conflicts(name, mode, held) && !conflicts(name, mode, before);
+
+    function pump(): void {
+        for (let i = 0; i < queue.length;) {
+            const r = queue[i];
+            if (grantable(r.name, r.mode, queue.slice(0, i))) {
+                queue.splice(i, 1);
+                r.run();
+            } else {
+                i++;
+            }
+        }
+    }
+
+    const hold = (name: string, mode: Mode, cb: Callback): Promise<unknown> => {
+        const grant = { name, mode };
+        held.push(grant);
         return Promise.resolve()
-            .then(() => cb({ name, mode: "exclusive" }))
-            .finally(() => release(name));
+            .then(() => cb(grant))
+            .finally(() => {
+                held.splice(held.indexOf(grant), 1);
+                pump();
+            });
     };
 
     return {
         request(name, a, b) {
             const options = typeof a === "function" ? {} : a;
             const cb = (typeof a === "function" ? a : b)!;
-            if (options.mode && options.mode !== "exclusive") {
-                return Promise.reject(new Error("webLocks shim: only exclusive locks are modelled"));
-            }
-            if (!held.has(name) && !waiting.some((w) => w.name === name)) return hold(name, cb);
+            const mode: Mode = options.mode ?? "exclusive";
+            const abortError = () => Object.assign(new Error("The request was aborted."), { name: "AbortError" });
+            if (options.signal?.aborted) return Promise.reject(abortError());
+            if (grantable(name, mode, queue)) return hold(name, mode, cb);
             if (options.ifAvailable) return Promise.resolve().then(() => cb(null));
             return new Promise((resolve, reject) => {
-                waiting.push({ name, run: () => void hold(name, cb).then(resolve, reject) });
+                const r: Request = { name, mode, run: () => void hold(name, mode, cb).then(resolve, reject) };
+                queue.push(r);
+                options.signal?.addEventListener("abort", () => {
+                    const i = queue.indexOf(r);
+                    if (i === -1) return;
+                    queue.splice(i, 1);
+                    reject(abortError());
+                    pump();
+                });
             });
         },
         async query() {
             return {
-                held: [...held].map((name) => ({ name, mode: "exclusive" as const })),
-                pending: waiting.map((w) => ({ name: w.name, mode: "exclusive" as const })),
+                held: held.map((g) => ({ ...g })),
+                pending: queue.map((r) => ({ name: r.name, mode: r.mode })),
             };
         },
     };

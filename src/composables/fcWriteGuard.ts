@@ -36,25 +36,30 @@
  *     are refused: what the firmware would then run was never checked.
  *
  * A write is refused while the connected craft has an open uncertain entry in fcTransactionState
- * (or its UID is unknown while any entry is open, or that storage is unreadable), and while a
+ * (or its UID is unknown while any entry is open, or that storage is unreadable), while a
  * Gyroflight write transaction of this page is open (withFcWriteLock): nothing else may write in
- * between its reads and its writes. The transaction's own writes carry its WritePermit, which checks
- * right before every SET and MSP_EEPROM_WRITE that the transaction still owns its pending entry and
- * that no entry it does not cover has appeared.
+ * between its reads and its writes, and while this page does not hold the origin's write lease
+ * (fcWriteLease.ts, audit WP8-F02). The transaction's own writes carry its WritePermit, which checks
+ * right before every SET and MSP_EEPROM_WRITE that the transaction still owns its pending entry,
+ * that no entry it does not cover has appeared, and that its page holds the lease exclusively.
  *
  * Gyroflight's write transactions (useTuneApply.ts) and its read-only check run one at a time per
  * browser origin under the Web Lock FC_WRITE_LOCK (navigator.locks, exclusive, never queued): a
- * second one is refused, never deferred. Without navigator.locks none starts (fail-closed).
+ * second one is refused, never deferred. Each then takes the write lease exclusively for its whole
+ * run, reads included; every page admits its other writes only while it holds that lease shared,
+ * so none does while a transaction runs (each yields it when quiet; a page that does not within
+ * LEASE_WAIT_MS gets the transaction refused). Without navigator.locks nothing writes (fail-closed).
  *
- * What this cannot do: the lock and the entries are this browser origin's. Another browser, another
+ * What this cannot do: the locks and the entries are this browser origin's. Another browser, another
  * origin (localhost vs 127.0.0.1, an installed app), another device or another program connected to
  * the same craft sees neither, and localStorage between tabs is not strictly consistent (a tab may
- * read another's change late). Writes outside a Gyroflight transaction do not ask for the Web Lock:
- * they see another tab's transaction only once its pending entry is stored (after its backup read).
- * Web Serial lets one page at a time open a port; whether a second tab can reach the same craft over
- * another transport (Bluetooth, TCP) depends on that transport. Within one page the order the check
- * admits writes in is the order they reach the craft (serial.send hands each to the transport's queue
- * at once). Nothing here is a craft-wide lock.
+ * read another's change late). Requests the check does not count as writes (reads; RTC, arming flag,
+ * motor test, reboot) are not held back by the lease. Web Serial lets one page at a time open a
+ * port; whether a second tab can reach the same craft over another transport (Bluetooth, TCP)
+ * depends on that transport. Within one page the order the check admits writes in is the order
+ * they reach the craft (serial.send hands each to the transport, which keeps that order: WebSerial
+ * and WebBluetooth queue whole sends). The check runs when a request is admitted, not when its
+ * bytes reach the wire. Nothing here is a craft-wide lock.
  */
 
 import { getActivePinia } from "pinia";
@@ -63,6 +68,10 @@ import { gui_log } from "@/js/gui_log";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { connectedCraftWriteIssues, useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
 import { useConnectionStore } from "@/stores/connection";
+import { writeLease } from "@/composables/fcWriteLease";
+
+// Every page takes part in the origin's write lease from the start (fcWriteLease.ts).
+writeLease.start();
 
 /** The Web Lock every Gyroflight write transaction and read-only check of this origin holds. */
 export const FC_WRITE_LOCK = "gyroflight.fcWrite";
@@ -246,9 +255,13 @@ const READ_CLI: ReadonlySet<string> = new Set([
     "exit",
 ]);
 
-/** Why a write by anyone but a Gyroflight transaction must not go out now; empty when it may. */
+/**
+ * Why a write by anyone but a Gyroflight transaction must not go out now; empty when it may. Such a
+ * write also needs this page's shared write lease (audit WP8-F02): while another page's
+ * transaction holds the lease exclusively, this page does not hold it.
+ */
 function foreignWriteIssues(): string[] {
-    return getActivePinia() ? connectedCraftWriteIssues() : [WRITE_GUARD_UNAVAILABLE];
+    return getActivePinia() ? [...writeLease.issues(), ...connectedCraftWriteIssues()] : [WRITE_GUARD_UNAVAILABLE];
 }
 
 /** The CLI tab holds the FC in its interactive CLI (msp_serial.c PORT_CLI_ACTIVE). */
@@ -274,8 +287,10 @@ export function mspRequestRefusal(
     const inCli = cliSessionRefusal();
     if (inCli) return inCli;
     if (classifyMsp(code, data) !== "write") return null;
-    const issues = permit ? permit.issues(code) : foreignWriteIssues();
-    return issues.length ? issues : null;
+    const issues = permit ? [...writeLease.transactionIssues(), ...permit.issues(code)] : foreignWriteIssues();
+    if (issues.length) return issues;
+    if (!permit) writeLease.noteAdmitted();
+    return null;
 }
 
 /** A refused request that has no error path (msp.ts send_message): shown in the log, never as success. */
@@ -303,7 +318,9 @@ function cliCommand(line: string): string {
  */
 export function cliInputRefusal(pending: string, text: string): string[] | null {
     const issues = foreignWriteIssues();
-    return issues.length ? cliLineRefusal(issues, pending, text, false) : null;
+    if (issues.length) return cliLineRefusal(issues, pending, text, false);
+    writeLease.noteAdmitted();
+    return null;
 }
 
 function cliLineRefusal(issues: string[], pending: string, text: string, interactive: boolean): string[] | null {
@@ -348,7 +365,10 @@ export const foreignWritesRefused = (): boolean => foreignWriteIssues().length >
  */
 export function interactiveCliText(text: string): { text: string; refused: null } | { text: null; refused: string[] } {
     const issues = foreignWriteIssues();
-    if (!issues.length) return { text, refused: null };
+    if (!issues.length) {
+        writeLease.noteAdmitted();
+        return { text, refused: null };
+    }
     const refused = cliLineRefusal(issues, "", text, true);
     return refused ? { text: null, refused } : { text: CLI_CLEAR_LINE + text, refused: null };
 }
@@ -360,7 +380,9 @@ interface LockManagerLike {
 /**
  * Run `fn` holding FC_WRITE_LOCK, or refuse (ApplyBlockedError) when another transaction or check of
  * this origin holds it, or when the browser has no Web Locks. While it runs, no write but its own
- * (carrying its WritePermit) leaves this page.
+ * (carrying its WritePermit) leaves this page, and (audit WP8-F02) it holds the write lease
+ * exclusively, from before its first read: no other page of this origin admits a write meanwhile.
+ * It is refused when the other pages do not yield the lease in time (fcWriteLease.ts).
  */
 export async function withFcWriteLock<T>(fn: () => Promise<T>): Promise<T> {
     const locks = (globalThis.navigator as { locks?: LockManagerLike } | undefined)?.locks;
@@ -370,7 +392,7 @@ export async function withFcWriteLock<T>(fn: () => Promise<T>): Promise<T> {
         if (!lock) return { busy: true as const };
         states.localWrites++;
         try {
-            return { busy: false as const, value: await fn() };
+            return { busy: false as const, value: await writeLease.exclusive(fn, (r) => new ApplyBlockedError(r)) };
         } finally {
             states.localWrites--;
         }

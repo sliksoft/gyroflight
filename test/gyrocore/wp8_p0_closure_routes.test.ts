@@ -552,10 +552,12 @@ describe("P2: one write transaction at a time per origin, reserved atomically", 
                 () => null,
                 (e: unknown) => e,
             );
+        // The page also gave up its shared write lease for the transaction's exclusive one (WP8-F02).
+        const inProgress = ["fc:write_lease_not_held", "fc:gyroflight_write_in_progress"];
         expect((err as ApplyBlockedError).reasons).toEqual(["fc:gyroflight_write_in_progress"]);
         // At the transport too, for a write that skips the tab's own check.
         const { default: MSP } = await import("../../src/js/msp");
-        expect(await refusal(MSP.promise(MSPCodes.MSP_SET_PID, [1]))).toEqual(["fc:gyroflight_write_in_progress"]);
+        expect(await refusal(MSP.promise(MSPCodes.MSP_SET_PID, [1]))).toEqual(inProgress);
         expect(writes()).toEqual([]);
         pause.release();
         expect((await restoring).status).toBe("verified");
