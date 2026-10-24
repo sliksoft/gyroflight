@@ -46,10 +46,15 @@
  * browser origin under the Web Lock FC_WRITE_LOCK (navigator.locks, exclusive, never queued): a
  * second one is refused, never deferred. Without navigator.locks none starts (fail-closed).
  *
- * What this cannot do: the lock and the entries are this browser's. Another browser, another device
- * or another program connected to the same craft sees neither, and localStorage between tabs is not
- * strictly consistent (a tab may read another's change late); Web Serial lets one page at a time
- * open a port. Nothing here is a craft-wide lock.
+ * What this cannot do: the lock and the entries are this browser origin's. Another browser, another
+ * origin (localhost vs 127.0.0.1, an installed app), another device or another program connected to
+ * the same craft sees neither, and localStorage between tabs is not strictly consistent (a tab may
+ * read another's change late). Writes outside a Gyroflight transaction do not ask for the Web Lock:
+ * they see another tab's transaction only once its pending entry is stored (after its backup read).
+ * Web Serial lets one page at a time open a port; whether a second tab can reach the same craft over
+ * another transport (Bluetooth, TCP) depends on that transport. Within one page the order the check
+ * admits writes in is the order they reach the craft (serial.send hands each to the transport's queue
+ * at once). Nothing here is a craft-wide lock.
  */
 
 import { getActivePinia } from "pinia";
@@ -57,6 +62,7 @@ import MSPCodes from "@/js/msp/MSPCodes";
 import { gui_log } from "@/js/gui_log";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { connectedCraftWriteIssues, useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
+import { useConnectionStore } from "@/stores/connection";
 
 /** The Web Lock every Gyroflight write transaction and read-only check of this origin holds. */
 export const FC_WRITE_LOCK = "gyroflight.fcWrite";
@@ -245,12 +251,28 @@ function foreignWriteIssues(): string[] {
     return getActivePinia() ? connectedCraftWriteIssues() : [WRITE_GUARD_UNAVAILABLE];
 }
 
+/** The CLI tab holds the FC in its interactive CLI (msp_serial.c PORT_CLI_ACTIVE). */
+export const CLI_SESSION_OPEN = "cli:interactive_session_open";
+
+/**
+ * While the CLI tab's interactive session is open every byte reaches its line editor, MSP frames
+ * included (their payload or CRC can hold a line end, and nothing clears the line before them).
+ * So while a write would be refused, nothing but the CLI tab's own checked text goes out then.
+ */
+function cliSessionRefusal(): string[] | null {
+    if (!getActivePinia() || !useConnectionStore().cliActive) return null;
+    const issues = foreignWriteIssues();
+    return issues.length ? [...issues, CLI_SESSION_OPEN] : null;
+}
+
 /** Why msp.ts must not send this request now (null: send it). See the header. */
 export function mspRequestRefusal(
     code: number,
     data: ArrayLike<number> | false | undefined,
     permit?: WritePermit,
 ): string[] | null {
+    const inCli = cliSessionRefusal();
+    if (inCli) return inCli;
     if (classifyMsp(code, data) !== "write") return null;
     const issues = permit ? permit.issues(code) : foreignWriteIssues();
     return issues.length ? issues : null;
@@ -305,7 +327,7 @@ function cliLineRefusal(issues: string[], pending: string, text: string, interac
 }
 
 /** One MSP CLI command (msp.ts send_cli_command adds the line end). */
-export const cliCommandRefusal = (command: string) => cliInputRefusal("", `${command}\n`);
+export const cliCommandRefusal = (command: string) => cliSessionRefusal() ?? cliInputRefusal("", `${command}\n`);
 
 /**
  * Empties an interactive CLI's line buffer whatever it holds: there 0x7f deletes one character and

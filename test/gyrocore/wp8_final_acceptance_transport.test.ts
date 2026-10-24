@@ -47,6 +47,8 @@ import { send as cliSend } from "../../src/composables/useMspCliSession";
 import { useCli } from "../../src/composables/useCli";
 import autoRestoreInstance from "../../src/js/utils/AutoRestore";
 import { mspHelper } from "../../src/js/msp/MSPHelper";
+import WebBluetooth from "../../src/js/protocols/WebBluetooth";
+import { withFcWriteLock } from "../../src/composables/fcWriteGuard";
 import { useFailsafeSave } from "../../src/composables/failsafe/useFailsafeSave";
 
 const UID: [number, number, number] = [0x0a1b2c3d, 0x4e5f6071, 0x12233445];
@@ -393,5 +395,66 @@ describe("a refused write ends the save instead of leaving it on 'Saving' (Codex
         mspHelper.sendRxFailConfig(() => undefined, refused);
         expect(sentCodes()).toEqual([MSPCodes.MSP_SET_RXFAIL_CONFIG]);
         expect(refused).not.toHaveBeenCalled();
+    });
+});
+
+describe("while the CLI tab's interactive session is open, only its own checked text goes out", () => {
+    // Every byte then reaches cli.c's line editor; an MSP frame's payload or CRC may end the line.
+    it("MSP requests (reads included) and MSP CLI commands are refused while writes would be", async () => {
+        useConnectionStore().cliActive = true;
+        uncertain();
+        expect(await rejected(MSP.promise(MSPCodes.MSP_STATUS))).toBeInstanceOf(ApplyBlockedError);
+        expect(await rejected(cliSend("get p_roll"))).toBeInstanceOf(ApplyBlockedError);
+        expect(MSP.send_message(MSPCodes.MSP_SET_MOTOR, [0, 0], false, () => undefined)).toBe(false);
+        expect(sent).not.toHaveBeenCalled();
+    });
+
+    it("without an uncertain state the session changes nothing (upstream behaviour)", () => {
+        useConnectionStore().cliActive = true;
+        void MSP.promise(MSPCodes.MSP_STATUS).catch(() => undefined);
+        expect(sentCodes()).toEqual([MSPCodes.MSP_STATUS]);
+    });
+});
+
+describe("Web Bluetooth queues sends: what the craft gets is still in check order (Codex WP8 final review P0 claim)", () => {
+    it("a SET admitted before a Gyroflight write lock reaches the craft before the transaction's first read; its retry is refused", async () => {
+        sent.mockRestore();
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const ble = new WebBluetooth();
+        const wire: number[] = [];
+        let release!: () => void;
+        const gate = new Promise<void>((r) => (release = r));
+        let first = true;
+        Object.assign(ble, {
+            connected: true,
+            device: { gatt: { connected: true } },
+            writeCharacteristic: {
+                writeValue: vi.fn(async (buf: Uint8Array) => {
+                    wire.push(buf[1] === 0x4d ? buf[4] : buf[4] | (buf[5] << 8));
+                    if (first) {
+                        first = false;
+                        await gate;
+                    }
+                }),
+            },
+        });
+        (serial as unknown as { _protocol: unknown })._protocol = ble;
+
+        // A read occupies the GATT write; a foreign SET (the PID tab) is admitted and waits behind it.
+        void MSP.promise(MSPCodes.MSP_STATUS).catch(() => undefined);
+        void MSP.promise(MSPCodes.MSP_SET_PID, [1, 2, 3]).catch(() => undefined);
+        // A Gyroflight transaction starts: its read queues behind the SET; a new foreign SET is refused.
+        await withFcWriteLock(async () => {
+            void MSP.promise(MSPCodes.MSP_PID).catch(() => undefined);
+            expect(await rejected(MSP.promise(MSPCodes.MSP_SET_PID, [9]))).toBeInstanceOf(ApplyBlockedError);
+        });
+        release();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(wire).toEqual([MSPCodes.MSP_STATUS, MSPCodes.MSP_SET_PID, MSPCodes.MSP_PID]);
+
+        // The state turns uncertain: the admitted SET's retry is checked again and not sent.
+        uncertain();
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 1));
+        expect(wire.filter((c) => c === MSPCodes.MSP_SET_PID)).toHaveLength(1);
     });
 });
