@@ -45,6 +45,7 @@ import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { TRANSACTION_ENTRY_PREFIX, type UncertainTransaction } from "../../src/gyrocore/stores/fcTransactionState";
 import { send as cliSend } from "../../src/composables/useMspCliSession";
 import { useCli } from "../../src/composables/useCli";
+import autoRestoreInstance from "../../src/js/utils/AutoRestore";
 
 const UID: [number, number, number] = [0x0a1b2c3d, 0x4e5f6071, 0x12233445];
 
@@ -285,5 +286,64 @@ describe("the CLI tab's line: the firmware may hold text whose echo has not arri
         cli.read(new TextEncoder().encode("# ex"));
         expect(cli.cleanup()).toBe(true);
         expect(sentText()).toEqual(["it\r"]);
+    });
+});
+
+describe("AutoRestore reports success only for a save that went out (Codex WP8 final review P1)", () => {
+    type Ar = {
+        _callback: ((r: unknown) => void) | null;
+        _finishWithSave: (errors: unknown[]) => Promise<void>;
+        handleDisconnect: () => void;
+    };
+    async function autoRestore() {
+        const ar = autoRestoreInstance;
+        vi.spyOn(serial, "disconnect").mockResolvedValue(true as never);
+        const results: { success: boolean }[] = [];
+        const a = ar as unknown as Ar;
+        a._callback = (r) => results.push(r as { success: boolean });
+        return { a, results };
+    }
+
+    it("a refused save followed by a disconnect inside the flush delay is a failure", async () => {
+        uncertain();
+        const { a, results } = await autoRestore();
+        const done = a._finishWithSave([]);
+        a.handleDisconnect();
+        await vi.advanceTimersByTimeAsync(5000);
+        await done;
+        expect(results).toEqual([expect.objectContaining({ success: false })]);
+        expect(sentText()).toEqual([]);
+    });
+
+    it("a save waiting behind another CLI command is refused when it would go out: failure, nothing sent", async () => {
+        const { a, results } = await autoRestore();
+        const first = rejected(cliSend("get p_roll", { timeoutMs: 3000 }));
+        const done = a._finishWithSave([]);
+        await vi.advanceTimersByTimeAsync(1000); // past the flush delay: the save has not gone out
+        expect(results).toEqual([]);
+        uncertain();
+        await vi.advanceTimersByTimeAsync(5000);
+        await first;
+        await done;
+        expect(results).toEqual([expect.objectContaining({ success: false })]);
+        expect(sentText()).toEqual(["get p_roll\n"]);
+    });
+
+    it("a disconnect while the save still waits in the queue is a failure, not the save's reboot", async () => {
+        const { a, results } = await autoRestore();
+        void cliSend("get p_roll", { timeoutMs: 3000 }).catch(() => undefined);
+        void a._finishWithSave([]);
+        await vi.advanceTimersByTimeAsync(600);
+        a.handleDisconnect();
+        expect(results).toEqual([expect.objectContaining({ success: false })]);
+    });
+
+    it("without an uncertain state a save that went out still ends as success", async () => {
+        const { a, results } = await autoRestore();
+        const done = a._finishWithSave([]);
+        await vi.advanceTimersByTimeAsync(1000);
+        await done;
+        expect(sentText()).toEqual(["save\n"]);
+        expect(results).toEqual([expect.objectContaining({ success: true })]);
     });
 });

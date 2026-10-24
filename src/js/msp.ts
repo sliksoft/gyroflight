@@ -73,6 +73,8 @@ interface CliQueueEntry {
     command: string;
     callback: CliCallback | undefined;
     timeoutMs: number | undefined;
+    /** Gyroflight: runs when the command leaves the queue for the port (it passed the write check). */
+    onSent?: () => void;
 }
 
 /** The decoder state MSPHelper.process_data reads when a frame completes. */
@@ -341,7 +343,11 @@ const MSP = {
         bufView[bufferSize - 1] = this.symbols.END_OF_TEXT; // ETX
         return bufferOut;
     },
-    send_cli_command(str: string, callback?: CliCallback, { timeoutMs }: { timeoutMs?: number } = {}) {
+    send_cli_command(
+        str: string,
+        callback?: CliCallback,
+        { timeoutMs, onSent }: { timeoutMs?: number; onSent?: () => void } = {},
+    ) {
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a CLI write is refused while the craft's
         // state is uncertain; the caller gets the error, nothing is sent.
         const refused = cliCommandRefusal(str);
@@ -350,7 +356,7 @@ const MSP = {
             else reportRefusedWrite(`CLI "${str.split(/\s/)[0]}"`, refused);
             return;
         }
-        this.cli_queue.push({ command: str, callback, timeoutMs });
+        this.cli_queue.push({ command: str, callback, timeoutMs, onSent });
         this._process_cli_queue();
     },
     _process_cli_queue() {
@@ -389,6 +395,7 @@ const MSP = {
             }, entry.timeoutMs);
         }
 
+        entry.onSent?.();
         void serial.send(this.encode_message_cli(entry.command));
     },
     _finish_cli(lines: string[], error: Error | null) {

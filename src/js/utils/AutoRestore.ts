@@ -262,20 +262,30 @@ class AutoRestore {
         }
 
         gui_log(i18n.getMessage("buttonSaving"));
-        this._saving = true;
-        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a save the write check refuses (uncertain FC
-        // state) was never sent; the restore failed, the FC does not reboot.
-        let refused: WriteRefusedError | null = null;
-        MSP.send_cli_command("save", (_lines, error) => {
-            if (error instanceof WriteRefusedError) refused = error;
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): "saving" (a disconnect is the save's reboot)
+        // starts only when `save` leaves the CLI queue for the port, which may be later than now.
+        // Refused by the write check (uncertain FC state) or dropped before it went out (a drained
+        // queue), it was never sent: the restore failed at once, the FC does not reboot.
+        const sent = await new Promise<boolean>((resolve) => {
+            MSP.send_cli_command(
+                "save",
+                (_lines, error) => {
+                    if (!this._saving && error) {
+                        this._cleanup(false, error instanceof WriteRefusedError ? error.message : String(error));
+                        resolve(false);
+                    }
+                },
+                {
+                    onSent: () => {
+                        this._saving = true;
+                        resolve(true);
+                    },
+                },
+            );
         });
+        if (!sent) return;
         await new Promise((resolve) => setTimeout(resolve, SAVE_FLUSH_MS));
 
-        if (refused) {
-            this._saving = false;
-            this._cleanup(false, (refused as WriteRefusedError).message);
-            return;
-        }
         this._cleanup(true, null);
     }
 
