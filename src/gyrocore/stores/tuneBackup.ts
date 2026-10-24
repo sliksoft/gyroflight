@@ -34,8 +34,13 @@ import type { TuneSnapshot } from "@/gyrocore/tuning/tuneSnapshot";
 import type { AbsoluteSnapshot } from "@/gyrocore/tuning/absoluteTune";
 
 export const BACKUP_STORAGE_KEY = "gyroflight.tuneBackups.v1";
-/** Newest backups kept per craft. */
+/** Newest backups kept per craft, of each kind: Restore targets (stateKnown) and the others. */
 export const BACKUPS_PER_CRAFT = 20;
+/**
+ * Where fcTransactionState keeps its entries (its TRANSACTION_ENTRY_PREFIX and earlier
+ * TRANSACTION_STORAGE_KEY; that store imports this one, so the prefix is read here, not imported).
+ */
+export const TRANSACTION_KEYS_PREFIX = "gyroflight.fcTransactionState.";
 
 export interface TuneBackup {
     id: string;
@@ -79,6 +84,30 @@ function readStorage(): TuneBackup[] {
     }
 }
 
+/**
+ * The backup ids open transaction entries name (their evidence: what the craft held before); null
+ * when an entry cannot be read, and then no backup may be dropped.
+ */
+function backupIdsInUse(): Set<string> | null {
+    try {
+        const ls = globalThis.localStorage;
+        const ids = new Set<string>();
+        for (let i = 0; i < ls.length; i++) {
+            const key = ls.key(i);
+            if (!key?.startsWith(TRANSACTION_KEYS_PREFIX)) continue;
+            const parsed = JSON.parse(ls.getItem(key) ?? "null") as unknown;
+            for (const e of Array.isArray(parsed) ? parsed : [parsed]) {
+                const id = (e as { backupId?: unknown } | null)?.backupId;
+                if (typeof id !== "string") return null;
+                ids.add(id);
+            }
+        }
+        return ids;
+    } catch {
+        return null;
+    }
+}
+
 export function sameUid(a: readonly number[] | null | undefined, b: readonly number[] | null | undefined): boolean {
     return !!a && !!b && a.length === 3 && b.length === 3 && a.every((w, i) => w === b[i]);
 }
@@ -88,11 +117,20 @@ export const useTuneBackupStore = defineStore("gyroflightTuneBackup", () => {
 
     /**
      * Stores `backup` and reads it back; false when the browser did not keep it exactly. Starts from
-     * the storage, not this page's copy, so a backup another tab stored meanwhile is kept.
+     * the storage, not this page's copy, so a backup another tab stored meanwhile is kept. Of a
+     * craft's backups the newest BACKUPS_PER_CRAFT Restore targets and the newest as many others
+     * stay, and every one an open transaction entry names (audit WP8: repeated recovery snapshots
+     * must not push out the evidence or the trusted targets).
      */
     function save(backup: TuneBackup): boolean {
         const others = readStorage().filter((b) => b.id !== backup.id);
-        const sameCraft = [backup, ...others.filter((b) => sameUid(b.uid, backup.uid))].slice(0, BACKUPS_PER_CRAFT);
+        const inUse = backupIdsInUse();
+        const kept = { trusted: 0, other: 0 };
+        const sameCraft = [backup, ...others.filter((b) => sameUid(b.uid, backup.uid))].filter((b) => {
+            if (!inUse || inUse.has(b.id)) return true;
+            const kind = b.stateKnown === true ? "trusted" : "other";
+            return ++kept[kind] <= BACKUPS_PER_CRAFT;
+        });
         const next = [...sameCraft, ...others.filter((b) => !sameUid(b.uid, backup.uid))];
         try {
             globalThis.localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(next));
