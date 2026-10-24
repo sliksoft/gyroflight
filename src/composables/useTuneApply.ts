@@ -41,6 +41,10 @@
  * Restore writes a stored backup back to the same craft (same UID), after its own
  * confirmation, takes a backup of the current state first, and verifies the result
  * against the backup before saving.
+ *
+ * A failure after the first SET leaves the craft in a state this route did not verify; it is
+ * recorded per craft (gyrocore/stores/fcTransactionState.ts) and every Apply on that craft is
+ * refused until a verified Restore or a read-only check (checkTransactionState) shows the state.
  */
 
 import MSP from "@/js/msp";
@@ -81,6 +85,7 @@ import {
     type TuneSnapshot,
 } from "@/gyrocore/tuning/tuneSnapshot";
 import { newBackupId, sameUid, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { useFcTransactionStore, type UncertainTransaction } from "@/gyrocore/stores/fcTransactionState";
 import {
     MIN_ABSOLUTE_API,
     SLIDER_MODE_KEYS,
@@ -301,7 +306,20 @@ function storeBackup(
     return backup;
 }
 
-/** After the write was sent: read back, compare, and save only when everything matches. */
+/**
+ * The saved state an MSP_EEPROM_WRITE reply proves. Only the firmware's own error reply
+ * (MSP_RESULT_ERROR: refused, e.g. armed) shows nothing was saved. No reply, a timeout or a corrupt
+ * reply say nothing about whether the firmware ran the save before the answer was lost: unknown.
+ */
+function eepromReplyState(reply: MspReply): "saved" | "no" | "unknown" {
+    if (!reply || reply.crcError) return "unknown";
+    return reply.unsupported ? "no" : "saved";
+}
+
+/**
+ * After the write was sent: read back, compare, save only when everything matches, and read
+ * again after the save (the firmware reloads and validates its config there).
+ */
 async function verifyAndSave(expected: TuneSnapshot, backupId: string): Promise<TuneSnapshot> {
     let readback: TuneSnapshot;
     try {
@@ -313,12 +331,32 @@ async function verifyAndSave(expected: TuneSnapshot, backupId: string): Promise<
     if (mismatches.length) {
         throw new TuneWriteError("verify", "no", backupId, mismatches.join("; "), mismatches);
     }
+    let reply: MspReply;
     try {
-        await MSP.promise(MSPCodes.MSP_EEPROM_WRITE);
+        reply = (await MSP.promise(MSPCodes.MSP_EEPROM_WRITE)) as MspReply;
     } catch (err) {
         throw new TuneWriteError("eeprom", "unknown", backupId, errorText(err));
     }
-    return readback;
+    const saved = eepromReplyState(reply);
+    if (saved !== "saved") {
+        throw new TuneWriteError(
+            "eeprom",
+            saved,
+            backupId,
+            saved === "no" ? "eeprom_write_refused" : "eeprom_reply_unreadable",
+        );
+    }
+    let afterSave: TuneSnapshot;
+    try {
+        afterSave = await readSnapshot("fc:verify_readback_missing");
+    } catch (err) {
+        throw new TuneWriteError("eeprom_verify", "unknown", backupId, errorText(err));
+    }
+    const adjusted = snapshotMismatches(expected, afterSave);
+    if (adjusted.length) {
+        throw new TuneWriteError("eeprom_verify", "yes_adjusted", backupId, adjusted.join("; "), adjusted);
+    }
+    return afterSave;
 }
 
 function errorText(err: unknown): string {
@@ -326,6 +364,47 @@ function errorText(err: unknown): string {
         return err.reasons.join(", ");
     }
     return typeof err === "object" && err !== null ? String(Reflect.get(err, "message") ?? err) : String(err);
+}
+
+/** Refuses while an earlier write on this craft ended in a state nobody verified (fcTransactionState). */
+function assertTransactionStateKnown(uid: readonly number[] | null | undefined): void {
+    const blocks = useFcTransactionStore().blocks(uid);
+    if (blocks.length) {
+        throw new ApplyBlockedError(blocks);
+    }
+}
+
+/**
+ * Runs one write transaction; a failure after its first SET is recorded as an uncertain state of
+ * the craft the backup was taken from (the error is rethrown unchanged). A verified Restore makes
+ * the craft's state known again.
+ */
+async function transaction<T>(action: UncertainTransaction["action"], run: () => Promise<T>): Promise<T> {
+    try {
+        const result = await run();
+        if (action === "restore" || action === "absolute_restore") {
+            // Written, read back, saved and read again: the craft the backup belongs to is known.
+            const uid = useTuneBackupStore().get((result as { backupId: string }).backupId)?.uid;
+            if (uid) useFcTransactionStore().resolve(uid);
+        }
+        return result;
+    } catch (err) {
+        if (err instanceof TuneWriteError && err.stage !== "prepare") {
+            const uid = useTuneBackupStore().get(err.backupId)?.uid ?? useFlightControllerStore().config.uid;
+            if (Array.isArray(uid) && uid.length === 3) {
+                useFcTransactionStore().record({
+                    uid: [uid[0], uid[1], uid[2]],
+                    action,
+                    stage: err.stage,
+                    saved: err.saved,
+                    backupId: err.backupId,
+                    detail: err.message,
+                    at: new Date().toISOString(),
+                });
+            }
+        }
+        throw err;
+    }
 }
 
 function assertConnectedReal() {
@@ -414,6 +493,14 @@ export async function applyTune(
     compositeId: string | null | undefined,
     confirmation: string | null | undefined,
 ): Promise<TuneWriteResult> {
+    return transaction("apply", () => applyTuneOnce(proposed, compositeId, confirmation));
+}
+
+async function applyTuneOnce(
+    proposed: ProposedSliders,
+    compositeId: string | null | undefined,
+    confirmation: string | null | undefined,
+): Promise<TuneWriteResult> {
     // 1. Every gate that needs no flight controller, in this order, before any MSP.
     const { gateState, composite } = assertSliderWriteAuthorized(proposed, compositeId);
     const confirmed = consumeConfirmation(confirmation, {
@@ -421,12 +508,14 @@ export async function applyTune(
         compositeId: composite.id,
         sliders: { ...proposed },
     });
+    assertTransactionStateKnown(logIdentity(logHeaders(gateState, composite)).uid);
     assertConnectedReal();
 
     // 2-4. Identity, live tune, logged PIDs, and the firmware's calculation (read-only).
     const { fc, before, expected } = await readLiveTune(composite, logHeaders(gateState, composite), {
         ...proposed,
     });
+    assertTransactionStateKnown(fc.uid);
     // What the user confirmed must still be what the firmware would produce.
     if (confirmed.preview !== snapshotHash(expected)) {
         throw new ApplyBlockedError(["apply:preview_changed"]);
@@ -450,7 +539,12 @@ export async function applyTune(
     } catch (err) {
         throw new TuneWriteError("write", "no", backup.id, errorText(err));
     }
-    await validateTuningSliders();
+    // After the SET: a failure here is a failed write with its stage, never a generic error.
+    try {
+        await validateTuningSliders();
+    } catch (err) {
+        throw new TuneWriteError("validate", "no", backup.id, errorText(err));
+    }
     if (!fcStore.tuningSliders.slider_pids_valid || !fcStore.tuningSliders.slider_dterm_valid) {
         throw new TuneWriteError("validate", "no", backup.id, "the firmware did not validate the written sliders");
     }
@@ -521,6 +615,10 @@ export async function previewRestore(backupId: string): Promise<RestorePreview> 
 
 /** Write a stored backup back to the craft it was taken from, then verify and save. */
 export async function restoreTune(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
+    return transaction("restore", () => restoreTuneOnce(backupId, confirmation));
+}
+
+async function restoreTuneOnce(backupId: string, confirmation: string | null | undefined): Promise<TuneWriteResult> {
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readRestoreTarget(backupId);
     const target = backup.snapshot;
@@ -796,9 +894,15 @@ async function verifyAbsoluteAndSave(
     } catch (err) {
         throw new TuneWriteError("eeprom", "unknown", backupId, errorText(err));
     }
-    if (!reply || reply.crcError || reply.unsupported) {
-        // The firmware refuses MSP_EEPROM_WRITE while armed: nothing was saved.
-        throw new TuneWriteError("eeprom", reply ? "no" : "unknown", backupId, "eeprom_write_refused");
+    const saved = eepromReplyState(reply);
+    if (saved !== "saved") {
+        // "no" only on the firmware's refusal (armed); a lost or corrupt answer leaves it unknown.
+        throw new TuneWriteError(
+            "eeprom",
+            saved,
+            backupId,
+            saved === "no" ? "eeprom_write_refused" : "eeprom_reply_unreadable",
+        );
     }
     let afterSave: AbsoluteSnapshot;
     try {
@@ -892,6 +996,13 @@ export async function applyAbsoluteTune(
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
+    return transaction("absolute_apply", () => applyAbsoluteTuneOnce(proposal, confirmation));
+}
+
+async function applyAbsoluteTuneOnce(
+    proposal: AbsoluteProposal,
+    confirmation: string | null | undefined,
+): Promise<AbsoluteWriteResult> {
     // What is authorized, confirmed and written is this copy: plain data the caller can no longer
     // change while the Apply awaits (a getter, a function or a class instance is refused).
     let authorized: AbsoluteProposal;
@@ -909,10 +1020,12 @@ export async function applyAbsoluteTune(
         proposalId: authorized.id,
         change: { ...authorized.change },
     });
+    assertTransactionStateKnown(logIdentity(authorized.log.headerPairs).uid);
     assertConnectedReal();
 
     // 2. Identity, live values against the log, and the expected result (read-only).
     const { fc, before, expected } = await readLiveAbsolute(authorized);
+    assertTransactionStateKnown(fc.uid);
     if (confirmed.preview !== absoluteHash(expected)) {
         throw new ApplyBlockedError(["apply:preview_changed"]);
     }
@@ -992,6 +1105,13 @@ export async function restoreAbsoluteTune(
     backupId: string,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
+    return transaction("absolute_restore", () => restoreAbsoluteTuneOnce(backupId, confirmation));
+}
+
+async function restoreAbsoluteTuneOnce(
+    backupId: string,
+    confirmation: string | null | undefined,
+): Promise<AbsoluteWriteResult> {
     const confirmed = consumeConfirmation(confirmation, { kind: "restore", backupId });
     const { backup, fc, current } = await readAbsoluteRestoreTarget(backupId);
     const target = backup.absolute;
@@ -1002,6 +1122,60 @@ export async function restoreAbsoluteTune(
     await writeAbsoluteBlocks(current, target, current, safety.id, true);
     const verified = await verifyAbsoluteAndSave(target, current, safety.id);
     return { status: "verified", backupId: safety.id, expected: target, ...verified };
+}
+
+export interface TransactionStateCheck {
+    /** The craft's open entries are all resolved now. */
+    resolved: boolean;
+    /** Per open entry, why it stays open (empty when it was resolved). */
+    reasons: string[];
+}
+
+/**
+ * Read-only: does the connected craft show a known state again after an uncertain write? An entry
+ * whose EEPROM was not written (saved "no") is resolved when a full read-back equals the backup
+ * taken right before that write (RAM holds it and EEPROM never changed; after a reboot RAM
+ * reloads EEPROM). With saved "unknown" or "yes_adjusted" EEPROM cannot be read, so only a
+ * verified Restore resolves it. Writes nothing.
+ */
+export async function checkTransactionState(): Promise<TransactionStateCheck> {
+    assertConnectedReal();
+    const fc = await readIdentity();
+    if (!fc.uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
+    const states = useFcTransactionStore();
+    const open = states.forUid(fc.uid);
+    const reasons: string[] = [];
+    for (const entry of open) {
+        const backup = useTuneBackupStore().get(entry.backupId);
+        if (!backup) {
+            reasons.push(`state:${entry.backupId}:backup_not_found`);
+        } else if (entry.saved !== "no") {
+            reasons.push(`state:${entry.backupId}:eeprom_state_unknown_restore_required`);
+        } else if (profileSwitchOf(entry.detail)) {
+            // A SET may sit in another profile's RAM; one profile's read-back cannot show that.
+            reasons.push(`state:${entry.backupId}:profile_switch_seen_restore_required`);
+        } else if (fc.version !== backup.firmware) {
+            reasons.push(`state:${entry.backupId}:firmware_changed`);
+        } else if (backup.absolute) {
+            const profile = backup.absolute.pidProfile;
+            if (fc.pidProfile !== profile || fc.apiVersion !== backup.absolute.apiVersion) {
+                reasons.push(`state:${entry.backupId}:pid_profile_or_api_differs`);
+            } else {
+                const now = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion, profile!);
+                const diff = absoluteDiff(now, backup.absolute);
+                if (diff.length) reasons.push(`state:${entry.backupId}:differs_from_backup:${diff.length}`);
+            }
+        } else {
+            const now = await readSnapshot("fc:live_readback_missing");
+            const diff = snapshotMismatches(backup.snapshot, now);
+            if (diff.length) reasons.push(`state:${entry.backupId}:differs_from_backup:${diff.length}`);
+        }
+    }
+    if (!open.length) return { resolved: true, reasons: [] };
+    if (reasons.length) return { resolved: false, reasons };
+    return states.resolve(fc.uid)
+        ? { resolved: true, reasons: [] }
+        : { resolved: false, reasons: ["state:not_stored"] };
 }
 
 export type { AbsoluteProposal, AbsoluteValues };
@@ -1016,5 +1190,6 @@ export function useTuneApply() {
         applyAbsoluteTune,
         previewAbsoluteRestore,
         restoreAbsoluteTune,
+        checkTransactionState,
     };
 }

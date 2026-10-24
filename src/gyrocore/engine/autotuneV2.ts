@@ -468,10 +468,20 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     });
     for (const name of analysed) {
         const ai = AXES.indexOf(name) as 0 | 1 | 2;
+        // Every qualified reference counts: one that disagrees is not outvoted by one that agrees.
+        const results: { status: string; meanAbsGRel: number; n: number }[] = [];
         for (const other of references) {
             const oc = other.chirp[name];
             const oh = headerMap(other.headerPairs);
             if (!oc) continue;
+            // A reference measurement the qualification did not pass in full is no evidence for the
+            // plant (audit P1-5): a rejected sweep, or one with warnings, never validates it.
+            if (oc.state !== "usable") {
+                crossLogRejected.push(
+                    `cross_log_reference_not_qualified:${oc.state}:${other.sha256}:${other.logIndex}`,
+                );
+                continue;
+            }
             const ctl = analyzeAxisController(other, oh, ai, oc, flightMask(other.channels.rcThrottle));
             if (!ctl) continue;
             const otherLoop = buildAxisLoop(ai, oc.tf, ctl.cfg, null, false, false);
@@ -482,9 +492,18 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                 crossLogRejected.push(`cross_log_identical_measurement:${other.sha256}:${other.logIndex}`);
                 continue;
             }
-            crossLogPlant[name] = cmp;
-            break;
+            results.push(cmp);
         }
+        if (!results.length) continue;
+        // The worst reference decides; references that disagree with each other block (FAIL).
+        const worst = [...results].sort((a, b) => b.meanAbsGRel - a.meanAbsGRel)[0];
+        const statuses = new Set(results.map((r) => r.status));
+        if (statuses.size > 1) crossLogRejected.push(`cross_log_references_disagree:${name}`);
+        crossLogPlant[name] = {
+            status: statuses.size > 1 ? "FAIL" : worst.status,
+            meanAbsGRel: worst.meanAbsGRel,
+            n: worst.n,
+        };
     }
 
     // 5. Proposed tune as a whole: margins, items, evidence.

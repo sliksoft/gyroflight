@@ -758,6 +758,17 @@
     },
     "gyroflightPreviewNoChange": { "message": "No value changes." },
     "gyroflightPreviewButton": { "message": "Read from flight controller (read-only preview)" },
+    "gyroflightUncertainTitle": { "message": "Flight controller state not verified: Apply is refused" },
+    "gyroflightUncertainEntry": {
+        "message": "$1: a write stopped at stage $2 (saved to EEPROM: $3); backup taken before it: $4"
+    },
+    "gyroflightUncertainText": {
+        "message": "Gyroflight did not verify what this flight controller holds since then, so every Apply on it is refused until its state is known again. Restore the backup taken before that write (written, read back and saved), or, when EEPROM was not written (saved: no), power-cycle the flight controller and check its state below: a read-back equal to that backup clears this. With saved: unknown only a Restore clears it."
+    },
+    "gyroflightUncertainUnreadable": {
+        "message": "The record of earlier writes in this browser cannot be read; until it can, every Apply is refused."
+    },
+    "gyroflightUncertainCheck": { "message": "Check flight controller state (read-only)" },
     "gyroflightPreviewNeedsRelease": {
         "message": "The preview is offered only when Apply is: the flight controller calculates it in the values the PID tab would save, so it needs the same checks (marked ✗ above)."
     },

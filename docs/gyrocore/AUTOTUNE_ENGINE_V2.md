@@ -44,6 +44,19 @@ MSP message.
   tracked stages says that a sent SET is not recorded), `write` with an unreadable craft (a SET was sent, its result is unknown), `write` with
   differing fields (a partial write the craft kept), `verify` (written, not verified) and `eeprom` / `eeprom_verify`
   (saved state unknown). The panel shows the phase, the cause, the saved state and that current state.
+- Saved state of MSP_EEPROM_WRITE (both routes, audit F-03): `no` only on the firmware's own refusal (MSP_RESULT_ERROR,
+  e.g. armed); a timeout, no answer or a CRC-corrupt answer is `unknown`, since the firmware may have saved before the
+  answer was lost. The slider route reads the tune again after the save, as the absolute route does (`eeprom_verify`:
+  `unknown` when unreadable, `yes_adjusted` when the firmware changed a value on reload).
+- Uncertain state (`gyrocore/stores/fcTransactionState.ts`): every failure after the first SET (any stage but `prepare`)
+  of an Apply or a Restore is recorded per craft UID in this browser, with stage, saved state and the backup taken
+  before it. Every Apply on that craft is refused (`fc:transaction_state_uncertain:<backup>:<stage>:<saved>`, checked
+  before any MSP against the logged UID and again against the live UID) until its state is known: a verified Restore
+  (written, read back, saved, read again) clears it; so does the read-only check `checkTransactionState` when EEPROM was
+  not written (saved `no`), no profile switch was seen, and a full read-back equals that backup (after a power cycle
+  RAM reloads the EEPROM this write never touched). With saved `unknown` / `yes_adjusted` only a Restore clears it.
+  Unreadable storage of this record refuses every Apply (`fc:transaction_state_unreadable`). Both panels show the
+  record and the check (`UncertainStateNotice.vue`).
 - Profile switch after a SET: the firmware has no profile-bound atomic write, so a switch between the last MSP_STATUS_EX
   check and the SET puts that block into the other profile's RAM. The route catches it at the next check (stage `verify`
   or `write`, `fc:pid_profile_changed:a->b`); the panel then names the profile that may hold the write, states that
@@ -100,8 +113,8 @@ Open risks: MSP has no atomic check-and-write. The last check runs synchronously
 request after the check, and a calculation reply arriving after its timeout is still decoded into the FC store
 (authorized Previews only). Separate Apply / Restore calls with distinct tokens, and upstream saves, are not serialized
 against each other.
-The binding proves that the proposal follows from the decoded inputs in the store, not that those inputs are the
-currently imported files (a stale calculation that republishes them, audit P1-7, is not fixed here).
+The binding proves that the proposal follows from the decoded inputs in the store; that those are the currently
+imported files rests on the source revision (a calculation still running when the files changed publishes nothing).
 
 ## Release contract (`gyrocore/releaseGate/`)
 
@@ -114,7 +127,9 @@ The v1 slider route takes the same Verified Tune for its `independent_pid_valida
 
 Verified Tune (`verifiedTune.ts`): plant from a baseline CHIRP log, plant-fixed prediction for the candidate PIDs, compared
 with a second CHIRP log flown with them — closed-loop T up to 40 Hz and the loop L = G·C_fb near the crossover (at high
-loop gain T ≈ C_ref/C_fb hides plant errors). Tolerance: twice the baseline-repeat scatter, or the M5-A floors. The change
+loop gain T ≈ C_ref/C_fb hides plant errors). Tolerance: twice the baseline-repeat scatter, or the M5-A floors; never
+more than `MAX_REPEAT_TOLERANCE_FACTOR` (3) × the floor: a bin where the repeat scatters more is not compared against a
+wider band, and an axis with more than 20 % such bins is `INSUFFICIENT` (audit P1-4). The change
 must be resolvable; baseline, candidate and repeat distinct flights; the record has an integrity hash. Only passing
 records are stored (per craft, localStorage; record kind `gyroflight.verified_tune.v2`, v1 records are refused).
 
@@ -126,7 +141,9 @@ flight from the current tune.
 
 In the app (`engine/verifiedTuneFromLogs.ts`, panel button _Create Verified Tune from these logs_): the imported logs are
 grouped by logged tune; the tune imported last is the candidate, the one before it the baseline, a second baseline log the
-repeat (a flight imported twice is one flight). The engine attests only when the record's baseline is the primary log's
+repeat (a flight imported twice is one flight). The repeat must pass the cross-log reference rules against the baseline
+(independent flight, same craft, firmware and whole logged configuration, not only the same P/I/D/F; audit P1-4),
+otherwise none is used and the reasons name why. The engine attests only when the record's baseline is the primary log's
 configuration, and then searches PID candidates only on the record's segment (the contract's own predicate).
 
 The v1 slider route reads the same record but stays blocked: GyroCore Safety's slider path is unchanged (it still returns
@@ -144,6 +161,14 @@ absolute route's write authority, not the whole of it: GyroCore Safety blocks th
 | `feedforwardOptimizer.ts` | blocked without acro stick data (2026.6.2: no PID FF in ANGLE); calibrated model otherwise                                                                                                        |
 | `safetyEvidence.ts`       | absolute-route Safety evidence contract                                                                                                                                                           |
 | `autotuneV2.ts`           | orchestration, part statuses, `required_measurement:*`, full and releasable proposal                                                                                                              |
+
+Cross-log plant reproducibility (`plant_identification`): only a reference sweep the qualification passed in full
+(`usable`) counts; a rejected one, or one with warnings, is named (`cross_log_reference_not_qualified`) and never
+validates the plant (audit P1-5). Every qualified reference is compared: the worst decides, and references that disagree
+with each other make it FAIL (`cross_log_references_disagree`), so one agreeing reference never outvotes another.
+
+Stale calculations (audit P1-7): the store's source revision moves on with every import or reset; Calculate and _Create
+Verified Tune_ publish only for the revision they started on (a record from files no longer imported is not stored).
 
 Status rules: a measurement rejected by qualification is diagnostic only (margins, never a proposal); filter decisions use
 qualified axes only; the chain is validated only when every control band (2–20, 20–80 Hz) is coherent and matches;

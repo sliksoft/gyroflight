@@ -380,6 +380,25 @@ describe("write, read back, verify, save", () => {
             "eeprom",
             "unknown",
         ],
+        // Audit F-03: the save's own answer decides what is reported, never "verified" without it.
+        [
+            "the firmware refuses the save",
+            (k) => (k.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "unsupported"),
+            "eeprom",
+            "no",
+        ],
+        [
+            "the save's answer is corrupt",
+            (k) => (k.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "crc"),
+            "eeprom",
+            "unknown",
+        ],
+        [
+            "no answer to the save",
+            (k) => (k.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "noreply"),
+            "eeprom",
+            "unknown",
+        ],
     ];
     for (const [name, mutate, stage, saved] of failures) {
         it(`${name}: reported as a failed write (${stage}), never as success`, async () => {
@@ -398,6 +417,18 @@ describe("write, read back, verify, save", () => {
             }
         });
     }
+
+    it("a write that ended unverified blocks the next Apply on that craft until a verified Restore", async () => {
+        const c = await load();
+        route.craft.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "crc";
+        const err = (await failure(apply(c.id))) as TuneWriteError;
+        expect(err).toMatchObject({ stage: "eeprom", saved: "unknown" });
+        route.craft.faultsAfterWrite = {};
+        route.craft.calls = [];
+        const next = (await failure(apply(c.id))) as ApplyBlockedError;
+        expect(next.reasons).toEqual([`fc:transaction_state_uncertain:${err.backupId}:eeprom:unknown`]);
+        expect(writes()).toEqual([]);
+    });
 
     it("gyro filter Hz the sliders recompute on SET are expected from MSP_CALCULATE_SIMPLIFIED_GYRO", async () => {
         const c = await load();

@@ -377,6 +377,10 @@ export const APPLY_SUCCESS_SEQUENCE = [
     MSPCodes.MSP_PID,
     MSPCodes.MSP_PID_ADVANCED,
     MSPCodes.MSP_EEPROM_WRITE,
+    // Read again after the save: the firmware reloads and validates its config there.
+    MSPCodes.MSP_SIMPLIFIED_TUNING,
+    MSPCodes.MSP_PID,
+    MSPCodes.MSP_PID_ADVANCED,
 ];
 
 export const WRITE_CODES = new Set([

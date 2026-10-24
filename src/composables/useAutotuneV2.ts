@@ -149,9 +149,13 @@ export function useAutotuneV2() {
     const store = useAutotuneV2Store();
     const dialog = useDialog();
 
+    /** The files changed while a run awaited: its result belongs to files no longer imported. */
+    class StaleRun extends Error {}
+
     /** Engine inputs of every imported file (cached until a file is added). Newest import = highest order. */
     async function buildInputs(): Promise<readonly AutotuneLogInput[]> {
         if (store.inputs) return store.inputs;
+        const revision = store.revision;
         const inputs: AutotuneLogInput[] = [];
         const n = store.sources.length;
         for (const [i, s] of store.sources.entries()) {
@@ -159,6 +163,7 @@ export function useAutotuneV2() {
             // Let the interface paint the progress line before the long synchronous analysis.
             await new Promise((r) => setTimeout(r, 0));
             const sha = await sha256Hex(s.bytes);
+            if (store.revision !== revision) throw new StaleRun();
             // store.sources is newest first: the first source gets the highest order.
             for (const l of buildLogInputs(s.bytes, sha, s.report, analyzeM4BblFile(s.bytes, s.filename))) {
                 inputs.push({ ...l, order: n - i });
@@ -166,6 +171,7 @@ export function useAutotuneV2() {
         }
         // One flight carried by two files (renamed, re-saved) is kept once. Frozen: the write
         // authority pins these objects, and nothing may edit them in place after the calculation.
+        if (store.revision !== revision) throw new StaleRun();
         store.inputs = Object.freeze(
             uniqueFlights(inputs).map((l) => Object.freeze({ ...l, channels: Object.freeze({ ...l.channels }) })),
         );
@@ -175,6 +181,7 @@ export function useAutotuneV2() {
     /** Run the engine on every imported file of this craft. Pure computation: no flight controller. */
     async function calculate() {
         if (!store.sources.length || store.state === "calculating") return;
+        const revision = store.revision;
         store.state = "calculating";
         store.errorMessage = "";
         try {
@@ -185,10 +192,12 @@ export function useAutotuneV2() {
             store.result = runAutotuneV2(input);
             store.state = "done";
         } catch (err) {
+            // A stale run leaves the newer files' state alone (addSource reset it to idle).
+            if (err instanceof StaleRun || store.revision !== revision) return;
             store.state = "error";
             store.errorMessage = reasonsOf(err).join(", ");
         } finally {
-            store.progressMessage = "";
+            if (store.revision === revision) store.progressMessage = "";
         }
     }
 
@@ -199,8 +208,11 @@ export function useAutotuneV2() {
      */
     async function createVerifiedTune() {
         if (!store.sources.length || store.state === "calculating") return;
+        const revision = store.revision;
         try {
             const attempt = verifiedTuneFromLogs(await buildInputs());
+            // A record from files no longer imported is never stored.
+            if (store.revision !== revision) return;
             const stored = attempt.record?.verdict === "PASS" && useVerifiedTuneStore().save(attempt.record);
             store.verifiedTuneAttempt = {
                 verdict: attempt.record ? attempt.record.verdict : "NONE",
@@ -208,11 +220,12 @@ export function useAutotuneV2() {
                 reasons: attempt.reasons,
             };
         } catch (err) {
+            if (err instanceof StaleRun || store.revision !== revision) return;
             store.verifiedTuneAttempt = { verdict: "NONE", id: null, reasons: reasonsOf(err) };
         } finally {
-            store.progressMessage = "";
+            if (store.revision === revision) store.progressMessage = "";
         }
-        await calculate();
+        if (store.revision === revision) await calculate();
     }
 
     /**
