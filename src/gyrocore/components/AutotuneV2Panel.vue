@@ -175,6 +175,47 @@
                 </table>
             </template>
 
+            <template v-if="v2.qualification">
+                <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2QualTitle") }}</p>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2QualHelp") }}</p>
+                <p class="text-sm" data-gyrocore="v2-qualification-source">
+                    {{
+                        v2.qualification.source
+                            ? qualSourceText(v2.qualification.source)
+                            : $t("gyroflightV2QualNoSource")
+                    }}
+                </p>
+                <ul class="text-sm" data-gyrocore="v2-qualification-criteria">
+                    <li
+                        v-for="c in v2.qualification.criteria"
+                        :key="c.name"
+                        :data-criterion="c.name"
+                        :data-status="c.status"
+                    >
+                        <span
+                            :class="
+                                c.status === 'PASS'
+                                    ? 'text-green-500'
+                                    : c.status === 'FAIL'
+                                      ? 'text-red-500'
+                                      : 'text-yellow-500'
+                            "
+                        >
+                            {{ c.status }}
+                        </span>
+                        {{ c.name
+                        }}<span v-if="c.reasons.length" class="text-dimmed">
+                            ({{ c.reasons.slice(0, 6).join("; ") }})</span
+                        >
+                    </li>
+                </ul>
+                <ul class="text-sm" data-gyrocore="v2-qualification-axes">
+                    <li v-for="a in v2.qualification.axes" :key="a.axis" :data-axis="a.axis" :data-level="a.level">
+                        {{ a.axis }}: {{ a.level }} · {{ a.status }} · {{ a.verdict ?? "--" }}
+                    </li>
+                </ul>
+            </template>
+
             <!-- 3. Compare -->
             <h4 class="font-bold mt-3" data-step="v2-compare">3. {{ $t("gyroflightStepCompare") }}</h4>
             <p v-if="!result.proposal" class="text-sm text-dimmed" data-gyrocore="v2-no-change">
@@ -390,6 +431,8 @@ const result = computed(() => v2.result);
 const num = (x: number | null | undefined, digits: number) =>
     x == null || !Number.isFinite(x) ? "--" : x.toFixed(digits);
 const band = (b: [number, number] | null) => (b ? `${num(b[0], 1)}–${num(b[1], 1)}` : "--");
+const qualSourceText = (s: { sha256: string; logIndex: number }) =>
+    i18n.getMessage("gyroflightV2QualSource", [s.sha256.slice(0, 12), String(s.logIndex + 1)]);
 const outcome = computed(() => v2.outcome);
 
 /** The profile-switch warning of a failed write: which profile may hold it, and how to recover. */

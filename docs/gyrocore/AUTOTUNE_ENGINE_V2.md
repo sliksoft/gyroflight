@@ -210,10 +210,20 @@ controller its loop must be resolved with a bounded band end and no unity re-ent
 worse than the primary's bounds by more than 5° / 1.5 dB (the M5-A scatter): otherwise `FAIL`, the bounds are void
 (`MEASURED`, the worse PM). Too coarse, too short or no margins: `INSUFFICIENT`, the margins stay `MODEL_CONDITIONAL`.
 `PASS`: the reported margins are the worse of both logs. The remaining limit is the finer log's own class (features
-narrower than `RESOLVED_FEATURE_BINS` × its step); no margin is an absolute stability guarantee. No producer of a
-qualification log exists in the app yet (the CHIRP analysis picks its Welch segment length from the sample rate
-alone, `chirp/qualification.ts` `chooseSegmentSize`), so the app shows the requirement
-`chirp_finer_resolution_model_class_qualification` instead of releasing.
+narrower than `RESOLVED_FEATURE_BINS` × its step); no margin is an absolute stability guarantee.
+
+Qualification producer (`engine/modelQualification.ts`, WP5, informative): every CHIRP window is also analysed with
+the longest Welch segment that still gives 8 segments (`finestWelchSegment`; AIR65's 20 s sweeps: 16384 samples,
+0.244 Hz, 8× finer than the 1.95 Hz of `chooseSegmentSize`, which is unchanged), stored as `ChirpAxisInput.fine` with
+its provenance. The producer picks the finest other flight that passes the cross-log rules (INDEPENDENT, same craft,
+firmware and configuration) and whose sweeps are `usable`, runs the engine with it as `modelClassQualification`
+(that flight is then no cross-log reference: `cross_log_reference_is_the_qualification`) and reports per axis the
+evidence level and verdict, and nine criteria (identifiability, model structure, measurement quality, frequency
+coverage, independent evidence, uncertainty, margin applicability, reference quality, independent validation) as
+PASS / FAIL / NOT_VALIDATED. The verdicts are loopModel's and the release contract's, never the producer's. The app
+shows the report under the margins; the analysis it publishes, and that Apply is bound to, is the engine run
+without it, so the producer never reaches the write authority (an absolute Apply is refused by GyroCore Safety in
+any case). On the AIR65 logs no flight can serve: roll and pitch sweeps are rejected, yaw has warnings.
 
 Qualification band (audit P1-2, `QUALIFICATION_BAND_EXTENSION` 1.5): a qualification must reach 1.5 × the primary's
 band end (BAND_END's own figures: a resonance from about 1.5 × f_end shows < 0.5 dB in the primary's tail), otherwise

@@ -29,6 +29,7 @@ import { defineStore } from "pinia";
 import { ref, shallowRef } from "vue";
 import type { ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
 import type { AutotuneLogInput, AutotuneV2Result } from "@/gyrocore/engine/autotuneV2";
+import type { ModelQualificationReport } from "@/gyrocore/engine/modelQualification";
 import type { AbsoluteDiffRow, AbsoluteSnapshot } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 
@@ -80,6 +81,8 @@ export type AutotuneV2Outcome =
 export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
     const sources = shallowRef<AutotuneV2Source[]>([]);
     const result = shallowRef<AutotuneV2Result | null>(null);
+    /** The model-class qualification producer's report on the same inputs (informative; never Apply's). */
+    const qualification = shallowRef<ModelQualificationReport | null>(null);
     const state = ref<"idle" | "calculating" | "done" | "error">("idle");
     const errorMessage = ref("");
     const progressMessage = ref("");
@@ -114,6 +117,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         revision.value++;
         inputs.value = null;
         result.value = null;
+        qualification.value = null;
         preview.value = null;
         state.value = "idle";
     }
@@ -124,6 +128,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         inputs.value = null;
         verifiedTuneAttempt.value = null;
         result.value = null;
+        qualification.value = null;
         preview.value = null;
         outcome.value = null;
         state.value = "idle";
@@ -136,6 +141,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         inputs,
         verifiedTuneAttempt,
         result,
+        qualification,
         state,
         errorMessage,
         progressMessage,

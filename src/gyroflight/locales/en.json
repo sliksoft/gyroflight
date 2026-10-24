@@ -939,6 +939,14 @@
     "gyroflightV2Need_chirp_repeats_or_longer_sweep_for_averages": {
         "message": "more averages at the crossover: repeated CHIRP sweeps or a longer sweep (see the measurement plan)"
     },
+    "gyroflightV2QualTitle": { "message": "Model-class qualification from the imported logs (informative)" },
+    "gyroflightV2QualHelp": {
+        "message": "An independent flight of this craft and configuration, analysed with the finest resolution its own samples give, checked against the margins above. Shown only: it is not part of the analysis Apply uses, and an absolute Apply stays blocked by GyroCore Safety."
+    },
+    "gyroflightV2QualSource": { "message": "Qualification flight: file $1…, log $2" },
+    "gyroflightV2QualNoSource": {
+        "message": "No imported flight can serve as the qualification (see the reasons below)."
+    },
     "gyroflightV2PlanTitle": { "message": "Measurement plan for the next CHIRP flight (informative)" },
     "gyroflightV2PlanHelp": {
         "message": "Derived from this flight's own loop: the band, frequency resolution, Welch segment length and averages the margin evidence needs, and what the data show. Model-dependent figures; they release nothing."
