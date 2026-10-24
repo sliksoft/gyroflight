@@ -27,7 +27,7 @@ import { gui_log } from "../gui_log";
 import { i18n } from "../localization";
 import { serial } from "../serial";
 // Gyroflight hook (docs/gyrocore/UPSTREAM.md): this backup reads the CLI over the raw serial line.
-import { cliInputRefusal, reportRefusedWrite } from "../../composables/fcWriteGuard";
+import { interactiveCliText, reportRefusedWrite } from "../../composables/fcWriteGuard";
 
 /**
  *
@@ -384,13 +384,13 @@ class AutoBackup {
 
     private sendCommand(line: string, callback?: () => void) {
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md): it sends only `diff all` and `exit` (reads),
-        // checked like every CLI line.
-        const refused = cliInputRefusal("", `${line}\n`);
-        if (refused) {
-            reportRefusedWrite(`CLI "${line}"`, refused);
+        // checked like the CLI tab's lines (interactive CLI).
+        const out = interactiveCliText(`${line}\n`);
+        if (out.refused) {
+            reportRefusedWrite(`CLI "${line}"`, out.refused);
             return;
         }
-        this.sendSerial(`${line}\n`, callback);
+        this.sendSerial(out.text, callback);
     }
 
     execute(callback: (result: boolean) => void) {

@@ -291,7 +291,9 @@ describe("the CLI tab's raw serial line (useCli) while uncertain", () => {
         cli.sendLine("get p_roll");
         cli.sendLine("diff all");
         cli.sendLine("exit");
-        expect(sentText()).toEqual(["get p_roll\n", "diff all\n", "exit\n"]);
+        // Each behind the bytes that empty the firmware's line (WP8 final acceptance).
+        const clear = "\u007f".repeat(256);
+        expect(sentText()).toEqual([`${clear}get p_roll\n`, `${clear}diff all\n`, `${clear}exit\n`]);
     });
 
     it("a line with backspaces is refused: `save get` would run, not `get` (Codex WP8 final review P0)", () => {

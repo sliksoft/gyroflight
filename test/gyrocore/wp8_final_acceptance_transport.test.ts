@@ -198,3 +198,92 @@ describe("MSP2_CLI_SETTING is judged on its encoded bytes", () => {
         expect(sentCodes()).toEqual([]);
     });
 });
+
+/**
+ * The firmware's interactive line editor (cli.c processCharacterInteractive / processCharacter) over
+ * the bytes sent, against a few command names (the table is sorted, as cmdTable is): which command
+ * lines it would run. Completion on tab or '?', 0x7f deletes, leading spaces dropped, 255 characters.
+ */
+function firmwareRuns(bytes: number[], names = ["diff", "dump", "exit", "get", "save", "set", "status"]): string[] {
+    let buf = "";
+    const ran: string[] = [];
+    for (const c of bytes) {
+        if (c === 0x09 || c === 0x3f) {
+            const m = names.filter((n) => n.startsWith(buf.toLowerCase()));
+            if (!m.length) continue;
+            const [first, last] = [m[0], m.at(-1)!];
+            let i = buf.length;
+            for (; i < first.length && first[i] === last[i]; i++) buf += first[i];
+            if (m.length === 1 && i === first.length) buf += " ";
+        } else if (c === 0x7f) {
+            buf = buf.slice(0, -1);
+        } else if (c === 0x0a || c === 0x0d) {
+            const line = (buf.includes("#") ? buf.slice(0, buf.indexOf("#")) : buf).replace(/ +$/, "");
+            if (line) ran.push(line);
+            buf = "";
+        } else if (c >= 0x20 && c <= 0x7e && buf.length < 255 && !(buf === "" && c === 0x20)) {
+            buf += String.fromCodePoint(c);
+        }
+    }
+    return ran;
+}
+
+describe("the CLI tab's line: the firmware may hold text whose echo has not arrived (Codex WP8 final review P0)", () => {
+    function cliTab() {
+        const connection = useConnectionStore();
+        connection.connectionValid = true;
+        connection.cliValid = true;
+        connection.cliActive = true;
+        return useCli();
+    }
+    const allBytes = () => sent.mock.calls.flatMap(([b]) => Array.from(new Uint8Array(b as ArrayBuffer)));
+
+    it("a completion sent while writes were allowed, then uncertainty, then leaving the tab: `save exit` never runs", () => {
+        const cli = cliTab();
+        cli.state.commandInput = "sa";
+        cli.handleCommandKeyDown(new KeyboardEvent("keydown", { key: "Tab" }));
+        expect(sentText()).toEqual(["sa\t"]);
+        uncertain(); // the echo "ve " has not arrived; the page still sees an empty line
+        expect(cli.cleanup()).toBe(true);
+        expect(firmwareRuns(allBytes())).toEqual(["exit"]);
+    });
+
+    it("the same for a typed read: `get p_roll` runs, not `save get p_roll`", () => {
+        const cli = cliTab();
+        cli.state.commandInput = "sa";
+        cli.handleCommandKeyDown(new KeyboardEvent("keydown", { key: "Tab" }));
+        uncertain();
+        cli.sendLine("get p_roll");
+        expect(firmwareRuns(allBytes())).toEqual(["get p_roll"]);
+    });
+
+    it("leaving the tab with echoed text in the line (`# save `) exits; the reboot it reports is real", () => {
+        const cli = cliTab();
+        cli.read(new TextEncoder().encode("# save "));
+        uncertain();
+        expect(cli.cleanup()).toBe(true);
+        expect(firmwareRuns(allBytes())).toEqual(["exit"]);
+    });
+
+    it("'?' completes like a tab in the interactive CLI and is refused like one", () => {
+        uncertain();
+        const cli = cliTab();
+        cli.sendLine("sa?");
+        cli.sendLine("get p_roll?");
+        expect(sent).not.toHaveBeenCalled();
+    });
+
+    it("a refused write over the CLI tab sends nothing at all, not even the line clearing", () => {
+        uncertain();
+        const cli = cliTab();
+        cli.sendLine("save");
+        expect(sent).not.toHaveBeenCalled();
+    });
+
+    it("without an uncertain state the tab sends exactly what it did before (no line clearing)", () => {
+        const cli = cliTab();
+        cli.read(new TextEncoder().encode("# ex"));
+        expect(cli.cleanup()).toBe(true);
+        expect(sentText()).toEqual(["it\r"]);
+    });
+});

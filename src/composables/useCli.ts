@@ -38,7 +38,7 @@ import { addTimeout, removeTimeout } from "../js/timers";
 import { useAppInfoStore } from "../stores/appInfo";
 import { useConnectionStore } from "../stores/connection";
 // Gyroflight hook (docs/gyrocore/UPSTREAM.md): the CLI tab writes to the serial line directly.
-import { cliInputRefusal, reportRefusedWrite } from "./fcWriteGuard";
+import { foreignWritesRefused, interactiveCliText, reportRefusedWrite } from "./fcWriteGuard";
 
 const backspaceCode = 8;
 const lineFeedCode = 10;
@@ -326,18 +326,26 @@ export function useCli(): Cli {
     };
 
     const encoder = new TextEncoder();
-    const send = (line: string, callback?: SendCallback) => {
+    /** Sends `line`; false when the write check refused it (nothing was sent). */
+    const send = (line: string, callback?: SendCallback): boolean => {
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md): while the craft's state is uncertain only
-        // reads go out. What the firmware already holds of the line (cliBuffer) runs with it.
-        const refused = cliInputRefusal(removePromptHash(cliBuffer), line);
-        if (refused) {
-            reportRefusedWrite("CLI command", refused);
-            writeLineToOutput(`###ERROR Gyroflight: not sent (${refused.join(", ")})`);
-            return;
+        // reads go out, behind bytes that empty the firmware's line (fcWriteGuard interactiveCliText).
+        const out = interactiveCliText(line);
+        if (out.refused) {
+            reportRefusedWrite("CLI command", out.refused);
+            writeLineToOutput(`###ERROR Gyroflight: not sent (${out.refused.join(", ")})`);
+            return false;
         }
         // serial.send never rejects: it logs a failure and reports it through the callback.
-        void serial.send(encoder.encode(line), callback);
+        void serial.send(encoder.encode(out.text), callback);
+        return true;
     };
+
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md): what to send for `command` given what the firmware
+    // echoed of its line. While writes are refused that line is emptied first (send), so the whole
+    // command goes out, not the rest of it after the echoed part.
+    const commandAfterBuffer = (command: string) =>
+        foreignWritesRefused() ? command : getCliCommand(command, cliBuffer);
 
     const executeCommands = (outString: string) => {
         history.add(outString.trim());
@@ -370,7 +378,7 @@ export function useCli(): Cli {
                 const isLast = commandArray.length === 0;
 
                 if (isLast && cliBuffer) {
-                    line = getCliCommand(line, cliBuffer);
+                    line = commandAfterBuffer(line);
                 }
 
                 const isProfile = line.toLowerCase().startsWith("profile");
@@ -872,12 +880,14 @@ export function useCli(): Cli {
 
         // `exit` + MSP_REBOOT reboots the FC. Keep tab_switch_in_progress held across the
         // handoff; prepareDisconnect (run on every reboot path) releases it after the disconnect.
-        const rebooting = connectionStore.connectionValid && connectionStore.cliValid && connectionStore.cliActive;
-        if (rebooting) {
-            send(getCliCommand("exit\r", cliBuffer), function () {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused `exit` starts no reboot.
+        const rebooting =
+            connectionStore.connectionValid &&
+            connectionStore.cliValid &&
+            connectionStore.cliActive &&
+            send(commandAfterBuffer("exit\r"), function () {
                 reinitializeConnection();
             });
-        }
 
         connectionStore.cliActive = false;
         connectionStore.cliValid = false;

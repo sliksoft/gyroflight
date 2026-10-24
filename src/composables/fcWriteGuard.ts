@@ -23,16 +23,17 @@
  * The one write check of the app (audit WP8): every request that can change the flight controller's
  * configuration passes it on its way to the port, whoever sends it.
  *
- *   - MSP requests: msp.ts calls mspRequestRefusal() when a request is queued and again when a parked
- *     one is released. Each code is classified (classifyMsp): "read" (the firmware only answers),
+ *   - MSP requests: msp.ts calls mspRequestRefusal() when a request is queued, when a parked one is
+ *     released and before each retry. Each code is classified (classifyMsp): "read" (the firmware only answers),
  *     "runtime" (changes nothing that is stored or that a later read of the tune shows: the clock,
  *     the arming-disable flag, motor test outputs, a reboot) or "write". A code this table does not
  *     know is a write.
  *   - CLI: msp.ts (MSP CLI: Presets, Backups, AutoRestore, flight plan, VTX, ports, power, sensors,
- *     the flasher's config lines) and the CLI tab's raw serial line (useCli.ts, AutoBackup.ts) call
- *     cliInputRefusal(). It replays the firmware's line editor (cli.c processCharacter: backspace,
- *     line end, comments from '#') over the text, and only a line whose command is in READ_CLI
- *     counts as a read. Tab completion is refused: what the firmware then holds was never checked.
+ *     the flasher's config lines) calls cliInputRefusal(); the CLI tab's raw serial line (useCli.ts,
+ *     AutoBackup.ts) calls interactiveCliText(), which also clears the firmware's line first. Each
+ *     line the text ends (comments from '#' cut, as cli.c does) counts as a read only when its
+ *     command is in READ_CLI; text that is not printable ASCII and line ends, and tab completion,
+ *     are refused: what the firmware would then run was never checked.
  *
  * A write is refused while the connected craft has an open uncertain entry in fcTransactionState
  * (or its UID is unknown while any entry is open, or that storage is unreadable), and while a
@@ -280,7 +281,10 @@ function cliCommand(line: string): string {
  */
 export function cliInputRefusal(pending: string, text: string): string[] | null {
     const issues = foreignWriteIssues();
-    if (!issues.length) return null;
+    return issues.length ? cliLineRefusal(issues, pending, text, false) : null;
+}
+
+function cliLineRefusal(issues: string[], pending: string, text: string, interactive: boolean): string[] | null {
     let line = pending;
     for (const ch of text) {
         if (ch === "\r" || ch === "\n") {
@@ -288,7 +292,7 @@ export function cliInputRefusal(pending: string, text: string): string[] | null 
             const name = cmd.split(/\s+/)[0]?.toLowerCase() ?? "";
             if (cmd && !READ_CLI.has(name)) return [...issues, `cli:not_read_only:${name}`];
             line = "";
-        } else if (ch === "\t") {
+        } else if (ch === "\t" || (interactive && ch === "?")) {
             return [...issues, "cli:completion"];
         } else if (ch < " " || ch > "~") {
             return [...issues, "cli:edit_control_or_non_ascii_character"];
@@ -302,6 +306,30 @@ export function cliInputRefusal(pending: string, text: string): string[] | null 
 
 /** One MSP CLI command (msp.ts send_cli_command adds the line end). */
 export const cliCommandRefusal = (command: string) => cliInputRefusal("", `${command}\n`);
+
+/**
+ * Empties an interactive CLI's line buffer whatever it holds: there 0x7f deletes one character and
+ * does nothing on an empty buffer, which holds at most CLI_IN_BUFFER_SIZE - 1 (cli.h 256; cli.c
+ * processCharacterInteractive, processCharacter).
+ */
+export const CLI_CLEAR_LINE = "\u007f".repeat(256);
+
+/** Whether a write by anyone but a Gyroflight transaction would be refused now. */
+export const foreignWritesRefused = (): boolean => foreignWriteIssues().length > 0;
+
+/**
+ * What a raw serial line into an interactive CLI (the CLI tab, AutoBackup) sends for `text`, or why
+ * it must not. While writes may go out: `text` unchanged. Otherwise `text` is checked from an empty
+ * line and goes out behind CLI_CLEAR_LINE, so nothing the firmware already holds joins it: what this
+ * page knows of that buffer is the echo, which can lag (a completion sent before the state turned
+ * uncertain, its echo still on its way). '?' completes like a tab there and is refused like one.
+ */
+export function interactiveCliText(text: string): { text: string; refused: null } | { text: null; refused: string[] } {
+    const issues = foreignWriteIssues();
+    if (!issues.length) return { text, refused: null };
+    const refused = cliLineRefusal(issues, "", text, true);
+    return refused ? { text: null, refused } : { text: CLI_CLEAR_LINE + text, refused: null };
+}
 
 interface LockManagerLike {
     request<T>(name: string, options: { ifAvailable: boolean }, cb: (lock: unknown) => Promise<T>): Promise<T>;
