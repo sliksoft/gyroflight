@@ -25,6 +25,14 @@ import { MspDataView } from "./msp/mspBytes";
 import { useNavigationStore } from "../stores/navigation";
 import { useConnectionStore } from "../stores/connection";
 import { pinia } from "./pinia_instance";
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md): the one write check every request passes.
+import {
+    cliCommandRefusal,
+    mspRequestRefusal,
+    reportRefusedWrite,
+    writeRefused,
+    type WritePermit,
+} from "../composables/fcWriteGuard";
 
 /** A request payload: the encoders read `.length` and index it, so an array-like of bytes. */
 export type MspPayload = ArrayLike<number> | false | undefined;
@@ -54,6 +62,8 @@ export interface MspRequest {
     attempts?: number;
     start?: number;
     timer?: ReturnType<typeof setTimeout> | null;
+    /** Gyroflight: the write check again, for a parked request when it is released. */
+    recheck?: () => string[] | null;
 }
 
 export type CliCallback = (lines: string[], error?: Error | null) => void;
@@ -331,6 +341,14 @@ const MSP = {
         return bufferOut;
     },
     send_cli_command(str: string, callback?: CliCallback, { timeoutMs }: { timeoutMs?: number } = {}) {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a CLI write is refused while the craft's
+        // state is uncertain; the caller gets the error, nothing is sent.
+        const refused = cliCommandRefusal(str);
+        if (refused) {
+            if (callback) callback([], writeRefused(refused));
+            else reportRefusedWrite(`CLI "${str.split(/\s/)[0]}"`, refused);
+            return;
+        }
         this.cli_queue.push({ command: str, callback, timeoutMs });
         this._process_cli_queue();
     },
@@ -471,6 +489,7 @@ const MSP = {
      * @param {Function|false|undefined} callback_msp callback invoked with the MSP response
      * @param {boolean} errorAware whether timeout and cancellation errors settle the request
      * @param {boolean} [notifyTimeout=true] whether timeout exhaustion invokes MSP.onTimeout
+     * @param {WritePermit} [permit] Gyroflight: a write transaction's authority for its own write
      * @returns {boolean} true when the request is queued
      */
     _transmit(
@@ -480,7 +499,17 @@ const MSP = {
         callback_msp: MspCallback | false | undefined,
         errorAware: boolean,
         notifyTimeout = true,
+        permit?: WritePermit,
     ): boolean {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a write is refused while the craft's state is
+        // uncertain. An awaiter gets the error; a callback caller gets no callback (never "saved").
+        const recheck = () => mspRequestRefusal(code, data, permit);
+        const refused = recheck();
+        if (refused) {
+            if (errorAware && callback_msp) callback_msp(null, writeRefused(refused));
+            else reportRefusedWrite(`MSP ${code}`, refused);
+            return false;
+        }
         const bufferOut = code <= 254 ? this.encode_message_v1(code, data) : this.encode_message_v2(code, data);
         const view = new Uint8Array(bufferOut);
 
@@ -499,6 +528,7 @@ const MSP = {
                     callbackSent: callback_sent,
                     errorAware: true,
                     notifyTimeout,
+                    recheck,
                 });
                 return true;
             }
@@ -614,6 +644,18 @@ const MSP = {
             this.parked.delete(code);
         }
 
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): checked again now that it would go out.
+        const refused = entry.recheck?.();
+        if (refused) {
+            try {
+                errorAwareCallback(entry)?.(null, writeRefused(refused));
+            } catch (callbackError) {
+                console.error("MSP callback threw on a refused write:", callbackError);
+            }
+            this._release_parked(code);
+            return;
+        }
+
         entry.attempts = 1;
         entry.start = performance.now();
         this._arm_timer(entry);
@@ -628,15 +670,16 @@ const MSP = {
     /**
      * @param {number} code MSP command code
      * @param {ArrayBuffer|Array<number>|false} data optional command payload
-     * @param {{notifyTimeout?: boolean}} options set notifyTimeout false when request silence is
-     * expected and must not trigger the connection-liveness watchdog
+     * @param {{notifyTimeout?: boolean, permit?: WritePermit}} options set notifyTimeout false when
+     * request silence is expected and must not trigger the connection-liveness watchdog; permit
+     * (Gyroflight) is a write transaction's authority for its own write
      * @returns {Promise<object|undefined>} resolves with {command, data, length}; rejects with
-     * MspTimeoutError, MspCancelledError or MspCrcError
+     * MspTimeoutError, MspCancelledError, MspCrcError or (Gyroflight) WriteRefusedError
      */
     async promise(
         code: number | undefined,
         data?: MspPayload,
-        { notifyTimeout = true }: { notifyTimeout?: boolean } = {},
+        { notifyTimeout = true, permit }: { notifyTimeout?: boolean; permit?: WritePermit } = {},
     ): Promise<MspResponse | undefined> {
         const connectionStore = useConnectionStore();
         if (code === undefined || connectionStore.virtualMode) {
@@ -661,6 +704,7 @@ const MSP = {
                 },
                 true,
                 notifyTimeout,
+                permit,
             );
         });
     },

@@ -52,19 +52,20 @@ export interface TuneBackup {
     /**
      * Whether the craft's state was known when it was taken: false for the backup a Restore takes
      * while the craft holds the result of a write nobody verified (kept to show what was there).
-     * Missing on backups taken before this was recorded.
+     * Missing on backups taken before this was recorded: those are never a Restore target.
      */
     stateKnown?: boolean;
 }
 
 /**
- * Why `b` must not be written back by a Restore; null when it may. An unverified state never; a
- * before-Restore backup only with its provenance recorded (an older one may hold the partial
- * result of a failed write it was taken after).
+ * Why `b` must not be written back by a Restore; null when it may. An unverified state never, and
+ * no backup without its provenance recorded, whatever its reason: one stored before stateKnown
+ * existed may have been taken after a failed write left a partial result on the craft (audit WP8).
+ * There is no migration that could prove an older backup sound.
  */
 export function restoreTargetIssue(b: TuneBackup): string | null {
     if (b.stateKnown === false) return "restore:backup_unverified";
-    if (b.reason === "before_restore" && b.stateKnown !== true) return "restore:backup_provenance_unknown";
+    if (b.stateKnown !== true) return "restore:backup_provenance_unknown";
     return null;
 }
 
@@ -85,9 +86,12 @@ export function sameUid(a: readonly number[] | null | undefined, b: readonly num
 export const useTuneBackupStore = defineStore("gyroflightTuneBackup", () => {
     const backups = ref<TuneBackup[]>(readStorage());
 
-    /** Stores `backup` and reads it back; false when the browser did not keep it exactly. */
+    /**
+     * Stores `backup` and reads it back; false when the browser did not keep it exactly. Starts from
+     * the storage, not this page's copy, so a backup another tab stored meanwhile is kept.
+     */
     function save(backup: TuneBackup): boolean {
-        const others = backups.value.filter((b) => b.id !== backup.id);
+        const others = readStorage().filter((b) => b.id !== backup.id);
         const sameCraft = [backup, ...others.filter((b) => sameUid(b.uid, backup.uid))].slice(0, BACKUPS_PER_CRAFT);
         const next = [...sameCraft, ...others.filter((b) => !sameUid(b.uid, backup.uid))];
         try {

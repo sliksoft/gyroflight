@@ -532,6 +532,9 @@ describe("Restore", () => {
             firmware: "2026.6.2",
             compositeId: null,
             snapshot,
+            // Taken while the craft's state was known, as storeBackup records it (WP8: no
+            // backup without its provenance is a Restore target).
+            stateKnown: true,
         };
         expect(store.save(backup)).toBe(true);
         await restoreTune("bk-manual", await confirmRestoreToken("bk-manual"));

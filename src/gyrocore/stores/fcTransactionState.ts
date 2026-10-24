@@ -26,27 +26,37 @@
  * it and what the log shows.
  *
  * useTuneApply.ts stores a pending entry before the first MSP of every write (no write starts when
- * the browser does not keep it), and settles it at the end: removed when verified or stopped before
- * the first SET, replaced by the failure otherwise; a page closed mid-write leaves it pending. Kept
- * per craft UID in this browser (localStorage). An entry is cleared only by evidence that covers it:
+ * the browser does not keep it), and settles it at the end: removed when nothing was sent or the
+ * write was verified, replaced by the failure otherwise; a page closed mid-write leaves it pending
+ * ("in_progress"). Kept per craft UID in this browser (localStorage). An entry is cleared only by
+ * evidence that covers it:
  *   - a verified Restore (backup written, read back, saved, read again) by the same route of the one
- *     PID profile the entry could have changed; an entry whose profiles are unknown, or that a
- *     profile switch may have spread over two profiles, is covered by no Restore (resolveByRestore).
- *     A Restore itself is refused while the craft has an entry it would not cover: its EEPROM save
- *     would persist that entry's unverified values too (notCoveredByRestore), or
- *   - a read-only check whose full read-back equals the backup, when EEPROM was not written (saved
- *     "no") and no profile switch was seen. With saved "unknown" or "yes_adjusted" a read-back
- *     cannot show what EEPROM holds, so only a Restore clears it.
- * While an entry is open, Gyroflight's Apply and the shared upstream saves (PID tab, EEPROM saves)
- * refuse on that craft (assertNoUncertainWriteOnConnectedCraft). Unreadable storage counts as an
+ *     PID profile the entry could have changed. An entry still in progress (its writer may be
+ *     paused, or its page closed before it could record a profile switch), an entry whose profiles
+ *     are unknown, or one a profile switch may have spread over two profiles is covered by no
+ *     Restore (coveredBy). A Restore itself is refused while the craft has an entry it would not
+ *     cover, checked again before each of its writes: its EEPROM save would persist that entry's
+ *     unverified values too (notCoveredByRestore), or
+ *   - a read-only check whose full read-back of the one profile the entry names equals the backup,
+ *     when EEPROM was not written (saved "no") and no profile switch was seen. With saved "unknown"
+ *     or "yes_adjusted" a read-back cannot show what EEPROM holds, and with unknown or several
+ *     profiles one profile's read-back cannot show the others: only a Restore clears it, or nothing.
+ * There is no unlock on a power cycle or on an assumption: an entry nothing covers stays until it
+ * is cleared by hand outside Gyroflight (fail-closed).
+ *
+ * While an entry is open, every write to that craft is refused: Gyroflight's routes, the shared
+ * upstream saves (assertNoUncertainWriteOnConnectedCraft) and, at the transport, every MSP or CLI
+ * write of any tab of the app (composables/fcWriteGuard.ts). Unreadable storage counts as an
  * uncertain state for every craft (fail-closed) and is never overwritten, so a later page cannot
  * lose what it held; clearing it is a manual step outside Gyroflight.
  *
- * Each entry is stored under its own key (TRANSACTION_ENTRY_PREFIX + id): a page writes and removes
- * only the keys of its own transactions, so two tabs writing at once cannot overwrite each other's
- * entries (localStorage has no compare-and-swap for a shared list). Every check and change reads
- * the storage first, so another tab's entry is seen, and a `storage` event refreshes what is shown.
- * Resolving removes an entry only while its stored value is still the one the evidence covered.
+ * Each entry is stored under its own key (TRANSACTION_ENTRY_PREFIX + id, the id a random UUID): a
+ * page writes and removes only the keys of its own transactions. Pending entries are reserved and
+ * settled only inside the origin's write lock (fcWriteGuard.withFcWriteLock), so no two
+ * transactions of one browser reserve or settle at the same time. Every check and change reads the
+ * storage first, so another tab's entry is seen, and a `storage` event refreshes what is shown.
+ * Resolving or settling removes an entry only while its stored value is still the one the evidence
+ * covered. localStorage is per browser and not strictly consistent between tabs: see fcWriteGuard.
  */
 
 import { defineStore } from "pinia";
@@ -165,6 +175,10 @@ function readStorage(): Stored {
 
 export const TRANSACTION_STATE_UNREADABLE = "fc:transaction_state_unreadable";
 export const TRANSACTION_STATE_NOT_STORED = "fc:transaction_state_not_stored";
+/** Entries are open and the connected craft's UID is not known: it may be one of theirs. */
+export const TRANSACTION_STATE_UID_UNKNOWN = "fc:transaction_state_uid_unknown";
+/** A Gyroflight write transaction of this page is open: no other write goes out meanwhile. */
+export const GYROFLIGHT_WRITE_OPEN = "fc:gyroflight_write_in_progress";
 
 let recordSeq = 0;
 
@@ -173,6 +187,8 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
     const entries = ref<UncertainTransaction[]>(stored.ok ? stored.entries : []);
     // A latch: once storage was unreadable or refused a change, this page keeps its own entries.
     const unreadable = ref(!stored.ok);
+    // Gyroflight write transactions (and read-only checks) of this page holding the write lock.
+    const localWrites = ref(0);
 
     /** Take what the storage holds now (another tab may have changed it); memory once unreadable. */
     function sync(): void {
@@ -206,12 +222,13 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
 
     /**
      * Before the first MSP of a write: the transaction as pending, stored and read back. false: the
-     * browser did not keep it (or its storage is unreadable), and the write must not start.
+     * browser did not keep it (or its storage is unreadable), or its id is taken, and the write must
+     * not start. Called inside the write lock, so no other transaction of this origin reserves now.
      */
     function recordPending(t: Keyed): boolean {
         sync();
         if (unreadable.value) return false;
-        // A new transaction never takes over a stored one's key (ids are time + 32 random bits).
+        // A new transaction never takes over a stored one's key (ids are random UUIDs).
         if (entries.value.some((e) => e.id === t.id)) return false;
         return store(t);
     }
@@ -221,16 +238,31 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
      * removed (verified, or stopped before the first SET). Kept in memory when the browser refuses
      * the change; that refusal then blocks every craft until the page is reloaded.
      */
-    function settle(id: string, outcome: UncertainTransaction | null): void {
+    function settle(id: string, outcome: UncertainTransaction | null, pending?: UncertainTransaction): void {
         sync();
         if (outcome) {
             const e = { ...outcome, id };
             if (!store(e)) upsert(e);
             return;
         }
-        const ok = !unreadable.value && removeEntry(id, null);
+        // Removed only while it still holds the pending entry this page stored; anything else stays.
+        const json = pending ? JSON.stringify(pending) : null;
+        if (json !== null && !unreadable.value && !holds({ ...pending!, id })) {
+            sync();
+            return;
+        }
+        const ok = !unreadable.value && removeEntry(id, json);
         if (!ok) unreadable.value = true;
         entries.value = entries.value.filter((x) => x.id !== id);
+    }
+
+    /** Whether the storage still holds exactly the pending entry `e` this page stored (its ownership). */
+    function holds(e: UncertainTransaction & { id: string }): boolean {
+        try {
+            return !unreadable.value && globalThis.localStorage.getItem(keyOf(e.id)) === JSON.stringify(e);
+        } catch {
+            return false;
+        }
     }
 
     /** Record an uncertain outcome (kept in memory when the browser refuses it; see settle). */
@@ -273,12 +305,15 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
 
     /**
      * Whether a verified Restore by `restored.route` of PID profile `restored.profile` proves the
-     * state `e` left: the same route (the slider Restore does not write the filter block), and the
-     * entry's affected profiles are known and just that one.
+     * state `e` left: the entry ended (one still in progress may be written further by its paused
+     * writer, and a page closed mid-write never recorded a profile switch it may have run into), the
+     * same route (the slider Restore does not write the filter block), and the entry's affected
+     * profiles are known and just that one.
      */
     function coveredBy(e: UncertainTransaction, restored: RestoreScope): boolean {
         const absolute = e.action === "absolute_apply" || e.action === "absolute_restore";
         return (
+            e.stage !== "in_progress" &&
             absolute === (restored.route === "absolute") &&
             restored.profile !== null &&
             Array.isArray(e.profiles) &&
@@ -287,10 +322,17 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
         );
     }
 
-    /** The open entries of this craft such a Restore would not cover: while any exists, it must not run. */
-    function notCoveredByRestore(uid: readonly number[], restored: RestoreScope): UncertainTransaction[] {
+    /**
+     * The open entries of this craft such a Restore would not cover (but `exceptId`, the Restore's own
+     * pending entry): while any exists, it must not run, nor write on.
+     */
+    function notCoveredByRestore(
+        uid: readonly number[],
+        restored: RestoreScope,
+        exceptId?: string,
+    ): UncertainTransaction[] {
         sync();
-        return forUid(uid).filter((e) => !coveredBy(e, restored));
+        return forUid(uid).filter((e) => e.id !== exceptId && !coveredBy(e, restored));
     }
 
     /** After a verified Restore: resolve the entries it covers; the others stay. */
@@ -302,9 +344,11 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
     return {
         entries,
         unreadable,
+        localWrites,
         sync,
         recordPending,
         settle,
+        holds,
         record,
         forUid,
         blocks,
@@ -315,14 +359,29 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
 });
 
 /**
- * For write paths outside Gyroflight's routes (the PID tab's Save, EEPROM saves of any tab): refuse
- * while the connected craft's last Gyroflight write ended in a state nobody verified, since such a
- * save would write or persist those unverified values (audit WP8). Throws ApplyBlockedError.
+ * Why a write that is not part of a Gyroflight transaction must not reach the connected craft now;
+ * empty when it may: a Gyroflight transaction of this page is open, the craft has an open entry,
+ * the storage is unreadable, or entries are open while the craft's UID is unknown.
  */
-export function assertNoUncertainWriteOnConnectedCraft(): void {
+export function connectedCraftWriteIssues(): string[] {
     const uid = useFlightControllerStore().config.uid;
     const states = useFcTransactionStore();
     states.sync();
-    const blocks = states.blocks(Array.isArray(uid) && uid.length === 3 ? uid : null);
-    if (blocks.length) throw new ApplyBlockedError(blocks);
+    const known = Array.isArray(uid) && uid.length === 3 ? uid : null;
+    return [
+        ...(states.localWrites > 0 ? [GYROFLIGHT_WRITE_OPEN] : []),
+        ...states.blocks(known),
+        ...(!known && states.entries.length ? [TRANSACTION_STATE_UID_UNKNOWN] : []),
+    ];
+}
+
+/**
+ * For write paths outside Gyroflight's routes (the PID tab's Save, EEPROM saves of any tab): refuse
+ * while the connected craft's last Gyroflight write ended in a state nobody verified, since such a
+ * save would write or persist those unverified values (audit WP8). Throws ApplyBlockedError. The
+ * transport checks the same again for every request (composables/fcWriteGuard.ts).
+ */
+export function assertNoUncertainWriteOnConnectedCraft(): void {
+    const issues = connectedCraftWriteIssues();
+    if (issues.length) throw new ApplyBlockedError(issues);
 }

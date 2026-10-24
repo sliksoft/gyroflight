@@ -24,6 +24,7 @@ import semver from "semver";
 import MSP from "../js/msp";
 import { useFlightControllerStore } from "@/stores/fc";
 import { cancelRebootReconnect, scheduleRebootReconnect } from "../js/serial_backend";
+import { WriteRefusedError } from "./fcWriteGuard";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 2000;
 const SAVE_COMMAND_TIMEOUT_MS = 5000;
@@ -231,6 +232,12 @@ export async function saveAndReconnect(): Promise<SaveAndReconnectResult> {
     try {
         await sendSave();
     } catch (error) {
+        if (error instanceof WriteRefusedError) {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): the save was refused before it was sent
+            // (uncertain FC state); the FC does not reboot, so there is no reconnect to wait for.
+            console.error("sendSave refused:", error);
+            return { ok: false, error };
+        }
         if (isConnectionClosedError(error)) {
             // Save accepted; the FC is rebooting (the port closed before it could reply).
             console.debug("Save reboot: connection closed before response (expected).");
@@ -238,9 +245,8 @@ export async function saveAndReconnect(): Promise<SaveAndReconnectResult> {
             saveError = error;
             console.error("sendSave failed:", error);
         }
-    } finally {
-        scheduleReconnect();
     }
+    scheduleReconnect();
     return { ok: saveError === null, error: saveError };
 }
 

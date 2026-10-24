@@ -705,8 +705,11 @@ describe("independent review: attempts to get past the authority", () => {
         const token = await confirm(p);
         const first = applyAbsoluteTune(p, token);
         const second = applyAbsoluteTune(p, token);
-        expect((await denial(second)).reasons).toEqual(["apply:confirmation_unknown_or_used"]);
+        // WP8: the origin's write lock refuses it now, before it could reach the token.
+        expect((await denial(second)).reasons).toEqual(["fc:write_lock_busy"]);
         expect((await first).status).toBe("verified");
+        // The token stays single-use: the first Apply used it.
+        expect((await denial(applyAbsoluteTune(p, token))).reasons).toEqual(["apply:confirmation_unknown_or_used"]);
     });
 
     it("a proposal carrying a Verified Tune from the reactive store is copied, not refused", async () => {

@@ -45,6 +45,12 @@
  * A failure after the first SET leaves the craft in a state this route did not verify; it is
  * recorded per craft (gyrocore/stores/fcTransactionState.ts) and every Apply on that craft is
  * refused until a verified Restore or a read-only check (checkTransactionState) shows the state.
+ *
+ * Every write transaction and the read-only check hold the origin's write lock
+ * (fcWriteGuard.withFcWriteLock): one at a time, a second one is refused. A transaction's SETs and
+ * MSP_EEPROM_WRITE go out only through its own permit (Transaction.write), which the transport
+ * checks right before each of them: its pending entry is still stored as it stored it, and no
+ * entry it does not cover has appeared for the craft.
  */
 
 import MSP from "@/js/msp";
@@ -121,6 +127,7 @@ import {
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { assertAbsoluteWriteAuthorized, assertSliderWriteAuthorized } from "@/gyrocore/releaseGate/writeAuthority";
 import { pinAnalysis, plainCopy } from "@/gyrocore/releaseGate/analysisBinding";
+import { WriteRefusedError, withFcWriteLock, type WritePermit } from "@/composables/fcWriteGuard";
 
 /**
  * Where a write transaction stopped. "prepare": before the first SET was sent (a check or a fresh
@@ -333,7 +340,12 @@ function eepromReplyState(reply: MspReply): "saved" | "no" | "unknown" {
  * After the write was sent: read back, compare, save only when everything matches, and read
  * again after the save (the firmware reloads and validates its config there).
  */
-async function verifyAndSave(expected: TuneSnapshot, backupId: string, backup: TuneSnapshot): Promise<TuneSnapshot> {
+async function verifyAndSave(
+    expected: TuneSnapshot,
+    backupId: string,
+    backup: TuneSnapshot,
+    tx: Transaction,
+): Promise<TuneSnapshot> {
     let readback: TuneSnapshot;
     try {
         readback = await readSnapshot("fc:verify_readback_missing");
@@ -348,9 +360,9 @@ async function verifyAndSave(expected: TuneSnapshot, backupId: string, backup: T
     }
     let reply: MspReply;
     try {
-        reply = (await MSP.promise(MSPCodes.MSP_EEPROM_WRITE)) as MspReply;
+        reply = await tx.write(MSPCodes.MSP_EEPROM_WRITE);
     } catch (err) {
-        throw new TuneWriteError("eeprom", "unknown", backupId, errorText(err));
+        throw new TuneWriteError("eeprom", savedAfterSendError(err), backupId, errorText(err));
     }
     const saved = eepromReplyState(reply);
     if (saved !== "saved") {
@@ -374,6 +386,14 @@ async function verifyAndSave(expected: TuneSnapshot, backupId: string, backup: T
     return afterSave;
 }
 
+/**
+ * The saved state after MSP_EEPROM_WRITE failed with `err`: "no" when the write check refused it
+ * before it was sent, otherwise unknown (the firmware may have saved before the answer was lost).
+ */
+function savedAfterSendError(err: unknown): "no" | "unknown" {
+    return err instanceof WriteRefusedError ? "no" : "unknown";
+}
+
 function errorText(err: unknown): string {
     if (err instanceof ApplyBlockedError) {
         return err.reasons.join(", ");
@@ -395,32 +415,91 @@ function assertTransactionStateKnown(uid: readonly number[] | null | undefined):
 interface Transaction {
     /**
      * Store the transaction as pending (read back) right after the backup and before the first SET;
-     * throws, so no SET is sent, when the browser does not keep it.
+     * throws, so no SET is sent, when the browser does not keep it or its id is taken. A Restore
+     * passes the PID profile it restores (`restoring`): its writes may go on only while every other
+     * entry of the craft is one it covers.
      */
-    begin(uid: [number, number, number] | null, backupId: string, profiles: number[] | null): void;
+    begin(
+        uid: [number, number, number] | null,
+        backupId: string,
+        profiles: number[] | null,
+        restoring?: number | null,
+    ): void;
+    /** A SET or MSP_EEPROM_WRITE of this transaction, with its permit (see the file header). */
+    write(code: number, data?: MspPayload): Promise<MspReply>;
+}
+
+type MspPayload = Parameters<typeof MSP.promise>[1];
+
+/** A new transaction id: a random UUID (no write starts without one). */
+function newTransactionId(): string {
+    const uuid = globalThis.crypto?.randomUUID?.();
+    if (!uuid) throw new ApplyBlockedError(["fc:transaction_id_unavailable"]);
+    return `tx-${uuid}`;
 }
 
 /**
- * Runs one write transaction. Once begun, it is pending in fcTransactionState; at the end the entry
- * is removed (verified, or stopped before the first SET) or replaced by the failure, with the PID
- * profiles it may have changed (a profile switch adds the other one). A verified Restore then
- * resolves the earlier entries it covers (fcTransactionState.resolveByRestore), never more.
+ * Runs one write transaction, holding the origin's write lock throughout. Once begun, it is pending
+ * in fcTransactionState; at the end the entry is removed (verified, or nothing was sent) or replaced
+ * by the failure, with the PID profiles it may have changed (a profile switch adds the other one).
+ * A verified Restore then resolves the earlier entries it covers (fcTransactionState.resolveByRestore),
+ * never more, and never one still in progress.
  */
 async function transaction<T extends { backupId: string }>(
     action: UncertainTransaction["action"],
     run: (tx: Transaction) => Promise<T>,
 ): Promise<T> {
+    return withFcWriteLock(() => transactionLocked(action, run));
+}
+
+async function transactionLocked<T extends { backupId: string }>(
+    action: UncertainTransaction["action"],
+    run: (tx: Transaction) => Promise<T>,
+): Promise<T> {
     const states = useFcTransactionStore();
+    const restoreRoute = action === "restore" ? "slider" : action === "absolute_restore" ? "absolute" : null;
     // A holder, not a variable: begin() assigns it from a closure.
-    const rec: { begun: { id: string; uid: [number, number, number]; profiles: number[] | null } | null } = {
-        begun: null,
+    const rec: {
+        begun: {
+            pending: UncertainTransaction & { id: string };
+            uid: [number, number, number];
+            profiles: number[] | null;
+            restoring: number | null;
+        } | null;
+        /** Writes handed to the transport and not refused by the write check (each may have run). */
+        sent: number;
+    } = { begun: null, sent: 0 };
+    const permit: WritePermit = {
+        issues() {
+            const b = rec.begun;
+            if (!b) return ["fc:transaction_not_begun"];
+            const issues: string[] = [];
+            if (!states.holds(b.pending)) issues.push("fc:transaction_ownership_lost");
+            states.sync();
+            if (states.unreadable) issues.push(TRANSACTION_STATE_UNREADABLE);
+            if (restoreRoute) {
+                for (const e of states.notCoveredByRestore(
+                    b.uid,
+                    { route: restoreRoute, profile: b.restoring },
+                    b.pending.id,
+                )) {
+                    issues.push(`restore:uncertain_state_not_covered:${e.backupId}:${e.stage}:${e.saved}`);
+                }
+            } else {
+                for (const e of states.forUid(b.uid)) {
+                    if (e.id !== b.pending.id) {
+                        issues.push(`fc:transaction_state_uncertain:${e.backupId}:${e.stage}:${e.saved}`);
+                    }
+                }
+            }
+            return issues;
+        },
     };
     const tx: Transaction = {
-        begin(uid, backupId, profiles) {
+        begin(uid, backupId, profiles, restoring = null) {
             if (!uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
-            const id = `tx-${newBackupId().slice(3)}`;
-            const ok = states.recordPending({
-                id,
+            const pending = {
+                id: newTransactionId(),
                 uid,
                 action,
                 stage: "in_progress",
@@ -429,36 +508,46 @@ async function transaction<T extends { backupId: string }>(
                 profiles,
                 detail: "",
                 at: new Date().toISOString(),
-            });
-            if (!ok) throw new ApplyBlockedError([TRANSACTION_STATE_NOT_STORED]);
-            rec.begun = { id, uid, profiles };
+            };
+            if (!states.recordPending(pending)) throw new ApplyBlockedError([TRANSACTION_STATE_NOT_STORED]);
+            rec.begun = { pending, uid, profiles, restoring };
+        },
+        async write(code, data) {
+            // Counted before it goes out: a write whose answer is lost may still have run.
+            rec.sent++;
+            try {
+                return (await MSP.promise(code, data, { permit })) as MspReply;
+            } catch (err) {
+                if (err instanceof WriteRefusedError) rec.sent--;
+                throw err;
+            }
         },
     };
     try {
         const result = await run(tx);
         const b = rec.begun;
         if (b) {
-            states.settle(b.id, null);
+            states.settle(b.pending.id, null, b.pending);
             // Written, read back, saved and read again: what this Restore covers is known again.
-            if ((action === "absolute_restore" || action === "restore") && b.profiles?.length === 1) {
-                states.resolveByRestore(b.uid, {
-                    route: action === "restore" ? "slider" : "absolute",
-                    profile: b.profiles[0],
-                });
+            if (restoreRoute && b.profiles?.length === 1) {
+                states.resolveByRestore(b.uid, { route: restoreRoute, profile: b.profiles[0] });
             }
         }
         return result;
     } catch (err) {
         const b = rec.begun;
         if (b) {
-            if (err instanceof TuneWriteError && err.stage !== "prepare") {
+            if (rec.sent === 0) {
+                // Nothing reached the craft: it holds what was backed up.
+                states.settle(b.pending.id, null, b.pending);
+            } else if (err instanceof TuneWriteError) {
                 const sw = profileSwitchOf(err.message);
                 const profiles =
                     b.profiles && sw ? (sw.to === null ? null : [...new Set([...b.profiles, sw.to])]) : b.profiles;
-                states.settle(b.id, {
+                states.settle(b.pending.id, {
                     uid: b.uid,
                     action,
-                    stage: err.stage,
+                    stage: err.stage === "prepare" ? "write" : err.stage,
                     saved: err.saved,
                     backupId: err.backupId,
                     profiles,
@@ -466,7 +555,17 @@ async function transaction<T extends { backupId: string }>(
                     at: new Date().toISOString(),
                 });
             } else {
-                states.settle(b.id, null);
+                // Interrupted after a write went out, by something that is not a write failure.
+                states.settle(b.pending.id, {
+                    uid: b.uid,
+                    action,
+                    stage: "write",
+                    saved: "unknown",
+                    backupId: b.pending.backupId,
+                    profiles: b.profiles,
+                    detail: errorText(err),
+                    at: new Date().toISOString(),
+                });
             }
         }
         throw err;
@@ -487,7 +586,9 @@ const SLIDER_PROFILES_UNKNOWN = null;
  * but never written back (the Restore routes refuse it).
  */
 function recovering(fc: FcIdentity): boolean {
-    return useFcTransactionStore().forUid(fc.uid).length > 0;
+    const states = useFcTransactionStore();
+    states.sync();
+    return states.unreadable || states.forUid(fc.uid).length > 0;
 }
 
 /**
@@ -638,7 +739,7 @@ async function applyTuneOnce(
         }
     }
     try {
-        await MSP.promise(MSPCodes.MSP_SET_SIMPLIFIED_TUNING, mspHelper.crunch(MSPCodes.MSP_SET_SIMPLIFIED_TUNING));
+        await tx.write(MSPCodes.MSP_SET_SIMPLIFIED_TUNING, mspHelper.crunch(MSPCodes.MSP_SET_SIMPLIFIED_TUNING));
     } catch (err) {
         throw new TuneWriteError("write", "no", backup.id, errorText(err));
     }
@@ -653,7 +754,7 @@ async function applyTuneOnce(
     }
 
     // 6. Read back, compare with the firmware's own calculation, save only on a full match.
-    const after = await verifyAndSave(expected, backup.id, before);
+    const after = await verifyAndSave(expected, backup.id, before, tx);
     return { status: "verified", backupId: backup.id, expected, readback: after };
 }
 
@@ -738,12 +839,12 @@ async function restoreTuneOnce(
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, current, null, undefined, !recovering(fc));
-    tx.begin(uid3(fc.uid), safety.id, SLIDER_PROFILES_UNKNOWN);
+    tx.begin(uid3(fc.uid), safety.id, SLIDER_PROFILES_UNKNOWN, fc.pidProfile);
 
     const fcStore = useFlightControllerStore();
     loadStore({ ...current, sliders: target.sliders, filters: target.filters });
     try {
-        await MSP.promise(MSPCodes.MSP_SET_SIMPLIFIED_TUNING, mspHelper.crunch(MSPCodes.MSP_SET_SIMPLIFIED_TUNING));
+        await tx.write(MSPCodes.MSP_SET_SIMPLIFIED_TUNING, mspHelper.crunch(MSPCodes.MSP_SET_SIMPLIFIED_TUNING));
     } catch (err) {
         throw new TuneWriteError("write", "no", safety.id, errorText(err));
     }
@@ -755,19 +856,19 @@ async function restoreTuneOnce(
         const pidsOff = target.pids.some((row, i) => row.some((v, j) => v !== readback.pids[i]?.[j]));
         if (pidsOff) {
             loadStore({ ...readback, pids: target.pids });
-            await MSP.promise(MSPCodes.MSP_SET_PID, mspHelper.crunch(MSPCodes.MSP_SET_PID));
+            await tx.write(MSPCodes.MSP_SET_PID, mspHelper.crunch(MSPCodes.MSP_SET_PID));
         }
         const advancedOff = SNAPSHOT_ADVANCED_KEYS.some((k) => readback.advanced[k] !== target.advanced[k]);
         if (advancedOff) {
             // MSP_SET_PID_ADVANCED writes the whole block: start from a fresh read of it.
             await readOk(MSPCodes.MSP_PID_ADVANCED, "fc:verify_readback_missing");
             Object.assign(fcStore.advancedTuning, target.advanced);
-            await MSP.promise(MSPCodes.MSP_SET_PID_ADVANCED, mspHelper.crunch(MSPCodes.MSP_SET_PID_ADVANCED));
+            await tx.write(MSPCodes.MSP_SET_PID_ADVANCED, mspHelper.crunch(MSPCodes.MSP_SET_PID_ADVANCED));
         }
     } catch (err) {
         throw new TuneWriteError("write", "no", safety.id, errorText(err));
     }
-    const after = await verifyAndSave(target, safety.id, current);
+    const after = await verifyAndSave(target, safety.id, current, tx);
     return { status: "verified", backupId: safety.id, expected: target, readback: after };
 }
 
@@ -846,9 +947,9 @@ async function readAbsoluteSnapshot(reason: string, apiVersion: string, profile:
     return snapshot;
 }
 
-/** One write; the firmware's error reply (MSP_RESULT_ERROR) counts as a failed write. */
-async function writeOk(code: number): Promise<void> {
-    const reply = (await MSP.promise(code, mspHelper.crunch(code))) as MspReply;
+/** One write of `tx`; the firmware's error reply (MSP_RESULT_ERROR) counts as a failed write. */
+async function writeOk(code: number, tx: Transaction): Promise<void> {
+    const reply = await tx.write(code, mspHelper.crunch(code));
     if (!reply || reply.crcError || reply.unsupported) {
         throw new Error(`write_refused:${code}`);
     }
@@ -903,6 +1004,7 @@ async function writeAbsoluteBlocks(
     target: AbsoluteSnapshot,
     backup: AbsoluteSnapshot,
     backupId: string,
+    tx: Transaction,
     all = false,
     beforeFirstSet?: () => void,
 ): Promise<void> {
@@ -924,7 +1026,13 @@ async function writeAbsoluteBlocks(
         storeHoldsTarget = true;
         fill();
         sent++;
-        await writeOk(code);
+        try {
+            await writeOk(code, tx);
+        } catch (err) {
+            // Refused by the write check: it never reached the craft.
+            if (err instanceof WriteRefusedError) sent--;
+            throw err;
+        }
     };
     try {
         if (slidersChange || all) {
@@ -976,6 +1084,7 @@ async function verifyAbsoluteAndSave(
     expected: AbsoluteSnapshot,
     backup: AbsoluteSnapshot,
     backupId: string,
+    tx: Transaction,
 ): Promise<Omit<AbsoluteWriteResult, "status" | "backupId" | "expected">> {
     const profile = expected.pidProfile!;
     let readback: AbsoluteSnapshot;
@@ -1005,9 +1114,9 @@ async function verifyAbsoluteAndSave(
     }
     let reply: MspReply;
     try {
-        reply = (await MSP.promise(MSPCodes.MSP_EEPROM_WRITE)) as MspReply;
+        reply = await tx.write(MSPCodes.MSP_EEPROM_WRITE);
     } catch (err) {
-        throw new TuneWriteError("eeprom", "unknown", backupId, errorText(err));
+        throw new TuneWriteError("eeprom", savedAfterSendError(err), backupId, errorText(err));
     }
     const saved = eepromReplyState(reply);
     if (saved !== "saved") {
@@ -1153,8 +1262,8 @@ async function applyAbsoluteTuneOnce(
     recheck();
     const backup = storeBackup("before_absolute_apply", fc, v1Snapshot(), null, before);
     tx.begin(uid3(fc.uid), backup.id, [before.pidProfile!]);
-    await writeAbsoluteBlocks(before, expected, before, backup.id, false, recheck);
-    const verified = await verifyAbsoluteAndSave(expected, before, backup.id);
+    await writeAbsoluteBlocks(before, expected, before, backup.id, tx, false, recheck);
+    const verified = await verifyAbsoluteAndSave(expected, before, backup.id, tx);
     return { status: "verified", backupId: backup.id, expected, ...verified };
 }
 
@@ -1242,9 +1351,9 @@ async function restoreAbsoluteTuneOnce(
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
     const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current, !recovering(fc));
-    tx.begin(uid3(fc.uid), safety.id, [current.pidProfile!]);
-    await writeAbsoluteBlocks(current, target, current, safety.id, true);
-    const verified = await verifyAbsoluteAndSave(target, current, safety.id);
+    tx.begin(uid3(fc.uid), safety.id, [current.pidProfile!], current.pidProfile);
+    await writeAbsoluteBlocks(current, target, current, safety.id, tx, true);
+    const verified = await verifyAbsoluteAndSave(target, current, safety.id, tx);
     return { status: "verified", backupId: safety.id, expected: target, ...verified };
 }
 
@@ -1257,12 +1366,18 @@ export interface TransactionStateCheck {
 
 /**
  * Read-only: does the connected craft show a known state again after an uncertain write? An entry
- * whose EEPROM was not written (saved "no") is resolved when a full read-back equals the backup
- * taken right before that write (RAM holds it and EEPROM never changed; after a reboot RAM
- * reloads EEPROM). With saved "unknown" or "yes_adjusted" EEPROM cannot be read, so only a
- * verified Restore resolves it. Writes nothing.
+ * whose EEPROM was not written (saved "no") and that names exactly one PID profile is resolved when
+ * a full read-back of that profile, active now, equals the backup taken right before that write
+ * (RAM holds it and EEPROM never changed). With saved "unknown" or "yes_adjusted" EEPROM cannot be
+ * read, and an entry whose profiles are unknown (the slider route, entries from before profiles
+ * were recorded) or several may hold a SET in a profile this read does not see: only a verified
+ * Restore resolves those, or nothing does. Holds the write lock; writes nothing.
  */
 export async function checkTransactionState(): Promise<TransactionStateCheck> {
+    return withFcWriteLock(checkTransactionStateLocked);
+}
+
+async function checkTransactionStateLocked(): Promise<TransactionStateCheck> {
     assertConnectedReal();
     const fc = await readIdentity();
     if (!fc.uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
@@ -1279,17 +1394,26 @@ export async function checkTransactionState(): Promise<TransactionStateCheck> {
         } else if (profileSwitchOf(entry.detail)) {
             // A SET may sit in another profile's RAM; one profile's read-back cannot show that.
             reasons.push(`state:${entry.backupId}:profile_switch_seen_restore_required`);
+        } else if (!Array.isArray(entry.profiles) || entry.profiles.length !== 1) {
+            // Which profiles it changed is not known as one: the others cannot be read from here.
+            reasons.push(`state:${entry.backupId}:profile_scope_unknown_restore_required`);
         } else if (fc.version !== backup.firmware) {
             reasons.push(`state:${entry.backupId}:firmware_changed`);
         } else if (backup.absolute) {
             const profile = backup.absolute.pidProfile;
-            if (fc.pidProfile !== profile || fc.apiVersion !== backup.absolute.apiVersion) {
+            if (
+                entry.profiles[0] !== profile ||
+                fc.pidProfile !== profile ||
+                fc.apiVersion !== backup.absolute.apiVersion
+            ) {
                 reasons.push(`state:${entry.backupId}:pid_profile_or_api_differs`);
             } else {
                 const now = await readAbsoluteSnapshot("fc:live_readback_missing", fc.apiVersion, profile!);
                 const diff = absoluteDiff(now, backup.absolute);
                 if (diff.length) reasons.push(`state:${entry.backupId}:differs_from_backup:${diff.length}`);
             }
+        } else if (fc.pidProfile !== entry.profiles[0]) {
+            reasons.push(`state:${entry.backupId}:pid_profile_or_api_differs`);
         } else {
             const now = await readSnapshot("fc:live_readback_missing");
             const diff = snapshotMismatches(backup.snapshot, now);

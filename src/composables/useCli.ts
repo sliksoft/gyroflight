@@ -37,6 +37,8 @@ import { escapeHtml } from "../js/utils/common";
 import { addTimeout, removeTimeout } from "../js/timers";
 import { useAppInfoStore } from "../stores/appInfo";
 import { useConnectionStore } from "../stores/connection";
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md): the CLI tab writes to the serial line directly.
+import { cliInputRefusal, reportRefusedWrite } from "./fcWriteGuard";
 
 const backspaceCode = 8;
 const lineFeedCode = 10;
@@ -325,6 +327,14 @@ export function useCli(): Cli {
 
     const encoder = new TextEncoder();
     const send = (line: string, callback?: SendCallback) => {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): while the craft's state is uncertain only
+        // reads go out. What the firmware already holds of the line (cliBuffer) runs with it.
+        const refused = cliInputRefusal(removePromptHash(cliBuffer), line);
+        if (refused) {
+            reportRefusedWrite("CLI command", refused);
+            writeLineToOutput(`###ERROR Gyroflight: not sent (${refused.join(", ")})`);
+            return;
+        }
         // serial.send never rejects: it logs a failure and reports it through the callback.
         void serial.send(encoder.encode(line), callback);
     };

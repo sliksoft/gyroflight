@@ -528,11 +528,24 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         expect(refused.reasons).toEqual(["restore:uncertain_state_not_covered:bk-other:write:no"]);
     });
 
-    it("a pending entry of profile 0 is covered by a verified Restore of profile 0", async () => {
+    it("a pending entry of profile 0 is covered by no Restore: its writer may still be writing (WP8 P0, was the bug)", async () => {
         const err = await uncertain();
         const states = useFcTransactionStore();
         const token = await confirmRestore(err.backupId);
         states.record(other({ id: "tx-p0", stage: "in_progress", saved: "unknown", profiles: [0] }));
+        gate.fc.calls = [];
+        expect((await denial(restoreAbsoluteTune(err.backupId, token))).reasons).toEqual([
+            "restore:uncertain_state_not_covered:bk-other:in_progress:unknown",
+        ]);
+        expect(writes()).toEqual([]);
+        expect(states.forUid(gate.fc.uid)).toHaveLength(2);
+    });
+
+    it("an ended entry of profile 0 is covered by a verified Restore of profile 0", async () => {
+        const err = await uncertain();
+        const states = useFcTransactionStore();
+        const token = await confirmRestore(err.backupId);
+        states.record(other({ id: "tx-p0", stage: "write", saved: "no", profiles: [0] }));
         expect((await restoreAbsoluteTune(err.backupId, token)).status).toBe("verified");
         expect(states.forUid(gate.fc.uid)).toEqual([]);
     });

@@ -340,6 +340,8 @@ describe("the panel with every gate released (test harnesses)", () => {
             firmware: "2026.6.2",
             compositeId: null,
             snapshot,
+            // Taken while the state was known, as storeBackup records it (WP8: provenance required).
+            stateKnown: true,
         };
         backups.save({ ...base, id: "bk-mine", uid: [1, 2, 3] });
         backups.save({ ...base, id: "bk-other", uid: [7, 8, 9] });
