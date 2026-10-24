@@ -444,10 +444,12 @@ const MSP = {
 
         if (entry.timeoutMs) {
             this.cli_timer = setTimeout(() => {
-                this._finish_cli(
-                    [],
+                // Gyroflight: with whether it went out whole and what came back so far (WP8-F01).
+                const timedOut = Object.assign(
                     new Error(`Timed out after ${entry.timeoutMs}ms waiting for response to "${entry.command}"`),
+                    { delivered: entry.delivery === "delivered", output: this.cliInFlightOutput() ?? [] },
                 );
+                this._finish_cli([], timedOut);
             }, entry.timeoutMs);
         }
 
@@ -543,6 +545,7 @@ const MSP = {
 
         const pending = this.cli_queue.splice(0, this.cli_queue.length);
         const inFlight = this.cli_in_flight;
+        const output = this.cliInFlightOutput() ?? [];
         this.cli_in_flight = null;
         this.cli_callback = null;
         this.cli_buffer.length = 0;
@@ -551,12 +554,16 @@ const MSP = {
         this.cli_session_uncertain = false;
 
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): only the command in flight
-        // carries the caller's error (with whether all its bytes were sent); the queued ones never
-        // left the app.
+        // carries the caller's error, with whether all its bytes were sent and the text received for
+        // it so far (a `save` prints its outcome and then resets the FC); the queued ones never left
+        // the app.
         const outcomes: Array<[CliQueueEntry | null, Error]> = [
             [
                 inFlight,
-                Object.assign(new Error(error.message), error, { delivered: inFlight?.delivery === "delivered" }),
+                Object.assign(new Error(error.message), error, {
+                    delivered: inFlight?.delivery === "delivered",
+                    output,
+                }),
             ],
             ...pending.map((entry): [CliQueueEntry, Error] => [
                 entry,

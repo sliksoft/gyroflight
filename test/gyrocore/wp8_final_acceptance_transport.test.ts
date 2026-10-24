@@ -353,13 +353,27 @@ describe("AutoRestore reports success only for a save that went out (Codex WP8 f
         expect(results).toEqual([expect.objectContaining({ success: false })]);
     });
 
-    it("without an uncertain state a save that went out still ends as success", async () => {
+    // WP8-F01: going out is not enough; success needs the firmware's "# saving" / "Rebooting"
+    // (test/gyrocore/wp8_repair_save_evidence.test.ts covers the unconfirmed outcomes).
+    it("without an uncertain state a save that went out and that the firmware confirmed ends as success", async () => {
         const { a, results } = await autoRestore();
         const done = a._finishWithSave([]);
-        await vi.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(10);
+        MSP.read({
+            data: new Uint8Array([0x02, ...Array.from("\r\n# saving\r\n\r\nRebooting", (c) => c.charCodeAt(0))]).buffer,
+        });
+        a.handleDisconnect();
         await done;
         expect(sentText()).toEqual(["save\n"]);
-        expect(results).toEqual([expect.objectContaining({ success: true })]);
+        expect(results).toEqual([expect.objectContaining({ success: true, persistence: "confirmed" })]);
+    });
+
+    it("a save that went out without the firmware confirming it is not a success (WP8-F01)", async () => {
+        const { a, results } = await autoRestore();
+        const done = a._finishWithSave([]);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await done;
+        expect(results).toEqual([expect.objectContaining({ success: false, persistence: "not_verified" })]);
     });
 });
 
