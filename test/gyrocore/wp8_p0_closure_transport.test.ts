@@ -102,11 +102,18 @@ async function rejected(p: Promise<unknown>): Promise<unknown> {
     );
 }
 
+/** The late reply of a timed-out MSP CLI command (STX ... LF ETX): it ends the drain (audit WP8-F09). */
+function lateCliReply() {
+    MSP.read({ data: new Uint8Array([0x02, 0x6c, 0x61, 0x74, 0x65, 0x0a, 0x03]).buffer });
+}
+
 beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.clear();
     vi.useFakeTimers();
-    sent = vi.spyOn(serial, "send").mockImplementation(async () => ({ bytesSent: 0 }));
+    // The transport takes every byte unless a test says otherwise (WP8-F01/F09: a send is
+    // delivered only when bytesSent is the whole frame).
+    sent = vi.spyOn(serial, "send").mockImplementation(async (data) => ({ bytesSent: data.byteLength }));
     setProtocolConnected(true);
     useConnectionStore().virtualMode = false;
     useFlightControllerStore().config.uid = [...UID];
@@ -114,6 +121,8 @@ beforeEach(() => {
     MSP.parked.clear();
     MSP.cli_queue = [];
     MSP.cli_in_flight = null;
+    MSP.cli_discarding = false;
+    MSP.cli_session_uncertain = false;
     MSP.state = MSP.decoder_states.IDLE;
     reconnect.schedule.mockClear();
 });
@@ -254,6 +263,8 @@ describe("the MSP CLI (Presets, Backups, AutoRestore, flight plan, VTX and port 
         const queued = rejected(cliSend("save"));
         expect(sentText()).toEqual(["get p_roll\n"]);
         uncertain();
+        await vi.advanceTimersByTimeAsync(150);
+        lateCliReply(); // the timed-out reply ends (WP8-F09): the queued save reaches its dispatch check
         await vi.advanceTimersByTimeAsync(5000);
         await first;
         expect(await queued).toBeInstanceOf(ApplyBlockedError);

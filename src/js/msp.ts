@@ -75,6 +75,32 @@ interface CliQueueEntry {
     timeoutMs: number | undefined;
     /** Gyroflight: runs when the command leaves the queue for the port (it passed the write check). */
     onSent?: () => void;
+    /** Gyroflight: told once whether the transport took every byte of the command's frame. */
+    onDelivery?: (delivered: boolean) => void;
+    /** Gyroflight: set when it leaves the queue; "pending" until the transport reports the bytes sent. */
+    delivery?: "pending" | "delivered" | "failed";
+}
+
+/**
+ * Gyroflight (audit WP8-F09): the MSP CLI session is uncertain (a timed-out reply never ended, or a
+ * command reached the transport only in part), so no CLI command goes out until the link is set
+ * up again. Nothing was sent.
+ */
+export class CliSessionUncertainError extends Error {
+    readonly notSent = true;
+
+    constructor(command: string) {
+        super(`CLI "${command.split(/\s/)[0]}" not sent: the CLI session is uncertain, reconnect first`);
+        this.name = "CliSessionUncertainError";
+    }
+}
+
+/** Gyroflight: the transport did not take every byte of a CLI command (some may have gone out). */
+export class CliDeliveryError extends Error {
+    constructor(command: string) {
+        super(`CLI "${command.split(/\s/)[0]}" not delivered: the transport did not send the whole command`);
+        this.name = "CliDeliveryError";
+    }
 }
 
 /** The decoder state MSPHelper.process_data reads when a frame completes. */
@@ -179,12 +205,17 @@ const MSP = {
     cli_timer: null as Timer | null,
     // When a CLI command times out, we don't know whether the firmware is
     // mid-response, about to respond, or silent. Enter a "draining" state
-    // where every byte is dropped; the decoder clears the state on the
-    // closing ETX (so any bookended late response is consumed in full)
-    // or when the drain grace timer expires (a real hang).
+    // in which no CLI command goes out and the late reply's text reaches
+    // no caller; the decoder ends it on the reply's ETX (the firmware sends
+    // one per command frame, answering ours), so it is consumed in full.
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F09): MSP frames
+    // received meanwhile are decoded as usual, and when the grace timer
+    // expires without that ETX the session is uncertain (a reply without a
+    // request id could still come and be taken for the next one's).
     cli_discarding: false,
     cli_drain_timer: null as Timer | null,
     cli_drain_grace_ms: 1000,
+    cli_session_uncertain: false,
 
     SDCARD_STATE_NOT_PRESENT: 0,
     SDCARD_STATE_FATAL: 1,
@@ -203,13 +234,6 @@ const MSP = {
         );
 
         for (const chunk of data) {
-            if (this.cli_discarding) {
-                if (chunk === this.symbols.END_OF_TEXT) {
-                    this._end_cli_drain();
-                }
-                continue;
-            }
-
             this._decode_byte(chunk);
         }
         this.last_received_timestamp = Date.now();
@@ -346,7 +370,11 @@ const MSP = {
     send_cli_command(
         str: string,
         callback?: CliCallback,
-        { timeoutMs, onSent }: { timeoutMs?: number; onSent?: () => void } = {},
+        {
+            timeoutMs,
+            onSent,
+            onDelivery,
+        }: { timeoutMs?: number; onSent?: () => void; onDelivery?: (delivered: boolean) => void } = {},
     ) {
         // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a CLI write is refused while the craft's
         // state is uncertain; the caller gets the error, nothing is sent.
@@ -356,11 +384,39 @@ const MSP = {
             else reportRefusedWrite(`CLI "${str.split(/\s/)[0]}"`, refused);
             return;
         }
-        this.cli_queue.push({ command: str, callback, timeoutMs, onSent });
+        const entry: CliQueueEntry = { command: str, callback, timeoutMs, onSent, onDelivery };
+        if (this.cli_session_uncertain) {
+            this._refuse_uncertain_cli(entry);
+            return;
+        }
+        this.cli_queue.push(entry);
         this._process_cli_queue();
     },
+    /** Gyroflight: a CLI command the uncertain session will not send; its caller is told. */
+    _refuse_uncertain_cli(entry: CliQueueEntry) {
+        const error = new CliSessionUncertainError(entry.command);
+        try {
+            if (entry.callback) entry.callback([], error);
+            else reportRefusedWrite(`CLI "${entry.command.split(/\s/)[0]}"`, [error.message]);
+        } catch (callbackError) {
+            console.error("CLI callback threw on an uncertain session:", callbackError);
+        }
+    },
+    /** Gyroflight: from now on no CLI command goes out until disconnect_cleanup; the queued ones end. */
+    _cli_session_lost() {
+        this.cli_session_uncertain = true;
+        for (const entry of this.cli_queue.splice(0, this.cli_queue.length)) this._refuse_uncertain_cli(entry);
+    },
+    /** The CLI text received so far for the command in flight (null when none is). */
+    cliInFlightOutput(): string[] | null {
+        return this.cli_in_flight ? [...this.cli_output, this.cli_buffer.join("")] : null;
+    },
     _process_cli_queue() {
-        if (this.cli_in_flight || this.cli_queue.length === 0) {
+        if (this.cli_in_flight || this.cli_discarding || this.cli_queue.length === 0) {
+            return;
+        }
+        if (this.cli_session_uncertain) {
+            this._cli_session_lost();
             return;
         }
 
@@ -396,7 +452,24 @@ const MSP = {
         }
 
         entry.onSent?.();
-        void serial.send(this.encode_message_cli(entry.command));
+        entry.delivery = "pending";
+        const frame = this.encode_message_cli(entry.command);
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01/F09): delivered only when the
+        // transport reports every byte; otherwise the command ends with an error and, as the
+        // firmware may hold part of it, the session is uncertain.
+        void Promise.resolve(serial.send(frame)).then((result) => {
+            const delivered = result?.bytesSent === frame.byteLength;
+            entry.delivery = delivered ? "delivered" : "failed";
+            try {
+                entry.onDelivery?.(delivered);
+            } catch (callbackError) {
+                console.error("CLI delivery callback threw:", callbackError);
+            }
+            if (delivered) return;
+            this.cli_session_uncertain = true;
+            if (this.cli_in_flight === entry) this._finish_cli([], new CliDeliveryError(entry.command));
+            else this._cli_session_lost();
+        });
     },
     _finish_cli(lines: string[], error: Error | null) {
         const entry = this.cli_in_flight;
@@ -421,14 +494,18 @@ const MSP = {
         }
 
         if (error) {
+            if (this.cli_session_uncertain) {
+                this._cli_session_lost();
+                return;
+            }
             // Drain any in-flight or soon-to-arrive response before sending the
-            // next command; the decoder will end drain on ETX, otherwise the
-            // grace timer forces progress.
+            // next command; the decoder ends the drain on its ETX. Gyroflight: when
+            // the grace timer expires first, the session is uncertain.
             this.cli_discarding = true;
             if (this.cli_drain_timer) {
                 clearTimeout(this.cli_drain_timer);
             }
-            this.cli_drain_timer = setTimeout(() => this._end_cli_drain(), this.cli_drain_grace_ms);
+            this.cli_drain_timer = setTimeout(() => this._cli_drain_expired(), this.cli_drain_grace_ms);
             return;
         }
 
@@ -444,6 +521,15 @@ const MSP = {
         this.cli_output.length = 0;
         this.state = this.decoder_states.IDLE;
         this._process_cli_queue();
+    },
+    _cli_drain_expired() {
+        this.cli_drain_timer = null;
+        this.cli_discarding = false;
+        this.cli_buffer.length = 0;
+        this.cli_output.length = 0;
+        // A late reply's text would otherwise swallow the MSP frames after it.
+        if (this.state === this.decoder_states.CLI_COMMAND) this.state = this.decoder_states.IDLE;
+        this._cli_session_lost();
     },
     _drain_cli_queue(error: Error) {
         if (this.cli_timer) {
@@ -462,13 +548,29 @@ const MSP = {
         this.cli_buffer.length = 0;
         this.cli_output.length = 0;
         this.cli_discarding = false;
+        this.cli_session_uncertain = false;
 
-        for (const entry of [inFlight, ...pending]) {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): only the command in flight
+        // carries the caller's error (with whether all its bytes were sent); the queued ones never
+        // left the app.
+        const outcomes: Array<[CliQueueEntry | null, Error]> = [
+            [
+                inFlight,
+                Object.assign(new Error(error.message), error, { delivered: inFlight?.delivery === "delivered" }),
+            ],
+            ...pending.map((entry): [CliQueueEntry, Error] => [
+                entry,
+                Object.assign(new Error(`CLI "${entry.command.split(/\s/)[0]}" not sent: ${error.message}`), {
+                    notSent: true,
+                }),
+            ]),
+        ];
+        for (const [entry, entryError] of outcomes) {
             if (!entry?.callback) {
                 continue;
             }
             try {
-                entry.callback([], error);
+                entry.callback([], entryError);
             } catch (callbackError) {
                 console.error("CLI callback threw during drain:", callbackError);
             }
@@ -799,6 +901,10 @@ const BYTE_HANDLERS: Partial<Record<number, (this: typeof MSP, chunk: number) =>
                 if (this.cli_callback) {
                     const response = this.cli_output;
                     this.cli_callback(response);
+                } else {
+                    // A reply no command waits for (the late one being drained): it reaches no one.
+                    this.cli_output.length = 0;
+                    if (this.cli_discarding) this._end_cli_drain();
                 }
                 break;
             case this.symbols.LINE_FEED:
