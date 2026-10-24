@@ -51,8 +51,8 @@ export async function releasedSafety() {
             authorized: true,
         };
     };
-    const releasedAbsolute = (proposal: Parameters<typeof actual.absoluteSafetyAuthorization>[0]) => ({
-        ...actual.absoluteSafetyAuthorization(proposal),
+    const releasedAbsolute = (...args: Parameters<typeof actual.absoluteSafetyAuthorization>) => ({
+        ...actual.absoluteSafetyAuthorization(...args),
         status: "PASS" as const,
         blocks: [],
         authorized: true,

@@ -96,6 +96,11 @@ export function encodeLog(
         sFrames?: { atFrame: number; flightModeFlags: number; failsafePhase?: number }[];
         /** false: no S-frame field definitions and no S-frames (no flightModeFlags column). */
         slowFields?: boolean;
+        /**
+         * loopIteration of the first frame (default 0, where the firmware starts every log): an
+         * export that begins inside a session starts later.
+         */
+        firstIteration?: number;
     },
 ) {
     const motorCount = opts.motorCount ?? 0;
@@ -155,7 +160,7 @@ export function encodeLog(
             unsignedVB(out, 0);
             unsignedVB(out, slow.failsafePhase ?? 0);
         }
-        const cur = values(iteration, frame, motorCount, extraFields.length);
+        const cur = values(iteration + (opts.firstIteration ?? 0), frame, motorCount, extraFields.length);
         if (iteration % opts.iInterval === 0) {
             out.push("I".charCodeAt(0));
             unsignedVB(out, cur[0]);
