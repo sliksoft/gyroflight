@@ -71,15 +71,26 @@ One authority for both Apply routes, in the project's gate order (composite → 
 live readback and recheck). Each step is recomputed from the stores on every call; nothing a proposal carries counts as
 authorization by itself. Any missing, malformed or unevaluable evidence is `APPLY_DENIED` with the step's reasons.
 
-| Step             | Slider route (`applyTune`)                  | Absolute route (`applyAbsoluteTune`)                                                                                                                                                                                                                            |
-| ---------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| composite        | `assertCompositeApplyAuthorized`            | `analysis_binding` (`analysisBinding.ts`): the proposal equals, field for field, the current analysis's releasable proposal (analysis `done`); at the write point the engine runs again on the decoded inputs and the Verified Tune store and must reproduce it |
-| release contract | (none: the slider route has no v2 contract) | `evaluateRelease` (below)                                                                                                                                                                                                                                       |
-| Safety           | `assertSafetyAuthorized`                    | `absoluteSafetyAuthorization` (`safety/authorize.ts`), bound to the proposal id and change. GyroCore Safety has no evaluation of absolute values: always BLOCK `missing_required_analysis`                                                                      |
-| product lock     | `assertProductApplyReleased`                | `productApplyBlocks` with Safety's evidence and the Verified Tune this browser holds now; the record the proposal carries must be that one (`independent_pid_validation_not_current`)                                                                           |
+| Step             | Slider route (`applyTune`)                  | Absolute route (`applyAbsoluteTune`)                                                                                                                                                                                                                                                            |
+| ---------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| composite        | `assertCompositeApplyAuthorized`            | `analysis_binding` (`analysisBinding.ts`): the proposal equals, field for field, the current analysis's releasable proposal (analysis `done`); at the write point the engine runs again on the decoded inputs and the Verified Tune store and must reproduce it                                 |
+| release contract | (none: the slider route has no v2 contract) | `evaluateRelease` (below)                                                                                                                                                                                                                                                                       |
+| Safety           | `assertSafetyAuthorized`                    | `absoluteSafetyAuthorization` (`safety/authorize.ts`), bound to the proposal id and change: GyroCore Safety's evaluation of absolute values (`safety/absoluteEvaluate.ts`, below). It never authorizes while the hardware validation is NOT_EXECUTED (`absolute_safety:not_hardware_validated`) |
+| product lock     | `assertProductApplyReleased`                | `productApplyBlocks` with Safety's evidence and the Verified Tune this browser holds now; the record the proposal carries must be that one (`independent_pid_validation_not_current`)                                                                                                           |
 
-Consequence: the absolute route is denied in every case today, whatever the release contract says, until GyroCore
-Safety gains an evaluation of absolute values. Write-path tests release the steps they do not test through the harnesses
+Absolute Safety evaluation (`safety/absoluteEvaluate.ts`, WP6): `validated_starting_configuration` (a Verified Tune this
+browser holds, for this craft and firmware, measured from exactly the logged configuration and covering the change),
+`absolute_values_in_range` (known, writable, integer, `settings.c` range, d_max ≥ D or 0, dynamic min ≤ max, against
+the logged values; the complete live snapshot is the route's own check), `plausible_step` (P / I / D / F / d_max by at
+most the PID search's 30 %), `dynamic_margins` (PM / GM / |S| VALIDATED with their uncertainty and inside the targets
+on every axis the change moves, read again from the evidence, not taken from the release contract),
+`fc_identity_binding` (UID, board, firmware in the log), `live_recheck` and `human_confirmation` (the route's own,
+simulator-tested), `rollback` (NOT_VALIDATED: backup and Restore verified on the simulator only) and
+`hardware_validation` (NOT_EXECUTED). `ABSOLUTE_SAFETY_POLICY.hardwareValidated` is false: on the strongest software
+evidence the tests can build (every software check PASS), Safety still blocks.
+
+Consequence: the absolute route is denied in every case today, whatever the release contract says, until the hardware
+validation has been executed and recorded. Write-path tests release the steps they do not test through the harnesses
 in `test/gyrocore/harness/` (`analysisBindingRelease`, `safetyRelease`, `productRelease`). Restore is not a proposal and
 stays outside the authority (own confirmation, same UID / firmware / profile, backup first).
 
