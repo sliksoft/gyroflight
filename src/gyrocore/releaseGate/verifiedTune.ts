@@ -52,8 +52,17 @@ import {
 import { plantFixedWhatIf, type IdentifiedPlant } from "@/js/blackbox/betaflight_open_loop";
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 
-/** v2: bound to the absolute logged configurations (v1 records carried relative limits and are refused). */
-export const VERIFIED_TUNE_KIND = "gyroflight.verified_tune.v2";
+/**
+ * v3: bound to the absolute logged configurations, with an independent, whole-configuration baseline
+ * repeat and a bounded tolerance (v1 records carried relative limits and are refused).
+ */
+export const VERIFIED_TUNE_KIND = "gyroflight.verified_tune.v3";
+/**
+ * Records built under earlier producer rules: v2 records may have taken a repeat of another
+ * configuration, a scatter-widened tolerance without bound, or a flight whose independence was
+ * never shown (audit 2026-10-23 P1-4, F-01). They are refused by name, never reinterpreted.
+ */
+export const SUPERSEDED_VERIFIED_TUNE_KINDS: readonly string[] = ["gyroflight.verified_tune.v2"];
 const AXES = ["roll", "pitch", "yaw"] as const;
 type Axis = (typeof AXES)[number];
 
@@ -420,6 +429,9 @@ export function verifiedTuneIssues(
     v: VerifiedTune | null | undefined,
     craft: { uid: readonly number[] | null; firmware: string | null },
 ): string[] {
+    if (v && typeof v === "object" && SUPERSEDED_VERIFIED_TUNE_KINDS.includes(v.kind)) {
+        return ["independent_pid_validation_missing", `verified_tune:built_under_superseded_rules:${v.kind}`];
+    }
     if (!v || typeof v !== "object" || v.kind !== VERIFIED_TUNE_KIND) {
         return ["independent_pid_validation_missing"];
     }
