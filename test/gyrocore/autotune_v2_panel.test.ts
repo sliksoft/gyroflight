@@ -210,6 +210,36 @@ describe("AutotuneV2Panel", () => {
         expect(mocks.fc.eeprom.pids[0]).toEqual([56, 79, 30]);
     });
 
+    it("a write that ended unverified: the panel names it, Apply is not offered, a Restore clears it (F-03)", async () => {
+        const c = mount(released);
+        await flush();
+        const apply = q(c, '[data-gyrocore="v2-apply"]') as HTMLButtonElement;
+        expect(q(c, '[data-gyrocore="uncertain-state"]')).toBeNull();
+        // The firmware saves, its answer arrives corrupt: the saved state is unknown.
+        mocks.fc.corruptReplyAfterExecute = new Set([MSPCodes.MSP_EEPROM_WRITE]);
+        mocks.showYesNo.mockResolvedValue(true);
+        apply.click();
+        for (let i = 0; i < 60 && !q(c, '[data-gyrocore="uncertain-state"]'); i++) await flush();
+        mocks.fc.corruptReplyAfterExecute = new Set();
+        const notice = q(c, '[data-gyrocore="uncertain-state"]')!;
+        expect(notice).not.toBeNull();
+        expect(notice.textContent).toContain("gyroflightUncertainEntry|");
+        expect(notice.textContent).toContain("|eeprom|unknown|");
+        expect(apply.disabled).toBe(true);
+        // A read-back cannot show what EEPROM holds: the check says so and the notice stays.
+        (q(c, '[data-gyrocore="uncertain-state-check"]') as HTMLButtonElement).click();
+        for (let i = 0; i < 60 && !q(c, '[data-gyrocore="uncertain-state-why"]'); i++) await flush();
+        expect(q(c, '[data-gyrocore="uncertain-state-why"]')!.textContent).toContain(
+            "eeprom_state_unknown_restore_required",
+        );
+        // Restore (verified and saved) makes the state known: the notice goes, Apply is offered again.
+        const restore = q(c, '[data-gyrocore="v2-restore"]') as HTMLButtonElement;
+        restore.click();
+        for (let i = 0; i < 80 && q(c, '[data-gyrocore="uncertain-state"]'); i++) await flush();
+        expect(q(c, '[data-gyrocore="uncertain-state"]')).toBeNull();
+        expect(apply.disabled).toBe(false);
+    });
+
     it("in virtual mode neither preview nor Apply is offered", async () => {
         mocks.virtual = true;
         const c = mount(released);

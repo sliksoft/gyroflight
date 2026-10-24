@@ -94,6 +94,8 @@ export interface FirmwareFc {
     ignoreWrite: Set<number>;
     /** The firmware stores this SET's fields, then answers MSP_RESULT_ERROR (as msp.c does on a late check). */
     errorAfterDecode: Set<number>;
+    /** The firmware runs this command, then its reply arrives with a CRC error (the save happened, unseen). */
+    corruptReplyAfterExecute?: Set<number>;
     /** Extra config fixes on the EEPROM reload (stands in for validateAndFixConfig paths not modelled). */
     adjustOnReload?: (s: FirmwareState) => void;
     /**
@@ -721,7 +723,19 @@ export async function firmwarePromise(fc: FirmwareFc, code: number, data?: numbe
     const err = { command: code, crcError: false, unsupported: 1 };
     if (f === "crc") return { ...ok, crcError: true };
     if (f === "unsupported") return err;
+    const reply = execute(fc, code, d, ok, err);
+    // The command ran, then its answer was lost to a corrupt frame (the requester cannot tell).
+    if (fc.corruptReplyAfterExecute?.has(code)) return { ...ok, crcError: true };
+    return reply;
+}
 
+function execute(
+    fc: FirmwareFc,
+    code: number,
+    d: number[],
+    ok: { command: number; crcError: boolean; unsupported: number },
+    err: { command: number; crcError: boolean; unsupported: number },
+) {
     const store = useFlightControllerStore();
     switch (code) {
         case MSPCodes.MSP_API_VERSION:

@@ -87,6 +87,12 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
     const outcome = ref<AutotuneV2Outcome | null>(null);
     const busy = ref(false);
     /**
+     * Revision of the source list: every addSource / reset moves it on. A calculation (or a Verified
+     * Tune attempt) publishes only for the revision it started on, so a run that was still busy when
+     * the files changed never shows its result under the new files (audit P1-7).
+     */
+    const revision = ref(0);
+    /**
      * Decoded engine inputs of the current sources (rebuilt when a source is added). Published
      * frozen (useAutotuneV2 buildInputs): what an Apply was authorized against cannot change in place.
      */
@@ -105,6 +111,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         const sameBytes = (b: Uint8Array) => b.length === bytes.length && b.every((x, i) => x === bytes[i]);
         const same = sources.value.filter((s) => s.uid === uid && s.filename !== filename && !sameBytes(s.bytes));
         sources.value = [{ filename, bytes, report, uid }, ...same].slice(0, MAX_SOURCES);
+        revision.value++;
         inputs.value = null;
         result.value = null;
         preview.value = null;
@@ -113,6 +120,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
 
     function reset() {
         sources.value = [];
+        revision.value++;
         inputs.value = null;
         verifiedTuneAttempt.value = null;
         result.value = null;
@@ -134,6 +142,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         preview,
         outcome,
         busy,
+        revision,
         addSource,
         reset,
     };

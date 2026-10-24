@@ -182,6 +182,7 @@
                 </li>
             </ul>
             <p class="text-sm text-dimmed">{{ $t("gyroflightApplyOnClick") }}</p>
+            <UncertainStateNotice />
             <UButton
                 size="xs"
                 variant="outline"
@@ -330,6 +331,8 @@ import { useFlightControllerStore } from "@/stores/fc";
 import { useAutotuneV2 } from "@/composables/useAutotuneV2";
 import { useAutotuneV2Store, type AutotuneV2Source } from "@/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
+import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
 import { RESOLVED_FEATURE_BINS, type LoopMargins } from "@/gyrocore/engine/loopModel";
@@ -338,6 +341,7 @@ const v2 = useAutotuneV2Store();
 const connection = useConnectionStore();
 const fc = useFlightControllerStore();
 const backupStore = useTuneBackupStore();
+const transactionStates = useFcTransactionStore();
 const { calculate, createVerifiedTune, preview, releasedProposal, confirmAndApply, confirmAndRestore } =
     useAutotuneV2();
 
@@ -388,7 +392,11 @@ const contract = computed(() => {
 });
 
 const canPreview = computed(() => !!v2.result?.proposal && connected.value && !connection.virtualMode);
-const canApply = computed(() => !!released.value && connected.value && !connection.virtualMode);
+// An earlier write on this craft whose outcome nobody verified refuses every Apply (fcTransactionState).
+const stateBlocks = computed(() => transactionStates.blocks(fc.config.uid));
+const canApply = computed(
+    () => !!released.value && connected.value && !connection.virtualMode && !stateBlocks.value.length,
+);
 
 function summary(s: AutotuneV2Source) {
     const ms = s.report.measurements;

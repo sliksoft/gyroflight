@@ -38,7 +38,7 @@ import {
 } from "@/gyrocore/releaseGate/verifiedTune";
 import { analyzeAxisController, flightMask, type AutotuneLogInput } from "./autotuneV2";
 import { buildAxisLoop } from "./loopModel";
-import { bestLog, groupByTune, sameFlight, uniqueFlights } from "./logInput";
+import { bestLog, crossLogReferenceIssues, groupByTune, sameFlight, uniqueFlights } from "./logInput";
 
 const AXES = ["roll", "pitch", "yaw"] as const;
 
@@ -74,7 +74,21 @@ export function verifiedTuneFromLogs(logs: readonly AutotuneLogInput[], createdA
     const candidate = bestLog(groups[0]);
     const baseGroup = groups[1];
     const baseline = bestLog(baseGroup);
-    const repeat = baseGroup.find((l) => !sameFlight(l, baseline) && !sameFlight(l, candidate)) ?? null;
+    const pool = uniqueFlights(logs);
+    // The repeat sets the tolerance: it must be an independent flight of the same craft, firmware
+    // and whole logged configuration as the baseline (the cross-log reference rules), not only the
+    // same P/I/D/F (audit P1-4).
+    const repeatRejected: string[] = [];
+    const repeat =
+        baseGroup.find((l) => {
+            if (l === baseline) return false;
+            const issues = [
+                ...crossLogReferenceIssues(baseline, l, pool),
+                ...(sameFlight(l, candidate) ? [`cross_log_duplicate_of_candidate:${l.sha256}:${l.logIndex}`] : []),
+            ];
+            repeatRejected.push(...issues.map((r) => `verified_tune:repeat_rejected:${r}`));
+            return !issues.length;
+        }) ?? null;
     const idB = logIdentity(baseline.headerPairs);
     const idC = logIdentity(candidate.headerPairs);
     const reasons: string[] = [];
@@ -125,6 +139,6 @@ export function verifiedTuneFromLogs(logs: readonly AutotuneLogInput[], createdA
         createdAt,
     });
     // Informational: without a repeat the tolerance falls back to the M5-A floors.
-    if (!repeat) reasons.push("verified_tune:no_baseline_repeat_m5a_floors_used");
+    if (!repeat) reasons.push("verified_tune:no_baseline_repeat_m5a_floors_used", ...repeatRejected);
     return { record, reasons: [...record.reasons, ...reasons] };
 }

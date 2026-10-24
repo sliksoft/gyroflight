@@ -77,6 +77,7 @@
             </li>
         </ul>
         <p class="text-sm text-dimmed">{{ $t("gyroflightApplyOnClick") }}</p>
+        <UncertainStateNotice />
         <UButton
             size="xs"
             variant="outline"
@@ -215,6 +216,8 @@ import { useApplyGate } from "@/gyrocore/composables/useApplyGate";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { useM4FlightMetricsStore } from "@/gyrocore/stores/m4FlightMetrics";
 import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
+import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { useTuneWorkflowStore } from "@/gyrocore/stores/tuneWorkflow";
 import { describeCompositeReasons } from "@/gyrocore/tuning/reasons";
 import {
@@ -270,7 +273,14 @@ const checklist = computed(() =>
         virtualMode: !!connection.virtualMode,
     }),
 );
-const canApply = computed(() => !!composite.value?.final && checklist.value.every((c) => c.ok));
+// An earlier write on this craft whose outcome nobody verified refuses every Apply (fcTransactionState).
+const transactionStates = useFcTransactionStore();
+const canApply = computed(
+    () =>
+        !!composite.value?.final &&
+        checklist.value.every((c) => c.ok) &&
+        !transactionStates.blocks(fc.config.uid).length,
+);
 const outcome = computed(() => workflow.outcome);
 // The firmware calculation of the preview goes through the shared FC store (useTuneApply
 // previewTune): it needs the same write authority as Apply, so it is offered exactly when Apply is.

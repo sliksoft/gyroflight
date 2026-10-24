@@ -75,6 +75,15 @@ export const LOOP_BAND = { minMag: 0.25, maxMag: 4 } as const;
 export function loopToleranceFloor(): { magDb: number; phaseDeg: number } {
     return { magDb: 1.5, phaseDeg: 8 };
 }
+/**
+ * Upper bound of a scatter-derived tolerance, as a multiple of its floor (audit P1-4). Twice the
+ * baseline-repeat scatter widens the tolerance, but a repeat that scatters more than this says the
+ * flights are not reproducible enough to confirm a prediction at all: such a bin is not compared
+ * against a wider band, it counts as unresolvable (INSUFFICIENT when too many are). Design
+ * parameter: 3 × the M5-A floor (a repeat ≈ 50 % less reproducible than the reference crafts),
+ * not calibrated across craft classes.
+ */
+export const MAX_REPEAT_TOLERANCE_FACTOR = 3;
 /** A compared bin counts as resolved when the predicted change exceeds the tolerance there. */
 export const MIN_DETECTABLE_BINS = 3;
 /** Share of compared bins that must lie inside the tolerance; none may exceed twice it. */
@@ -108,6 +117,8 @@ export interface AxisComparison {
     maxMagErrDb: number;
     maxPhaseErrDeg: number;
     toleranceSource: "baseline_repeat" | "m5a_bands";
+    /** Bins whose repeat scatter exceeded MAX_REPEAT_TOLERANCE_FACTOR × the floor (not compared). */
+    scatterCappedBins?: number;
     verdict: "PASS" | "FAIL" | "NOT_DETECTABLE" | "INSUFFICIENT";
 }
 
@@ -225,6 +236,16 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
     let loopBins = 0;
     let loopWithin = 0;
     let loopMaxExcess = 0;
+    let capped = 0;
+    let candidates = 0;
+    // Twice the repeat scatter, never below the floor; null above the bound (the bin cannot confirm).
+    const scatterTolerance = (floor: { magDb: number; phaseDeg: number }, magDb: number, phaseDeg: number) => {
+        const tol = { magDb: Math.max(floor.magDb, 2 * magDb), phaseDeg: Math.max(floor.phaseDeg, 2 * phaseDeg) };
+        return tol.magDb > MAX_REPEAT_TOLERANCE_FACTOR * floor.magDb ||
+            tol.phaseDeg > MAX_REPEAT_TOLERANCE_FACTOR * floor.phaseDeg
+            ? null
+            : tol;
+    };
     for (const b of whatIf.bins) {
         if (b.status !== "ok" || !b.T_candidate || !b.T_current || !b.T_measured || !b.G) continue;
         const meas = measuredAt(input.candidateT, b.frequencyHz);
@@ -237,13 +258,15 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
         const Lpred = cmul(b.G, cfb);
         const Gmeas = extractG(meas.T, input.candidateCfg, b.frequencyHz);
         if (Gmeas && cmag(Lpred) >= LOOP_BAND.minMag && cmag(Lpred) <= LOOP_BAND.maxMag) {
-            let tol = loopToleranceFloor();
+            let tol: { magDb: number; phaseDeg: number } | null = loopToleranceFloor();
             const Grep = rep ? extractG(rep.T, input.baselineCfg, b.frequencyHz) : null;
             if (Grep) {
-                tol = {
-                    magDb: Math.max(tol.magDb, 2 * Math.abs(db(Grep) - db(b.G))),
-                    phaseDeg: Math.max(tol.phaseDeg, 2 * Math.abs(phaseDiff(Grep, b.G))),
-                };
+                tol = scatterTolerance(tol, Math.abs(db(Grep) - db(b.G)), Math.abs(phaseDiff(Grep, b.G)));
+            }
+            candidates++;
+            if (!tol) {
+                capped++;
+                continue;
             }
             const Lmeas = cmul(Gmeas, cfb);
             const excess = Math.max(
@@ -257,13 +280,19 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
 
         // Closed-loop T, in the band where the CHIRP plant estimate is tight.
         if (b.frequencyHz > VALIDATION_MAX_HZ) continue;
-        let tol = toleranceFloor(b.frequencyHz);
+        let tol: { magDb: number; phaseDeg: number } | null = toleranceFloor(b.frequencyHz);
         if (rep) {
-            // Twice the observed log-to-log scatter, never tighter than the floor.
-            tol = {
-                magDb: Math.max(tol.magDb, 2 * Math.abs(db(rep.T) - db(b.T_measured))),
-                phaseDeg: Math.max(tol.phaseDeg, 2 * Math.abs(phaseDiff(rep.T, b.T_measured))),
-            };
+            // Twice the observed log-to-log scatter, never tighter than the floor, never above the bound.
+            tol = scatterTolerance(
+                tol,
+                Math.abs(db(rep.T) - db(b.T_measured)),
+                Math.abs(phaseDiff(rep.T, b.T_measured)),
+            );
+        }
+        candidates++;
+        if (!tol) {
+            capped++;
+            continue;
         }
         compared++;
         const changeMag = Math.abs(db(b.T_candidate) - db(b.T_current));
@@ -280,7 +309,9 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
     const withinShare = compared ? within / compared : 0;
     const loopWithinShare = loopBins ? loopWithin / loopBins : 0;
     let verdict: AxisComparison["verdict"];
-    if (compared < MIN_DETECTABLE_BINS * 2 || loopBins < MIN_DETECTABLE_BINS) verdict = "INSUFFICIENT";
+    // Too many bins the repeat could not bound: the flights do not reproduce well enough to confirm.
+    const tooScattered = candidates > 0 && capped > (1 - MIN_WITHIN_SHARE) * candidates;
+    if (compared < MIN_DETECTABLE_BINS * 2 || loopBins < MIN_DETECTABLE_BINS || tooScattered) verdict = "INSUFFICIENT";
     else if (detectable < MIN_DETECTABLE_BINS) verdict = "NOT_DETECTABLE";
     else
         verdict =
@@ -302,6 +333,7 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
         maxMagErrDb: maxMag,
         maxPhaseErrDeg: maxPhase,
         toleranceSource: input.baselineRepeatT ? "baseline_repeat" : "m5a_bands",
+        scatterCappedBins: capped,
         verdict,
     };
 }
