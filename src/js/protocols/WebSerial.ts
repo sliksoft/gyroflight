@@ -148,6 +148,9 @@ class WebSerial extends EventTarget {
     reading: boolean;
 
     isNeedBatchWrite = false;
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F03): one logical send at a time, so the
+    // chunks of a batched frame are never split by another send and sends reach the port in order.
+    #sendQueue: Promise<unknown> = Promise.resolve();
 
     constructor() {
         super();
@@ -556,56 +559,61 @@ class WebSerial extends EventTarget {
         return isMac && vendorId !== undefined && vendorIdNames[vendorId] === "AT32";
     }
 
-    async batchWrite(data: WebSerialPayload): Promise<void> {
-        // send() only calls this with a writer. this.writer is read per chunk, not captured,
-        // so a disconnect mid-frame fails the next chunk rather than writing to a released lock.
+    /** Writes `data` in chunks; returns the bytes that went out before a chunk failed or the port closed. */
+    async batchWrite(data: WebSerialPayload): Promise<number> {
+        // this.writer is read per chunk, not captured, so a disconnect mid-frame stops the frame
+        // rather than writing to a released lock.
         // AT32 on macOS requires smaller chunks (63 bytes) to work correctly due to
         // USB buffer size limitations in the macOS implementation
         const batchWriteSize = 63;
-        let remainingData = data;
-        while (remainingData.byteLength > batchWriteSize) {
-            const sliceData = remainingData.slice(0, batchWriteSize);
-            remainingData = remainingData.slice(batchWriteSize);
+        let written = 0;
+        while (written < data.byteLength) {
+            const chunk = data.slice(written, written + batchWriteSize);
+            if (!this.connected || !this.writer) return written;
             try {
                 // The chunks are one frame, so they must reach the port in order.
-                await this.writer!.write(sliceData); // NOSONAR: sequential by design
+                await this.writer.write(chunk); // NOSONAR: sequential by design
             } catch (error) {
                 console.error(`${logHead} Error writing batch chunk:`, error);
-                throw error; // Re-throw to be caught by the send method
+                return written;
             }
+            written += chunk.byteLength;
         }
-        await this.writer!.write(remainingData);
+        return written;
     }
 
-    async send(data: WebSerialPayload, callback?: (result: WebSerialSendResult) => void): Promise<WebSerialSendResult> {
+    /**
+     * Sends `data` once every earlier send has finished. bytesSent is what went out: 0 when the port
+     * was not open, less than the payload when it failed in the middle (the receiver got a cut frame).
+     */
+    send(data: WebSerialPayload, callback?: (result: WebSerialSendResult) => void): Promise<WebSerialSendResult> {
+        const result = this.#sendQueue.then(() => this.#sendNow(data));
+        this.#sendQueue = result.catch(() => undefined);
+        if (callback) {
+            result.then(callback).catch((error) => console.error(`${logHead} send callback threw:`, error));
+        }
+        return result;
+    }
+
+    async #sendNow(data: WebSerialPayload): Promise<WebSerialSendResult> {
         if (!this.connected || !this.writer) {
             console.error(`${logHead} Failed to send data, serial port not open`);
-            if (callback) {
-                callback({ bytesSent: 0 });
-            }
             return { bytesSent: 0 };
         }
 
-        try {
-            if (this.isNeedBatchWrite) {
-                await this.batchWrite(data);
-            } else {
+        let bytesSent = 0;
+        if (this.isNeedBatchWrite) {
+            bytesSent = await this.batchWrite(data);
+        } else {
+            try {
                 await this.writer.write(data);
+                bytesSent = data.byteLength;
+            } catch (error) {
+                console.error(`${logHead} Error sending data:`, error);
             }
-            this.bytesSent += data.byteLength;
-
-            const result = { bytesSent: data.byteLength };
-            if (callback) {
-                callback(result);
-            }
-            return result;
-        } catch (error) {
-            console.error(`${logHead} Error sending data:`, error);
-            if (callback) {
-                callback({ bytesSent: 0 });
-            }
-            return { bytesSent: 0 };
         }
+        this.bytesSent += bytesSent;
+        return { bytesSent };
     }
 }
 
