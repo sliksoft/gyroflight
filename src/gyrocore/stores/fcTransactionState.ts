@@ -211,6 +211,8 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
     function recordPending(t: Keyed): boolean {
         sync();
         if (unreadable.value) return false;
+        // A new transaction never takes over a stored one's key (ids are time + 32 random bits).
+        if (entries.value.some((e) => e.id === t.id)) return false;
         return store(t);
     }
 
