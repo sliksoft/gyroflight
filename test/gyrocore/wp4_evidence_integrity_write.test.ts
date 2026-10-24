@@ -689,7 +689,7 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         st.record(other({ id: "tx-c" }));
         const seen = st.forUid(gate.fc.uid);
         localStorage.setItem(
-            `${TRANSACTION_ENTRY_PREFIX  }tx-c`,
+            `${TRANSACTION_ENTRY_PREFIX}tx-c`,
             JSON.stringify(other({ id: "tx-c", saved: "unknown" })),
         );
         expect(st.resolveEntries(seen)).toBe(false);
@@ -697,10 +697,10 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
     });
 
     it("an unreadable entry key blocks every craft, and is left as it is", async () => {
-        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX  }tx-bad`, "{not json");
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}tx-bad`, "{not json");
         setActivePinia(createPinia());
         expect((await denial(apply(proposal()))).reasons).toEqual([TRANSACTION_STATE_UNREADABLE]);
-        expect(localStorage.getItem(`${TRANSACTION_ENTRY_PREFIX  }tx-bad`)).toBe("{not json");
+        expect(localStorage.getItem(`${TRANSACTION_ENTRY_PREFIX}tx-bad`)).toBe("{not json");
         nothingReachedTheCraft();
     });
 
@@ -724,7 +724,7 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
             // During the read-back the check compares (after it listed the open entries).
             if (!injected && code === MSPCodes.MSP_PID) {
                 injected = true;
-                localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX  }tx-late`, JSON.stringify(other({ id: "tx-late" })));
+                localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}tx-late`, JSON.stringify(other({ id: "tx-late" })));
             }
             return false;
         };
@@ -732,5 +732,14 @@ describe("WP8 review round 2: Restore covers one profile and one route, and neve
         expect(check).toEqual({ resolved: false, reasons: ["state:bk-other:changed_during_check"] });
         // Its own entry was resolved by the evidence; the late one stays.
         expect(storedEntries().map((e) => e.id)).toEqual(["tx-late"]);
+    });
+
+    it("a pending entry never takes over the key of a stored one (an id collision refuses the write)", () => {
+        const st = useFcTransactionStore();
+        st.record(other({ id: "tx-same", backupId: "bk-first" }));
+        expect(st.recordPending({ ...other({}), id: "tx-same", stage: "in_progress", backupId: "bk-second" })).toBe(
+            false,
+        );
+        expect(storedEntries()).toEqual([expect.objectContaining({ id: "tx-same", backupId: "bk-first" })]);
     });
 });
