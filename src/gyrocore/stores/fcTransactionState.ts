@@ -63,37 +63,17 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { sameUid } from "@/gyrocore/stores/tuneBackup";
+import {
+    TRANSACTION_ENTRY_PREFIX,
+    TRANSACTION_STORAGE_KEY,
+    readTransactionRecords,
+    transactionKey,
+    type KeyedTransaction,
+    type UncertainTransaction,
+} from "@/gyrocore/stores/transactionRecords";
 import { useFlightControllerStore } from "@/stores/fc";
 
-/** One key per transaction: this prefix and its id. */
-export const TRANSACTION_ENTRY_PREFIX = "gyroflight.fcTransactionState.v2.";
-/** The earlier format (one list): its entries are moved to their own keys when read. */
-export const TRANSACTION_STORAGE_KEY = "gyroflight.fcTransactionState.v1";
-
-export interface UncertainTransaction {
-    /** Unique per write transaction (a pending entry and its outcome share it). */
-    id?: string;
-    uid: [number, number, number];
-    action: "apply" | "absolute_apply" | "restore" | "absolute_restore";
-    /**
-     * useTuneApply WriteStage where it stopped (never "prepare": nothing was sent then), or
-     * "in_progress": recorded before the first MSP and never settled (the page closed or crashed
-     * in the middle of the write, so nothing is known of its outcome).
-     */
-    stage: string;
-    /** EEPROM state the failure could prove: "no", "unknown" or "yes_adjusted". */
-    saved: string;
-    /** The backup taken right before the write: what Restore puts back and the check compares with. */
-    backupId: string;
-    /**
-     * The PID profiles the write may have changed. Absolute route: the one active when it began
-     * (it re-checks it around every SET), and the one a profile switch it saw moved a SET into.
-     * null: not known (the slider route, which does not re-check it).
-     */
-    profiles?: number[] | null;
-    detail: string;
-    at: string;
-}
+export { TRANSACTION_ENTRY_PREFIX, TRANSACTION_STORAGE_KEY, type UncertainTransaction };
 
 /** What a verified Restore wrote: its route, and the PID profile active then (null: not known). */
 export interface RestoreScope {
@@ -103,22 +83,9 @@ export interface RestoreScope {
 
 type Stored = { ok: true; entries: UncertainTransaction[] } | { ok: false };
 
-function isEntry(e: unknown): e is UncertainTransaction {
-    const t = e as Partial<UncertainTransaction> | null;
-    return (
-        !!t &&
-        Array.isArray(t.uid) &&
-        t.uid.length === 3 &&
-        t.uid.every(Number.isFinite) &&
-        typeof t.backupId === "string" &&
-        typeof t.stage === "string" &&
-        typeof t.saved === "string"
-    );
-}
+type Keyed = KeyedTransaction;
 
-type Keyed = UncertainTransaction & { id: string };
-
-const keyOf = (id: string) => TRANSACTION_ENTRY_PREFIX + id;
+const keyOf = transactionKey;
 
 /** Store one entry under its own key and read it back. */
 function putEntry(e: Keyed): boolean {
@@ -145,27 +112,21 @@ function removeEntry(id: string, json: string | null): boolean {
 
 /**
  * Every entry the storage holds, oldest first; not ok when any of them (or an earlier-format list
- * that could not be moved to its own keys) cannot be read.
+ * that could not be moved to its own keys) cannot be read (transactionRecords.ts: the definition
+ * backup retention reads with too).
  */
 function readStorage(): Stored {
     try {
         const ls = globalThis.localStorage;
-        const legacy = ls.getItem(TRANSACTION_STORAGE_KEY);
-        if (legacy !== null) {
-            const list = JSON.parse(legacy) as unknown;
-            if (!Array.isArray(list) || !list.every(isEntry)) return { ok: false };
-            const moved = list.map((e, i) => ({ ...e, id: e.id ?? `tx-v1-${i}-${e.backupId}` }));
+        let read = readTransactionRecords(ls);
+        if (read.ok && read.legacy) {
+            const moved = read.legacy.map((e, i) => ({ ...e, id: e.id ?? `tx-v1-${i}-${e.backupId}` }));
             if (!moved.every(putEntry)) return { ok: false };
             ls.removeItem(TRANSACTION_STORAGE_KEY);
+            read = readTransactionRecords(ls);
         }
-        const out: Keyed[] = [];
-        for (let i = 0; i < ls.length; i++) {
-            const key = ls.key(i);
-            if (!key?.startsWith(TRANSACTION_ENTRY_PREFIX)) continue;
-            const e = JSON.parse(ls.getItem(key) ?? "null") as unknown;
-            if (!isEntry(e) || keyOf(String(e.id)) !== key) return { ok: false };
-            out.push(e as Keyed);
-        }
+        if (!read.ok || read.legacy) return { ok: false };
+        const out = [...read.entries];
         out.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
         return { ok: true, entries: out };
     } catch {
