@@ -213,7 +213,38 @@ worse than the primary's bounds by more than 5° / 1.5 dB (the M5-A scatter): ot
 narrower than `RESOLVED_FEATURE_BINS` × its step); no margin is an absolute stability guarantee. No producer of a
 qualification log exists in the app yet (the CHIRP analysis picks its Welch segment length from the sample rate
 alone, `chirp/qualification.ts` `chooseSegmentSize`), so the app shows the requirement
-`chirp_finer_resolution_model_class_qualification` instead of releasing. Cross-log
+`chirp_finer_resolution_model_class_qualification` instead of releasing.
+
+Qualification band (audit P1-2, `QUALIFICATION_BAND_EXTENSION` 1.5): a qualification must reach 1.5 × the primary's
+band end (BAND_END's own figures: a resonance from about 1.5 × f_end shows < 0.5 dB in the primary's tail), otherwise
+`qualification_band_not_extended` and the margins stay `MODEL_CONDITIONAL`; after a PASS the remaining tail assumption
+names the qualification's band end. Its resolution must come from its own samples (`AnalysisProvenance`: bins no denser
+than fs / segment samples, a window that holds its segments, ≥ 8 Welch segments; `qualification_resolution_not_shown`
+otherwise), so padded or interpolated bins never qualify.
+
+Measurement uncertainty (`UNCERTAINTY`, WP3): per bin the random error of the H1 estimate (Bendat & Piersol, eq. 9.90 /
+9.91) from coherence and independent averages, carried to L with |C_ref / (C_ref − T·C_fb)|. Averages for the
+exponential Betaflight sweep (`sweepAverages`, from the log's chirp headers): T / (Ts² f ln(f1/f0)), at least 1 (near
+an AIR65 crossover: 1, whatever the Welch segment count). Fewer than 8 Welch segments: uncertainty unknown, no bounds. A
+bin whose ±2 ε reaches half its value is left out as not identified (counted in the evidence). The bounds are the worst
+of the nominal loop and four corners with every bin moved by the same ±2 ε in gain and phase; a corner that changes the
+crossings leaves no bounds. `measured` keeps the values on the bins; the release contract requires the uncertainty with
+VALIDATED evidence (`margin_evidence_uncertainty_missing`). Phase checks (`PHASE_CHECKS`): an unwrap step that, with
+±2 σ at both bins, exceeds 90° is ambiguous; the absolute branch must be the rate plant's (phase in (−180°, 0°] at the
+lowest bin) plus the controller's; at least three bins in the octave around the crossover. Each failure leaves the
+margins unbounded (`MEASURED`). These are the model's assumptions, carried in `MarginEvidence.assumptions`.
+
+Measurement planner (`engine/measurementPlan.ts`, informative, shown under the margins): per axis the band (to
+|L| ≤ −12 dB, extrapolated along the tail; a qualification 1.5 × further), the bin step the measured phase slope needs
+and the qualification's (÷ RESOLVED_FEATURE_BINS), the power-of-two Welch segment for both, the averages needed at the
+crossover for 2 σ ≤ 2.5° and the sweep duration or repeats that give them, and what the data show (coherence dips,
+possible narrow features, noise near the crossover, a poorly resolved crossover). It changes no analysis and
+releases nothing; `chooseSegmentSize` and the qualified primary transfer function are unchanged.
+
+Fixed factors: 25° / 4.5× (`LOOP_RESOLUTION`, `RESOLVED_FEATURE_BINS`), 5° / 1.5 dB, −6 dB and the coherence limits are
+calibrated on AIR65 / M5-A logs only (NOT_VALIDATED across craft classes); the new ones (1.5×, 8 segments, 90°,
+3 bins, k = 2, ε limit 0.5, the planner's −12 dB and 2.5°) are design parameters derived in the code comments, not
+calibrated. Cross-log
 reproducibility counts only an independent flight of the same craft,
 firmware and configuration: not the same file, not the same samples, and not the same flight trimmed, re-exported or
 time-shifted (`logInput.ts` `FLIGHT_WINDOW`: flights are identified by content-anchored 256-sample gyroADC windows,

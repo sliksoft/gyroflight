@@ -44,7 +44,10 @@ import type { ChainSimulation, EffectiveChain } from "../../src/gyrocore/engine/
 
 const FREQS = Array.from({ length: 199 }, (_, i) => 1 + i * 0.5);
 
-const FINE_FREQS = Array.from({ length: 991 }, (_, i) => 1 + i * 0.1);
+// SIMULATION: 0.1 Hz to 160 Hz (QUALIFICATION_BAND_EXTENSION × the 100 Hz primary band and more),
+// with the Welch analysis such bins take at 4 kHz (40 000-sample segments, 32 of them).
+const FINE_FREQS = Array.from({ length: 1591 }, (_, i) => 1 + i * 0.1);
+const FINE_WELCH = { segmentSamples: 40000, sampleRateHz: 4000, windowSamples: 40000 * 16.5, segments: 32 };
 
 function tfFor(cfg: DigitalControllerConfig, K: number, freqs = FREQS) {
     return syntheticTransferFunction(freqs, (f) => {
@@ -136,6 +139,7 @@ describe("PID search", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true, {
             tf: tfFor(cfg, 40, FINE_FREQS),
             source: { sha256: "5".repeat(64), logIndex: 0 },
+            analysis: FINE_WELCH,
         });
         const r = optimizeAxisPid(loop, current);
         expect(r.outcome).toBe("improved");

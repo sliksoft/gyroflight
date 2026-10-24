@@ -134,6 +134,47 @@
                 </li>
             </ul>
 
+            <template v-if="result.measurementPlan?.length">
+                <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2PlanTitle") }}</p>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2PlanHelp") }}</p>
+                <table class="gyroflight-workflow-table text-sm" data-gyrocore="v2-measurement-plan">
+                    <thead>
+                        <tr>
+                            <th>{{ $t("gyroflightV2PlanAxis") }}</th>
+                            <th>{{ $t("gyroflightV2PlanBand") }}</th>
+                            <th>{{ $t("gyroflightV2PlanResolution") }}</th>
+                            <th>{{ $t("gyroflightV2PlanSegment") }}</th>
+                            <th>{{ $t("gyroflightV2PlanAverages") }}</th>
+                            <th>{{ $t("gyroflightV2PlanSweep") }}</th>
+                            <th>{{ $t("gyroflightV2PlanDiagnostics") }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="p in result.measurementPlan" :key="p.axis" :data-axis="p.axis">
+                            <td>{{ p.axis }}</td>
+                            <td>{{ band(p.bandHz.primary) }}</td>
+                            <td>
+                                {{ num(p.resolutionHz.now, 2) }} / {{ num(p.resolutionHz.primary, 2) }} /
+                                {{ num(p.resolutionHz.qualification, 3) }}
+                            </td>
+                            <td>
+                                {{ p.segmentSamples.primary ?? "--" }} / {{ p.segmentSamples.qualification ?? "--" }}
+                            </td>
+                            <td>{{ p.averages.now ?? "--" }} / {{ p.averages.needed ?? "--" }}</td>
+                            <td>
+                                {{ p.sweep ? `${num(p.sweep.durationS, 0)} × ${p.sweep.repeats}` : "--" }};
+                                {{
+                                    p.qualificationSweep
+                                        ? `${num(p.qualificationSweep.durationS, 0)} × ${p.qualificationSweep.repeats}`
+                                        : "--"
+                                }}
+                            </td>
+                            <td>{{ p.diagnostics.join(", ") || "--" }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </template>
+
             <!-- 3. Compare -->
             <h4 class="font-bold mt-3" data-step="v2-compare">3. {{ $t("gyroflightStepCompare") }}</h4>
             <p v-if="!result.proposal" class="text-sm text-dimmed" data-gyrocore="v2-no-change">
@@ -346,6 +387,9 @@ const { calculate, createVerifiedTune, preview, releasedProposal, confirmAndAppl
     useAutotuneV2();
 
 const result = computed(() => v2.result);
+const num = (x: number | null | undefined, digits: number) =>
+    x == null || !Number.isFinite(x) ? "--" : x.toFixed(digits);
+const band = (b: [number, number] | null) => (b ? `${num(b[0], 1)}–${num(b[1], 1)}` : "--");
 const outcome = computed(() => v2.outcome);
 
 /** The profile-switch warning of a failed write: which profile may hold it, and how to recover. */

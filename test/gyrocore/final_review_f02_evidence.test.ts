@@ -90,8 +90,13 @@ const SOURCE = { sha256: SIMULATED_QUALIFICATION_SHA, logIndex: 0 };
 const PRIMARY_LOG = { sha256: "d".repeat(64), logIndex: 0, headerPairs: [] as [string, string][] };
 /** Chain validated, steady, attested: only the margin evidence is left open. */
 function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null = null): LoopMargins {
-    const q = fine ? { tf: tfOf(fine.freqs, fine.g), source: SOURCE } : null;
+    const q = fine ? { tf: tfOf(fine.freqs, fine.g), source: SOURCE, analysis: welchOf(fine.freqs) } : null;
     return loopMargins(buildAxisLoop(0, tfOf(freqs, g), cfg, UNITY_CHAIN, true, true, q));
+}
+/** SIMULATION: the Welch analysis a synthetic grid claims (its step from 4 kHz segments, 32 of them). */
+function welchOf(freqs: number[]) {
+    const segmentSamples = Math.round(4000 / (freqs[1] - freqs[0]));
+    return { segmentSamples, sampleRateHz: 4000, windowSamples: (segmentSamples * 33) / 2, segments: 32 };
 }
 /** AxisMargins exactly as autotuneV2 builds them from loopMargins. */
 const axisMargins = (m: LoopMargins, axis: AxisMargins["axis"] = "roll"): AxisMargins => ({
@@ -316,7 +321,8 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
 
     it("5a. SIMULATION: a finer (0.1 Hz) identification of the same smooth plant qualifies it: VALIDATED", () => {
         const coarse = margins(uniform(200, 0.5), smooth);
-        const m = margins(uniform(200, 0.5), smooth, { freqs: uniform(200, 0.1), g: smooth });
+        // Over 1.5 × the primary's band (QUALIFICATION_BAND_EXTENSION, audit P1-2).
+        const m = margins(uniform(200, 0.5), smooth, { freqs: uniform(310, 0.1), g: smooth });
         expect(m.evidence.qualification!.verdict).toBe("PASS");
         expect(m.evidence.level).toBe("VALIDATED");
         expect(m.reasons).toEqual([]);
@@ -340,6 +346,36 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
         expect(m.evidence.qualification!.reasons.some((r) => r.startsWith("qualification_not_finer"))).toBe(true);
         expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
         expect(m.status).toBe("NOT_VALIDATED");
+    });
+
+    it("5e. a finer qualification over the same band does not test the loop above it (P1-2): INSUFFICIENT", () => {
+        const m = margins(uniform(200, 0.5), smooth, { freqs: uniform(200, 0.1), g: smooth });
+        expect(m.evidence.qualification!.verdict).toBe("INSUFFICIENT");
+        expect(m.evidence.qualification!.reasons.some((r) => r.startsWith("qualification_band_not_extended:"))).toBe(
+            true,
+        );
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        expect(m.status).toBe("NOT_VALIDATED");
+    });
+
+    it("5f. finer bins that the qualification's samples cannot give (zero padding) are no qualification", () => {
+        const fine = uniform(310, 0.1);
+        // 0.1 Hz bins claimed from 0.5 Hz segments: interpolated, not resolved.
+        const q = { tf: tfOf(fine, smooth), source: SOURCE, analysis: { ...welchOf(uniform(200, 0.5)), segments: 32 } };
+        const m = loopMargins(buildAxisLoop(0, tfOf(uniform(200, 0.5), smooth), cfg, UNITY_CHAIN, true, true, q));
+        expect(m.evidence.qualification!.reasons).toContain(
+            "qualification_resolution_not_shown:bins_denser_than_segment_resolution",
+        );
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        const bare = loopMargins(
+            buildAxisLoop(0, tfOf(uniform(200, 0.5), smooth), cfg, UNITY_CHAIN, true, true, {
+                tf: tfOf(fine, smooth),
+                source: SOURCE,
+            }),
+        );
+        expect(bare.evidence.qualification!.reasons).toContain(
+            "qualification_resolution_not_shown:resolution_provenance_missing",
+        );
     });
 
     it("5c. a qualification over a shorter band is INSUFFICIENT", () => {

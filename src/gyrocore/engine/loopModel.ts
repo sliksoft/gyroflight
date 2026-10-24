@@ -217,6 +217,140 @@ export const BIN_SAGITTA = Math.tan(((LOOP_RESOLUTION.maxPhaseStepDeg / 2) * Mat
 export const MODEL_CLASS_QUALIFICATION = Object.freeze({ maxPmDeficitDeg: 5, maxGainDeficitDb: 1.5 });
 
 /**
+ * How far a qualification's band must reach above the primary's band end before it may stand for
+ * the loop there (audit P1-2). The primary's tail check (BAND_END) sees a ζ = 0.02 resonance at
+ * 1.1 × f_end (+3.7 dB) and still at 1.2 × (+1.5 dB), but not from about 1.5 × f_end up (< 0.5 dB):
+ * a qualification over the same band tests nothing of that blind range. With its band reaching
+ * 1.5 × f_end (and its own end bounded), the remaining assumption moves to above the
+ * qualification's band end. Derived from the BAND_END figures for one resonance shape; not calibrated.
+ */
+export const QUALIFICATION_BAND_EXTENSION = 1.5;
+
+/**
+ * Measurement uncertainty of the identified loop (WP3). Per bin, the random error of the H1
+ * estimate from coherence γ² and the number of independent averages n_d (Bendat & Piersol, Random
+ * Data, 4th ed., eq. 9.90 / 9.91): ε[|H|] ≈ √(1 − γ²) / (|γ| √(2 n_d)), and σ[φ] ≈ ε rad. They
+ * hold for stationary random data; for a sweep they are an approximation, which n_d keeps
+ * conservative (sweepAverages). The plant G = T / (C_ref − T·C_fb) and so L inherit T's relative
+ * error times |C_ref / (C_ref − T·C_fb)| (first order), which grows where |T·C_fb| ≈ |C_ref|.
+ *
+ *   coverage 2           bounds at ±2 ε (≈ 95 % for a normal error; the formula's own premise).
+ *   minWelchSegments 8   with fewer Welch segments the coherence estimate itself is too biased (with
+ *                        one segment γ² ≡ 1): the uncertainty is then unknown and the margins
+ *                        unbounded. Design parameter, not calibrated.
+ *   maxCoverageRelErr 0.5  a ±2 ε of half the loop gain or more leaves no meaningful bound.
+ *
+ * The bounds take the worst of the nominal loop and four corners in which every bin's L is moved by
+ * the same signed ±2 ε in gain and in phase (a common error shifts the crossover; per-bin errors that
+ * cancel would bound less). Model-dependent: the formula is not validated against repeated flights.
+ */
+export const UNCERTAINTY = Object.freeze({ coverage: 2, minWelchSegments: 8, maxCoverageRelErr: 0.5 });
+
+/**
+ * Checks of the phase the margins are read on (WP3).
+ *   maxUnwrapStepDeg 90  unwrapping picks the step of least magnitude, so it is unambiguous only while
+ *     a step and its uncertainty (± 2 σ at both bins) stay well inside ±180°; above 90° a different
+ *     branch is no longer excluded and the margins stay unbounded.
+ *   The absolute branch: the identified rate plant (motor command → gyro rate: an integrator, the
+ *     motor lag and a delay) has a phase in (−180°, 0°] at the lowest identified bin, and the
+ *     controller's phase is continuous from there; their sum must equal the unwrapped loop phase at
+ *     every bin, or the branch is unverified. An assumption of the model class, stated in the evidence.
+ *   octaveBins 3  at least three identified bins within one octave around the crossover
+ *     (fc/√2 … fc·√2): the crossing is bracketed and its slope is read from two steps.
+ */
+export const PHASE_CHECKS = Object.freeze({
+    maxUnwrapStepDeg: 90,
+    plantPhaseMinDeg: -180,
+    plantPhaseMaxDeg: 0,
+    octaveBins: 3,
+});
+
+/** Sweep of a CHIRP measurement (Betaflight chirp.c: exponential, f(t) = f0 · (f1 / f0)^(t / T)). */
+export interface SweepInfo {
+    f0Hz: number;
+    f1Hz: number;
+    durationS: number;
+}
+
+/**
+ * Where a transfer function's resolution comes from: the Welch segment length in samples, the
+ * sample rate, the samples of the analysed window and the segment count. A finer resolution than
+ * the samples can give (zero padding, interpolation) is no resolution.
+ */
+export interface AnalysisProvenance {
+    segmentSamples: number;
+    sampleRateHz: number;
+    windowSamples: number;
+    segments: number;
+}
+
+/**
+ * Independent averages at `fHz` in a Welch estimate of an exponential sweep: the sweep dwells
+ * T / (f · ln(f1 / f0)) per hertz, so one bin of width 1/Ts is excited for T / (Ts · f · ln(f1/f0))
+ * seconds, i.e. that many / Ts non-overlapping segments; at least 1, at most the non-overlapping
+ * count of the whole window. Without the sweep: 1 (each frequency excited once).
+ */
+export function sweepAverages(fHz: number, segmentS: number, segments: number, sweep: SweepInfo | null): number {
+    const cap = Math.max(1, Math.floor((segments + 1) / 2));
+    if (!sweep || !(sweep.f1Hz > sweep.f0Hz && sweep.f0Hz > 0 && sweep.durationS > 0 && segmentS > 0 && fHz > 0)) {
+        return 1;
+    }
+    const n = Math.floor(sweep.durationS / (segmentS * segmentS * fHz * Math.log(sweep.f1Hz / sweep.f0Hz)));
+    return Math.min(cap, Math.max(1, n));
+}
+
+/** Per identified bin, the relative error of L (UNCERTAINTY); `relErr` null when it cannot be known. */
+export interface LoopUncertainty {
+    relErr: Map<number, number> | null;
+    /** Independent averages per bin used (lowest and highest over the identified bins). */
+    averages: [number, number] | null;
+    /** Independent averages used at each bin. */
+    averagesByHz?: Map<number, number>;
+    reasons: string[];
+}
+
+/** The uncertainty of a loop identified from `tf` under the controller `cfg` (UNCERTAINTY). */
+export function loopUncertainty(
+    tf: TransferFunction,
+    cfg: DigitalControllerConfig,
+    measurement: { sweep?: SweepInfo | null; analysis?: AnalysisProvenance | null } = {},
+): LoopUncertainty {
+    const K = tf.numSegments;
+    if (!(Number.isInteger(K) && K >= UNCERTAINTY.minWelchSegments)) {
+        return { relErr: null, averages: null, reasons: [`uncertainty_unknown:welch_segments:${K}`] };
+    }
+    const step = tf.frequencies.length > 1 ? tf.frequencies[1] - tf.frequencies[0] : 0;
+    const segmentS = measurement.analysis
+        ? measurement.analysis.segmentSamples / measurement.analysis.sampleRateHz
+        : step > 0
+          ? 1 / step
+          : 0;
+    const relErr = new Map<number, number>();
+    const averagesByHz = new Map<number, number>();
+    let lo = Infinity;
+    let hi = 0;
+    for (let k = 0; k < tf.frequencies.length; k++) {
+        const f = tf.frequencies[k];
+        const g2 = tf.coherence[k];
+        if (!(g2 > 0 && g2 <= 1) || !(f > 0)) continue;
+        const n = sweepAverages(f, segmentS, K, measurement.sweep ?? null);
+        averagesByHz.set(f, n);
+        lo = Math.min(lo, n);
+        hi = Math.max(hi, n);
+        const eT = Math.sqrt(1 - g2) / (Math.sqrt(g2) * Math.sqrt(2 * n));
+        const T = { re: tf.hReal[k], im: tf.hImag[k] };
+        const frf = evaluateControllerFrf(cfg, f);
+        const den = cmag({
+            re: frf.cReference.re - (T.re * frf.cFeedback.re - T.im * frf.cFeedback.im),
+            im: frf.cReference.im - (T.re * frf.cFeedback.im + T.im * frf.cFeedback.re),
+        });
+        const kappa = den > 1e-12 ? cmag(frf.cReference) / den : Infinity;
+        relErr.set(f, eT * kappa);
+    }
+    return { relErr, averages: Number.isFinite(lo) ? [lo, hi] : null, averagesByHz, reasons: [] };
+}
+
+/**
  * What the margins rest on (one level per result; LoopMargins.status is VALIDATED only with level
  * VALIDATED and no other reason):
  *
@@ -250,6 +384,20 @@ export interface ModelClassQualification {
     reasons: string[];
 }
 
+/** The measurement uncertainty folded into the bounds (UNCERTAINTY). */
+export interface MarginUncertainty {
+    /** Coverage factor k of the ± k ε corners. */
+    coverage: number;
+    /** Independent averages per bin used (lowest, highest). */
+    averages: [number, number] | null;
+    /** Largest relative error ε of L over the bins the margins are read on. */
+    maxRelErr: number;
+    /** Identified bins left out because their ±k ε reached half their value (not identified). */
+    droppedBins?: number;
+    /** The nominal values read on the bins, before the uncertainty widened them. */
+    nominal: { phaseMarginDeg: number; gainMarginDb: number | null; sensitivityPeakDb: number | null };
+}
+
 export interface MarginEvidence {
     level: MarginEvidenceLevel;
     /** Largest step between two adjacent identified bins (Hz): the frequency resolution of the margins. */
@@ -261,6 +409,8 @@ export interface MarginEvidence {
     /** What the margins assume, as codes (shown with the margins). */
     assumptions: string[];
     qualification: ModelClassQualification | null;
+    /** The uncertainty the bounds include; null: not known (no bounds then). */
+    uncertainty?: MarginUncertainty | null;
 }
 
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -295,6 +445,19 @@ export function marginEvidenceIssues(evidence: unknown): string[] {
         out.push("margin_evidence_feature_width_invalid");
     }
     if (!Array.isArray(e.assumptions) || !e.assumptions.length) out.push("margin_evidence_assumptions_missing");
+    // The bounds must carry the measurement uncertainty they include (fail-closed when absent).
+    const u = e.uncertainty as Partial<MarginUncertainty> | null | undefined;
+    if (
+        !u ||
+        typeof u !== "object" ||
+        !finite(u.coverage) ||
+        u.coverage < UNCERTAINTY.coverage ||
+        !finite(u.maxRelErr) ||
+        u.maxRelErr < 0 ||
+        u.coverage * u.maxRelErr >= UNCERTAINTY.maxCoverageRelErr
+    ) {
+        out.push("margin_evidence_uncertainty_missing");
+    }
     const q = e.qualification as Partial<ModelClassQualification> | null | undefined;
     if (!q || typeof q !== "object") {
         out.push("model_class_qualification_missing");
@@ -326,6 +489,9 @@ export function marginEvidenceIssues(evidence: unknown): string[] {
         q.bandHz[1] < e.bandHz[1] - r
     ) {
         out.push("model_class_qualification_band_not_covered");
+    } else if (q.bandHz[1] < e.bandHz[1] * QUALIFICATION_BAND_EXTENSION - r) {
+        // A qualification over the same band does not test the loop above it (audit P1-2).
+        out.push("model_class_qualification_band_not_extended");
     }
     if (!finite(q.phaseMarginDeg) || !finite(q.gainMarginDb) || !finite(q.sensitivityPeakDb)) {
         out.push("model_class_qualification_margins_missing");
@@ -374,7 +540,8 @@ function resolutionIssues(f: number[], magDb: number[], ph: number[], fc: number
     const coarse: string[] = [];
     const unresolved: string[] = [];
     steps.forEach((s, i) => {
-        const near = steps.filter((_, j) => j !== i && Math.abs(j - i) <= 5).sort((a, b) => a - b);
+        // The ±5 neighbouring steps (a local slice: the search over all steps was quadratic).
+        const near = [...steps.slice(Math.max(0, i - 5), i), ...steps.slice(i + 1, i + 6)].sort((a, b) => a - b);
         if (near.length && s > R.maxGapRatio * near[Math.floor(near.length / 2)]) gaps.push(span(i));
         if (f[i] >= fc / 2 && s > R.maxRelativeSpacing * f[i]) coarse.push(span(i));
         const phaseLimit = Math.max(R.maxPhaseStepDeg, R.maxPhaseSlopeDegPerNeper * Math.log(f[i + 1] / f[i]));
@@ -461,11 +628,20 @@ export interface AxisLoop {
     chainValidated: boolean;
     /** A Verified Tune for this craft / firmware passed (the only attestation). */
     attested: boolean;
+    /** Relative error of the identified L per bin (UNCERTAINTY). */
+    uncertainty: LoopUncertainty;
     /**
      * The plant identified at a finer resolution from another flight of the same craft and
-     * configuration (MODEL_CLASS_QUALIFICATION), or null.
+     * configuration (MODEL_CLASS_QUALIFICATION), its uncertainty and where its resolution comes
+     * from, or null.
      */
-    qualification: { plant: IdentifiedPlant; source: { sha256: string; logIndex: number } } | null;
+    qualification: {
+        plant: IdentifiedPlant;
+        source: { sha256: string; logIndex: number };
+        uncertainty: LoopUncertainty;
+        /** Why its resolution is not shown to come from its samples (empty: it is). */
+        provenanceIssues: string[];
+    } | null;
 }
 
 export interface LoopCandidate {
@@ -514,7 +690,12 @@ export function buildAxisLoop(
         tf: TransferFunction;
         cfg?: DigitalControllerConfig;
         source: { sha256: string; logIndex: number };
+        sweep?: SweepInfo | null;
+        /** Where the finer resolution comes from; without it the qualification is not shown finer. */
+        analysis?: AnalysisProvenance | null;
     } | null = null,
+    /** The primary measurement's sweep and analysis (UNCERTAINTY averages). */
+    measurement: { sweep?: SweepInfo | null; analysis?: AnalysisProvenance | null } = {},
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
     const opts = { missingFilterInfo: missing, coherenceMin: LOOP_MIN_COHERENCE };
@@ -526,13 +707,41 @@ export function buildAxisLoop(
         chain,
         chainValidated,
         attested,
+        uncertainty: loopUncertainty(tf, cfg, measurement),
         qualification: qualification
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
                   source: { ...qualification.source },
+                  uncertainty: loopUncertainty(qualification.tf, qualification.cfg ?? cfg, qualification),
+                  provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
               }
             : null,
     };
+}
+
+/**
+ * Why a transfer function's resolution is not shown to come from its own samples (WP3): the bins
+ * may be no denser than the Welch segment gives (fs / segment samples), the window must hold that
+ * many segments at 50 % overlap, and there must be enough of them for the coherence to mean
+ * something (UNCERTAINTY.minWelchSegments).
+ */
+export function provenanceIssues(tf: TransferFunction, a: AnalysisProvenance | null): string[] {
+    if (!a) return ["resolution_provenance_missing"];
+    const out: string[] = [];
+    const ok = (x: number) => Number.isFinite(x) && x > 0;
+    if (!ok(a.segmentSamples) || !ok(a.sampleRateHz) || !ok(a.windowSamples) || !ok(a.segments)) {
+        return ["resolution_provenance_invalid"];
+    }
+    const steps = Array.from(tf.frequencies)
+        .slice(1)
+        .map((f, i) => f - tf.frequencies[i]);
+    const finest = steps.length ? Math.min(...steps) : Infinity;
+    if (finest < (a.sampleRateHz / a.segmentSamples) * (1 - 1e-9)) out.push("bins_denser_than_segment_resolution");
+    if (a.windowSamples < (a.segmentSamples * (a.segments + 1)) / 2) out.push("window_shorter_than_its_segments");
+    if (a.segments < UNCERTAINTY.minWelchSegments || tf.numSegments !== a.segments) {
+        out.push(`too_few_welch_segments:${a.segments}`);
+    }
+    return out;
 }
 
 function unwrap(phases: number[]): number[] {
@@ -549,17 +758,83 @@ function unwrap(phases: number[]): number[] {
     return out;
 }
 
+/** One identified bin of a candidate loop: L = G · C, and the relative error of L there (UNCERTAINTY). */
+export interface LoopPoint {
+    f: number;
+    L: Complex;
+    /** The plant term (with the candidate's chain ratio) and the controller term of L. */
+    G?: Complex;
+    C?: Complex;
+    /** Relative error ε of L; undefined: not known. */
+    err?: number;
+}
+
 /** Loop response of a candidate on the identified bins. */
-export function candidateLoop(loop: AxisLoop, cand: LoopCandidate): { f: number; L: Complex }[] {
-    const out: { f: number; L: Complex }[] = [];
+export function candidateLoop(loop: AxisLoop, cand: LoopCandidate): LoopPoint[] {
+    const out: LoopPoint[] = [];
     for (const b of loop.plant.bins) {
         if (b.status !== "ok" || !b.G || !(b.coherence >= LOOP_MIN_COHERENCE)) continue;
         let G = b.G;
         if (cand.chain && loop.chain) {
             G = cmul(G, cdiv(cand.chain.frf(b.frequencyHz), loop.chain.frf(b.frequencyHz)));
         }
-        out.push({ f: b.frequencyHz, L: cmul(G, evaluateControllerFrf(cand.cfg, b.frequencyHz).cFeedback) });
+        const err = loop.uncertainty?.relErr?.get(b.frequencyHz);
+        // A bin whose ±k ε reaches half its own value is not identified (UNCERTAINTY): typically at
+        // low frequency, where |T·C_fb| ≈ |C_ref| amplifies T's error into G.
+        if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr) continue;
+        const C = evaluateControllerFrf(cand.cfg, b.frequencyHz).cFeedback;
+        out.push({ f: b.frequencyHz, L: cmul(G, C), G, C, err });
     }
+    return out;
+}
+
+/** Identified bins candidateLoop leaves out because their uncertainty is too large. */
+function binsDroppedForUncertainty(loop: AxisLoop): number {
+    const relErr = loop.uncertainty?.relErr;
+    if (!relErr) return 0;
+    let n = 0;
+    for (const b of loop.plant.bins) {
+        if (b.status !== "ok" || !b.G || !(b.coherence >= LOOP_MIN_COHERENCE)) continue;
+        const err = relErr.get(b.frequencyHz);
+        if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr) n++;
+    }
+    return n;
+}
+
+/**
+ * The phase checks (PHASE_CHECKS) on the unwrapped loop phase `ph`: steps that leave the branch
+ * ambiguous, the absolute branch against the plant and controller phases, and the bins around the
+ * crossover. Any issue leaves the margins unbounded.
+ */
+function phaseIssues(pts: LoopPoint[], ph: number[], fc: number): string[] {
+    const P = PHASE_CHECKS;
+    const out: string[] = [];
+    const sigmaDeg = (p: LoopPoint) => ((p.err ?? 0) * 180) / Math.PI;
+    const ambiguous: string[] = [];
+    for (let i = 1; i < pts.length; i++) {
+        const margin = UNCERTAINTY.coverage * (sigmaDeg(pts[i - 1]) + sigmaDeg(pts[i]));
+        if (Math.abs(ph[i] - ph[i - 1]) + margin > P.maxUnwrapStepDeg) {
+            ambiguous.push(`${pts[i - 1].f.toFixed(1)}-${pts[i].f.toFixed(1)}Hz`);
+        }
+    }
+    if (ambiguous.length) out.push(`phase_unwrap_ambiguous:${ambiguous.slice(0, 3).join(",")}`);
+    // The absolute branch: the rate plant's phase at the lowest bin in (−180°, 0°], then the plant and
+    // controller phases each unwrapped on their own; their sum must be the unwrapped loop phase.
+    if (pts.every((p) => p.G && p.C)) {
+        const g = unwrap(pts.map((p) => cphaseDeg(p.G!)));
+        const c = unwrap(pts.map((p) => cphaseDeg(p.C!)));
+        if (!(g[0] > P.plantPhaseMinDeg && g[0] <= P.plantPhaseMaxDeg)) {
+            out.push(`phase_branch_unverified:plant_phase_at_lowest_bin:${g[0].toFixed(0)}deg`);
+        } else if (pts.some((_, i) => Math.abs(g[i] + c[i] - ph[i]) > P.maxUnwrapStepDeg)) {
+            // Most often the sum is below −180° at the lowest bin: the loop phase was then unwrapped
+            // from the wrong branch, and a PM read on it would be off by 360°.
+            out.push("phase_branch_unverified:loop_phase_not_plant_plus_controller");
+        }
+    } else {
+        out.push("phase_branch_unverified:plant_and_controller_terms_missing");
+    }
+    const near = pts.filter((p) => p.f >= fc / Math.SQRT2 && p.f <= fc * Math.SQRT2).length;
+    if (near < P.octaveBins) out.push(`crossover_insufficiently_resolved:${near}_bins_in_octave`);
     return out;
 }
 
@@ -584,7 +859,7 @@ interface LoopRead {
 }
 
 /** PM, GM and |S| on the identified bins of a loop, with the basis they have (unchanged math). */
-function readLoop(pts: { f: number; L: Complex }[]): LoopRead {
+function readLoop(pts: LoopPoint[]): LoopRead {
     const reasons: string[] = [];
     const read: LoopRead = {
         ok: false,
@@ -636,12 +911,15 @@ function readLoop(pts: { f: number; L: Complex }[]): LoopRead {
 
     // Between bins the loop is not measured: the bins must be contiguous and resolve it
     // (LOOP_RESOLUTION), or no margin read on them bounds the loop between them.
-    const resolution = resolutionIssues(
-        pts.map((p) => p.f),
-        mag.map((m) => 20 * Math.log10(m)),
-        ph,
-        fc,
-    );
+    const resolution = [
+        ...resolutionIssues(
+            pts.map((p) => p.f),
+            mag.map((m) => 20 * Math.log10(m)),
+            ph,
+            fc,
+        ),
+        ...phaseIssues(pts, ph, fc),
+    ];
     reasons.push(...resolution);
 
     // The loop is unknown above the last bin: the band end must be safely below unity and not
@@ -732,16 +1010,86 @@ function readLoop(pts: { f: number; L: Complex }[]): LoopRead {
 const CONTRADICTS_CLASS =
     /^(ambiguous_crossovers|loop_gain_reenters_unity|loop_unresolved_between_bins|identified_band_has_gaps|identified_band_too_coarse|loop_gain_above_one_at_band_end)/;
 
+/** Bounds of a loop with its measurement uncertainty folded in (UNCERTAINTY); `uncertainty` null: unknown. */
+interface UncertainBounds {
+    pm: number;
+    gm: number | null;
+    sPeak: number | null;
+    uncertainty: MarginUncertainty | null;
+    reasons: string[];
+}
+
+/**
+ * The bounds `read` gives, widened by the measurement uncertainty: the worst of the nominal loop
+ * and four corners with every bin's L moved by the same ±k ε in gain and phase. Unknown (null
+ * uncertainty, with reasons) when ε is not known, too large, or a corner changes what the bins show.
+ */
+function uncertainBounds(pts: LoopPoint[], read: LoopRead, u: LoopUncertainty): UncertainBounds {
+    const nominal = { pm: read.pm!, gm: read.gm, sPeak: read.sPeak };
+    const unknown = (reasons: string[]) => ({ ...nominal, uncertainty: null, reasons });
+    if (!u.relErr || pts.some((p) => !Number.isFinite(p.err))) {
+        return unknown(u.reasons.length ? u.reasons : ["margin_uncertainty_unknown"]);
+    }
+    const k = UNCERTAINTY.coverage;
+    const maxRelErr = Math.max(...pts.map((p) => p.err!));
+    if (k * maxRelErr >= UNCERTAINTY.maxCoverageRelErr) {
+        return unknown([`margin_uncertainty_too_large:${(k * maxRelErr).toFixed(3)}`]);
+    }
+    let { pm, gm, sPeak } = nominal;
+    for (const sm of [1, -1]) {
+        for (const sp of [1, -1]) {
+            const moved = pts.map((p) => {
+                const g = 1 + sm * k * p.err!;
+                const a = sp * k * p.err!;
+                return {
+                    ...p,
+                    L: {
+                        re: g * (p.L.re * Math.cos(a) - p.L.im * Math.sin(a)),
+                        im: g * (p.L.re * Math.sin(a) + p.L.im * Math.cos(a)),
+                    },
+                };
+            });
+            const r = readLoop(moved);
+            if (!r.ok || !r.bounded || (r.gm === null) !== (gm === null) || (r.sPeak === null) !== (sPeak === null)) {
+                return unknown(["margin_uncertainty_changes_what_the_bins_show"]);
+            }
+            pm = Math.min(pm, r.pm!);
+            if (gm !== null) gm = Math.min(gm, r.gm!);
+            if (sPeak !== null) sPeak = Math.max(sPeak, r.sPeak!);
+        }
+    }
+    return {
+        pm,
+        gm,
+        sPeak,
+        uncertainty: {
+            coverage: k,
+            averages: u.averages,
+            maxRelErr,
+            nominal: { phaseMarginDeg: nominal.pm, gainMarginDb: nominal.gm, sensitivityPeakDb: nominal.sPeak },
+        },
+        reasons: [],
+    };
+}
+
 /** Check the primary's bounds against the finer, independent identification (MODEL_CLASS_QUALIFICATION). */
-function qualifyModelClass(loop: AxisLoop, cand: LoopCandidate, primary: LoopRead): ModelClassQualification | null {
+function qualifyModelClass(
+    loop: AxisLoop,
+    cand: LoopCandidate,
+    primary: LoopRead,
+    bounds: UncertainBounds,
+): ModelClassQualification | null {
     const q = loop.qualification;
     if (!q) return null;
-    const fine = readLoop(candidateLoop({ ...loop, plant: q.plant }, cand));
+    const finePts = candidateLoop({ ...loop, plant: q.plant, uncertainty: q.uncertainty }, cand);
+    const fine = readLoop(finePts);
     const Q = MODEL_CLASS_QUALIFICATION;
     const fail: string[] = [];
     const insufficient: string[] = [];
     const r = primary.resolutionHz;
     if (!fine.ok) insufficient.push("qualification_margins_unavailable", ...fine.reasons);
+    // The finer resolution must come from the qualification's own samples (no padded or interpolated bins).
+    insufficient.push(...q.provenanceIssues.map((x) => `qualification_resolution_not_shown:${x}`));
     if (!(fine.resolutionHz !== null && r !== null && fine.resolutionHz * RESOLVED_FEATURE_BINS <= r * (1 + 1e-9))) {
         insufficient.push(
             `qualification_not_finer:${fine.resolutionHz?.toFixed(3)}Hz>${r !== null ? (r / RESOLVED_FEATURE_BINS).toFixed(3) : "?"}Hz`,
@@ -755,22 +1103,34 @@ function qualifyModelClass(loop: AxisLoop, cand: LoopCandidate, primary: LoopRea
         fine.bandHz[1] < primary.bandHz[1] - r
     ) {
         insufficient.push("qualification_band_not_covered");
+    } else if (fine.bandHz[1] < primary.bandHz[1] * QUALIFICATION_BAND_EXTENSION - r) {
+        // The same band again does not test the loop above the primary's band end (audit P1-2).
+        insufficient.push(
+            `qualification_band_not_extended:${fine.bandHz[1].toFixed(1)}<${(primary.bandHz[1] * QUALIFICATION_BAND_EXTENSION).toFixed(1)}Hz`,
+        );
     }
+    let fb: UncertainBounds | null = null;
     if (fine.ok) {
         fail.push(...fine.reasons.filter((x) => CONTRADICTS_CLASS.test(x)).map((x) => `qualification:${x}`));
         if (!fine.bounded && !fail.length) {
             insufficient.push(...fine.reasons.map((x) => `qualification:${x}`));
         }
-        if (fine.pm! < primary.pm! - Q.maxPmDeficitDeg) {
-            fail.push(`qualification_pm_below_bound:${fine.pm!.toFixed(1)}<${primary.pm!.toFixed(1)}deg`);
+        // The qualification's margins carry their own uncertainty, as the primary's do.
+        fb = fine.bounded ? uncertainBounds(finePts, fine, q.uncertainty) : null;
+        if (fb && !fb.uncertainty) insufficient.push(...fb.reasons.map((x) => `qualification:${x}`));
+        const fpm = fb?.pm ?? fine.pm!;
+        const fgm = fb ? fb.gm : fine.gm;
+        const fs = fb ? fb.sPeak : fine.sPeak;
+        if (fpm < bounds.pm - Q.maxPmDeficitDeg) {
+            fail.push(`qualification_pm_below_bound:${fpm.toFixed(1)}<${bounds.pm.toFixed(1)}deg`);
         }
-        if (fine.gm !== null && primary.gm !== null && fine.gm < primary.gm - Q.maxGainDeficitDb) {
-            fail.push(`qualification_gm_below_bound:${fine.gm.toFixed(1)}<${primary.gm.toFixed(1)}dB`);
+        if (fgm !== null && bounds.gm !== null && fgm < bounds.gm - Q.maxGainDeficitDb) {
+            fail.push(`qualification_gm_below_bound:${fgm.toFixed(1)}<${bounds.gm.toFixed(1)}dB`);
         }
-        if (fine.sPeak !== null && primary.sPeak !== null && fine.sPeak > primary.sPeak + Q.maxGainDeficitDb) {
-            fail.push(`qualification_s_above_bound:${fine.sPeak.toFixed(1)}>${primary.sPeak.toFixed(1)}dB`);
+        if (fs !== null && bounds.sPeak !== null && fs > bounds.sPeak + Q.maxGainDeficitDb) {
+            fail.push(`qualification_s_above_bound:${fs.toFixed(1)}>${bounds.sPeak.toFixed(1)}dB`);
         }
-        if ((fine.gm === null) !== (primary.gm === null) || (fine.sPeak === null) !== (primary.sPeak === null)) {
+        if ((fgm === null) !== (bounds.gm === null) || (fs === null) !== (bounds.sPeak === null)) {
             insufficient.push("qualification_margins_unavailable");
         }
     }
@@ -779,9 +1139,9 @@ function qualifyModelClass(loop: AxisLoop, cand: LoopCandidate, primary: LoopRea
         resolutionHz: fine.resolutionHz,
         bandHz: fine.bandHz,
         verdict: fail.length ? "FAIL" : insufficient.length ? "INSUFFICIENT" : "PASS",
-        phaseMarginDeg: fine.pm,
-        gainMarginDb: fine.gm,
-        sensitivityPeakDb: fine.sPeak,
+        phaseMarginDeg: fb?.pm ?? fine.pm,
+        gainMarginDb: fb ? fb.gm : fine.gm,
+        sensitivityPeakDb: fb ? fb.sPeak : fine.sPeak,
         reasons: [...new Set([...fail, ...insufficient])],
     };
 }
@@ -835,10 +1195,20 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     let pm = read.pm!;
     let gm = read.gm;
     let sPeak = read.sPeak;
-    if (!read.bounded) {
+    // The measurement uncertainty widens the bounds; unknown uncertainty leaves no bounds.
+    const ub = read.bounded ? uncertainBounds(pts, read, loop.uncertainty) : null;
+    if (ub && !ub.uncertainty) reasons.push(...ub.reasons);
+    if (!read.bounded || !ub?.uncertainty) {
         evidence.level = "MEASURED";
         evidence.assumptions = ["values_read_on_bins_only"];
+        // Without a known uncertainty the bins bound nothing: GM and |S| unknown, as for unresolved bins.
+        gm = null;
+        sPeak = null;
     } else {
+        pm = ub.pm;
+        gm = ub.gm;
+        sPeak = ub.sPeak;
+        evidence.uncertainty = { ...ub.uncertainty, droppedBins: binsDroppedForUncertainty(loop) };
         const width = RESOLVED_FEATURE_BINS * read.resolutionHz!;
         evidence.level = "MODEL_CONDITIONAL";
         evidence.minFeatureWidthHz = width;
@@ -846,8 +1216,10 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
             `no_loop_feature_narrower_than:${width.toFixed(2)}Hz`,
             "loop_between_bins_within_bin_sagitta",
             `loop_above_band_end_bounded_by_tail:${read.bandHz![1].toFixed(1)}Hz`,
+            "rate_plant_phase_in_minus180_0_at_lowest_bin",
+            `measurement_error_within:${UNCERTAINTY.coverage}x_bendat_piersol_random_error`,
         ];
-        const q = qualifyModelClass(loop, cand, read);
+        const q = qualifyModelClass(loop, cand, read, ub);
         evidence.qualification = q;
         if (q?.verdict === "PASS") {
             // The worse of both logs; a value either leaves unknown stays unknown.
@@ -860,6 +1232,12 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         const issues = marginEvidenceIssues({ ...evidence, level: "VALIDATED" });
         if (!issues.length) {
             evidence.level = "VALIDATED";
+            // What remains unmeasured lies above the qualification's band end, not the primary's.
+            evidence.assumptions = evidence.assumptions.map((x) =>
+                x.startsWith("loop_above_band_end_bounded_by_tail:")
+                    ? `loop_above_band_end_bounded_by_tail:${q!.bandHz![1].toFixed(1)}Hz`
+                    : x,
+            );
             evidence.assumptions.push(
                 `qualified_down_to_feature_width:${(RESOLVED_FEATURE_BINS * q!.resolutionHz!).toFixed(3)}Hz`,
             );
