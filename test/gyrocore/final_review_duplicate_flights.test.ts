@@ -40,6 +40,7 @@ import {
     flightFingerprint,
     flightWindows,
     pickPrimary,
+    flightRelation,
     sameFlight,
     sharedWindows,
     uniqueFlights,
@@ -186,11 +187,24 @@ describe("R-1: the engine does not release on a copy of its own flight", () => {
         expect(released(r)).toBe(false);
     }, 600_000);
 
-    it("a re-identified copy (gyro re-scaled, same T) is rejected as the identical measurement", () => {
+    it("a re-identified copy (gyro re-scaled, same T) is not independent: the same session start", () => {
         const channels = structuredClone(primary.channels);
         for (const g of channels.gyroAdc as unknown as Float64Array[]) for (let k = 0; k < g.length; k++) g[k] *= 1.37;
         const copy = { ...primary, sha256: "3".repeat(64), channels };
         expect(sameFlight(primary, copy)).toBe(false); // the windows do not see it ...
+        // ... its session evidence does (the same first sample time): independence unproven.
+        expect(flightRelation(primary, copy)).toEqual({ relation: "UNKNOWN", reasons: ["same_session_start_time"] });
+        const r = run(primary, [copy]);
+        expect(r.crossLogRejected).toContain("cross_log_independence_unproven:same_session_start_time");
+        expect(released(r)).toBe(false);
+    }, 600_000);
+
+    it("a re-identified copy with its clock restarted too is rejected as the identical measurement", () => {
+        const channels = structuredClone(primary.channels);
+        for (const g of channels.gyroAdc as unknown as Float64Array[]) for (let k = 0; k < g.length; k++) g[k] *= 1.37;
+        channels.timeUs = Float64Array.from(channels.timeUs, (v) => v + 3_000_000);
+        const copy = { ...primary, sha256: "3".repeat(64), channels };
+        expect(flightRelation(primary, copy).relation).toBe("INDEPENDENT"); // windows and session miss it ...
         const r = run(primary, [copy]); // ... the plant comparison does: no two flights agree to the bit
         // (roll's controller model is fitted on the gyro itself, so its extracted plant differs a
         // little; pitch and yaw use the headers alone and come out bit-identical.)

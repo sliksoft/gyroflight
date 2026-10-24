@@ -37,6 +37,7 @@ import type { AutotuneLogInput, ChirpAxisInput, FlightFragment } from "./autotun
 import type { AxisName } from "./safetyEvidence";
 
 const FIELDS = [
+    "loopIteration",
     "time",
     "gyroADC[0]",
     "gyroADC[1]",
@@ -118,6 +119,8 @@ export function buildLogInputs(
                 qualificationReasons: m.apply.blocked.filter((r) => r.startsWith("measurement:")),
             };
         }
+        const iterations = ch.loopIteration;
+        const firstIteration = iterations && Number.isFinite(iterations[0]) ? iterations[0] : null;
         const m4log = m4?.logs.find((l) => l.logIndex === log.logIndex)?.result ?? null;
         const latency = (axis: AxisName) => {
             const a = m4log?.feedforward.axes.find((x) => x.axis === axis);
@@ -149,9 +152,20 @@ export function buildLogInputs(
                 latencyMs: { roll: latency("roll"), pitch: latency("pitch"), yaw: latency("yaw") },
             },
             noiseFloorKnown: !!m4log && m4log.filters.gyroLpf.spectrum.every((s) => s.noiseFloorDb !== null),
+            session: { firstIteration, startDatetime: logStartDatetime(log.headerPairs) },
         });
     }
     return out;
+}
+
+/**
+ * The header's `Log start datetime`, or null: absent, unparseable, or the firmware's placeholder
+ * without a real-time clock (year 0000, as most FPV flight controllers log it).
+ */
+export function logStartDatetime(pairs: readonly (readonly [string, string])[]): string | null {
+    const raw = pairs.find(([k]) => k === "Log start datetime")?.[1]?.trim();
+    if (!raw || /^0000-/.test(raw) || !Number.isFinite(Date.parse(raw))) return null;
+    return raw;
 }
 
 const fingerprints = new WeakMap<object, string>();
@@ -277,27 +291,107 @@ export function flightFragments(log: AutotuneLogInput): readonly FlightFragment[
             logIndex: log.logIndex,
             fingerprint: flightFingerprint(log),
             windows: flightWindows(log),
+            session: log.session,
+            firstTimeUs: log.channels.timeUs.length ? log.channels.timeUs[0] : null,
         },
     ];
 }
 
-function sameFragment(a: FlightFragment, b: FlightFragment): boolean {
-    if (a.sha256 === b.sha256 && a.logIndex === b.logIndex) return true;
-    if (a.fingerprint === b.fingerprint) return true;
+/**
+ * How two logs' flights relate (audit F-01). Shared content proves one flight; its absence proves
+ * nothing on its own, since two disjoint fragments of one flight share no sample. So:
+ *
+ *   SAME         the same log, the same samples (fingerprint), or FLIGHT_WINDOW.minShared shared
+ *                active windows or more (trimmed, re-exported, time-shifted, overlapping fragments).
+ *   INDEPENDENT  positive evidence of two recording sessions: no shared active window, both with
+ *                enough active windows (minShared) that an overlap would have shown, both holding
+ *                their session's first frame (loopIteration 0: the firmware starts every log there,
+ *                an export from inside a session does not), and not the same session start (equal
+ *                first sample time, or equal real `Log start datetime`).
+ *   UNKNOWN      anything else: a few shared windows, too little movement to tell, a fragment
+ *                without its session start, missing metadata. It never counts as a repeat, a
+ *                reference, a qualification or a Verified Tune repeat, and is not merged either.
+ */
+export type FlightRelation = "SAME" | "INDEPENDENT" | "UNKNOWN";
+
+export interface FlightRelationVerdict {
+    relation: FlightRelation;
+    /** Why it is not INDEPENDENT (empty when it is). */
+    reasons: string[];
+}
+
+function sharedCount(a: FlightFragment, b: FlightFragment): number {
     const [small, large] = a.windows.size <= b.windows.size ? [a.windows, b.windows] : [b.windows, a.windows];
     let n = 0;
-    for (const w of small) if (large.has(w) && ++n >= FLIGHT_WINDOW.minShared) return true;
-    return false;
+    for (const w of small) if (large.has(w)) n++;
+    return n;
+}
+
+/**
+ * The relation between two flights, each given by every fragment known to belong to it (the
+ * fragments of one flight are linked by shared samples, so they share one recording session):
+ * SAME if any pair of fragments is the same flight; INDEPENDENT only on the evidence above, with
+ * a flight's session start shown by any one of its fragments.
+ */
+function fragmentsRelation(fa: readonly FlightFragment[], fb: readonly FlightFragment[]): FlightRelationVerdict {
+    if (!fa.length || !fb.length) return { relation: "UNKNOWN", reasons: ["no_fragments"] };
+    let shared = 0;
+    for (const x of fa) {
+        for (const y of fb) {
+            if (x.sha256 === y.sha256 && x.logIndex === y.logIndex) return { relation: "SAME", reasons: ["same_log"] };
+            if (x.fingerprint === y.fingerprint) return { relation: "SAME", reasons: ["same_samples"] };
+            const n = sharedCount(x, y);
+            if (n >= FLIGHT_WINDOW.minShared) return { relation: "SAME", reasons: [`shared_windows:${n}`] };
+            shared += n;
+        }
+    }
+    const reasons: string[] = [];
+    const id = (f: FlightFragment) => `${f.sha256}:${f.logIndex}`;
+    // A few bit-identical windows are shared samples: not one flight by the threshold, never two.
+    if (shared > 0) reasons.push(`samples_in_common:${shared}_windows`);
+    for (const f of [...fa, ...fb]) {
+        // Too little movement: an overlap with the other flight could not have shown.
+        if (f.windows.size < FLIGHT_WINDOW.minShared) reasons.push(`too_little_movement_to_tell:${id(f)}`);
+    }
+    const anchors: FlightFragment[] = [];
+    for (const fs of [fa, fb]) {
+        const anchor = fs.find((f) => f.session?.firstIteration === 0);
+        if (anchor) {
+            anchors.push(anchor);
+            continue;
+        }
+        reasons.push(
+            fs.every((f) => f.session?.firstIteration == null)
+                ? `session_evidence_missing:${id(fs[0])}`
+                : `session_start_not_in_log:${id(fs[0])}`,
+        );
+    }
+    if (
+        anchors.length === 2 &&
+        typeof anchors[0].firstTimeUs === "number" &&
+        anchors[0].firstTimeUs === anchors[1].firstTimeUs
+    ) {
+        reasons.push("same_session_start_time");
+    }
+    const dates = (fs: readonly FlightFragment[]) => new Set(fs.map((f) => f.session?.startDatetime).filter(Boolean));
+    const db = dates(fb);
+    if ([...dates(fa)].some((d) => db.has(d))) reasons.push("same_session_datetime");
+    return reasons.length ? { relation: "UNKNOWN", reasons } : { relation: "INDEPENDENT", reasons: [] };
+}
+
+/** How the flights of `a` and `b` relate, over every fragment each stands for (uniqueFlights). */
+export function flightRelation(a: AutotuneLogInput, b: AutotuneLogInput): FlightRelationVerdict {
+    return fragmentsRelation(flightFragments(a), flightFragments(b));
 }
 
 /**
  * Same log of the same file, the same samples under another file, or the same flight trimmed,
  * re-exported or time-shifted (FLIGHT_WINDOW.minShared shared active windows or more). A log kept
- * by uniqueFlights for several files matches whatever any of them matches.
+ * by uniqueFlights for several files matches whatever any of them matches. Not SAME is not
+ * independent: see flightRelation.
  */
 export function sameFlight(a: AutotuneLogInput, b: AutotuneLogInput): boolean {
-    const fb = flightFragments(b);
-    return flightFragments(a).some((x) => fb.some((y) => sameFragment(x, y)));
+    return flightRelation(a, b).relation === "SAME";
 }
 
 /**
@@ -353,16 +447,22 @@ export function crossLogReferenceIssues(
     other: AutotuneLogInput,
     pool: readonly AutotuneLogInput[] = [],
 ): string[] {
-    const linked =
-        sameFlight(primary, other) ||
-        (pool.length > 0 &&
-            flightGroups([primary, other, ...pool.filter((l) => l !== primary && l !== other)]).some(
-                (g) => g.includes(primary) && g.includes(other),
-            ));
-    if (linked) return [`cross_log_duplicate_of_primary:${other.sha256}:${other.logIndex}`];
+    const groups = flightGroups([primary, other, ...pool.filter((l) => l !== primary && l !== other)]);
+    const groupOf = (l: AutotuneLogInput) => groups.find((g) => g.includes(l)) ?? [l];
+    if (sameFlight(primary, other) || groupOf(primary).includes(other)) {
+        return [`cross_log_duplicate_of_primary:${other.sha256}:${other.logIndex}`];
+    }
+    const out: string[] = [];
+    // Independent only on positive evidence, over every fragment either flight is known by.
+    const relation = fragmentsRelation(
+        groupOf(primary).flatMap(flightFragments),
+        groupOf(other).flatMap(flightFragments),
+    );
+    if (relation.relation !== "INDEPENDENT") {
+        out.push(...relation.reasons.map((r) => `cross_log_independence_unproven:${r}`));
+    }
     const a = logIdentity(primary.headerPairs);
     const b = logIdentity(other.headerPairs);
-    const out: string[] = [];
     if (!a.uid || !b.uid || a.uid.some((w, i) => w !== b.uid![i]) || a.board !== b.board) {
         out.push("cross_log_other_craft");
     }

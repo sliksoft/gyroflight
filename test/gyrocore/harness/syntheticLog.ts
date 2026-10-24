@@ -121,9 +121,12 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         return k.endsWith("PID") && o.pids?.[axis] ? [k, o.pids[axis]!.join(",")] : [k, v];
     });
     const h = Object.fromEntries(headerPairs);
-    const timeUs = Float64Array.from({ length: n }, (_, k) => k * 250);
     // The noise is the flight: the same hash gives the same samples (a copy), another hash another flight.
     let seed = Number.parseInt(sha256.slice(0, 8), 16) || 11;
+    // Each flight is its own recording session (logInput.ts flightRelation): armed at its own time
+    // since boot, the log starting at the session's first frame (loopIteration 0).
+    const armedAtUs = 1_000_000 + (seed % 997) * 1000;
+    const timeUs = Float64Array.from({ length: n }, (_, k) => armedAtUs + k * 250);
     const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32 - 0.5;
     // eRPM 600 (×100) with 12 poles → 166.7 Hz motor fundamental.
     const erpm = [0, 1, 2, 3].map(() => new Float64Array(n).fill(600));
@@ -176,6 +179,7 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         chirp: {},
         stick: { acroSeconds: 0, latencyMs: {} },
         noiseFloorKnown: true,
+        session: { firstIteration: 0, startDatetime: null },
     };
     // Each sweep's T is what a plant would show under the controller the engine reconstructs
     // for this log (headers + M5-B effective D path), so baseline and candidate are consistent.

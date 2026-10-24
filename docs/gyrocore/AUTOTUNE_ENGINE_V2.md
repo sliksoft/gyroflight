@@ -221,7 +221,15 @@ constant stretches excluded; four shared windows make one flight; overlapping fr
 `flightGroups`, so a fragment B overlapping both A and C makes A and C one flight although they share no sample; the
 file kept for a group carries the identity of every file in it, `flightGroup`, and the engine groups its own inputs
 too), and not a reference whose plant comes out bit-identical
-(`cross_log_identical_measurement`); a candidate that misses a target is shown, never recommended; a Verified Tune whose
+(`cross_log_identical_measurement`). Independence itself needs positive evidence (`flightRelation`, audit F-01):
+`SAME` (one log, one sample set, or ≥ 4 shared active windows), `INDEPENDENT` only for two recording sessions shown
+as such (no shared active window, enough movement in each for an overlap to show, each flight holding its session's
+first frame, loopIteration 0, where the firmware starts every log, and no equal session start time or real
+`Log start datetime`), and `UNKNOWN` otherwise (a few shared windows, an export from inside a session, missing session
+data, a quiet log). A flight's session start may come from any of its linked fragments. `UNKNOWN` is never a
+reference, a model-class qualification or a Verified Tune repeat, and is not merged; the panel then asks for
+`complete_log_of_an_independent_flight`. Several CHIRP sweeps of one flight, exported as separate files, are therefore
+not independent, whatever band each covers. A candidate that misses a target is shown, never recommended; a Verified Tune whose
 gain-change flight also moved feedforward yields no PID candidate and says so
 (`verified_tune_segment_moves_feedforward`); filter and feedforward results stay PARTIAL until a flight with them confirms
 them.
