@@ -302,7 +302,10 @@ async function onPreview() {
 }
 
 // Backups of the absolute route are restored from the autotune v2 panel (they include the filter block).
-const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !b.absolute) : []));
+// A backup a recovery Restore took of an unverified state is no Restore target (tuneBackup.ts).
+const backups = computed(() =>
+    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !b.absolute && !b.unverified) : [],
+);
 
 function measurementById(id: string) {
     return gate.report?.measurements.find((m) => m.id === id) ?? null;

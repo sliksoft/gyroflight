@@ -56,15 +56,23 @@ MSP message.
   Apply on that craft is refused (`fc:transaction_state_uncertain:<backup>:<stage>:<saved>`, checked before any MSP
   against the logged UID and again against the live UID), and so are the shared upstream saves (the PID tab's write,
   `saveToEeprom`, `saveAndReboot`, the OSD save: `assertNoUncertainWriteOnConnectedCraft`, docs/gyrocore/UPSTREAM.md),
-  since they would write or persist the unverified values. An entry is cleared only by evidence that covers it: a
-  verified Restore (written, read back, saved, read again) of the one PID profile the entry may have changed (never an
-  entry a profile switch spread over two profiles), or the read-only check `checkTransactionState` when EEPROM was not
-  written (saved `no`), no profile switch was seen, and a full read-back equals that backup (after a power cycle RAM
-  reloads the EEPROM this write never touched). With saved `unknown` / `yes_adjusted` only a Restore clears it.
-  Unreadable storage of this record refuses every Apply (`fc:transaction_state_unreadable`). Both panels show the
-  record and the check (`UncertainStateNotice.vue`). When a verify read after the SETs fails, the shared store gets
-  the backup's values back (it would otherwise hold target values the craft was not shown to have). Not covered: the
-  CLI `save` command and presets.
+  since they would write or persist the unverified values; the Motors tab's save checks before its first SET (it writes
+  the filter block), and `saveAndReboot` again right before its delayed `MSP_EEPROM_WRITE`. An entry is cleared only by
+  evidence that covers it: a verified Restore (written, read back, saved, read again) by the same route (the slider
+  Restore does not write the filter block) of the one PID profile the entry may have changed (the slider route records
+  the profile active when it began), or the read-only check `checkTransactionState` when EEPROM was not written (saved
+  `no`), no profile switch was seen, and a full read-back equals that backup (after a power cycle RAM reloads the EEPROM
+  this write never touched). With saved `unknown` / `yes_adjusted` only a Restore clears it. An entry with unknown
+  profiles, or one a profile switch spread over two profiles, is covered by no Restore. A Restore is refused outright
+  while the craft has an entry it would not cover (`restore:uncertain_state_not_covered:...`), since its EEPROM save
+  would persist that entry's RAM too; such a craft has no software recovery path (fail-closed; reflash or a manual
+  check outside Gyroflight). The backup a Restore takes while recovering is marked `unverified` and is never a Restore
+  target (`restore:backup_unverified`). Unreadable storage of this record refuses every Apply and Restore
+  (`fc:transaction_state_unreadable`) and is never overwritten. Every check and change reads the storage first, so an
+  entry another tab stored is seen; localStorage has no compare-and-swap, so two tabs changing it in the same instant
+  can still lose one change. Both panels show the record and the check (`UncertainStateNotice.vue`). When a verify read
+  after the SETs fails, the shared store gets the backup's values back (it would otherwise hold target values the craft
+  was not shown to have). Not covered: the CLI `save` command and presets.
 - Profile switch after a SET: the firmware has no profile-bound atomic write, so a switch between the last MSP_STATUS_EX
   check and the SET puts that block into the other profile's RAM. The route catches it at the next check (stage `verify`
   or `write`, `fc:pid_profile_changed:a->b`); the panel then names the profile that may hold the write, states that

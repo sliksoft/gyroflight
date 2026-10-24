@@ -29,15 +29,22 @@
  * the browser does not keep it), and settles it at the end: removed when verified or stopped before
  * the first SET, replaced by the failure otherwise; a page closed mid-write leaves it pending. Kept
  * per craft UID in this browser (localStorage). An entry is cleared only by evidence that covers it:
- *   - a verified Restore (backup written, read back, saved, read again) of the PID profile the entry
- *     could have changed; an entry that a profile switch may have spread over two profiles is not
- *     covered by restoring one (resolveByRestore), or
+ *   - a verified Restore (backup written, read back, saved, read again) by the same route of the one
+ *     PID profile the entry could have changed; an entry whose profiles are unknown, or that a
+ *     profile switch may have spread over two profiles, is covered by no Restore (resolveByRestore).
+ *     A Restore itself is refused while the craft has an entry it would not cover: its EEPROM save
+ *     would persist that entry's unverified values too (notCoveredByRestore), or
  *   - a read-only check whose full read-back equals the backup, when EEPROM was not written (saved
  *     "no") and no profile switch was seen. With saved "unknown" or "yes_adjusted" a read-back
  *     cannot show what EEPROM holds, so only a Restore clears it.
  * While an entry is open, Gyroflight's Apply and the shared upstream saves (PID tab, EEPROM saves)
  * refuse on that craft (assertNoUncertainWriteOnConnectedCraft). Unreadable storage counts as an
- * uncertain state for every craft (fail-closed).
+ * uncertain state for every craft (fail-closed) and is never overwritten, so a later page cannot
+ * lose what it held; clearing it is a manual step outside Gyroflight.
+ *
+ * Every check and change reads the storage first, so a write in another tab of this browser is
+ * seen (and a `storage` event refreshes what is shown). localStorage has no compare-and-swap: two
+ * tabs changing it in the same instant can still lose one change (residual risk).
  */
 
 import { defineStore } from "pinia";
@@ -64,12 +71,18 @@ export interface UncertainTransaction {
     /** The backup taken right before the write: what Restore puts back and the check compares with. */
     backupId: string;
     /**
-     * Absolute route: the PID profiles the write may have changed (the backed-up one, and the one a
-     * profile switch moved a SET into); null: not known (the slider route, a pending entry).
+     * The PID profiles the write may have changed: the one active when it began, and the one a
+     * profile switch the absolute route saw moved a SET into; null: not known.
      */
     profiles?: number[] | null;
     detail: string;
     at: string;
+}
+
+/** What a verified Restore wrote: its route, and the PID profile active then (null: not known). */
+export interface RestoreScope {
+    route: "absolute" | "slider";
+    profile: number | null;
 }
 
 type Stored = { ok: true; entries: UncertainTransaction[] } | { ok: false };
@@ -104,16 +117,27 @@ export const TRANSACTION_STATE_NOT_STORED = "fc:transaction_state_not_stored";
 export const useFcTransactionStore = defineStore("gyroflightFcTransactionState", () => {
     const stored = readStorage();
     const entries = ref<UncertainTransaction[]>(stored.ok ? stored.entries : []);
+    // A latch: once storage was unreadable or refused a change, this page keeps its own entries.
     const unreadable = ref(!stored.ok);
 
-    function reload() {
+    /** Take what the storage holds now (another tab may have changed it); memory once unreadable. */
+    function sync(): void {
+        if (unreadable.value) return;
         const s = readStorage();
-        entries.value = s.ok ? s.entries : [];
-        unreadable.value = !s.ok;
+        if (!s.ok) unreadable.value = true;
+        else if (JSON.stringify(s.entries) !== JSON.stringify(entries.value)) entries.value = s.entries;
     }
 
-    /** Store `next` and read it back; false (and every craft blocked) when the browser does not keep it. */
+    globalThis.addEventListener?.("storage", (e: StorageEvent) => {
+        if (e.key === TRANSACTION_STORAGE_KEY || e.key === null) sync();
+    });
+
+    /**
+     * Store `next` and read it back; false (and every craft blocked) when the browser does not keep
+     * it. Never writes over storage that was unreadable: what it held is unknown.
+     */
     function persist(next: UncertainTransaction[]): boolean {
+        if (unreadable.value) return false;
         try {
             globalThis.localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify(next));
             if (globalThis.localStorage.getItem(TRANSACTION_STORAGE_KEY) !== JSON.stringify(next)) {
@@ -127,11 +151,17 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
         return true;
     }
 
+    /** persist(), or keep `next` in this page's memory when the browser refuses it (see settle). */
+    function keep(next: UncertainTransaction[]): void {
+        if (!persist(next)) entries.value = next;
+    }
+
     /**
      * Before the first MSP of a write: the transaction as pending, stored and read back. false: the
-     * browser did not keep it, and the write must not start (a reload would forget a failure).
+     * browser did not keep it (or its storage is unreadable), and the write must not start.
      */
     function recordPending(t: UncertainTransaction & { id: string }): boolean {
+        sync();
         return persist([t, ...entries.value]);
     }
 
@@ -141,71 +171,79 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
      * the change; that refusal then blocks every craft until the page is reloaded.
      */
     function settle(id: string, outcome: UncertainTransaction | null): void {
-        const next = [...(outcome ? [{ ...outcome, id }] : []), ...entries.value.filter((e) => e.id !== id)];
-        if (!persist(next)) entries.value = next;
+        sync();
+        keep([...(outcome ? [{ ...outcome, id }] : []), ...entries.value.filter((e) => e.id !== id)]);
     }
 
     /** Record an uncertain outcome (kept in memory when the browser refuses it; see settle). */
     function record(t: UncertainTransaction): void {
-        const next = [t, ...entries.value];
-        if (!persist(next)) entries.value = next;
+        sync();
+        keep([t, ...entries.value]);
     }
 
-    /** The open entries for this craft; a null UID matches none (the caller blocks on the missing UID). */
+    /** The open entries for this craft as last read; a null UID matches none (the caller blocks on the missing UID). */
     function forUid(uid: readonly number[] | null | undefined): UncertainTransaction[] {
         return entries.value.filter((e) => sameUid(e.uid, uid));
     }
 
-    /** Why a write on this craft must not run now; empty when its state is known. `except`: the caller's own entry. */
-    function blocks(uid: readonly number[] | null | undefined, except?: string): string[] {
-        const open = forUid(uid).filter((e) => !except || e.id !== except);
+    /**
+     * Why a write on this craft must not run now, as last read; empty when its state is known.
+     * Pure (the panels compute from it); a write path calls sync() first.
+     */
+    function blocks(uid: readonly number[] | null | undefined): string[] {
         return [
             ...(unreadable.value ? [TRANSACTION_STATE_UNREADABLE] : []),
-            ...open.map((e) => `fc:transaction_state_uncertain:${e.backupId}:${e.stage}:${e.saved}`),
+            ...forUid(uid).map((e) => `fc:transaction_state_uncertain:${e.backupId}:${e.stage}:${e.saved}`),
         ];
     }
 
     /** Drop the given entries: their craft state is known again (kept when the browser refuses the change). */
-    function resolveEntries(ids: readonly UncertainTransaction[]): boolean {
-        return persist(entries.value.filter((e) => !ids.includes(e)));
+    function resolveEntries(list: readonly UncertainTransaction[]): boolean {
+        const gone = new Set(list.map((e) => JSON.stringify(e)));
+        sync();
+        return persist(entries.value.filter((e) => !gone.has(JSON.stringify(e))));
     }
 
     /**
-     * A verified absolute Restore of PID profile `profile` proves that profile only: it resolves the
-     * absolute entries whose affected profiles are just that one, and the entries whose profiles are
-     * unknown because the page closed mid-write (pending) when no profile switch was recorded. A
-     * verified slider-route Restore resolves the slider route's entries. Entries the Restore does not
-     * cover stay.
+     * Whether a verified Restore by `restored.route` of PID profile `restored.profile` proves the
+     * state `e` left: the same route (the slider Restore does not write the filter block), and the
+     * entry's affected profiles are known and just that one.
      */
-    function resolveByRestore(
-        uid: readonly number[],
-        restored: { route: "absolute"; profile: number } | { route: "slider" },
-    ): boolean {
-        const covered = forUid(uid).filter((e) => {
-            const absolute = e.action === "absolute_apply" || e.action === "absolute_restore";
-            if (restored.route === "slider") return !absolute && e.stage !== "in_progress";
-            if (e.stage === "in_progress") return true;
-            return (
-                absolute &&
-                Array.isArray(e.profiles) &&
-                e.profiles.length > 0 &&
-                e.profiles.every((p) => p === restored.profile)
-            );
-        });
-        return resolveEntries(covered);
+    function coveredBy(e: UncertainTransaction, restored: RestoreScope): boolean {
+        const absolute = e.action === "absolute_apply" || e.action === "absolute_restore";
+        return (
+            absolute === (restored.route === "absolute") &&
+            restored.profile !== null &&
+            Array.isArray(e.profiles) &&
+            e.profiles.length === 1 &&
+            e.profiles[0] === restored.profile
+        );
+    }
+
+    /** The open entries of this craft such a Restore would not cover: while any exists, it must not run. */
+    function notCoveredByRestore(uid: readonly number[], restored: RestoreScope): UncertainTransaction[] {
+        sync();
+        return forUid(uid).filter((e) => !coveredBy(e, restored));
+    }
+
+    /** After a verified Restore: resolve the entries it covers; the others stay. */
+    function resolveByRestore(uid: readonly number[], restored: RestoreScope): boolean {
+        sync();
+        return resolveEntries(forUid(uid).filter((e) => coveredBy(e, restored)));
     }
 
     return {
         entries,
         unreadable,
+        sync,
         recordPending,
         settle,
         record,
         forUid,
         blocks,
         resolveEntries,
+        notCoveredByRestore,
         resolveByRestore,
-        reload,
     };
 });
 
@@ -216,6 +254,8 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
  */
 export function assertNoUncertainWriteOnConnectedCraft(): void {
     const uid = useFlightControllerStore().config.uid;
-    const blocks = useFcTransactionStore().blocks(Array.isArray(uid) && uid.length === 3 ? uid : null);
+    const states = useFcTransactionStore();
+    states.sync();
+    const blocks = states.blocks(Array.isArray(uid) && uid.length === 3 ? uid : null);
     if (blocks.length) throw new ApplyBlockedError(blocks);
 }

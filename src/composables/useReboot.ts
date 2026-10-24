@@ -81,8 +81,8 @@ export function useReboot() {
         } catch (err) {
             return Promise.reject(err);
         }
-        return new Promise<void>((resolve) => {
-            mspHelper.writeConfiguration(false, () => cleanupAndReboot(resolve));
+        return new Promise<void>((resolve, reject) => {
+            mspHelper.writeConfiguration(false, () => cleanupAndReboot(resolve), reject);
         });
     }
 

@@ -160,6 +160,11 @@ async function apply(id: string, token?: string | null) {
     return useAutotune().applyGains(CHANGE, id, token === undefined ? await confirmApply(id) : token);
 }
 
+async function confirmRestoreToken(backupId: string) {
+    const preview = await previewHashNow(() => previewRestore(backupId));
+    return issueConfirmation({ kind: "restore", backupId, preview });
+}
+
 async function failure(p: Promise<unknown>) {
     return p.then(
         () => null,
@@ -428,6 +433,11 @@ describe("write, read back, verify, save", () => {
         const next = (await failure(apply(c.id))) as ApplyBlockedError;
         expect(next.reasons).toEqual([`fc:transaction_state_uncertain:${err.backupId}:eeprom:unknown`]);
         expect(writes()).toEqual([]);
+        // The entry names the PID profile the write began on, so the slider Restore of that profile covers it.
+        const back = await restoreTune(err.backupId, await confirmRestoreToken(err.backupId));
+        expect(back.status).toBe("verified");
+        expect(useTuneBackupStore().get(back.backupId)?.unverified).toBe(true);
+        expect((await apply(c.id)).status).toBe("verified");
     });
 
     it("gyro filter Hz the sliders recompute on SET are expected from MSP_CALCULATE_SIMPLIFIED_GYRO", async () => {
@@ -488,11 +498,6 @@ describe("read-only preview, and the confirmation bound to it", () => {
 });
 
 describe("Restore", () => {
-    async function confirmRestoreToken(backupId: string) {
-        const preview = await previewHashNow(() => previewRestore(backupId));
-        return issueConfirmation({ kind: "restore", backupId, preview });
-    }
-
     it("puts the backed-up tune back on the same craft, verified and saved, after its own backup", async () => {
         const c = await load();
         const before = route.craft.pids.map((r) => [...r]);

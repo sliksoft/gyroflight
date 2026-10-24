@@ -87,6 +87,7 @@ import {
 import { newBackupId, sameUid, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import {
     TRANSACTION_STATE_NOT_STORED,
+    TRANSACTION_STATE_UNREADABLE,
     useFcTransactionStore,
     type UncertainTransaction,
 } from "@/gyrocore/stores/fcTransactionState";
@@ -292,6 +293,7 @@ function storeBackup(
     snapshot: TuneSnapshot,
     compositeId: string | null,
     absolute?: AbsoluteSnapshot,
+    unverified = false,
 ): TuneBackup {
     const backup: TuneBackup = {
         id: newBackupId(),
@@ -303,6 +305,7 @@ function storeBackup(
         compositeId,
         snapshot,
         ...(absolute ? { absolute } : {}),
+        ...(unverified ? { unverified: true as const } : {}),
     };
     if (!useTuneBackupStore().save(backup)) {
         throw new ApplyBlockedError(["apply:backup_not_stored"]);
@@ -374,7 +377,9 @@ function errorText(err: unknown): string {
 
 /** Refuses while an earlier write on this craft ended in a state nobody verified (fcTransactionState). */
 function assertTransactionStateKnown(uid: readonly number[] | null | undefined): void {
-    const blocks = useFcTransactionStore().blocks(uid);
+    const states = useFcTransactionStore();
+    states.sync();
+    const blocks = states.blocks(uid);
     if (blocks.length) {
         throw new ApplyBlockedError(blocks);
     }
@@ -429,10 +434,11 @@ async function transaction<T extends { backupId: string }>(
         if (b) {
             states.settle(b.id, null);
             // Written, read back, saved and read again: what this Restore covers is known again.
-            if (action === "absolute_restore" && b.profiles?.length === 1) {
-                states.resolveByRestore(b.uid, { route: "absolute", profile: b.profiles[0] });
-            } else if (action === "restore") {
-                states.resolveByRestore(b.uid, { route: "slider" });
+            if ((action === "absolute_restore" || action === "restore") && b.profiles?.length === 1) {
+                states.resolveByRestore(b.uid, {
+                    route: action === "restore" ? "slider" : "absolute",
+                    profile: b.profiles[0],
+                });
             }
         }
         return result;
@@ -459,6 +465,36 @@ async function transaction<T extends { backupId: string }>(
         }
         throw err;
     }
+}
+
+/**
+ * The PID profile a slider-route write acts on: the one active when it began. That route does not
+ * check the profile again while it writes (the absolute route does, assertPidProfile).
+ */
+const profilesOf = (fc: FcIdentity): number[] | null => (fc.pidProfile === null ? null : [fc.pidProfile]);
+
+/**
+ * A Restore that starts while the craft has open uncertain entries recovers from a write nobody
+ * verified: what it backs up first is that unverified state, kept so the recovery can be inspected
+ * but never written back (the Restore routes refuse it).
+ */
+function recovering(fc: FcIdentity): boolean {
+    return useFcTransactionStore().forUid(fc.uid).length > 0;
+}
+
+/**
+ * Before a Restore: the transaction state must be readable, and every open entry of this craft must
+ * be one this Restore covers (fcTransactionState.notCoveredByRestore). Otherwise its EEPROM save
+ * would persist what the other entries left in RAM (another PID profile, the filter block).
+ */
+function restoreStateBlocks(fc: FcIdentity, route: "absolute" | "slider"): string[] {
+    const states = useFcTransactionStore();
+    states.sync();
+    if (states.unreadable) return [TRANSACTION_STATE_UNREADABLE];
+    if (!fc.uid) return [];
+    return states
+        .notCoveredByRestore(fc.uid, { route, profile: fc.pidProfile })
+        .map((e) => `restore:uncertain_state_not_covered:${e.backupId}:${e.stage}:${e.saved}`);
 }
 
 const uid3 = (u: readonly number[] | null | undefined): [number, number, number] | null =>
@@ -584,7 +620,7 @@ async function applyTuneOnce(
 
     // 5. Backup, then the write itself.
     const backup = storeBackup("before_apply", fc, before, composite.id);
-    tx.begin(uid3(fc.uid), backup.id, null);
+    tx.begin(uid3(fc.uid), backup.id, profilesOf(fc));
     const fcStore = useFlightControllerStore();
     loadStore(before);
     // Object.keys widens to string[]; the keys are the proposal's own slider fields.
@@ -642,6 +678,9 @@ async function readRestoreTarget(backupId: string): Promise<RestorePreview> {
     if (snapshotIssues(backup.snapshot).length) {
         throw new ApplyBlockedError(["restore:backup_invalid"]);
     }
+    if (backup.unverified) {
+        throw new ApplyBlockedError(["restore:backup_unverified"]);
+    }
     assertConnectedReal();
     const fc = await readIdentity();
     const blocked: string[] = [];
@@ -660,6 +699,7 @@ async function readRestoreTarget(backupId: string): Promise<RestorePreview> {
     if (fc.armed) {
         blocked.push("fc:armed");
     }
+    blocked.push(...restoreStateBlocks(fc, "slider"));
     if (blocked.length) {
         throw new ApplyBlockedError(blocked);
     }
@@ -688,8 +728,8 @@ async function restoreTuneOnce(
     if (confirmed.preview !== restoreHash(snapshotHash(current), snapshotHash(target))) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
-    const safety = storeBackup("before_restore", fc, current, null);
-    tx.begin(uid3(fc.uid), safety.id, null);
+    const safety = storeBackup("before_restore", fc, current, null, undefined, recovering(fc));
+    tx.begin(uid3(fc.uid), safety.id, profilesOf(fc));
 
     const fcStore = useFlightControllerStore();
     loadStore({ ...current, sliders: target.sliders, filters: target.filters });
@@ -1137,6 +1177,9 @@ async function readAbsoluteRestoreTarget(backupId: string): Promise<{
     if (absoluteSnapshotIssues(backup.absolute).length) {
         throw new ApplyBlockedError(["restore:backup_invalid"]);
     }
+    if (backup.unverified) {
+        throw new ApplyBlockedError(["restore:backup_unverified"]);
+    }
     assertConnectedReal();
     const fc = await readIdentity();
     const blocked: string[] = [];
@@ -1150,6 +1193,7 @@ async function readAbsoluteRestoreTarget(backupId: string): Promise<{
     else if (fc.pidProfile !== backup.absolute.pidProfile) {
         blocked.push(`restore:pid_profile_changed:${backup.absolute.pidProfile}->${fc.pidProfile}`);
     }
+    blocked.push(...restoreStateBlocks(fc, "absolute"));
     if (blocked.length) {
         throw new ApplyBlockedError(blocked);
     }
@@ -1187,7 +1231,7 @@ async function restoreAbsoluteTuneOnce(
     if (confirmed.preview !== restoreHash(absoluteHash(current), absoluteHash(target))) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
-    const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current);
+    const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current, recovering(fc));
     tx.begin(uid3(fc.uid), safety.id, [current.pidProfile!]);
     await writeAbsoluteBlocks(current, target, current, safety.id, true);
     const verified = await verifyAbsoluteAndSave(target, current, safety.id);
@@ -1213,6 +1257,7 @@ export async function checkTransactionState(): Promise<TransactionStateCheck> {
     const fc = await readIdentity();
     if (!fc.uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
     const states = useFcTransactionStore();
+    states.sync();
     const open = states.forUid(fc.uid);
     const reasons: string[] = [];
     for (const entry of open) {

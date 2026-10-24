@@ -48,6 +48,7 @@ import type { CurrentMeterConfig, LedStripEntry } from "../../stores/fc.types";
 import type Features from "../Features";
 import type Beepers from "../Beepers";
 import { TABS, tabSwitchCleanup } from "../tab_adapters";
+import { assertNoUncertainWriteOnConnectedCraft } from "../../gyrocore/stores/fcTransactionState";
 
 // serial_backend's initFeaturesOnConnect (or VirtualFC) replaces the reset value null with these
 // instances before any feature or beeper MSP is exchanged.
@@ -799,7 +800,7 @@ class MspHelper {
         MSP.send_message(mspCode, mspHelper.crunch(mspCode), false, callback);
     }
 
-    writeConfiguration(reboot: boolean, callback?: () => void) {
+    writeConfiguration(reboot: boolean, callback?: () => void, onRefused?: (err: unknown) => void) {
         const fcStore = useFlightControllerStore();
         // We need some protection when testing motors on motors tab
         if (!fcStore.config.armingDisabled) {
@@ -807,6 +808,14 @@ class MspHelper {
         }
 
         setTimeout(function () {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): checked again when the save goes out, since
+            // a Gyroflight write may have ended unverified during the delay.
+            try {
+                assertNoUncertainWriteOnConnectedCraft();
+            } catch (err) {
+                onRefused?.(err);
+                return;
+            }
             MSP.send_message(MSPCodes.MSP_EEPROM_WRITE, false, false, function () {
                 gui_log(i18n.getMessage("configurationEepromSaved"));
                 console.log("Configuration saved to EEPROM");

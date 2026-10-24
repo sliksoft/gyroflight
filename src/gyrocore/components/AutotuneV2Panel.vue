@@ -635,7 +635,10 @@ function evidenceClass(level: string) {
           : "text-yellow-500";
 }
 
-const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !!b.absolute) : []));
+// A backup a recovery Restore took of an unverified state is no Restore target (tuneBackup.ts).
+const backups = computed(() =>
+    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !!b.absolute && !b.unverified) : [],
+);
 
 function stateClass(state: string) {
     return state === "VALIDATED" ? "text-green-500" : state === "BLOCKED" ? "text-red-500" : "text-yellow-500";
