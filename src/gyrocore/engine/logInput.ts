@@ -491,8 +491,45 @@ export function uniqueFlights(logs: readonly AutotuneLogInput[]): AutotuneLogInp
     });
 }
 
-/** Header values beyond the absolute fields that shape the identified plant. */
-const PLANT_CONFIG_KEYS = ["looptime", "pid_process_denom", "motor_poles", "gyro_notch_hz", "dterm_notch_hz"];
+/**
+ * Header values beyond the absolute fields that the models read (audit WP8): the loop rates, the
+ * gyro chain (gyroChain.chainConfigFromHeaders), the D path (dtermConfigFromHeaders) and the
+ * controller model (controllerConfigFromHeaders). Not the sweep settings (a qualification flight
+ * sweeps differently by design) nor values the firmware computes per flight.
+ */
+export const PLANT_CONFIG_KEYS = [
+    "looptime",
+    "pid_process_denom",
+    "motor_poles",
+    "gyro_notch_hz",
+    "dterm_notch_hz",
+    "gyro_lpf1_type",
+    "gyro_lpf1_static_hz",
+    "gyro_lpf1_dyn_hz",
+    "gyro_lpf1_dyn_expo",
+    "gyro_lpf2_type",
+    "gyro_lpf2_static_hz",
+    "dyn_notch_count",
+    "dyn_notch_q",
+    "dyn_notch_min_hz",
+    "dyn_notch_max_hz",
+    "rpm_filter_harmonics",
+    "rpm_filter_q",
+    "rpm_filter_min_hz",
+    "rpm_filter_fade_range_hz",
+    "rpm_filter_lpf_hz",
+    "rpm_filter_weights",
+    "dterm_lpf1_type",
+    "dterm_lpf1_static_hz",
+    "dterm_lpf1_dyn_hz",
+    "dterm_lpf1_dyn_expo",
+    "dterm_lpf2_type",
+    "dterm_lpf2_static_hz",
+    "throttle_limit_type",
+    "yaw_lowpass_hz",
+    "chirp_lag_freq_hz",
+    "chirp_lead_freq_hz",
+];
 
 /**
  * Why `other` cannot serve as an independent repeat of `primary` (empty: it can): not the same
@@ -534,7 +571,7 @@ export function crossLogReferenceIssues(
     for (const k of PLANT_CONFIG_KEYS) {
         if (ha.get(k) !== hb.get(k)) out.push(`cross_log_config_differs:${k}`);
     }
-    return out;
+    return [...new Set(out)];
 }
 
 /** The logged P/I/D/F of all axes: logs with the same key were flown with the same tune. */

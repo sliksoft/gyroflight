@@ -257,19 +257,24 @@ describe("1. from Blackbox bytes through every stage: each failing condition blo
         expect(report.candidates[0].rejected).toContain("qualification_no_usable_axis_with_finer_analysis");
     }, 600_000);
 
-    it("the producer on decoded flights: a finer independent flight over the same band is INSUFFICIENT (P1-2)", () => {
+    it("the producer on decoded flights: one 20 s sweep analysed finer is not coherent enough, so no qualification", () => {
+        // An independent second flight of the same tune. Its finer analysis (8× the resolution, the
+        // same samples) leaves most fine bins too briefly excited by the exponential sweep: the
+        // producer refuses it, and the plan asks for a longer sweep (measurementPlan.ts).
         const second = decoded(
             { plants: [AIR65_LIKE, AIR65_LIKE, AIR65_LIKE], noise: 0.3, seed: 21, startTimeUs: 6_000_000 },
             "qualification.bbl",
         );
+        expect(flightRelation(stable, second).relation).toBe("INDEPENDENT");
         const { report } = assessModelQualification({ primary: stable, others: [second], verifiedTune: null });
-        expect(report.source?.sha256).toBe(second.sha256);
+        expect(report.source).toBeNull();
         expect(report.connectedToApply).toBe(false);
-        for (const a of report.axes) {
-            expect(a.level).not.toBe("VALIDATED");
-            expect(a.verdict === null || a.verdict !== "PASS").toBe(true);
-        }
-        expect(report.criteria.find((c) => c.name === "independent_evidence")!.status).toBe("PASS");
+        expect(
+            report.candidates[0].rejected.some((r) => r.startsWith("qualification_axis_fine_analysis_not_coherent:")),
+        ).toBe(true);
+        expect(stableR.parts.flatMap((p) => p.requiredMeasurements)).toContain(
+            "required_measurement:chirp_longer_sweep_for_averages",
+        );
     }, 600_000);
 });
 

@@ -127,19 +127,20 @@ describe("the plan follows the evidence rules", () => {
         const sigma = ((PLAN.pmUncertaintyDeg / UNCERTAINTY.coverage) * Math.PI) / 180;
         expect(p.averages.needed).toBe(Math.max(1, Math.ceil(((1 - g2) * kappa * kappa) / (2 * g2 * sigma * sigma))));
         expect(p.averages.now).toBe(1);
-        expect(p.requiredMeasurements).toContain("required_measurement:chirp_repeats_or_longer_sweep_for_averages");
-        // Over the planned band: one average per bin at fc takes T = Ts² · fc · ln(f1/f0); n such sweeps give n.
+        expect(p.requiredMeasurements).toContain("required_measurement:chirp_longer_sweep_for_averages");
+        // One sweep over the planned band giving n averages at fc: T = n · Ts² · fc · ln(f1/f0)
+        // (the analysis does not combine repeated sweeps, so the plan never asks for repeats).
         const Ts = p.segmentSamples.primary! / 4000;
         expect(p.sweep!.f0Hz).toBeCloseTo(p.bandHz.primary![0], 9);
         expect(p.sweep!.f1Hz).toBeCloseTo(p.bandHz.primary![1], 9);
         expect(p.sweep!.durationS).toBeCloseTo(
             Math.max(
-                Ts * Ts * fc * Math.log(p.sweep!.f1Hz / p.sweep!.f0Hz),
+                p.averages.needed! * Ts * Ts * fc * Math.log(p.sweep!.f1Hz / p.sweep!.f0Hz),
                 (Ts * (UNCERTAINTY.minWelchSegments + 1)) / 2,
             ),
             6,
         );
-        expect(p.sweep!.repeats).toBe(p.averages.needed);
+        expect("repeats" in p.sweep!).toBe(false);
         const TsQ = p.segmentSamples.qualification! / 4000;
         expect(p.qualificationSweep!.durationS).toBeGreaterThanOrEqual((TsQ * (UNCERTAINTY.minWelchSegments + 1)) / 2);
         expect(p.qualificationSweep!.f1Hz).toBeCloseTo(p.bandHz.qualification![1], 9);

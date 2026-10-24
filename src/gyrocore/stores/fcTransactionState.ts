@@ -25,31 +25,49 @@
  * no further Apply may build on it, since every Apply assumes the craft holds what was read before
  * it and what the log shows.
  *
- * An entry is recorded by useTuneApply.ts for every failure after the first SET (any stage but
- * "prepare"), per craft UID, and kept in this browser (localStorage) so a reload does not forget it.
- * It is cleared only by evidence:
- *   - a verified Restore of that craft (backup written, read back, saved, read again), or
- *   - a read-only check whose full read-back equals the backup, when EEPROM was not written
- *     (saved "no"): RAM then holds the backup and EEPROM never changed. With saved "unknown" or
- *     "yes_adjusted" a read-back cannot show what EEPROM holds, so only a Restore clears it.
- * Unreadable storage counts as an uncertain state for every craft (fail-closed).
+ * useTuneApply.ts stores a pending entry before the first MSP of every write (no write starts when
+ * the browser does not keep it), and settles it at the end: removed when verified or stopped before
+ * the first SET, replaced by the failure otherwise; a page closed mid-write leaves it pending. Kept
+ * per craft UID in this browser (localStorage). An entry is cleared only by evidence that covers it:
+ *   - a verified Restore (backup written, read back, saved, read again) of the PID profile the entry
+ *     could have changed; an entry that a profile switch may have spread over two profiles is not
+ *     covered by restoring one (resolveByRestore), or
+ *   - a read-only check whose full read-back equals the backup, when EEPROM was not written (saved
+ *     "no") and no profile switch was seen. With saved "unknown" or "yes_adjusted" a read-back
+ *     cannot show what EEPROM holds, so only a Restore clears it.
+ * While an entry is open, Gyroflight's Apply and the shared upstream saves (PID tab, EEPROM saves)
+ * refuse on that craft (assertNoUncertainWriteOnConnectedCraft). Unreadable storage counts as an
+ * uncertain state for every craft (fail-closed).
  */
 
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { sameUid } from "@/gyrocore/stores/tuneBackup";
+import { useFlightControllerStore } from "@/stores/fc";
 
 export const TRANSACTION_STORAGE_KEY = "gyroflight.fcTransactionState.v1";
 
 export interface UncertainTransaction {
+    /** Unique per write transaction (a pending entry and its outcome share it). */
+    id?: string;
     uid: [number, number, number];
     action: "apply" | "absolute_apply" | "restore" | "absolute_restore";
-    /** useTuneApply WriteStage where it stopped (never "prepare": nothing was sent then). */
+    /**
+     * useTuneApply WriteStage where it stopped (never "prepare": nothing was sent then), or
+     * "in_progress": recorded before the first MSP and never settled (the page closed or crashed
+     * in the middle of the write, so nothing is known of its outcome).
+     */
     stage: string;
     /** EEPROM state the failure could prove: "no", "unknown" or "yes_adjusted". */
     saved: string;
     /** The backup taken right before the write: what Restore puts back and the check compares with. */
     backupId: string;
+    /**
+     * Absolute route: the PID profiles the write may have changed (the backed-up one, and the one a
+     * profile switch moved a SET into); null: not known (the slider route, a pending entry).
+     */
+    profiles?: number[] | null;
     detail: string;
     at: string;
 }
@@ -81,6 +99,7 @@ function readStorage(): Stored {
 }
 
 export const TRANSACTION_STATE_UNREADABLE = "fc:transaction_state_unreadable";
+export const TRANSACTION_STATE_NOT_STORED = "fc:transaction_state_not_stored";
 
 export const useFcTransactionStore = defineStore("gyroflightFcTransactionState", () => {
     const stored = readStorage();
@@ -93,9 +112,13 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
         unreadable.value = !s.ok;
     }
 
+    /** Store `next` and read it back; false (and every craft blocked) when the browser does not keep it. */
     function persist(next: UncertainTransaction[]): boolean {
         try {
             globalThis.localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify(next));
+            if (globalThis.localStorage.getItem(TRANSACTION_STORAGE_KEY) !== JSON.stringify(next)) {
+                throw new Error("not kept");
+            }
         } catch {
             unreadable.value = true;
             return false;
@@ -105,9 +128,24 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
     }
 
     /**
-     * Record an uncertain outcome. Kept in memory even when the browser refuses to store it; that
-     * refusal itself then blocks every craft (`unreadable`) until the page is reloaded.
+     * Before the first MSP of a write: the transaction as pending, stored and read back. false: the
+     * browser did not keep it, and the write must not start (a reload would forget a failure).
      */
+    function recordPending(t: UncertainTransaction & { id: string }): boolean {
+        return persist([t, ...entries.value]);
+    }
+
+    /**
+     * The transaction `id` ended: its pending entry is replaced by `outcome` (an uncertain end) or
+     * removed (verified, or stopped before the first SET). Kept in memory when the browser refuses
+     * the change; that refusal then blocks every craft until the page is reloaded.
+     */
+    function settle(id: string, outcome: UncertainTransaction | null): void {
+        const next = [...(outcome ? [{ ...outcome, id }] : []), ...entries.value.filter((e) => e.id !== id)];
+        if (!persist(next)) entries.value = next;
+    }
+
+    /** Record an uncertain outcome (kept in memory when the browser refuses it; see settle). */
     function record(t: UncertainTransaction): void {
         const next = [t, ...entries.value];
         if (!persist(next)) entries.value = next;
@@ -118,19 +156,66 @@ export const useFcTransactionStore = defineStore("gyroflightFcTransactionState",
         return entries.value.filter((e) => sameUid(e.uid, uid));
     }
 
-    /** Why an Apply on this craft must not run now; empty when its state is known. */
-    function blocks(uid: readonly number[] | null | undefined): string[] {
-        const open = forUid(uid);
+    /** Why a write on this craft must not run now; empty when its state is known. `except`: the caller's own entry. */
+    function blocks(uid: readonly number[] | null | undefined, except?: string): string[] {
+        const open = forUid(uid).filter((e) => !except || e.id !== except);
         return [
             ...(unreadable.value ? [TRANSACTION_STATE_UNREADABLE] : []),
             ...open.map((e) => `fc:transaction_state_uncertain:${e.backupId}:${e.stage}:${e.saved}`),
         ];
     }
 
-    /** The craft's state is known again: drop every entry for it (kept when the browser refuses the change). */
-    function resolve(uid: readonly number[]): boolean {
-        return persist(entries.value.filter((e) => !sameUid(e.uid, uid)));
+    /** Drop the given entries: their craft state is known again (kept when the browser refuses the change). */
+    function resolveEntries(ids: readonly UncertainTransaction[]): boolean {
+        return persist(entries.value.filter((e) => !ids.includes(e)));
     }
 
-    return { entries, unreadable, record, forUid, blocks, resolve, reload };
+    /**
+     * A verified absolute Restore of PID profile `profile` proves that profile only: it resolves the
+     * absolute entries whose affected profiles are just that one, and the entries whose profiles are
+     * unknown because the page closed mid-write (pending) when no profile switch was recorded. A
+     * verified slider-route Restore resolves the slider route's entries. Entries the Restore does not
+     * cover stay.
+     */
+    function resolveByRestore(
+        uid: readonly number[],
+        restored: { route: "absolute"; profile: number } | { route: "slider" },
+    ): boolean {
+        const covered = forUid(uid).filter((e) => {
+            const absolute = e.action === "absolute_apply" || e.action === "absolute_restore";
+            if (restored.route === "slider") return !absolute && e.stage !== "in_progress";
+            if (e.stage === "in_progress") return true;
+            return (
+                absolute &&
+                Array.isArray(e.profiles) &&
+                e.profiles.length > 0 &&
+                e.profiles.every((p) => p === restored.profile)
+            );
+        });
+        return resolveEntries(covered);
+    }
+
+    return {
+        entries,
+        unreadable,
+        recordPending,
+        settle,
+        record,
+        forUid,
+        blocks,
+        resolveEntries,
+        resolveByRestore,
+        reload,
+    };
 });
+
+/**
+ * For write paths outside Gyroflight's routes (the PID tab's Save, EEPROM saves of any tab): refuse
+ * while the connected craft's last Gyroflight write ended in a state nobody verified, since such a
+ * save would write or persist those unverified values (audit WP8). Throws ApplyBlockedError.
+ */
+export function assertNoUncertainWriteOnConnectedCraft(): void {
+    const uid = useFlightControllerStore().config.uid;
+    const blocks = useFcTransactionStore().blocks(Array.isArray(uid) && uid.length === 3 ? uid : null);
+    if (blocks.length) throw new ApplyBlockedError(blocks);
+}

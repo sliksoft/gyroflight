@@ -43,6 +43,7 @@ import {
     loopMargins,
     loopUncertainty,
     marginEvidenceIssues,
+    sectorDistanceToMinusOne,
     sweepAverages,
     UNCERTAINTY,
 } from "../../src/gyrocore/engine/loopModel";
@@ -126,13 +127,22 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         expect(m.evidence.bandHz![0]).toBeGreaterThan(2);
     });
 
+    it("an unidentified bin inside the band (a poorly measured resonance would vanish there) leaves no bounds", () => {
+        // One bin at 40 Hz just above the coherence limit: used, but its ±2ε is too large: left out.
+        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), (f) => (f === 40 ? 0.81 : 1));
+        const m = loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true));
+        expect(m.reasons).toContain("unidentified_bins_inside_band:1");
+        expect(m.evidence.level).toBe("MEASURED");
+        expect(m.gainMarginDb).toBeNull();
+    });
+
     it("an error that changes what the bins show (the crossings) leaves no bounds, named", () => {
         const hot = { ...cfg, axis: { ...cfg.axis, p: cfg.axis.p * 3.5 } };
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.9);
         const m = loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true), { cfg: hot });
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.gainMarginDb).toBeNull();
-        expect(m.reasons).toContain("margin_uncertainty_changes_what_the_bins_show");
+        expect(m.reasons.some((r) => r.startsWith("margin_uncertainty_changes_what_the_bins_show:"))).toBe(true);
     });
 
     it("the release contract requires the uncertainty with the bounds (fail-closed)", () => {
@@ -192,6 +202,27 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         expect(pm(exact).passed).toBe(true);
         expect(pm(noisy).passed).toBe(false);
         expect(pm(noisy).reasons).toContain(`pm_below_target:roll:${noisy.phaseMarginDeg}`);
+    });
+});
+
+describe("the bounds cover the whole uncertainty set, not a few samples of it (Codex WP8 P0-3)", () => {
+    it("Codex's counterexample: L = 0.98∠−176° with ±2ε = ±10 % can reach −1, so the distance bound is 0", () => {
+        const e = 0.1;
+        const th = (-176 * Math.PI) / 180;
+        expect(sectorDistanceToMinusOne(0.98 * (1 - e), 0.98 * (1 + e), th - e, th + e)).toBe(0);
+        // The four corners alone stay away from −1: they were no bound.
+        const corners = [1 - e, 1 + e].flatMap((g) =>
+            [-e, e].map((a) => Math.hypot(0.98 * g * Math.cos(th + a) + 1, 0.98 * g * Math.sin(th + a))),
+        );
+        expect(Math.min(...corners)).toBeGreaterThan(0.01);
+    });
+
+    it("the sector distance is exact on simple geometry", () => {
+        // A sector straddling angle π: radial distance; one beside it: the nearest boundary ray.
+        expect(sectorDistanceToMinusOne(1.5, 2, Math.PI - 0.1, Math.PI + 0.1)).toBeCloseTo(0.5, 12);
+        expect(sectorDistanceToMinusOne(1, 1, Math.PI / 2, Math.PI / 2)).toBeCloseTo(Math.SQRT2, 12);
+        // Unwrapped angles: −180° is the same point as 180°.
+        expect(sectorDistanceToMinusOne(0.5, 0.5, -Math.PI - 0.01, -Math.PI + 0.01)).toBeCloseTo(0.5, 12);
     });
 });
 

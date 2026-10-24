@@ -27,6 +27,7 @@ import MSPCodes from "@/js/msp/MSPCodes";
 import { useFlightControllerStore } from "@/stores/fc";
 import { gui_log } from "@/js/gui_log";
 import { i18n } from "@/js/localization";
+import { assertNoUncertainWriteOnConnectedCraft } from "@/gyrocore/stores/fcTransactionState";
 
 /**
  * Persist the current configuration to EEPROM without rebooting. This is the await-able,
@@ -41,6 +42,9 @@ import { i18n } from "@/js/localization";
  * @returns {Promise<void>} resolves once the EEPROM write is acknowledged
  */
 async function saveToEeprom(): Promise<void> {
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md): no save on a craft whose last Gyroflight write
+    // ended unverified; it would write or persist those values.
+    assertNoUncertainWriteOnConnectedCraft();
     const fcStore = useFlightControllerStore();
     // Never persist while arming is possible (matches writeConfiguration).
     if (!fcStore.config.armingDisabled) {
@@ -71,6 +75,12 @@ export function useReboot() {
      * @returns {Promise<void>} resolves once the reboot sequence has started
      */
     function saveAndReboot(): Promise<void> {
+        try {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): see saveToEeprom.
+            assertNoUncertainWriteOnConnectedCraft();
+        } catch (err) {
+            return Promise.reject(err);
+        }
         return new Promise<void>((resolve) => {
             mspHelper.writeConfiguration(false, () => cleanupAndReboot(resolve));
         });

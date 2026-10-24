@@ -38,18 +38,45 @@
  * report statuses PASS / FAIL / NOT_VALIDATED.
  */
 
-import { runAutotuneV2, type AutotuneLogInput, type AutotuneV2Input, type AutotuneV2Result } from "./autotuneV2";
+import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
+import {
+    runAutotuneV2,
+    sweepFromHeaders,
+    type AutotuneLogInput,
+    type AutotuneV2Input,
+    type AutotuneV2Result,
+} from "./autotuneV2";
 import { crossLogReferenceIssues, flightRelation } from "./logInput";
 import {
+    LOOP_MIN_COHERENCE,
     QUALIFICATION_BAND_EXTENSION,
     RESOLVED_FEATURE_BINS,
     type LoopMargins,
     type MarginEvidenceLevel,
     type ModelClassQualification,
+    type SweepInfo,
 } from "./loopModel";
 import type { AxisName } from "./safetyEvidence";
 
 const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
+
+/**
+ * Share of the finer analysis's bins inside the sweep's band that must reach LOOP_MIN_COHERENCE:
+ * 0.8, the share the Verified Tune comparison also asks of its bins (MIN_WITHIN_SHARE). Not calibrated.
+ */
+export const FINE_COHERENT_SHARE = 0.8;
+
+function coherentShare(tf: TransferFunction, sweep: SweepInfo | null): number {
+    let n = 0;
+    let ok = 0;
+    for (let k = 0; k < tf.frequencies.length; k++) {
+        const f = tf.frequencies[k];
+        if (!(f >= (sweep?.f0Hz ?? 1)) || !(f <= (sweep?.f1Hz ?? Infinity))) continue;
+        n++;
+        if (tf.coherence[k] >= LOOP_MIN_COHERENCE) ok++;
+    }
+    return n ? ok / n : 0;
+}
 
 export type CriterionStatus = "PASS" | "FAIL" | "NOT_VALIDATED";
 
@@ -105,6 +132,13 @@ function candidate(
         }
         if (!c.fine) {
             rejected.push(`qualification_axis_without_finer_analysis:${a}`);
+            continue;
+        }
+        // The qualification state was judged on the standard analysis: the finer one must itself be
+        // coherent over the sweep's band (FINE_COHERENT_SHARE of its bins at LOOP_MIN_COHERENCE).
+        const share = coherentShare(c.fine.tf, sweepFromHeaders(Object.fromEntries(other.headerPairs)));
+        if (!(share >= FINE_COHERENT_SHARE)) {
+            rejected.push(`qualification_axis_fine_analysis_not_coherent:${a}:${(share * 100).toFixed(0)}pct`);
             continue;
         }
         // The fine identification stands in for this log's measurement, with where it comes from.

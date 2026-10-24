@@ -23,7 +23,7 @@
  * Measurement planner (WP3, audit F-02 "adaptive measurement"): what the next CHIRP flight must
  * measure for this craft's own loop, derived from the loop the current flight identified. It
  * changes no analysis and releases nothing; it turns the evidence gaps into numbers the pilot can
- * set (band, resolution, segment length, sweep duration or repeats) and names what the data show
+ * set (band, resolution, segment length, sweep duration) and names what the data show
  * (coherence dips, possible narrow features, noise, a poorly resolved crossover).
  *
  * Every requirement follows from a rule the margin evidence already applies (loopModel.ts):
@@ -37,8 +37,10 @@
  *   averages      enough independent averages at the crossover that 2 σ of the loop phase (UNCERTAINTY,
  *                 Bendat & Piersol) stays within PLAN.pmUncertaintyDeg: n ≥ (1 − γ²) κ² / (2 γ² σ²).
  *   duration      an exponential sweep (chirp.c) over the planned band dwells T / (Ts² f ln(f1/f0))
- *                 segments per bin: T = Ts² fc ln(f1/f0) gives one average at fc, n such sweeps (or one
- *                 n times as long) give n; a window must also hold UNCERTAINTY.minWelchSegments segments.
+ *                 segments per bin: one sweep of T = n Ts² fc ln(f1/f0) gives n averages at fc; a
+ *                 window must also hold UNCERTAINTY.minWelchSegments segments. Gyroflight analyses one
+ *                 sweep per axis and does not combine repeated sweeps, so the plan asks for one longer
+ *                 sweep, never for repeats.
  * The figures are model-dependent (one sweep shape, the stationary-error approximation, the AIR65-
  * calibrated step limits); they say what this evidence rule needs, not that the craft is safe then.
  */
@@ -80,13 +82,13 @@ export interface AxisMeasurementPlan {
     /** Independent averages at the crossover: available now and needed (PLAN.pmUncertaintyDeg). */
     averages: { now: number | null; needed: number | null };
     /**
-     * The sweep over the planned band (not the logged one: only the band the evidence needs) that
-     * gives one average per bin at the crossover at the planned resolution, and how many such sweeps
-     * give the averages needed (a single sweep that long gives them as well).
+     * The one sweep over the planned band (not the logged one: only the band the evidence needs)
+     * that gives the averages needed at the crossover at the planned resolution (repeated sweeps
+     * are not combined by the analysis).
      */
-    sweep: { f0Hz: number; f1Hz: number; durationS: number; repeats: number } | null;
+    sweep: { f0Hz: number; f1Hz: number; durationS: number } | null;
     /** The same for the qualification flight, at its resolution over its band. */
-    qualificationSweep: { f0Hz: number; f1Hz: number; durationS: number; repeats: number } | null;
+    qualificationSweep: { f0Hz: number; f1Hz: number; durationS: number } | null;
     /** What the data show: coherence dips, possible narrow features, noise, crossover resolution. */
     diagnostics: string[];
     /** Targeted measurement needs, as required_measurement:* codes (the panel shows them). */
@@ -232,7 +234,7 @@ export function planMeasurement(
         const kappaSq = at.err ** 2 * ((2 * n * g2) / Math.max(1 - g2, 1e-12));
         const needed = Math.max(1, Math.ceil(((1 - g2) * kappaSq) / (2 * g2 * sigma * sigma)));
         plan.averages = { now: n, needed: g2 >= 1 ? 1 : needed };
-        if (plan.averages.needed! > n) required.add("required_measurement:chirp_repeats_or_longer_sweep_for_averages");
+        if (plan.averages.needed! > n) required.add("required_measurement:chirp_longer_sweep_for_averages");
         const near = pts.filter((p) => p.f >= fc / Math.SQRT2 && p.f <= fc * Math.SQRT2 && p.err !== undefined);
         const median = near.length ? near.map((p) => p.err!).sort((a, b) => a - b)[Math.floor(near.length / 2)] : 0;
         if (median > PLAN.noiseRelErr)
@@ -241,15 +243,15 @@ export function planMeasurement(
         diagnostics.push("uncertainty_unknown_averages_not_planned");
     }
     if (plan.bandHz.primary && plan.averages.needed !== null) {
-        // One average per bin: the sweep dwells one segment Ts in each bin of width 1/Ts at fc,
-        // T = Ts² · fc · ln(f1/f0) (sweepAverages solved for n = 1).
+        // n averages per bin: the sweep dwells n segments Ts in each bin of width 1/Ts at fc,
+        // T = n · Ts² · fc · ln(f1/f0) (sweepAverages solved for n).
         const sweepFor = (band: [number, number], segment: number) => {
             const Ts = segment / sampleRateHz;
             const durationS = Math.max(
-                Ts * Ts * fc * Math.log(band[1] / band[0]),
+                plan.averages.needed! * Ts * Ts * fc * Math.log(band[1] / band[0]),
                 (Ts * (UNCERTAINTY.minWelchSegments + 1)) / 2,
             );
-            return { f0Hz: band[0], f1Hz: band[1], durationS, repeats: plan.averages.needed! };
+            return { f0Hz: band[0], f1Hz: band[1], durationS };
         };
         plan.sweep = sweepFor(plan.bandHz.primary, plan.segmentSamples.primary);
         plan.qualificationSweep = sweepFor(plan.bandHz.qualification!, plan.segmentSamples.qualification);

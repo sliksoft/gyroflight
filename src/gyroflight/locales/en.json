@@ -936,8 +936,8 @@
     "gyroflightV2Need_chirp_covering_the_crossover": {
         "message": "a CHIRP sweep whose identified band contains the loop crossover"
     },
-    "gyroflightV2Need_chirp_repeats_or_longer_sweep_for_averages": {
-        "message": "more averages at the crossover: repeated CHIRP sweeps or a longer sweep (see the measurement plan)"
+    "gyroflightV2Need_chirp_longer_sweep_for_averages": {
+        "message": "more averages at the crossover: a longer CHIRP sweep over the planned band (see the measurement plan; repeated sweeps are not combined)"
     },
     "gyroflightV2SafetyChecksTitle": {
         "message": "GyroCore Safety checks of this absolute proposal (an absolute Apply stays refused until the hardware validation is executed)"
@@ -959,7 +959,7 @@
     "gyroflightV2PlanResolution": { "message": "Resolution now / needed / qualification (Hz)" },
     "gyroflightV2PlanSegment": { "message": "Segment (samples)" },
     "gyroflightV2PlanAverages": { "message": "Averages now / needed" },
-    "gyroflightV2PlanSweep": { "message": "Sweep (s) / repeats; qualification (s)" },
+    "gyroflightV2PlanSweep": { "message": "Sweep (s); qualification sweep (s)" },
     "gyroflightV2PlanDiagnostics": { "message": "What the data show" },
     "gyroflightV2Need_complete_log_of_an_independent_flight": {
         "message": "the complete blackbox log of another flight (from its arming, not an excerpt): an export from inside a log, or one without session data, cannot be shown to be another flight"

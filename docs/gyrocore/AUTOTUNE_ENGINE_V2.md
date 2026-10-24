@@ -48,15 +48,23 @@ MSP message.
   e.g. armed); a timeout, no answer or a CRC-corrupt answer is `unknown`, since the firmware may have saved before the
   answer was lost. The slider route reads the tune again after the save, as the absolute route does (`eeprom_verify`:
   `unknown` when unreadable, `yes_adjusted` when the firmware changed a value on reload).
-- Uncertain state (`gyrocore/stores/fcTransactionState.ts`): every failure after the first SET (any stage but `prepare`)
-  of an Apply or a Restore is recorded per craft UID in this browser, with stage, saved state and the backup taken
-  before it. Every Apply on that craft is refused (`fc:transaction_state_uncertain:<backup>:<stage>:<saved>`, checked
-  before any MSP against the logged UID and again against the live UID) until its state is known: a verified Restore
-  (written, read back, saved, read again) clears it; so does the read-only check `checkTransactionState` when EEPROM was
-  not written (saved `no`), no profile switch was seen, and a full read-back equals that backup (after a power cycle
-  RAM reloads the EEPROM this write never touched). With saved `unknown` / `yes_adjusted` only a Restore clears it.
+- Uncertain state (`gyrocore/stores/fcTransactionState.ts`): right after the backup and before the first SET, every
+  Apply or Restore stores itself as pending in this browser and reads it back; when the browser does not keep it, no
+  SET is sent (`fc:transaction_state_not_stored`). At the end the entry is removed (verified, or stopped before the
+  first SET) or replaced by the failure (stage, saved state, backup, and the PID profiles it may have changed: the
+  backed-up one, plus the one a profile switch moved a SET into); a page closed mid-write leaves it pending. Every
+  Apply on that craft is refused (`fc:transaction_state_uncertain:<backup>:<stage>:<saved>`, checked before any MSP
+  against the logged UID and again against the live UID), and so are the shared upstream saves (the PID tab's write,
+  `saveToEeprom`, `saveAndReboot`, the OSD save: `assertNoUncertainWriteOnConnectedCraft`, docs/gyrocore/UPSTREAM.md),
+  since they would write or persist the unverified values. An entry is cleared only by evidence that covers it: a
+  verified Restore (written, read back, saved, read again) of the one PID profile the entry may have changed (never an
+  entry a profile switch spread over two profiles), or the read-only check `checkTransactionState` when EEPROM was not
+  written (saved `no`), no profile switch was seen, and a full read-back equals that backup (after a power cycle RAM
+  reloads the EEPROM this write never touched). With saved `unknown` / `yes_adjusted` only a Restore clears it.
   Unreadable storage of this record refuses every Apply (`fc:transaction_state_unreadable`). Both panels show the
-  record and the check (`UncertainStateNotice.vue`).
+  record and the check (`UncertainStateNotice.vue`). When a verify read after the SETs fails, the shared store gets
+  the backup's values back (it would otherwise hold target values the craft was not shown to have). Not covered: the
+  CLI `save` command and presets.
 - Profile switch after a SET: the firmware has no profile-bound atomic write, so a switch between the last MSP_STATUS_EX
   check and the SET puts that block into the other profile's RAM. The route catches it at the next check (stage `verify`
   or `write`, `fc:pid_profile_changed:a->b`); the panel then names the profile that may hold the write, states that
@@ -227,7 +235,10 @@ Qualification producer (`engine/modelQualification.ts`, WP5, informative): every
 the longest Welch segment that still gives 8 segments (`finestWelchSegment`; AIR65's 20 s sweeps: 16384 samples,
 0.244 Hz, 8× finer than the 1.95 Hz of `chooseSegmentSize`, which is unchanged), stored as `ChirpAxisInput.fine` with
 its provenance. The producer picks the finest other flight that passes the cross-log rules (INDEPENDENT, same craft,
-firmware and configuration) and whose sweeps are `usable`, runs the engine with it as `modelClassQualification`
+firmware and the whole configuration the models read, `PLANT_CONFIG_KEYS`) whose sweeps are `usable` and whose finer
+analysis is itself coherent (≥ 80 % of its bins in the sweep band at the loop coherence: `FINE_COHERENT_SHARE`; one
+20 s exponential sweep analysed 8× finer is not, about 60 %), and whose controller reconstruction is validated (a D
+path only with the logged D term accepted: `dterm_path_not_validated`); it runs the engine with it as `modelClassQualification`
 (that flight is then no cross-log reference: `cross_log_reference_is_the_qualification`) and reports per axis the
 evidence level and verdict, and nine criteria (identifiability, model structure, measurement quality, frequency
 coverage, independent evidence, uncertainty, margin applicability, reference quality, independent validation) as
@@ -247,9 +258,14 @@ Measurement uncertainty (`UNCERTAINTY`, WP3): per bin the random error of the H1
 9.91) from coherence and independent averages, carried to L with |C_ref / (C_ref − T·C_fb)|. Averages for the
 exponential Betaflight sweep (`sweepAverages`, from the log's chirp headers): T / (Ts² f ln(f1/f0)), at least 1 (near
 an AIR65 crossover: 1, whatever the Welch segment count). Fewer than 8 Welch segments: uncertainty unknown, no bounds. A
-bin whose ±2 ε reaches half its value is left out as not identified (counted in the evidence). The bounds are the worst
-of the nominal loop and four corners with every bin moved by the same ±2 ε in gain and phase; a corner that changes the
-crossings leaves no bounds. `measured` keeps the values on the bins; the release contract requires the uncertainty with
+bin whose ±2 ε reaches half its value is not identified: below the lowest kept bin it is left out (counted), above it
+the margins stay unbounded (`unidentified_bins_inside_band`). The bounds hold for every loop in the per-bin uncertainty
+set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins the resolved-class allowance):
+PM over every step where |L| can be at unity (the stretch of the step where the gain band crosses 0 dB, its phase less
+±2 ε; those steps must form one run), GM over every step whose phase range can reach −180°, |S| from the larger of two
+lower bounds of the distance to −1 (the chord less the discs around its ends; the annular sector holding both ends'
+sets and the chord). A set that can reach a second crossing, −180° above unity, or −1 leaves no bounds
+(`margin_uncertainty_changes_what_the_bins_show:<which>`). `measured` keeps the values on the bins; the release contract requires the uncertainty with
 VALIDATED evidence (`margin_evidence_uncertainty_missing`). Phase checks (`PHASE_CHECKS`): an unwrap step that, with
 ±2 σ at both bins, exceeds 90° is ambiguous; the absolute branch must be the rate plant's (phase in (−180°, 0°] at the
 lowest bin) plus the controller's; at least three bins in the octave around the crossover. Each failure leaves the
@@ -258,7 +274,8 @@ margins unbounded (`MEASURED`). These are the model's assumptions, carried in `M
 Measurement planner (`engine/measurementPlan.ts`, informative, shown under the margins): per axis the band (to
 |L| ≤ −12 dB, extrapolated along the tail; a qualification 1.5 × further), the bin step the measured phase slope needs
 and the qualification's (÷ RESOLVED_FEATURE_BINS), the power-of-two Welch segment for both, the averages needed at the
-crossover for 2 σ ≤ 2.5° and the sweep duration or repeats that give them, and what the data show (coherence dips,
+crossover for 2 σ ≤ 2.5° and the length of the one sweep over the planned band that gives them (repeated sweeps are
+not combined by the analysis, so the plan never asks for repeats), and what the data show (coherence dips,
 possible narrow features, noise near the crossover, a poorly resolved crossover). It changes no analysis and
 releases nothing; `chooseSegmentSize` and the qualified primary transfer function are unchanged.
 
