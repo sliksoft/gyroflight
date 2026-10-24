@@ -215,7 +215,7 @@ import { useTuneWorkflow } from "@/composables/useTuneWorkflow";
 import { useApplyGate } from "@/gyrocore/composables/useApplyGate";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { useM4FlightMetricsStore } from "@/gyrocore/stores/m4FlightMetrics";
-import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { restoreTargetIssue, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
 import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { useTuneWorkflowStore } from "@/gyrocore/stores/tuneWorkflow";
@@ -302,9 +302,9 @@ async function onPreview() {
 }
 
 // Backups of the absolute route are restored from the autotune v2 panel (they include the filter block).
-// A backup a recovery Restore took of an unverified state is no Restore target (tuneBackup.ts).
+// Only backups a Restore may write back (tuneBackup.ts restoreTargetIssue).
 const backups = computed(() =>
-    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !b.absolute && !b.unverified) : [],
+    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !b.absolute && !restoreTargetIssue(b)) : [],
 );
 
 function measurementById(id: string) {

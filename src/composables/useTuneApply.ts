@@ -84,7 +84,13 @@ import {
     type FirmwareCalculation,
     type TuneSnapshot,
 } from "@/gyrocore/tuning/tuneSnapshot";
-import { newBackupId, sameUid, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import {
+    newBackupId,
+    restoreTargetIssue,
+    sameUid,
+    useTuneBackupStore,
+    type TuneBackup,
+} from "@/gyrocore/stores/tuneBackup";
 import {
     TRANSACTION_STATE_NOT_STORED,
     TRANSACTION_STATE_UNREADABLE,
@@ -293,7 +299,7 @@ function storeBackup(
     snapshot: TuneSnapshot,
     compositeId: string | null,
     absolute?: AbsoluteSnapshot,
-    unverified = false,
+    stateKnown = true,
 ): TuneBackup {
     const backup: TuneBackup = {
         id: newBackupId(),
@@ -305,7 +311,7 @@ function storeBackup(
         compositeId,
         snapshot,
         ...(absolute ? { absolute } : {}),
-        ...(unverified ? { unverified: true as const } : {}),
+        stateKnown,
     };
     if (!useTuneBackupStore().save(backup)) {
         throw new ApplyBlockedError(["apply:backup_not_stored"]);
@@ -468,10 +474,12 @@ async function transaction<T extends { backupId: string }>(
 }
 
 /**
- * The PID profile a slider-route write acts on: the one active when it began. That route does not
- * check the profile again while it writes (the absolute route does, assertPidProfile).
+ * The PID profiles a slider-route write may change: unknown. That route reads the profile once and
+ * does not check it again while it writes (the absolute route does, assertPidProfile), so a switch
+ * during its reads can move the SET into another profile. Its uncertain entries are therefore
+ * covered by no Restore; saved "no" ones by the read-only check after a power cycle.
  */
-const profilesOf = (fc: FcIdentity): number[] | null => (fc.pidProfile === null ? null : [fc.pidProfile]);
+const SLIDER_PROFILES_UNKNOWN = null;
 
 /**
  * A Restore that starts while the craft has open uncertain entries recovers from a write nobody
@@ -620,7 +628,7 @@ async function applyTuneOnce(
 
     // 5. Backup, then the write itself.
     const backup = storeBackup("before_apply", fc, before, composite.id);
-    tx.begin(uid3(fc.uid), backup.id, profilesOf(fc));
+    tx.begin(uid3(fc.uid), backup.id, SLIDER_PROFILES_UNKNOWN);
     const fcStore = useFlightControllerStore();
     loadStore(before);
     // Object.keys widens to string[]; the keys are the proposal's own slider fields.
@@ -678,8 +686,9 @@ async function readRestoreTarget(backupId: string): Promise<RestorePreview> {
     if (snapshotIssues(backup.snapshot).length) {
         throw new ApplyBlockedError(["restore:backup_invalid"]);
     }
-    if (backup.unverified) {
-        throw new ApplyBlockedError(["restore:backup_unverified"]);
+    const targetIssue = restoreTargetIssue(backup);
+    if (targetIssue) {
+        throw new ApplyBlockedError([targetIssue]);
     }
     assertConnectedReal();
     const fc = await readIdentity();
@@ -728,8 +737,8 @@ async function restoreTuneOnce(
     if (confirmed.preview !== restoreHash(snapshotHash(current), snapshotHash(target))) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
-    const safety = storeBackup("before_restore", fc, current, null, undefined, recovering(fc));
-    tx.begin(uid3(fc.uid), safety.id, profilesOf(fc));
+    const safety = storeBackup("before_restore", fc, current, null, undefined, !recovering(fc));
+    tx.begin(uid3(fc.uid), safety.id, SLIDER_PROFILES_UNKNOWN);
 
     const fcStore = useFlightControllerStore();
     loadStore({ ...current, sliders: target.sliders, filters: target.filters });
@@ -1177,8 +1186,9 @@ async function readAbsoluteRestoreTarget(backupId: string): Promise<{
     if (absoluteSnapshotIssues(backup.absolute).length) {
         throw new ApplyBlockedError(["restore:backup_invalid"]);
     }
-    if (backup.unverified) {
-        throw new ApplyBlockedError(["restore:backup_unverified"]);
+    const targetIssue = restoreTargetIssue(backup);
+    if (targetIssue) {
+        throw new ApplyBlockedError([targetIssue]);
     }
     assertConnectedReal();
     const fc = await readIdentity();
@@ -1231,7 +1241,7 @@ async function restoreAbsoluteTuneOnce(
     if (confirmed.preview !== restoreHash(absoluteHash(current), absoluteHash(target))) {
         throw new ApplyBlockedError(["restore:preview_changed"]);
     }
-    const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current, recovering(fc));
+    const safety = storeBackup("before_restore", fc, v1Snapshot(), null, current, !recovering(fc));
     tx.begin(uid3(fc.uid), safety.id, [current.pidProfile!]);
     await writeAbsoluteBlocks(current, target, current, safety.id, true);
     const verified = await verifyAbsoluteAndSave(target, current, safety.id);
@@ -1288,9 +1298,12 @@ export async function checkTransactionState(): Promise<TransactionStateCheck> {
     }
     if (!open.length) return { resolved: true, reasons: [] };
     if (reasons.length) return { resolved: false, reasons };
-    return states.resolveEntries(open)
-        ? { resolved: true, reasons: [] }
-        : { resolved: false, reasons: ["state:not_stored"] };
+    if (!states.resolveEntries(open)) return { resolved: false, reasons: ["state:not_stored"] };
+    // An entry another page stored or changed during the awaited reads is not covered by them.
+    const left = states.forUid(fc.uid);
+    return left.length
+        ? { resolved: false, reasons: left.map((e) => `state:${e.backupId}:changed_during_check`) }
+        : { resolved: true, reasons: [] };
 }
 
 export type { AbsoluteProposal, AbsoluteValues };

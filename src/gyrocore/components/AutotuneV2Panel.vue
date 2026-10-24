@@ -426,7 +426,7 @@ import { useConnectionStore } from "@/stores/connection";
 import { useFlightControllerStore } from "@/stores/fc";
 import { useAutotuneV2 } from "@/composables/useAutotuneV2";
 import { useAutotuneV2Store, type AutotuneV2Source } from "@/gyrocore/stores/autotuneV2";
-import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { restoreTargetIssue, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
 import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
@@ -635,9 +635,9 @@ function evidenceClass(level: string) {
           : "text-yellow-500";
 }
 
-// A backup a recovery Restore took of an unverified state is no Restore target (tuneBackup.ts).
+// Only backups a Restore may write back (tuneBackup.ts restoreTargetIssue).
 const backups = computed(() =>
-    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !!b.absolute && !b.unverified) : [],
+    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !!b.absolute && !restoreTargetIssue(b)) : [],
 );
 
 function stateClass(state: string) {

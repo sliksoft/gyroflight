@@ -433,11 +433,11 @@ describe("write, read back, verify, save", () => {
         const next = (await failure(apply(c.id))) as ApplyBlockedError;
         expect(next.reasons).toEqual([`fc:transaction_state_uncertain:${err.backupId}:eeprom:unknown`]);
         expect(writes()).toEqual([]);
-        // The entry names the PID profile the write began on, so the slider Restore of that profile covers it.
-        const back = await restoreTune(err.backupId, await confirmRestoreToken(err.backupId));
-        expect(back.status).toBe("verified");
-        expect(useTuneBackupStore().get(back.backupId)?.unverified).toBe(true);
-        expect((await apply(c.id)).status).toBe("verified");
+        // The slider route does not re-check the PID profile while it writes: which profile the SET
+        // reached is unknown, so no Restore covers it (its save would persist that profile's RAM).
+        const refused = (await failure(previewRestore(err.backupId))) as ApplyBlockedError;
+        expect(refused.reasons).toContain(`restore:uncertain_state_not_covered:${err.backupId}:eeprom:unknown`);
+        expect(writes()).toEqual([]);
     });
 
     it("gyro filter Hz the sliders recompute on SET are expected from MSP_CALCULATE_SIMPLIFIED_GYRO", async () => {
