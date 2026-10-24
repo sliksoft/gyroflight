@@ -31,8 +31,9 @@ import { useReboot } from "@/composables/useReboot";
 /**
  * Save path for the Failsafe tab: send the edited store sections to the FC, then save to
  * EEPROM and reboot.
- * @param initializeDefaults resets the tab's dirty baseline; runs once every write has been
- *   acknowledged, before the save-and-reboot
+ * @param initializeDefaults resets the tab's dirty baseline; Gyroflight (audit WP8-F06): runs only
+ *   once the firmware acknowledged the EEPROM save, so a failed or unconfirmed save leaves the
+ *   changes pending (Save stays enabled)
  */
 export function useFailsafeSave(initializeDefaults: () => void) {
     const fcStore = useFlightControllerStore();
@@ -44,7 +45,8 @@ export function useFailsafeSave(initializeDefaults: () => void) {
             await MSP.promise(MSPCodes.MSP_SET_RX_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_RX_CONFIG));
             await MSP.promise(MSPCodes.MSP_SET_FAILSAFE_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_FAILSAFE_CONFIG));
 
-            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused write rejects, so the save ends.
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused, unanswered or retry-refused RXFAIL
+            // write rejects, so the save ends (WP8-F05).
             await new Promise<void>((resolve, reject) => {
                 mspHelper.sendRxFailConfig(resolve, reject);
             });
@@ -55,9 +57,7 @@ export function useFailsafeSave(initializeDefaults: () => void) {
                 await MSP.promise(MSPCodes.MSP_SET_GPS_RESCUE, mspHelper.crunch(MSPCodes.MSP_SET_GPS_RESCUE));
             }
 
-            initializeDefaults();
-
-            await saveAndReboot();
+            await saveAndReboot({ onSaved: initializeDefaults });
         });
 
     return { saveConfig, isSaving };

@@ -717,39 +717,28 @@ class MspHelper {
         return mask;
     }
 
+    /**
+     * Sends every RXFAIL channel, one after the other. Gyroflight hook (docs/gyrocore/UPSTREAM.md,
+     * audit WP8-F05): over the error-aware MSP.promise, so a write the check refuses, one never
+     * answered, a refused retry (the first attempt may have run) or a cleared queue calls `onRefused`
+     * and ends the chain; `onCompleteCallback` only after the firmware acknowledged every channel.
+     */
     sendRxFailConfig(onCompleteCallback: () => void, onRefused?: (reason: Error) => void) {
         const fcStore = useFlightControllerStore();
-        let nextFunction = send_next_rxfail_config;
-
-        let rxFailIndex = 0;
-
-        if (fcStore.rxFailConfig.length == 0) {
-            onCompleteCallback();
-        } else {
-            send_next_rxfail_config();
-        }
-
-        function send_next_rxfail_config() {
-            const rxFail = fcStore.rxFailConfig[rxFailIndex];
-
-            const buffer = new MspBuffer();
-            buffer.push8(rxFailIndex).push8(rxFail.mode).push16(rxFail.value);
-
-            // prepare for next iteration
-            rxFailIndex++;
-            if (rxFailIndex == fcStore.rxFailConfig.length) {
-                nextFunction = onCompleteCallback;
+        const send = async () => {
+            for (let rxFailIndex = 0; rxFailIndex < fcStore.rxFailConfig.length; rxFailIndex++) {
+                const rxFail = fcStore.rxFailConfig[rxFailIndex];
+                const buffer = new MspBuffer();
+                buffer.push8(rxFailIndex).push8(rxFail.mode).push16(rxFail.value);
+                // One channel at a time, in order, as the legacy chain did.
+                await MSP.promise(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer); // NOSONAR: sequential by design
             }
-            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): false without a callback is the write check's
-            // refusal (nothing sent, the chain would stop silently); a caller waiting on it is told.
-            let answered = false;
-            const next = nextFunction;
-            const queued = MSP.send_message(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer, false, () => {
-                answered = true;
-                next();
-            });
-            if (!queued && !answered) onRefused?.(new Error("MSP_SET_RXFAIL_CONFIG refused by the write check"));
-        }
+        };
+        send().then(onCompleteCallback, (err: unknown) => {
+            const reason = err instanceof Error ? err : new Error(String(err));
+            if (onRefused) onRefused(reason);
+            else console.error("MSP_SET_RXFAIL_CONFIG failed:", reason);
+        });
     }
 
     /** Stops the FC from arming, with runaway takeoff prevention on. */

@@ -88,9 +88,11 @@ export function useReboot() {
     /**
      * Persist the current configuration to EEPROM and then reboot the board,
      * settling the connection state via the shared reboot flow.
+     * @param options.onSaved Gyroflight (audit WP8-F06): runs once the firmware acknowledged the
+     *   EEPROM save, before the reboot (a tab resets its clean baseline there, not earlier)
      * @returns {Promise<void>} resolves once the reboot sequence has started
      */
-    function saveAndReboot(): Promise<void> {
+    function saveAndReboot({ onSaved }: { onSaved?: () => void } = {}): Promise<void> {
         try {
             // Gyroflight hook (docs/gyrocore/UPSTREAM.md): see saveToEeprom.
             assertNoUncertainWriteOnConnectedCraft();
@@ -100,7 +102,10 @@ export function useReboot() {
         return new Promise<void>((resolve, reject) => {
             mspHelper.writeConfiguration(
                 false,
-                () => cleanupAndReboot(resolve),
+                () => {
+                    onSaved?.();
+                    cleanupAndReboot(resolve);
+                },
                 (err) => reject(notConfirmed(err)),
             );
         });

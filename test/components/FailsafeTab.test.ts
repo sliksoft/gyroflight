@@ -33,7 +33,8 @@ describe("Failsafe MSP wiring", () => {
         setActivePinia(createPinia());
         useFlightControllerStore().config.apiVersion = "1.47.0";
         vi.mocked(MSP.promise).mockResolvedValue(undefined);
-        saveAndReboot.mockResolvedValue(undefined);
+        // The firmware acknowledged the EEPROM save: onSaved runs (audit WP8-F06).
+        saveAndReboot.mockImplementation(async ({ onSaved }: { onSaved?: () => void } = {}) => onSaved?.());
     });
 
     afterEach(() => {
@@ -64,5 +65,23 @@ describe("Failsafe MSP wiring", () => {
 
         expect(saveAndReboot).toHaveBeenCalledOnce();
         expect(vm.configHasChanged).toBe(false);
+    });
+
+    // Gyroflight (audit WP8-F06): the RAM may hold the values, EEPROM does not; Save stays enabled.
+    it("keeps the changes pending when the EEPROM save is not confirmed", async () => {
+        saveAndReboot.mockRejectedValue(new Error("EEPROM save not confirmed (unknown)"));
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        wrapper = mountTab();
+        await flushPromises();
+        const fcStore = useFlightControllerStore();
+        const vm = wrapper.vm as unknown as { configHasChanged: boolean; saveConfig: () => Promise<void> };
+
+        fcStore.failsafeConfig.failsafe_delay += 1;
+        await nextTick();
+        await vm.saveConfig();
+        await nextTick();
+
+        expect(saveAndReboot).toHaveBeenCalledOnce();
+        expect(vm.configHasChanged).toBe(true);
     });
 });

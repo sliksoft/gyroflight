@@ -44,7 +44,9 @@ describe("useFailsafeSave", () => {
         initializeDefaults = vi.fn(() => {
             steps.push("defaults");
         });
-        saveAndReboot.mockImplementation(async () => {
+        // The firmware acknowledged the EEPROM save: the baseline is reset there (audit WP8-F06).
+        saveAndReboot.mockImplementation(async ({ onSaved }: { onSaved?: () => void } = {}) => {
+            onSaved?.();
             steps.push("reboot");
         });
     });
@@ -112,6 +114,19 @@ describe("useFailsafeSave", () => {
 
         rebooted();
         await saving;
+        expect(isSaving.value).toBe(false);
+    });
+
+    // Gyroflight (audit WP8-F06): writes acknowledged, EEPROM save refused or unconfirmed.
+    it("leaves the baseline alone when the EEPROM save fails after every write went through", async () => {
+        saveAndReboot.mockRejectedValue(new Error("EEPROM save not confirmed (not_saved)"));
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        const { saveConfig, isSaving } = useFailsafeSave(initializeDefaults);
+
+        await saveConfig();
+
+        expect(saveAndReboot).toHaveBeenCalledTimes(1);
+        expect(initializeDefaults).not.toHaveBeenCalled();
         expect(isSaving.value).toBe(false);
     });
 

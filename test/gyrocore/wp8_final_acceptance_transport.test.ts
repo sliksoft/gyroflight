@@ -385,12 +385,13 @@ describe("a refused write ends the save instead of leaving it on 'Saving' (Codex
         ] as never;
     };
 
-    it("the RXFAIL chain tells its caller when the write check refuses a step", () => {
+    it("the RXFAIL chain tells its caller when the write check refuses a step", async () => {
         rxFail();
         uncertain();
         const done = vi.fn();
         const refused = vi.fn();
         mspHelper.sendRxFailConfig(done, refused);
+        await vi.advanceTimersByTimeAsync(0); // the chain runs on MSP.promise (WP8-F05)
         expect(refused).toHaveBeenCalledTimes(1);
         expect(done).not.toHaveBeenCalled();
         expect(sentCodes()).toEqual([]);
