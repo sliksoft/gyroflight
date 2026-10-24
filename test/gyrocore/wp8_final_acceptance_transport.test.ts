@@ -46,6 +46,8 @@ import { TRANSACTION_ENTRY_PREFIX, type UncertainTransaction } from "../../src/g
 import { send as cliSend } from "../../src/composables/useMspCliSession";
 import { useCli } from "../../src/composables/useCli";
 import autoRestoreInstance from "../../src/js/utils/AutoRestore";
+import { mspHelper } from "../../src/js/msp/MSPHelper";
+import { useFailsafeSave } from "../../src/composables/failsafe/useFailsafeSave";
 
 const UID: [number, number, number] = [0x0a1b2c3d, 0x4e5f6071, 0x12233445];
 
@@ -345,5 +347,51 @@ describe("AutoRestore reports success only for a save that went out (Codex WP8 f
         await done;
         expect(sentText()).toEqual(["save\n"]);
         expect(results).toEqual([expect.objectContaining({ success: true })]);
+    });
+});
+
+describe("a refused write ends the save instead of leaving it on 'Saving' (Codex WP8 final review P2)", () => {
+    const rxFail = () => {
+        useFlightControllerStore().rxFailConfig = [
+            { mode: 0, value: 1500 },
+            { mode: 1, value: 1000 },
+        ] as never;
+    };
+
+    it("the RXFAIL chain tells its caller when the write check refuses a step", () => {
+        rxFail();
+        uncertain();
+        const done = vi.fn();
+        const refused = vi.fn();
+        mspHelper.sendRxFailConfig(done, refused);
+        expect(refused).toHaveBeenCalledTimes(1);
+        expect(done).not.toHaveBeenCalled();
+        expect(sentCodes()).toEqual([]);
+    });
+
+    it("the Failsafe save stops saving when the state turns uncertain between its writes", async () => {
+        rxFail();
+        vi.spyOn(MSP, "promise").mockImplementation(async (code) => {
+            // An entry appears while the save runs: its next write, the first RXFAIL, is refused.
+            if (code === MSPCodes.MSP_SET_FAILSAFE_CONFIG) uncertain();
+            return undefined as never;
+        });
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const defaults = vi.fn();
+        const { saveConfig, isSaving } = useFailsafeSave(defaults);
+        const saving = saveConfig().catch(() => undefined);
+        await vi.advanceTimersByTimeAsync(1000);
+        await saving;
+        expect(isSaving.value).toBe(false);
+        expect(defaults).not.toHaveBeenCalled();
+        expect(sentCodes()).toEqual([]);
+    });
+
+    it("without an uncertain state the chain still sends every RXFAIL entry", () => {
+        rxFail();
+        const refused = vi.fn();
+        mspHelper.sendRxFailConfig(() => undefined, refused);
+        expect(sentCodes()).toEqual([MSPCodes.MSP_SET_RXFAIL_CONFIG]);
+        expect(refused).not.toHaveBeenCalled();
     });
 });

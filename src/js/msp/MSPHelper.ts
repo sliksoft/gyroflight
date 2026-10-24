@@ -716,7 +716,7 @@ class MspHelper {
         return mask;
     }
 
-    sendRxFailConfig(onCompleteCallback: () => void) {
+    sendRxFailConfig(onCompleteCallback: () => void, onRefused?: (reason: Error) => void) {
         const fcStore = useFlightControllerStore();
         let nextFunction = send_next_rxfail_config;
 
@@ -739,7 +739,15 @@ class MspHelper {
             if (rxFailIndex == fcStore.rxFailConfig.length) {
                 nextFunction = onCompleteCallback;
             }
-            MSP.send_message(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer, false, nextFunction);
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): false without a callback is the write check's
+            // refusal (nothing sent, the chain would stop silently); a caller waiting on it is told.
+            let answered = false;
+            const next = nextFunction;
+            const queued = MSP.send_message(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer, false, () => {
+                answered = true;
+                next();
+            });
+            if (!queued && !answered) onRefused?.(new Error("MSP_SET_RXFAIL_CONFIG refused by the write check"));
         }
     }
 

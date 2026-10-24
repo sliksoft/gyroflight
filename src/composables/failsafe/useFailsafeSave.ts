@@ -44,8 +44,9 @@ export function useFailsafeSave(initializeDefaults: () => void) {
             await MSP.promise(MSPCodes.MSP_SET_RX_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_RX_CONFIG));
             await MSP.promise(MSPCodes.MSP_SET_FAILSAFE_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_FAILSAFE_CONFIG));
 
-            await new Promise<void>((resolve) => {
-                mspHelper.sendRxFailConfig(resolve);
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused write rejects, so the save ends.
+            await new Promise<void>((resolve, reject) => {
+                mspHelper.sendRxFailConfig(resolve, reject);
             });
 
             await MSP.promise(MSPCodes.MSP_SET_FEATURE_CONFIG, mspHelper.crunch(MSPCodes.MSP_SET_FEATURE_CONFIG));
