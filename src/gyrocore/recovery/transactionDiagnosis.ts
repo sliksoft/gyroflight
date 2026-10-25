@@ -36,6 +36,7 @@
 import { FC_WRITE_LOCK } from "@/composables/fcWriteGuard";
 import type { UncertainTransaction } from "@/gyrocore/stores/transactionRecords";
 import { restoreTargetIssue, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { absoluteSnapshotIssues } from "@/gyrocore/tuning/absoluteTune";
 
 export type DiagnosisFinding =
     | "orphaned_in_progress"
@@ -97,10 +98,19 @@ export function diagnoseEntry(e: UncertainTransaction, ctx: DiagnosisContext): E
     if (e.action === "restore" || e.action === "absolute_restore") findings.push("interrupted_restore");
 
     const recovery: RecoveryAvailability[] = [];
-    // fcTransactionState.coveredBy: ended (not in progress), one known profile, same route.
-    const trustedTarget = ctx.backups.some(
-        (b) => restoreTargetIssue(b) === null && !!b.absolute === isAbsolute(e.action),
-    );
+    // fcTransactionState.coveredBy (ended, one known profile, same route) and what the absolute
+    // Restore accepts as its target (readAbsoluteRestoreTarget: trusted, valid, that profile's). A
+    // slider-route entry names no profile it could be restored into: never offered.
+    const profile = oneProfile ? e.profiles![0] : null;
+    const trustedTarget =
+        isAbsolute(e.action) &&
+        ctx.backups.some(
+            (b) =>
+                restoreTargetIssue(b) === null &&
+                !!b.absolute &&
+                b.absolute.pidProfile === profile &&
+                absoluteSnapshotIssues(b.absolute).length === 0,
+        );
     if (!inProgress && oneProfile && trustedTarget) recovery.push("verified_restore");
     // checkTransactionState: EEPROM not written, one profile, no switch seen, its backup stored.
     if (!inProgress && e.saved === "no" && oneProfile && !profileSwitchSeen(e.detail) && backup) {
@@ -122,7 +132,9 @@ export function diagnoseCraft(entries: readonly UncertainTransaction[], ctx: Dia
         each.every((d) => d.recovery.includes("verified_restore")) &&
         new Set(each.map(profileOf)).size === 1 &&
         new Set(each.map((d) => isAbsolute(d.entry.action))).size === 1;
-    const checkForAll = each.every((d) => d.recovery.includes("read_only_check"));
+    // The check reads the one active profile: every entry must name that same one.
+    const checkForAll =
+        each.every((d) => d.recovery.includes("read_only_check")) && new Set(each.map(profileOf)).size === 1;
     return each.map((d) => {
         const recovery = d.recovery.filter(
             (r) => (r !== "verified_restore" || restoreForAll) && (r !== "read_only_check" || checkForAll),

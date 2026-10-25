@@ -43,6 +43,19 @@ import { FC_WRITE_LOCK } from "../../src/composables/fcWriteGuard";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { serial } from "../../src/js/serial";
 import UncertainStateNotice from "../../src/gyrocore/components/UncertainStateNotice.vue";
+import { SLIDER_MODE_KEYS, fieldsForApi, type AbsoluteSnapshot } from "../../src/gyrocore/tuning/absoluteTune";
+import { TRANSACTION_STORAGE_KEY } from "../../src/gyrocore/stores/transactionRecords";
+
+/** A complete absolute snapshot (what the absolute Restore accepts as its target) of PID profile `p`. */
+function absoluteOf(p: number): AbsoluteSnapshot {
+    const apiVersion = "1.47.0";
+    return {
+        apiVersion,
+        pidProfile: p,
+        sliders: Object.fromEntries(SLIDER_MODE_KEYS.map((k) => [k, 0])),
+        values: Object.fromEntries(fieldsForApi(apiVersion).map((f) => [f.key, 1])),
+    } as unknown as AbsoluteSnapshot;
+}
 
 vi.mock("../../src/js/localization", () => ({ i18n: { getMessage: (key: string) => key } }));
 
@@ -71,7 +84,7 @@ const backup = (id: string, b: Partial<TuneBackup> = {}): TuneBackup =>
         firmware: "2026.6.2",
         compositeId: null,
         snapshot: {},
-        absolute: { pidProfile: 0 },
+        absolute: absoluteOf(0),
         stateKnown: true,
         ...b,
     }) as TuneBackup;
@@ -156,9 +169,28 @@ describe("WP8-F07 which recovery it offers: only what the routes accept", () => 
     it("entries in two different profiles: no single Restore covers both", () => {
         const all = diagnoseCraft(
             [entry(), entry({ id: "tx-2", profiles: [1] })],
-            ctx({ backups: [backup("bk-1"), backup("bk-2", { absolute: { pidProfile: 1 } as never })] }),
+            ctx({ backups: [backup("bk-1"), backup("bk-2", { absolute: absoluteOf(1) })] }),
         );
         expect(all.every((d) => !d.recovery.includes("verified_restore"))).toBe(true);
+    });
+
+    // Codex review of F07 (round 2).
+    it("no Restore offered when the only trusted backup belongs to another profile", () => {
+        const d = diagnoseEntry(entry({ profiles: [1] }), ctx({ backups: [backup("bk-1")] }));
+        expect(d.recovery).toEqual(["none"]);
+    });
+
+    it("no Restore offered for an incomplete backup (the Restore would refuse it as invalid)", () => {
+        const d = diagnoseEntry(entry(), ctx({ backups: [backup("bk-1", { absolute: { pidProfile: 0 } as never })] }));
+        expect(d.recovery).toEqual(["none"]);
+    });
+
+    it("no read-only check offered when the entries name two profiles (the check reads only the active one)", () => {
+        const all = diagnoseCraft(
+            [entry({ saved: "no" }), entry({ id: "tx-2", saved: "no", profiles: [1], backupId: "bk-2" })],
+            ctx({ backups: [backup("bk-1"), backup("bk-2", { absolute: absoluteOf(1) })] }),
+        );
+        expect(all.every((d) => !d.recovery.includes("read_only_check"))).toBe(true);
     });
 });
 
@@ -193,6 +225,50 @@ describe("WP8-F07 the notice's diagnosis reads only", () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
+    });
+
+    const mountNotice = () =>
+        mount(UncertainStateNotice, {
+            global: {
+                mocks: { $t: (k: string) => k },
+                stubs: { UButton: { template: "<button @click=\"$emit('click')\"><slot /></button>" } },
+            },
+        });
+
+    it("an old-format list met by Diagnose is read, not moved: storage stays as it was", async () => {
+        useFlightControllerStore().config.uid = [...UID];
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}tx-1`, JSON.stringify(entry()));
+        const wrapper = mountNotice();
+        localStorage.setItem(
+            TRANSACTION_STORAGE_KEY,
+            JSON.stringify([{ ...entry({ backupId: "bk-old" }), id: undefined }]),
+        );
+        const before = { ...localStorage };
+        await wrapper.find("[data-gyrocore='uncertain-state-diagnose']").trigger("click");
+        await new Promise((r) => setTimeout(r, 20));
+        expect({ ...localStorage }).toEqual(before);
+        expect(wrapper.find("[data-gyrocore='uncertain-state-diagnosis'] [data-backup='bk-old']").exists()).toBe(true);
+        wrapper.unmount();
+    });
+
+    it("a diagnosis is dropped when the connected craft changes", async () => {
+        useFlightControllerStore().config.uid = [...UID];
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}tx-1`, JSON.stringify(entry()));
+        const wrapper = mountNotice();
+        await wrapper.find("[data-gyrocore='uncertain-state-diagnose']").trigger("click");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(wrapper.find("[data-gyrocore='uncertain-state-diagnosis']").exists()).toBe(true);
+        // Another craft, with an open entry of its own: the notice stays, the old diagnosis goes.
+        localStorage.setItem(
+            `${TRANSACTION_ENTRY_PREFIX}tx-9`,
+            JSON.stringify(entry({ id: "tx-9", uid: [9, 9, 9], backupId: "bk-9" })),
+        );
+        useFcTransactionStore().sync();
+        useFlightControllerStore().config.uid = [9, 9, 9];
+        await new Promise((r) => setTimeout(r, 20));
+        expect(wrapper.find("[data-gyrocore='uncertain-state']").exists()).toBe(true);
+        expect(wrapper.find("[data-gyrocore='uncertain-state-diagnosis']").exists()).toBe(false);
+        wrapper.unmount();
     });
 
     it("shows an orphan with no recovery; storage, the block and the transport are untouched", async () => {

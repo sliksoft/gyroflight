@@ -41,6 +41,9 @@
         >
             {{ $t("gyroflightRecoveryDiagnose") }}
         </UButton>
+        <p v-if="diagnosisUnreadable" data-gyrocore="uncertain-state-diagnosis-unreadable">
+            {{ $t("gyroflightUncertainUnreadable") }}
+        </p>
         <div v-if="diagnosis" class="mt-1" data-gyrocore="uncertain-state-diagnosis">
             <p class="text-dimmed">{{ $t("gyroflightRecoveryNotEvidence") }}</p>
             <div v-for="d in diagnosis" :key="d.entry.id ?? d.entry.backupId" :data-backup="d.entry.backupId">
@@ -68,12 +71,13 @@
  * diagnosis (audit WP8-F07) lists per entry what is unknown, which of those two can prove it, or
  * that none can and what to do then; it reads only and clears nothing.
  */
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { i18n } from "@/js/localization";
 import { useFlightControllerStore } from "@/stores/fc";
 import { useFcTransactionStore, type UncertainTransaction } from "@/gyrocore/stores/fcTransactionState";
 import { checkTransactionState, type TransactionStateCheck } from "@/composables/useTuneApply";
-import { useTuneBackupStore } from "@/gyrocore/stores/tuneBackup";
+import { sameUid, useTuneBackupStore } from "@/gyrocore/stores/tuneBackup";
+import { readTransactionRecords } from "@/gyrocore/stores/transactionRecords";
 import { diagnoseCraft, transactionOwnerActive, type EntryDiagnosis } from "@/gyrocore/recovery/transactionDiagnosis";
 
 const states = useFcTransactionStore();
@@ -82,16 +86,38 @@ const open = computed(() => states.forUid(fc.config.uid));
 const checking = ref(false);
 const lastCheck = ref<TransactionStateCheck | null>(null);
 const diagnosis = ref<EntryDiagnosis[] | null>(null);
+const diagnosisUnreadable = ref(false);
+let diagnosisRun = 0;
 
-/** Read-only (audit WP8-F07): what is unknown and which recovery could prove it; changes nothing. */
+// A diagnosis describes one craft and one set of entries: shown only while those are current.
+watch(
+    () => JSON.stringify([fc.config.uid, open.value]),
+    () => {
+        diagnosisRun++;
+        diagnosis.value = null;
+        diagnosisUnreadable.value = false;
+    },
+);
+
+/**
+ * Read-only (audit WP8-F07): what is unknown and which recovery could prove it. Reads the stored
+ * records without the store's sync (which moves an old-format list, a write) and changes nothing.
+ */
 async function onDiagnose() {
+    const run = ++diagnosisRun;
+    const uid = fc.config.uid;
+    const ownerActive = await transactionOwnerActive();
+    const read = readTransactionRecords(globalThis.localStorage);
+    if (run !== diagnosisRun) return;
+    diagnosisUnreadable.value = !read.ok;
+    if (!read.ok) {
+        diagnosis.value = null;
+        return;
+    }
+    const entries = [...read.entries, ...(read.legacy ?? [])].filter((e) => sameUid(e.uid, uid));
     const backups = useTuneBackupStore();
     backups.reload();
-    states.sync();
-    diagnosis.value = diagnoseCraft(states.forUid(fc.config.uid), {
-        backups: backups.forUid(fc.config.uid),
-        ownerActive: await transactionOwnerActive(),
-    });
+    diagnosis.value = diagnoseCraft(entries, { backups: backups.forUid(uid), ownerActive });
 }
 
 const entryText = (e: UncertainTransaction) =>
