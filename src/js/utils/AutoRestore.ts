@@ -379,8 +379,11 @@ class AutoRestore {
 
         removeTimeout(TIMEOUT_NAME);
 
-        callback({ success, errors: errorMsg, skipped: this._skipped, ...(persistence ? { persistence } : {}) });
-        released?.();
+        try {
+            callback({ success, errors: errorMsg, skipped: this._skipped, ...(persistence ? { persistence } : {}) });
+        } finally {
+            released?.();
+        }
     }
 
     async execute(cliLines: string[], callback: AutoRestoreCallback) {

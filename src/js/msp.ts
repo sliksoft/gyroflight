@@ -1031,7 +1031,8 @@ const MSP = {
     callbacks_cleanup(error: Error = new MspCancelledError("MSP queue cleared", undefined, "cleanup")) {
         const pending = this.callbacks;
         this.callbacks = [];
-        this.write_transmissions.clear();
+        // Gyroflight: the unanswered transmissions stay (their answers may still come on this link);
+        // they are forgotten only with the link (disconnect_cleanup).
 
         const parked: MspRequest[] = [];
         for (const queue of this.parked.values()) {
@@ -1055,6 +1056,7 @@ const MSP = {
         }
     },
     disconnect_cleanup() {
+        this.write_transmissions.clear(); // Gyroflight: no answer of the closed link can come any more
         this.state = 0; // reset packet state for "clean" initial entry (this is only required if user hot-disconnects)
         this.packet_error = 0; // reset CRC packet error counter for next session
 

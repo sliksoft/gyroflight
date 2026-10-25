@@ -150,6 +150,21 @@ describe("R1: an earlier EEPROM answer proves nothing for a later save", () => {
         expect((result as EepromSaveError).persistence).toBe("unknown");
     });
 
+    // Single re-review of the integration fixes: a tab switch clears the MSP queue, not the link.
+    it("a queue cleanup (tab switch) between the two saves keeps the earlier unanswered transmission in mind", async () => {
+        await saveAWithRetryOneAnswered();
+        MSP.callbacks_cleanup(); // a tab switch: the link stays, A's retry answer may still come
+        const b = saveEeprom().then(
+            () => "saved",
+            (e: unknown) => e,
+        );
+        await settle();
+        ack(MSPCodes.MSP_EEPROM_WRITE);
+        const result = await b;
+        expect(result).toBeInstanceOf(EepromSaveError);
+        expect((result as EepromSaveError).persistence).toBe("unknown");
+    });
+
     it("control: without an earlier unanswered transmission a save's answer proves it", async () => {
         const a = saveEeprom().then(
             () => "saved",
@@ -185,6 +200,37 @@ describe("R2: a failed AutoRestore stops its command loop", () => {
         await loop;
         expect(cliOnWire()).toEqual(["set a = 1"]);
         expect(results).toHaveLength(1);
+    });
+});
+
+describe("R2 (re-review): a result callback that throws still ends the restore's save wait", () => {
+    it("the confirmed save's wait is released even when the result callback throws", async () => {
+        const a = autoRestoreInstance as unknown as {
+            _callback: ((r: AutoRestoreResult) => void) | null;
+            _finishWithSave: (errors: unknown[]) => Promise<void>;
+        };
+        a._callback = () => {
+            throw new Error("callback failed");
+        };
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        let finished = false;
+        const done = a._finishWithSave([]).then(
+            () => (finished = true),
+            () => (finished = true),
+        );
+        await settle();
+        MSP.read({
+            data: new Uint8Array([STX, ...Array.from("\r\n# saving\r\n\r\nRebooting", (c) => c.charCodeAt(0))]).buffer,
+        });
+        try {
+            (autoRestoreInstance as unknown as { handleDisconnect: () => void }).handleDisconnect();
+        } catch {
+            // the throwing callback
+        }
+        await settle();
+        await vi.advanceTimersByTimeAsync(10);
+        await Promise.race([done, settle()]);
+        expect(finished).toBe(true);
     });
 });
 
