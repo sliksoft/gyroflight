@@ -237,10 +237,18 @@ export function createWriteLease(
             state.release?.();
             const timeout = new AbortController();
             const timer = setTimeout(() => timeout.abort(), waitMs);
+            const deadline = env.now() + waitMs;
             let asking: ReturnType<typeof setInterval> | undefined;
             const exclusive = locks.request(FC_WRITE_LEASE, { mode: "exclusive", signal: timeout.signal }, async () => {
                 clearTimeout(timer);
                 clearInterval(asking);
+                // Gyroflight (audit WP8 transport closure review): this page's own earlier writes must
+                // have ended too, as another page's must before it yields: one still with a transport
+                // could land inside the transaction. No new one is admitted meanwhile (not held).
+                while (!quiet()) {
+                    if (env.now() >= deadline) throw refuse([WRITE_LEASE_TIMEOUT]);
+                    await new Promise((resolve) => setTimeout(resolve, 50));
+                }
                 state.exclusive = true;
                 try {
                     return await fn();

@@ -375,8 +375,14 @@ class WebBluetooth extends EventTarget {
             await this._teardown;
         }
         // Gyroflight (audit WP8 transport closure): no second connection over an open one; its
-        // device, characteristics and link stay as they are.
+        // device, characteristics and link stay as they are. A connect to the device already open
+        // (the reboot retry loop riding a kept link, softResetForReboot) gets that connection.
         if (this.connected) {
+            if (path === this.connectionId && this.device?.gatt?.connected && this.link?.state === "OPEN") {
+                console.log(`${this.logHead} Already connected to ${path}, using the open connection`);
+                this.dispatchEvent(new CustomEvent<boolean>("connect", { detail: true }));
+                return;
+            }
             console.error(`${this.logHead} Already connected, not opening another connection`);
             this.dispatchEvent(new CustomEvent<boolean>("connect", { detail: false }));
             return;

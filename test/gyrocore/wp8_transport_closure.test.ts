@@ -53,7 +53,7 @@ import WebSerial from "../../src/js/protocols/WebSerial";
 import WebBluetooth, { type BleDevice } from "../../src/js/protocols/WebBluetooth";
 import Websocket from "../../src/js/protocols/WebSocket";
 import { TransportLink } from "../../src/js/protocols/TransportLink";
-import "../../src/composables/fcWriteGuard"; // starts this page's lease
+import { withFcWriteLock } from "../../src/composables/fcWriteGuard"; // also starts this page's lease
 import {
     createWriteLease,
     FC_WRITE_LEASE_CHANNEL,
@@ -116,6 +116,7 @@ function watch<T>(promise: Promise<T>) {
  */
 function fakeSerialPort() {
     const writes: { bytes: number[]; done: Deferred }[] = [];
+    let openWith: () => Promise<void> = async () => undefined;
     let closeWith: () => Promise<void> = async () => undefined;
     const writer = {
         write: vi.fn((chunk: ArrayBuffer | Uint8Array) => {
@@ -129,7 +130,7 @@ function fakeSerialPort() {
     const reader = { read: () => new Promise(() => {}), cancel: vi.fn(async () => undefined), releaseLock: vi.fn() };
     const port = {
         getInfo: () => ({ usbVendorId: 0x0483, usbProductId: 0x5740 }),
-        open: vi.fn(async () => undefined),
+        open: vi.fn(() => openWith()),
         close: vi.fn(() => closeWith()),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
@@ -141,6 +142,11 @@ function fakeSerialPort() {
         writer,
         reader,
         writes,
+        openWaits: () => {
+            const gate = deferred();
+            openWith = () => gate.promise;
+            return gate;
+        },
         closeResolves: () => (closeWith = async () => undefined),
         closeRejects: () => (closeWith = async () => Promise.reject(new Error("close failed"))),
         closeWaits: () => {
@@ -484,6 +490,45 @@ describe("WebSerial: a stuck write counts until its own port's close is proven",
         await until(() => serial.pendingSends === 0);
     });
 
+    it("a disconnect while the port is still opening waits for it, closes it, and the open does not come back", async () => {
+        const fake = fakeSerialPort();
+        const ws = new WebSerial();
+        ws.ports = [{ path: "serial_o", displayName: "o", vendorId: 1, productId: 1, port: fake.port as never }];
+        install("serial", ws);
+        const events: unknown[] = [];
+        ws.addEventListener("connect", (e) => events.push((e as CustomEvent).detail));
+        const gate = fake.openWaits();
+        const connecting = serial.connect("serial_o");
+        await flush();
+        const closing = watch(serial.disconnect());
+        await wait(60);
+        expect(closing.settled).toBe(false); // not reported closed while the open runs
+
+        gate.resolve();
+        expect(await connecting).toBe(false);
+        await until(() => closing.settled);
+        expect(closing.value).toBe(true);
+        expect(fake.port.close).toHaveBeenCalledTimes(1);
+        expect(ws.connected).toBe(false);
+        expect(events).toEqual([false]);
+        expect(await serial.send(frame(1))).toEqual({ bytesSent: 0 });
+    });
+
+    it("forceClose while the port is still opening closes it once open", async () => {
+        const fake = fakeSerialPort();
+        const ws = new WebSerial();
+        ws.ports = [{ path: "serial_p", displayName: "p", vendorId: 1, productId: 1, port: fake.port as never }];
+        install("serial", ws);
+        const gate = fake.openWaits();
+        const connecting = serial.connect("serial_p");
+        await flush();
+        serial.forceClose();
+        gate.resolve();
+        expect(await connecting).toBe(false);
+        await until(() => fake.port.close.mock.calls.length === 1);
+        expect(ws.connected).toBe(false);
+    });
+
     it("(10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven", async () => {
         const fake = fakeSerialPort();
         await connectSerial(fake.port);
@@ -648,6 +693,29 @@ describe("WebBluetooth: a write belongs to its own connection; closing is proven
         expect(serial.pendingSends).toBe(0);
     });
 
+    it("a connect to the device already open (the kept-link reboot retry) uses that connection", async () => {
+        const fake = fakeBleDevice();
+        const bt = new WebBluetooth();
+        await connectBle(bt, fake.device);
+        void serial.send(frame(1));
+        await flush();
+        const link = bt.link;
+        const events: unknown[] = [];
+        bt.addEventListener("connect", (e) => events.push((e as CustomEvent).detail));
+
+        await serial.connect(`bluetooth_${fake.device.id}`, { baudRate: 115200 });
+        expect(events).toEqual([true]);
+        expect(fake.gatt.connect).toHaveBeenCalledTimes(1);
+        expect(bt.link).toBe(link);
+        expect(bt.connected).toBe(true);
+        // The facade's new generation writes over the same open link.
+        fake.writes[0].done.resolve();
+        void serial.send(frame(2));
+        await flush();
+        expect(fake.writes).toHaveLength(2);
+        expect(fake.writes[1].connection).toBe(1);
+    });
+
     it("a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it", async () => {
         const fake = fakeBleDevice();
         const bt = new WebBluetooth();
@@ -783,6 +851,26 @@ describe("two tabs: the lease is yielded only after proven quiescence", () => {
         fake.writes[0].done.resolve();
         expect(await otherTransaction(tab)).toBe("ran");
     });
+
+    it("this tab's own transaction does not start while a send of this tab is still with a transport", async () => {
+        const fake = fakeSerialPort();
+        await connectSerial(fake.port);
+        void serial.send(frame(1));
+        await flush();
+        let ran = false;
+        const result = await withFcWriteLock(async () => {
+            ran = true;
+        }).catch((e: unknown) => (e instanceof ApplyBlockedError ? e.reasons : [String(e)]));
+        expect(result).toEqual([WRITE_LEASE_TIMEOUT]);
+        expect(ran).toBe(false);
+
+        fake.writes[0].done.resolve();
+        await until(() => serial.pendingSends === 0);
+        await withFcWriteLock(async () => {
+            ran = true;
+        });
+        expect(ran).toBe(true);
+    }, 20_000);
 
     it("(11) the other tab asks while the port is still closing: refused; after the close is proven: granted", async () => {
         const fake = fakeSerialPort();

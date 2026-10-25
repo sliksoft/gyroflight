@@ -202,6 +202,29 @@ describe("R1: an earlier EEPROM answer proves nothing for a later save", () => {
         expect((result as EepromSaveError).persistence).toBe("unknown");
     });
 
+    // Codex re-check of d070d344, P1 1: a frame whose CRC failed is no answer.
+    it("a CRC-invalid frame for the code does not use up the earlier unanswered transmission", async () => {
+        await saveAWithRetryOneAnswered();
+        // "$M>" with code MSP_EEPROM_WRITE and a wrong checksum.
+        MSP.read({ data: new Uint8Array([0x24, 0x4d, 0x3e, 0, MSPCodes.MSP_EEPROM_WRITE, 0]).buffer });
+        hold = true;
+        let bResult: unknown = null;
+        const b = saveEeprom().then(
+            () => (bResult = "saved"),
+            (e: unknown) => (bResult = e),
+        );
+        await settle();
+        ack(MSPCodes.MSP_EEPROM_WRITE); // A's retry answer, late
+        await settle();
+        expect(bResult).not.toBe("saved");
+        hold = false;
+        wire[wire.length - 1].resolve(6);
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 2));
+        await b;
+        expect(bResult).toBeInstanceOf(EepromSaveError);
+        expect((bResult as EepromSaveError).persistence).toBe("unknown");
+    });
+
     it("control: a closed link ends the history, so the next connection's save is proven by its answer", async () => {
         await saveAWithRetryOneAnswered();
         MSP.disconnect_cleanup(); // the link closed: no answer of it can come any more

@@ -444,7 +444,7 @@ describe("while the CLI tab's interactive session is open, only its own checked 
 });
 
 describe("Web Bluetooth queues sends: what the craft gets is still in check order (Codex WP8 final review P0 claim)", () => {
-    it("a SET admitted before a Gyroflight write lock reaches the craft before the transaction's first read; its retry is refused", async () => {
+    it("a SET admitted before a Gyroflight write lock but not yet handed over never reaches the craft; the transaction runs once this page's sends ended", async () => {
         sent.mockRestore();
         vi.spyOn(console, "error").mockImplementation(() => undefined);
         const ble = new WebBluetooth();
@@ -472,19 +472,40 @@ describe("Web Bluetooth queues sends: what the craft gets is still in check orde
 
         // A read occupies the GATT write; a foreign SET (the PID tab) is admitted and waits behind it.
         void MSP.promise(MSPCodes.MSP_STATUS).catch(() => undefined);
-        void MSP.promise(MSPCodes.MSP_SET_PID, [1, 2, 3]).catch(() => undefined);
-        // A Gyroflight transaction starts: its read queues behind the SET; a new foreign SET is refused.
-        await withFcWriteLock(async () => {
+        const set = MSP.promise(MSPCodes.MSP_SET_PID, [1, 2, 3]).then(
+            () => "answered",
+            (e: unknown) => e,
+        );
+        // A Gyroflight transaction starts. Audit WP8 transport closure review: it does not run while
+        // this page's own sends are still with the transport; meanwhile no new foreign SET is admitted.
+        let ran = false;
+        const tx = withFcWriteLock(async () => {
+            ran = true;
             void MSP.promise(MSPCodes.MSP_PID).catch(() => undefined);
             expect(await rejected(MSP.promise(MSPCodes.MSP_SET_PID, [9]))).toBeInstanceOf(ApplyBlockedError);
         });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(ran).toBe(false);
+        expect(await rejected(MSP.promise(MSPCodes.MSP_SET_PID, [7]))).toBeInstanceOf(ApplyBlockedError);
         release();
         await vi.advanceTimersByTimeAsync(0);
-        expect(wire).toEqual([MSPCodes.MSP_STATUS, MSPCodes.MSP_SET_PID, MSPCodes.MSP_PID]);
+        // The SET had not reached the transport yet: its check right before the handover refuses it
+        // now (this page gave up its lease), so it never goes out, before or during the transaction.
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 1) + 500);
+        expect(await set).toBeInstanceOf(Error);
+        await tx;
+        expect(ran).toBe(true);
+        await vi.advanceTimersByTimeAsync(0);
+        // In check order: the earlier read first, then the transaction's read (reads are retried,
+        // no FC answers here); the SET never.
+        expect(wire[0]).toBe(MSPCodes.MSP_STATUS);
+        expect(wire).toContain(MSPCodes.MSP_PID);
+        expect(wire.indexOf(MSPCodes.MSP_PID)).toBeGreaterThan(0);
+        expect(wire).not.toContain(MSPCodes.MSP_SET_PID);
 
-        // The state turns uncertain: the admitted SET's retry is checked again and not sent.
+        // Nothing more of the SET goes out, also once the state turns uncertain.
         uncertain();
         await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 1));
-        expect(wire.filter((c) => c === MSPCodes.MSP_SET_PID)).toHaveLength(1);
+        expect(wire.filter((c) => c === MSPCodes.MSP_SET_PID)).toHaveLength(0);
     });
 });

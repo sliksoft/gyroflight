@@ -162,6 +162,8 @@ class WebSerial extends EventTarget {
     link: TransportLink | null = null;
     /** The teardown in progress; every disconnect() meanwhile waits for it and gets its outcome. */
     #closing: Promise<boolean> | null = null;
+    /** port.open() in progress (settles, never rejects): a disconnect meanwhile cancels the open. */
+    #opening: Promise<unknown> | null = null;
 
     constructor() {
         super();
@@ -351,7 +353,13 @@ class WebSerial extends EventTarget {
             }
 
             const port = device.port;
-            await port.open(options);
+            const opening = port.open(options);
+            this.#opening = opening.catch(() => undefined);
+            try {
+                await opening;
+            } finally {
+                this.#opening = null;
+            }
             // Held from the moment it is open: a failed setup below must still be closed.
             this.port = port;
             this.link = new TransportLink();
@@ -388,16 +396,11 @@ class WebSerial extends EventTarget {
                 return true;
             } else if (connectionInfo && this.openCanceled) {
                 this.connectionId = path;
+                this.openRequested = false;
 
+                // The disconnect that cancelled the open closes the port (audit WP8 transport closure).
                 console.log(`${logHead} Connection opened with ID: ${path}, but request was canceled, disconnecting`);
-                // some bluetooth dongles/dongle drivers really doesn't like to be closed instantly, adding a small delay
-                setTimeout(() => {
-                    this.openRequested = false;
-                    this.openCanceled = false;
-                    void this.disconnect();
-                    this.dispatchEvent(new CustomEvent("connect", { detail: false }));
-                }, 150);
-
+                this.dispatchEvent(new CustomEvent("connect", { detail: false }));
                 return false;
             } else {
                 this.openRequested = false;
@@ -438,6 +441,14 @@ class WebSerial extends EventTarget {
     disconnect(): Promise<boolean> {
         this.#sendGeneration++;
         this.#sendQueue = Promise.resolve();
+        // During port.open(): cancel the open, wait for it, and close the port it opened, so the
+        // open cannot bring the connection back afterwards; nothing is reported closed before that.
+        const opening = this.#opening;
+        if (opening) {
+            this.openCanceled = true;
+            // some bluetooth dongles/dongle drivers really doesn't like to be closed instantly, adding a small delay
+            return opening.then(() => new Promise((resolve) => setTimeout(resolve, 150))).then(() => this.#close(true));
+        }
         return this.#close(true);
     }
 
@@ -541,7 +552,13 @@ class WebSerial extends EventTarget {
         // Instance refs are nulled immediately so the rest of the class sees a
         // disconnected state; the actual async teardown runs in a Promise chain
         // that Chrome typically drains before destroying the JS context.
-        // A teardown already running owns the port (audit WP8 transport closure).
+        // A teardown already running owns the port; an open still running is cancelled and its
+        // port closed once it is open (audit WP8 transport closure).
+        if (this.#opening && !this.port) {
+            this.openCanceled = true;
+            void this.#opening.then(() => this.#close(false));
+            return;
+        }
         if (this.#closing || (!this.port && !this.reader && !this.writer)) {
             return;
         }

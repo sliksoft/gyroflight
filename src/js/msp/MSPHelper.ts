@@ -451,7 +451,11 @@ class MspHelper {
     // Removes and settles every pending request for the frame's code. Iterates in reverse because
     // it splices, and re-reads the queue each step because a callback may queue new requests.
     private settleCallbacks(dataHandler: MspFrame) {
-        (dataHandler as { _note_answer?: (code: number) => void })._note_answer?.(dataHandler.code);
+        // Gyroflight (audit WP8 transport closure review): a frame whose CRC failed is no answer to
+        // any transmission (its code may be wrong too); it must not use up one that is unanswered.
+        if (!dataHandler.crcError) {
+            (dataHandler as { _note_answer?: (code: number) => void })._note_answer?.(dataHandler.code);
+        }
         // Gyroflight (audit WP8 review round 2): one answer settles every waiter of this code; each
         // learns how often the request went out, counted over all of them (one may have attached
         // to another's retried request).
