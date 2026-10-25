@@ -167,6 +167,9 @@ function fakeBleDevice(id = "ble-1") {
     let stopNotifications: () => Promise<unknown> = async () => undefined;
     let startNotifications: () => Promise<unknown> = async () => undefined;
     let disconnectWorks = true;
+    // As the specification has it, disconnect() rejects the operations still pending; a write the
+    // platform never settles is the worst case a test can ask for.
+    let writesOutliveDisconnect = false;
     const characteristic = (uuid: string, n: number) => ({
         uuid,
         properties: { notify: true },
@@ -190,7 +193,12 @@ function fakeBleDevice(id = "ble-1") {
             return { getPrimaryServices: async () => [{ uuid: UUID.service, getCharacteristics: async () => chars }] };
         }),
         disconnect: vi.fn(() => {
-            if (disconnectWorks) gatt.connected = false;
+            if (!disconnectWorks) return;
+            gatt.connected = false;
+            if (writesOutliveDisconnect) return;
+            for (const w of writes.filter((x) => x.connection === connection)) {
+                w.done.reject(new DOMException("GATT Server is disconnected.", "NetworkError"));
+            }
         }),
     };
     const device = { id, name: "FC", gatt, addEventListener: vi.fn(), removeEventListener: vi.fn() };
@@ -211,6 +219,7 @@ function fakeBleDevice(id = "ble-1") {
         },
         disconnectFails: () => (disconnectWorks = false),
         disconnectWorks: () => (disconnectWorks = true),
+        writesOutliveDisconnect: () => (writesOutliveDisconnect = true),
     };
 }
 
@@ -570,12 +579,14 @@ describe("WebBluetooth: a write belongs to its own connection; closing is proven
         const fake = fakeBleDevice();
         const bt = new WebBluetooth();
         await connectBle(bt, fake.device);
-        void bt.send(frame(1)); // stuck in writeValue
+        fake.writesOutliveDisconnect();
+        void bt.send(frame(1)); // stuck in writeValue, even after GATT is down
         const queued = bt.send(frame(2)); // behind it in the adapter's queue
         await flush();
         expect(fake.writes).toHaveLength(1);
 
-        expect(await serial.disconnect()).toBe(true);
+        // GATT down, but its write never ended: not proven closed. A new connection may open.
+        expect(await serial.disconnect()).toBe(false);
         await connectBle(bt, fake.device);
         fake.writes[0].done.resolve(); // the old write returns late
         await flush();
@@ -588,6 +599,53 @@ describe("WebBluetooth: a write belongs to its own connection; closing is proven
         expect(fake.writes.at(-1)).toMatchObject({ connection: 2 });
         fake.writes.at(-1)!.done.resolve();
         expect(await fresh).toEqual({ bytesSent: 6 });
+    });
+
+    it("GATT down is no proof while a write handed to it has not ended: busy, refused, not reported closed", async () => {
+        const fake = fakeBleDevice();
+        const bt = new WebBluetooth();
+        await connectBle(bt, fake.device);
+        fake.writesOutliveDisconnect();
+        void serial.send(frame(1));
+        await flush();
+        expect(fake.writes).toHaveLength(1);
+
+        expect(await serial.disconnect()).toBe(false);
+        expect(fake.gatt.connected).toBe(false);
+        expect(bt.link?.state).toBe("CLOSING");
+        expect(serial.pendingSends).toBe(1);
+        expect(await otherTransaction(otherTab(700))).toEqual([WRITE_LEASE_TIMEOUT]);
+        expect(await serial.disconnect()).toBe(false);
+
+        fake.writes[0].done.reject(new DOMException("GATT Server is disconnected.", "NetworkError"));
+        await until(() => serial.pendingSends === 0);
+        expect(bt.link?.state).toBe("CLOSED_CONFIRMED");
+        expect(await serial.disconnect()).toBe(true);
+        expect(await otherTransaction(otherTab())).toBe("ran");
+    });
+
+    it("a connect while a connection is open leaves that connection, its device and its link alone", async () => {
+        const a = fakeBleDevice("ble-a");
+        const b = fakeBleDevice("ble-b");
+        const bt = new WebBluetooth();
+        await connectBle(bt, a.device);
+        void serial.send(frame(1));
+        await flush();
+        const linkA = bt.link;
+        bt.devices.push(bt.createPort(b.device));
+
+        await serial.connect(`bluetooth_${b.device.id}`, { baudRate: 115200 });
+        expect(b.gatt.connect).not.toHaveBeenCalled();
+        expect(bt.getConnectedDevice()).toBe(a.device);
+        expect(bt.link).toBe(linkA);
+        expect(serial.pendingSends).toBe(1);
+
+        // The teardown closes A itself, and only then is A's link closed.
+        expect(await serial.disconnect()).toBe(true);
+        expect(a.gatt.disconnect).toHaveBeenCalled();
+        expect(a.gatt.connected).toBe(false);
+        expect(linkA?.state).toBe("CLOSED_CONFIRMED");
+        expect(serial.pendingSends).toBe(0);
     });
 
     it("a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it", async () => {

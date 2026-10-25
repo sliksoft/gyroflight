@@ -27,6 +27,40 @@ import { TransportLink } from "./TransportLink";
 
 /** How long a teardown waits for stopNotifications() before it disconnects GATT anyway. */
 const STOP_NOTIFICATIONS_MS = 2000;
+/** How long a teardown waits, once GATT is down, for the writes it aborted to settle. */
+const WRITES_SETTLE_MS = 2000;
+
+/**
+ * Gyroflight (audit WP8 transport closure review): one GATT connection of one device. GATT reported
+ * down only says this page can start no new operation; a write already handed to the platform is
+ * over only once its writeValue() settled. The link is CLOSED_CONFIRMED when both hold.
+ */
+export class GattLink extends TransportLink {
+    /** writeValue() calls of this connection that have not settled. */
+    writes = 0;
+    gattDown = false;
+    readonly #quiet: Promise<void>;
+    #onQuiet!: () => void;
+
+    constructor(readonly device: BleDevice) {
+        super();
+        this.#quiet = new Promise((resolve) => (this.#onQuiet = resolve));
+    }
+
+    settle(): void {
+        if (!this.gattDown || this.writes > 0) return;
+        this.closed();
+        this.#onQuiet();
+    }
+
+    /** Resolves true once the link is closed, false if that takes longer than `ms`. */
+    async quiet(ms: number): Promise<boolean> {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([this.#quiet, new Promise((resolve) => (timer = setTimeout(resolve, ms)))]);
+        clearTimeout(timer);
+        return this.state === "CLOSED_CONFIRMED";
+    }
+}
 
 /** The W3C `BluetoothRemoteGATTCharacteristic`, as far as this transport uses it. */
 interface BleCharacteristic extends EventTarget {
@@ -121,7 +155,7 @@ class WebBluetooth extends EventTarget {
      * device whose teardown failed is kept, so the next disconnect() runs it again and no new
      * connection opens meanwhile.
      */
-    link: TransportLink | null = null;
+    link: GattLink | null = null;
     server: BleServer | undefined;
     services: BleService[] | undefined;
     service: BleService | undefined;
@@ -340,11 +374,20 @@ class WebBluetooth extends EventTarget {
         if (this._teardown) {
             await this._teardown;
         }
-        // Gyroflight (audit WP8 transport closure): a device whose teardown failed may still be
-        // connected; close it again, quietly, and open nothing while that fails.
-        if (this.closeRequested && this.device) {
+        // Gyroflight (audit WP8 transport closure): no second connection over an open one; its
+        // device, characteristics and link stay as they are.
+        if (this.connected) {
+            console.error(`${this.logHead} Already connected, not opening another connection`);
+            this.dispatchEvent(new CustomEvent<boolean>("connect", { detail: false }));
+            return;
+        }
+        // A device still held (a teardown that failed, a setup that failed) may still be connected:
+        // close it first, quietly, and open nothing while that fails.
+        if (this.device) {
+            this.closeRequested = true;
             this._teardown = this._startTeardown(false);
-            if (!(await this._teardown) || this.device) {
+            await this._teardown;
+            if (this.device) {
                 console.error(`${this.logHead} An earlier connection could not be closed, not opening another`);
                 this.dispatchEvent(new CustomEvent<boolean>("connect", { detail: false }));
                 return;
@@ -367,7 +410,7 @@ class WebBluetooth extends EventTarget {
 
             await this.gattConnect();
             // The GATT link is up from here; a failed setup below is still closed against it.
-            this.link = new TransportLink();
+            this.link = new GattLink(this.device);
             this.writeQueue = Promise.resolve();
 
             gui_log(i18n.getMessage("bluetoothConnected", [this.device.name ?? ""]));
@@ -532,9 +575,10 @@ class WebBluetooth extends EventTarget {
         if (this._teardown) {
             return this._teardown;
         }
-        // A finished teardown let go of the device; one that failed kept it and runs again.
+        // A finished teardown let go of the device (GATT is down); its link is closed once its
+        // writes settled. One that failed kept the device and runs again.
         if (this.closeRequested && !this.device) {
-            return true;
+            return !this.link || this.link.state === "CLOSED_CONFIRMED";
         }
         // Mark closing now — before the gatt.disconnect() below — so the gattserverdisconnected
         // event it triggers is recognized by handleDisconnect as our own teardown, not an unplug.
@@ -553,30 +597,33 @@ class WebBluetooth extends EventTarget {
     }
 
     async _performTeardown(announce = true): Promise<boolean> {
-        const link = this.link;
+        // The device and link of this one connection: connect() never replaces a device it holds.
+        const device = this.device;
+        const link = this.link && (!device || this.link.device === device) ? this.link : null;
         link?.closing();
         const doCleanup = async (): Promise<void> => {
             this.removeEventListener("receive", this.handleReceiveBytes as unknown as EventListener);
 
-            if (this.device) {
-                this.device.removeEventListener("disconnect", this.handleDisconnect);
-                this.device.removeEventListener("gattserverdisconnected", this.handleDisconnect);
+            if (device) {
+                device.removeEventListener("disconnect", this.handleDisconnect);
+                device.removeEventListener("gattserverdisconnected", this.handleDisconnect);
 
                 // readCharacteristic may already be null from a prior teardown — guard
                 // before calling, or null.removeEventListener throws and aborts cleanup.
-                if (this.readCharacteristic) {
-                    this.readCharacteristic.removeEventListener("characteristicvaluechanged", this.handleNotification);
+                const readCharacteristic = this.readCharacteristic;
+                if (readCharacteristic) {
+                    readCharacteristic.removeEventListener("characteristicvaluechanged", this.handleNotification);
 
                     // Stop notifications while the link is still up (an unplug/unsolicited
                     // drop skips this): Chrome keeps the notify session marked active, and
                     // on Linux/BlueZ the next connection's startNotifications() can then
                     // resolve without re-arming the CCCD — subscribed but never receiving.
                     // Bounded: a stack that never answers must not keep the link from closing.
-                    if (this.device.gatt?.connected) {
+                    if (device.gatt?.connected) {
                         let timer: ReturnType<typeof setTimeout> | undefined;
                         try {
                             await Promise.race([
-                                this.readCharacteristic.stopNotifications(),
+                                readCharacteristic.stopNotifications(),
                                 new Promise((resolve) => (timer = setTimeout(resolve, STOP_NOTIFICATIONS_MS))),
                             ]);
                         } catch (error) {
@@ -587,12 +634,12 @@ class WebBluetooth extends EventTarget {
                     }
                 }
 
-                if (this.device.gatt?.connected) {
-                    this.device.gatt.disconnect();
+                if (device.gatt?.connected) {
+                    device.gatt.disconnect();
                 }
-                // The proof: the browser reports this page's GATT connection down. Its pending writes
-                // are aborted, and their characteristics are dead for any later connection.
-                if (this.device.gatt?.connected) {
+                // The browser reports this page's GATT connection down: no new operation can start
+                // on it, and its characteristics are dead for any later connection.
+                if (device.gatt?.connected) {
                     throw new Error("GATT server still connected after disconnect()");
                 }
 
@@ -611,13 +658,23 @@ class WebBluetooth extends EventTarget {
                 `${this.logHead} Connection with ID: ${this.connectionId} closed, Sent: ${this.bytesSent} bytes, Received: ${this.bytesReceived} bytes`,
             );
 
-            link?.closed();
             this.connectionId = false;
             this.bitrate = 0;
-            if (announce) this.dispatchEvent(new CustomEvent<boolean>("disconnect", { detail: true }));
+            // Closed only once every write it handed over has settled too: a write the platform
+            // still holds may yet reach the craft. Not settled in time: not reported closed.
+            let closed = true;
+            if (link) {
+                link.gattDown = true;
+                link.settle();
+                closed = await link.quiet(WRITES_SETTLE_MS);
+            }
+            if (!closed) {
+                console.error(`${this.logHead} A write of the closed connection has not ended; not reported closed`);
+            }
+            if (announce) this.dispatchEvent(new CustomEvent<boolean>("disconnect", { detail: closed }));
             // Report success explicitly — WebSerial/TauriSerial/VirtualSerial all return
             // true, and Serial.disconnect() coerces an undefined return to false.
-            return true;
+            return closed;
         } catch (error) {
             console.error(error);
             console.error(
@@ -677,6 +734,7 @@ class WebBluetooth extends EventTarget {
                     cb?.({ error: "Connection closed before the write", bytesSent: 0 });
                     return;
                 }
+                link.writes++;
                 try {
                     await characteristic.writeValue(dataBuffer);
                     this.bytesSent += data.byteLength;
@@ -697,6 +755,9 @@ class WebBluetooth extends EventTarget {
                         });
                     }
                     throw e; // re-throw to keep the queue in a rejected state
+                } finally {
+                    link.writes--;
+                    link.settle();
                 }
             })
             .catch(() => {

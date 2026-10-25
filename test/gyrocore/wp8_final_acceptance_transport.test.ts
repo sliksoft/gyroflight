@@ -47,8 +47,7 @@ import { send as cliSend } from "../../src/composables/useMspCliSession";
 import { useCli } from "../../src/composables/useCli";
 import autoRestoreInstance from "../../src/js/utils/AutoRestore";
 import { mspHelper } from "../../src/js/msp/MSPHelper";
-import WebBluetooth from "../../src/js/protocols/WebBluetooth";
-import { TransportLink } from "../../src/js/protocols/TransportLink";
+import WebBluetooth, { GattLink } from "../../src/js/protocols/WebBluetooth";
 import { withFcWriteLock } from "../../src/composables/fcWriteGuard";
 import { useFailsafeSave } from "../../src/composables/failsafe/useFailsafeSave";
 
@@ -453,11 +452,12 @@ describe("Web Bluetooth queues sends: what the craft gets is still in check orde
         let release!: () => void;
         const gate = new Promise<void>((r) => (release = r));
         let first = true;
+        const device = { gatt: { connected: true } };
         Object.assign(ble, {
             connected: true,
             // An open connection has its link (audit WP8 transport closure).
-            link: new TransportLink(),
-            device: { gatt: { connected: true } },
+            link: new GattLink(device as never),
+            device,
             writeCharacteristic: {
                 writeValue: vi.fn(async (buf: Uint8Array) => {
                     wire.push(buf[1] === 0x4d ? buf[4] : buf[4] | (buf[5] << 8));

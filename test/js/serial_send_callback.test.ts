@@ -21,7 +21,6 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { SerialProtocol } from "../../src/js/serial";
-import { TransportLink } from "../../src/js/protocols/TransportLink";
 
 // ---------------------------------------------------------------------------
 // serial.send() callback contract.
@@ -175,7 +174,7 @@ describe("WebBluetooth.send return value", () => {
     });
 
     it("returns the byte count written, not undefined", async () => {
-        const { default: WebBluetooth } = await vi.importActual<WebBluetoothModule>(
+        const { default: WebBluetooth, GattLink } = await vi.importActual<WebBluetoothModule>(
             "../../src/js/protocols/WebBluetooth",
         );
         const ble = new WebBluetooth();
@@ -184,7 +183,7 @@ describe("WebBluetooth.send return value", () => {
         ble.writeQueue = Promise.resolve();
         // An open connection (audit WP8 transport closure): connected, with its link.
         ble.connected = true;
-        ble.link = new TransportLink();
+        ble.link = new GattLink(ble.device);
 
         const result = await ble.send(new Uint8Array(20));
 

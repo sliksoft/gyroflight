@@ -218,10 +218,11 @@ const MSP = {
     crcError: false,
 
     callbacks: [] as MspRequest[],
-    // Gyroflight (audit WP8 integration review): per write code, the transmissions not answered yet
-    // (oldest first), for ANSWER_WINDOW_MS; an answer is matched to the oldest.
+    // Gyroflight (audit WP8 integration review, WP8 transport closure review): per write code, the
+    // transmissions not answered yet (oldest first); an answer is matched to the oldest. Kept until
+    // answered or until the link closes (disconnect_cleanup): no time proves that an earlier
+    // transmission's answer cannot still arrive and confirm a later write.
     write_transmissions: new Map<number, Array<{ owner: MspRequest; at: number }>>(),
-    ANSWER_WINDOW_MS: 4000,
     parked: new Map<number, MspRequest[]>(), // errorAware requests parked behind an in-flight same-code request
     onTimeout: null as ((code: number) => void) | null, // invoked with the code when an errorAware request exhausts MAX_RETRIES
     // CRC error count; lives in the connection store so the status bar stays reactive.
@@ -971,21 +972,17 @@ const MSP = {
     },
     /** Gyroflight: a write's bytes go to the transport now (see write_transmissions). */
     _note_transmission(obj: MspRequest) {
-        const now = Date.now();
-        const list = (this.write_transmissions.get(obj.code) ?? []).filter((t) => now - t.at < this.ANSWER_WINDOW_MS);
+        const list = this.write_transmissions.get(obj.code) ?? [];
         if (list.some((t) => t.owner !== obj)) obj.ambiguous = true;
-        list.push({ owner: obj, at: now });
+        list.push({ owner: obj, at: Date.now() });
         this.write_transmissions.set(obj.code, list);
     },
     /** Gyroflight: an answer to `code` came; it is matched to the oldest open transmission. */
     _note_answer(code: number) {
         const list = this.write_transmissions.get(code);
         if (!list) return;
-        const now = Date.now();
-        const open = list.filter((t) => now - t.at < this.ANSWER_WINDOW_MS);
-        open.shift();
-        if (open.length) this.write_transmissions.set(code, open);
-        else this.write_transmissions.delete(code);
+        list.shift();
+        if (list.length === 0) this.write_transmissions.delete(code);
     },
     /**
      * @param {number} code MSP command code

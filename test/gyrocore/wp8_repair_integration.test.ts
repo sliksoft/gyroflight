@@ -165,6 +165,55 @@ describe("R1: an earlier EEPROM answer proves nothing for a later save", () => {
         expect((result as EepromSaveError).persistence).toBe("unknown");
     });
 
+    // Codex integration review of 5ef42d3b: no time proves an earlier answer cannot come any more.
+    it("an earlier unanswered transmission still counts after long silence on the same link", async () => {
+        await saveAWithRetryOneAnswered();
+        await vi.advanceTimersByTimeAsync(60_000); // the link stays open
+        hold = true; // B's bytes go to the transport, whose write stays pending
+        let bResult: unknown = null;
+        const b = saveEeprom().then(
+            () => (bResult = "saved"),
+            (e: unknown) => (bResult = e),
+        );
+        await settle();
+        expect(eepromOnWire()).toBe(3);
+        ack(MSPCodes.MSP_EEPROM_WRITE); // A's retry answer, late: it proves nothing for B
+        await settle();
+        expect(bResult).not.toBe("saved");
+        hold = false;
+        wire[wire.length - 1].resolve(6);
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 2));
+        await b;
+        expect(bResult).toBeInstanceOf(EepromSaveError);
+        expect((bResult as EepromSaveError).persistence).toBe("unknown");
+    });
+
+    it("a save after long silence that goes out while A's retry is unanswered is not proven by the next answer", async () => {
+        await saveAWithRetryOneAnswered();
+        await vi.advanceTimersByTimeAsync(60_000);
+        const b = saveEeprom().then(
+            () => "saved",
+            (e: unknown) => e,
+        );
+        await settle();
+        ack(MSPCodes.MSP_EEPROM_WRITE);
+        const result = await b;
+        expect(result).toBeInstanceOf(EepromSaveError);
+        expect((result as EepromSaveError).persistence).toBe("unknown");
+    });
+
+    it("control: a closed link ends the history, so the next connection's save is proven by its answer", async () => {
+        await saveAWithRetryOneAnswered();
+        MSP.disconnect_cleanup(); // the link closed: no answer of it can come any more
+        const b = saveEeprom().then(
+            () => "saved",
+            (e: unknown) => e,
+        );
+        await settle();
+        ack(MSPCodes.MSP_EEPROM_WRITE);
+        expect(await b).toBe("saved");
+    });
+
     it("control: without an earlier unanswered transmission a save's answer proves it", async () => {
         const a = saveEeprom().then(
             () => "saved",
