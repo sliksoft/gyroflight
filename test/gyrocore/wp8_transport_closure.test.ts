@@ -514,6 +514,55 @@ describe("WebSerial: a stuck write counts until its own port's close is proven",
         expect(await serial.send(frame(1))).toEqual({ bytesSent: 0 });
     });
 
+    it("a cancelled open that fails leaves nothing behind: the next connect opens normally", async () => {
+        const fake = fakeSerialPort();
+        const ws = new WebSerial();
+        await flush(); // its own device load (getPorts) has run and will not replace the list below
+        ws.ports = [{ path: "serial_r", displayName: "r", vendorId: 1, productId: 1, port: fake.port as never }];
+        install("serial", ws);
+        const gate = fake.openWaits();
+        const connecting = serial.connect("serial_r");
+        await flush();
+        const closing = serial.disconnect();
+        gate.reject(new Error("device lost"));
+        expect(await connecting).toBe(false);
+        expect(await closing).toBe(true);
+
+        fake.openWaits().resolve();
+        expect(await serial.connect("serial_r")).toBe(true);
+        expect(ws.connected).toBe(true);
+        expect(fake.port.close).not.toHaveBeenCalled();
+    });
+
+    it("a connect while a cancelled open is still running waits for its close; no port is left open", async () => {
+        const a = fakeSerialPort();
+        const b = fakeSerialPort();
+        const ws = new WebSerial();
+        await flush(); // its own device load (getPorts) has run and will not replace the list below
+        ws.ports = [
+            { path: "serial_a", displayName: "a", vendorId: 1, productId: 1, port: a.port as never },
+            { path: "serial_b", displayName: "b", vendorId: 1, productId: 1, port: b.port as never },
+        ];
+        install("serial", ws);
+        const gateA = a.openWaits();
+        const connectingA = serial.connect("serial_a");
+        await flush();
+        const closingA = watch(serial.disconnect());
+        const connectingB = watch(serial.connect("serial_b"));
+        await flush();
+        expect(b.port.open).not.toHaveBeenCalled(); // B waits for A's cancellation
+
+        gateA.resolve();
+        expect(await connectingA).toBe(false);
+        await until(() => closingA.settled && connectingB.settled);
+        expect(closingA.value).toBe(true);
+        expect(a.port.close).toHaveBeenCalledTimes(1);
+        expect(connectingB.value).toBe(true);
+        expect(ws.connected).toBe(true);
+        expect(ws.getConnectedDevice()).toBe(b.port);
+        expect(b.port.close).not.toHaveBeenCalled();
+    });
+
     it("forceClose while the port is still opening closes it once open", async () => {
         const fake = fakeSerialPort();
         const ws = new WebSerial();

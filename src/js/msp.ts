@@ -1053,7 +1053,10 @@ const MSP = {
         }
     },
     disconnect_cleanup() {
-        this.write_transmissions.clear(); // Gyroflight: no answer of the closed link can come any more
+        // Gyroflight (audit WP8 transport closure review): forgotten only once the link is down, when
+        // no answer of it can come any more. A cleanup while it stays open (the kept BLE link through
+        // a reboot, a CLI drain) keeps them: a late answer must not confirm a later write.
+        if (!serial.connected) this.write_transmissions.clear();
         this.state = 0; // reset packet state for "clean" initial entry (this is only required if user hot-disconnects)
         this.packet_error = 0; // reset CRC packet error counter for next session
 

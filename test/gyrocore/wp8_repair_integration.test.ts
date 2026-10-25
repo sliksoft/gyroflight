@@ -225,9 +225,37 @@ describe("R1: an earlier EEPROM answer proves nothing for a later save", () => {
         expect((bResult as EepromSaveError).persistence).toBe("unknown");
     });
 
+    // Codex re-check of 91b6649b, P1: the kept BLE link through a reboot runs disconnect_cleanup()
+    // (resetAppConnectionState -> teardownConnectionUi) while the link stays open.
+    it("a cleanup while the link stays open (kept-link reboot) keeps the unanswered transmission", async () => {
+        await saveAWithRetryOneAnswered();
+        expect(serial.connected).toBe(true);
+        MSP.disconnect_cleanup(); // softResetForReboot
+        MSP.disconnect_cleanup(); // the reconnect loop, before riding the same link
+        hold = true;
+        let bResult: unknown = null;
+        const b = saveEeprom().then(
+            () => (bResult = "saved"),
+            (e: unknown) => (bResult = e),
+        );
+        await settle();
+        ack(MSPCodes.MSP_EEPROM_WRITE); // A's retry answer, late
+        await settle();
+        expect(bResult).not.toBe("saved");
+        hold = false;
+        wire[wire.length - 1].resolve(6);
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT * (MSP.MAX_RETRIES + 2));
+        await b;
+        expect(bResult).toBeInstanceOf(EepromSaveError);
+        expect((bResult as EepromSaveError).persistence).toBe("unknown");
+    });
+
     it("control: a closed link ends the history, so the next connection's save is proven by its answer", async () => {
         await saveAWithRetryOneAnswered();
-        MSP.disconnect_cleanup(); // the link closed: no answer of it can come any more
+        // The link closed: no answer of it can come any more.
+        (serial as unknown as { _protocol: { connected: boolean } })._protocol.connected = false;
+        MSP.disconnect_cleanup();
+        (serial as unknown as { _protocol: unknown })._protocol = fakeTransport(); // the next connection
         const b = saveEeprom().then(
             () => "saved",
             (e: unknown) => e,

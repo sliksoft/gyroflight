@@ -327,7 +327,8 @@ class WebSerial extends EventTarget {
         // Gyroflight (audit WP8 transport closure): never open while an earlier port's close is still
         // running or failed; that port could still send. A failed one is closed again first, quietly
         // (no "disconnect" event into the connect that is starting).
-        if (this.#closing) await this.#closing;
+        // An open still running (another connect, or one being cancelled) comes first too.
+        while (this.#closing || this.#opening) await (this.#closing ?? this.#opening);
         if (!this.connected && this.port && !(await this.#close(false))) {
             console.error(`${logHead} An earlier port could not be closed, not opening another`);
             this.dispatchEvent(new CustomEvent("connect", { detail: false }));
@@ -342,6 +343,7 @@ class WebSerial extends EventTarget {
         this.#sendQueue = Promise.resolve();
 
         this.openRequested = true;
+        this.openCanceled = false;
         this.closeRequested = false;
 
         try {
@@ -443,11 +445,17 @@ class WebSerial extends EventTarget {
         this.#sendQueue = Promise.resolve();
         // During port.open(): cancel the open, wait for it, and close the port it opened, so the
         // open cannot bring the connection back afterwards; nothing is reported closed before that.
+        // That is the teardown in progress from now on: a connect or disconnect meanwhile waits for it.
         const opening = this.#opening;
-        if (opening) {
+        if (opening && !this.#closing) {
             this.openCanceled = true;
             // some bluetooth dongles/dongle drivers really doesn't like to be closed instantly, adding a small delay
-            return opening.then(() => new Promise((resolve) => setTimeout(resolve, 150))).then(() => this.#close(true));
+            this.#closing = opening
+                .then(() => new Promise((resolve) => setTimeout(resolve, 150)))
+                .then(() => this.#teardown(true))
+                .finally(() => {
+                    this.#closing = null;
+                });
         }
         return this.#close(true);
     }
@@ -462,9 +470,11 @@ class WebSerial extends EventTarget {
     async #teardown(announce: boolean): Promise<boolean> {
         const port = this.port;
         const link = this.link;
-        // Nothing open: every port this transport opened was closed with proof.
+        // Nothing open: every port this transport opened was closed with proof (a cancelled open
+        // that failed opened nothing).
         if (!port) {
             this.connected = false;
+            this.openCanceled = false;
             return true;
         }
         // Only the teardown that ends a reported connection tells serial_backend.
@@ -555,8 +565,14 @@ class WebSerial extends EventTarget {
         // A teardown already running owns the port; an open still running is cancelled and its
         // port closed once it is open (audit WP8 transport closure).
         if (this.#opening && !this.port) {
-            this.openCanceled = true;
-            void this.#opening.then(() => this.#close(false));
+            if (!this.#closing) {
+                this.openCanceled = true;
+                this.#closing = this.#opening
+                    .then(() => this.#teardown(false))
+                    .finally(() => {
+                        this.#closing = null;
+                    });
+            }
             return;
         }
         if (this.#closing || (!this.port && !this.reader && !this.writer)) {
