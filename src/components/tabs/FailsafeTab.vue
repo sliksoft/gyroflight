@@ -2,8 +2,14 @@
     <BaseTab tab-name="failsafe">
         <div class="content_wrapper">
             <!-- Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F06 review): no edits while saving;
-                 the save sends the values it took when it started and then reboots. -->
-            <fieldset :disabled="isSaving" class="contents" data-gyrocore="failsafe-fields">
+                 the save sends the values it took when it started and then reboots. `inert` also stops
+                 the custom pointer handlers (selects, number steppers) that `disabled` does not. -->
+            <fieldset
+                :disabled="isSaving"
+                :inert="isSaving || undefined"
+                class="contents"
+                data-gyrocore="failsafe-fields"
+            >
                 <div class="tab_title" v-html="$t('tabFailsafe')"></div>
                 <WikiButton docUrl="failsafe" />
 

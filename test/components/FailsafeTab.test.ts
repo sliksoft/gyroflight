@@ -116,10 +116,13 @@ describe("Failsafe MSP wiring", () => {
         const saving = vm.saveConfig();
         await flushPromises();
         expect(fields().disabled).toBe(true);
+        // Codex review round 3: `inert` also stops custom pointer handlers (selects, steppers).
+        expect(fields().hasAttribute("inert")).toBe(true);
         finish();
         await saving;
         await nextTick();
         expect(fields().disabled).toBe(false);
+        expect(fields().hasAttribute("inert")).toBe(false);
     });
 
     // Gyroflight (audit WP8-F06): the RAM may hold the values, EEPROM does not; Save stays enabled.
