@@ -390,8 +390,12 @@ class AutoBackup {
             reportRefusedWrite(`CLI "${line}"`, out.refused);
             return;
         }
-        // Checked again right before its bytes go out (audit WP8-F03).
-        this.sendSerial(out.text, callback, () => interactiveCliStillAllowed(`${line}\n`, out.text));
+        // Checked again right before its bytes go out (audit WP8-F03). Its callback belongs to this
+        // connection (audit WP8 transport closure review): a send that finished only after the link
+        // closed and another opened must not act on that one (`exit` would disconnect it).
+        const connection = serial.connectionGeneration;
+        const onSent = callback && (() => serial.connectionGeneration === connection && callback());
+        this.sendSerial(out.text, onSent, () => interactiveCliStillAllowed(`${line}\n`, out.text));
     }
 
     execute(callback: (result: boolean) => void) {

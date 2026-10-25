@@ -62,6 +62,7 @@ import {
     type WriteLease,
 } from "../../src/composables/fcWriteLease";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
+import AutoBackup from "../../src/js/utils/AutoBackup";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const flush = async () => {
@@ -576,6 +577,39 @@ describe("WebSerial: a stuck write counts until its own port's close is proven",
         expect(await connecting).toBe(false);
         await until(() => fake.port.close.mock.calls.length === 1);
         expect(ws.connected).toBe(false);
+    });
+
+    // Codex re-check of af372bfb (P2): a callback of a send that ends after its link closed and
+    // another opened must not act on the new one. AutoBackup's `exit` would disconnect it.
+    it("a late AutoBackup exit callback from an old connection does not disconnect the new one", async () => {
+        const fake = fakeSerialPort();
+        await connectSerial(fake.port);
+        void serial.send(frame(1)); // stuck in the port
+        const onClose = vi.fn();
+        (AutoBackup as unknown as { sendCommand: (l: string, cb: () => void) => void }).sendCommand("exit", onClose);
+        await flush();
+        expect(fake.writes).toHaveLength(1); // exit waits behind the stuck write
+        expect(await serial.disconnect()).toBe(true);
+        const next = fakeSerialPort();
+        await connectSerial(next.port, "serial_n");
+
+        fake.writes[0].done.resolve(); // the old write ends; exit's turn comes, refused (0 bytes)
+        await flush();
+        await flush();
+        expect(next.writes).toHaveLength(0);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(serial.connected).toBe(true);
+    });
+
+    it("control: on its own connection the exit callback runs", async () => {
+        const fake = fakeSerialPort();
+        await connectSerial(fake.port);
+        const onClose = vi.fn();
+        (AutoBackup as unknown as { sendCommand: (l: string, cb: () => void) => void }).sendCommand("exit", onClose);
+        await flush();
+        expect(fake.writes).toHaveLength(1);
+        fake.writes[0].done.resolve();
+        await until(() => onClose.mock.calls.length === 1);
     });
 
     it("(10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven", async () => {
