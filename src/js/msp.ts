@@ -71,6 +71,10 @@ export interface MspRequest {
     recheck?: () => string[] | null;
     /** Gyroflight: a write admitted under this page's shared write lease (no transaction permit). */
     foreignWrite?: boolean;
+    /** Gyroflight: a write (classifyMsp): the firmware's error answer rejects an awaiter. */
+    write?: boolean;
+    /** Gyroflight: a legacy request that stopped retrying; its queued bytes no longer go out. */
+    exhausted?: boolean;
     /**
      * Gyroflight: how many times its bytes were handed to the transport (passed stillWanted); 0 when
      * every attempt was stopped there; unset when the transport never asked.
@@ -430,10 +434,15 @@ const MSP = {
             console.error("CLI callback threw on an uncertain session:", callbackError);
         }
     },
-    /** Gyroflight: from now on no CLI command goes out until disconnect_cleanup; the queued ones end. */
+    /**
+     * Gyroflight: from now on no CLI command goes out until disconnect_cleanup; the queued ones end,
+     * and so does one in flight (no reply can be told apart from an earlier command's now).
+     */
     _cli_session_lost() {
         this.cli_session_uncertain = true;
         for (const entry of this.cli_queue.splice(0, this.cli_queue.length)) this._refuse_uncertain_cli(entry);
+        const inFlight = this.cli_in_flight;
+        if (inFlight) this._finish_cli([], new CliSessionUncertainError(inFlight.command), false);
     },
     /** The CLI text received so far for the command in flight (null when none is). */
     cliInFlightOutput(): string[] | null {
@@ -490,7 +499,9 @@ const MSP = {
         // delivered only when the transport reports every byte.
         const stillWanted = () => {
             if (this.cli_in_flight !== entry || entry.generation !== this.cli_generation) return false;
-            entry.refusedAtWire = cliCommandRefusal(entry.command) ?? undefined;
+            entry.refusedAtWire = this.cli_session_uncertain
+                ? [new CliSessionUncertainError(entry.command).message]
+                : (cliCommandRefusal(entry.command) ?? undefined);
             return !entry.refusedAtWire;
         };
         void Promise.resolve(serial.send(frame, undefined, { stillWanted })).then((result) =>
@@ -561,8 +572,10 @@ const MSP = {
             this.cli_drain_timer = setTimeout(() => this._cli_drain_expired(), this.cli_drain_grace_ms);
         }
 
+        // A reply that came while the session turned uncertain may belong to another command.
+        const outcome = !error && this.cli_session_uncertain ? new CliSessionUncertainError(entry.command) : error;
         try {
-            entry.callback?.(lines, error);
+            entry.callback?.(outcome ? [] : lines, outcome);
         } catch (callbackError) {
             console.error("CLI callback threw:", callbackError);
         }
@@ -696,7 +709,8 @@ const MSP = {
         // uncertain. An awaiter gets the error; a callback caller gets no callback (never "saved").
         const recheck = () => mspRequestRefusal(code, data, permit);
         const refused = recheck();
-        const foreignWrite = !permit && classifyMsp(code, data) === "write";
+        const write = classifyMsp(code, data) === "write";
+        const foreignWrite = !permit && write;
         if (refused) {
             if (errorAware && callback_msp) callback_msp(null, writeRefused(refused));
             else reportRefusedWrite(`MSP ${code}`, refused);
@@ -722,6 +736,7 @@ const MSP = {
                     notifyTimeout,
                     recheck,
                     foreignWrite,
+                    write,
                 });
                 return true;
             }
@@ -740,6 +755,7 @@ const MSP = {
             start: performance.now(),
             recheck,
             foreignWrite,
+            write,
         };
 
         // errorAware entries always arm their own timer (even when deduped) so an awaiter
@@ -792,6 +808,7 @@ const MSP = {
             clearTimeout(obj.timer ?? undefined);
             obj.timer = null;
             if (!obj.errorAware) {
+                obj.exhausted = true;
                 reportRefusedWrite(`MSP ${obj.code} retry`, retryRefused);
                 return;
             }
@@ -824,6 +841,8 @@ const MSP = {
 
         if (!obj.errorAware) {
             // Legacy path: stop retrying but keep the entry queued so a late response still resolves it.
+            // Gyroflight: its bytes still held by the transport do not go out any more (WP8 review).
+            obj.exhausted = true;
             return;
         }
 
@@ -900,7 +919,7 @@ const MSP = {
      * out or was cleared meanwhile, or that the write check would now refuse, does not go out late.
      */
     _still_wanted(obj: MspRequest): boolean {
-        if (!this.callbacks.includes(obj) || obj.recheck?.()) {
+        if (obj.exhausted || !this.callbacks.includes(obj) || obj.recheck?.()) {
             obj.wireSends ??= 0;
             return false;
         }
@@ -1058,6 +1077,10 @@ const BYTE_HANDLERS: Partial<Record<number, (this: typeof MSP, chunk: number) =>
                 this.message_direction = 1;
                 this.unsupported = 1;
                 break;
+            default:
+                // Gyroflight: no direction the firmware sends (a corrupted header): not an answer.
+                this.message_direction = 0;
+                break;
         }
         this.state =
             this.state === this.decoder_states.DIRECTION_V1
@@ -1187,10 +1210,12 @@ declare global {
 window.MSP = MSP;
 
 // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F02): this page yields the write lease to
-// another page's transaction only while none of its own writes still awaits an answer (a retry is
-// pending) and no CLI command is in flight or queued.
+// another page's transaction only while nothing it sent is still with the transport (any send,
+// raw CLI text included, also one whose request gave up), none of its writes still awaits an
+// answer (a retry is pending), and no CLI command is in flight or queued.
 writeLease.setBusyProbe(
     () =>
+        serial.pendingSends > 0 ||
         MSP.callbacks.some((e) => e.foreignWrite && e.timer) ||
         [...MSP.parked.values()].some((q) => q.some((e) => e.foreignWrite)) ||
         MSP.cli_in_flight !== null ||

@@ -27,7 +27,7 @@ import semver from "semver";
 import vtxDeviceStatusFactory from "../utils/VtxDeviceStatus/VtxDeviceStatusFactory";
 import MSP from "../msp";
 import MSPCodes, { MSP2TextType } from "./MSPCodes";
-import { MspCrcError } from "./mspErrors";
+import { MspCrcError, MspFirmwareRefusedError } from "./mspErrors";
 import { MspBuffer, MspDataView } from "./mspBytes";
 import {
     API_VERSION_1_45,
@@ -196,7 +196,13 @@ function decodeLedMask(mask: number, layout: LedMaskLayout): LedStripEntry {
 }
 
 // Settles one pending request with the frame that answers it.
-function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspFrame, attempts?: number) {
+function deliverResponse(
+    callback: MspCallback,
+    errorAware: boolean,
+    frame: MspFrame,
+    attempts?: number,
+    write?: boolean,
+) {
     const { code, dataView: data, crcError } = frame;
     const response: MspResponse = {
         command: code,
@@ -214,6 +220,14 @@ function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspF
             callback(response);
         } else if (crcError) {
             callback(null, new MspCrcError(`CRC error for MSP code ${code}`, code));
+        } else if (write && frame.unsupported) {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 review round 2): a write the
+            // firmware refused is no success for an awaiter (it resolved before, and tabs took it
+            // for saved).
+            callback(
+                null,
+                new MspFirmwareRefusedError(`MSP code ${code} refused by the flight controller`, code, response),
+            );
         } else {
             callback(response, undefined);
         }
@@ -428,6 +442,13 @@ class MspHelper {
     // Removes and settles every pending request for the frame's code. Iterates in reverse because
     // it splices, and re-reads the queue each step because a callback may queue new requests.
     private settleCallbacks(dataHandler: MspFrame) {
+        // Gyroflight (audit WP8 review round 2): one answer settles every waiter of this code; each
+        // learns how often the request went out, counted over all of them (one may have attached
+        // to another's retried request).
+        const attempts = Math.max(
+            1,
+            ...dataHandler.callbacks.filter((e) => e?.code === dataHandler.code).map((e) => e.attempts ?? 1),
+        );
         for (let i = dataHandler.callbacks.length - 1; i >= 0; i--) {
             const entry = dataHandler.callbacks[i];
             if (entry?.code !== dataHandler.code) {
@@ -438,7 +459,7 @@ class MspHelper {
             dataHandler.callbacks.splice(i, 1);
 
             if (typeof entry.callback === "function") {
-                deliverResponse(entry.callback, entry.errorAware, dataHandler, entry.attempts);
+                deliverResponse(entry.callback, entry.errorAware, dataHandler, attempts, entry.write);
             }
         }
     }

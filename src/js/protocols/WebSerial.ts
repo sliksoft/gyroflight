@@ -567,20 +567,25 @@ class WebSerial extends EventTarget {
         return isMac && vendorId !== undefined && vendorIdNames[vendorId] === "AT32";
     }
 
-    /** Writes `data` in chunks; returns the bytes that went out before a chunk failed or the port closed. */
-    async batchWrite(data: WebSerialPayload): Promise<number> {
-        // this.writer is read per chunk, not captured, so a disconnect mid-frame stops the frame
-        // rather than writing to a released lock.
+    /**
+     * Writes `data` in chunks; returns the bytes that went out before a chunk failed or the port
+     * closed. Every chunk goes to the writer, and the connection, the frame started on: a frame cut
+     * by a disconnect never continues on the next connection (audit WP8 review round 2).
+     */
+    async batchWrite(data: WebSerialPayload, generation = this.#sendGeneration): Promise<number> {
         // AT32 on macOS requires smaller chunks (63 bytes) to work correctly due to
         // USB buffer size limitations in the macOS implementation
         const batchWriteSize = 63;
+        const writer = this.writer;
         let written = 0;
         while (written < data.byteLength) {
             const chunk = data.slice(written, written + batchWriteSize);
-            if (!this.connected || !this.writer) return written;
+            if (!this.connected || !writer || this.writer !== writer || generation !== this.#sendGeneration) {
+                return written;
+            }
             try {
                 // The chunks are one frame, so they must reach the port in order.
-                await this.writer.write(chunk); // NOSONAR: sequential by design
+                await writer.write(chunk); // NOSONAR: sequential by design
             } catch (error) {
                 console.error(`${logHead} Error writing batch chunk:`, error);
                 return written;
@@ -597,7 +602,7 @@ class WebSerial extends EventTarget {
     send(data: WebSerialPayload, callback?: (result: WebSerialSendResult) => void): Promise<WebSerialSendResult> {
         const generation = this.#sendGeneration;
         const result = this.#sendQueue.then(() =>
-            generation === this.#sendGeneration ? this.#sendNow(data) : { bytesSent: 0 },
+            generation === this.#sendGeneration ? this.#sendNow(data, generation) : { bytesSent: 0 },
         );
         this.#sendQueue = result.catch(() => undefined);
         if (callback) {
@@ -606,7 +611,7 @@ class WebSerial extends EventTarget {
         return result;
     }
 
-    async #sendNow(data: WebSerialPayload): Promise<WebSerialSendResult> {
+    async #sendNow(data: WebSerialPayload, generation: number): Promise<WebSerialSendResult> {
         if (!this.connected || !this.writer) {
             console.error(`${logHead} Failed to send data, serial port not open`);
             return { bytesSent: 0 };
@@ -614,7 +619,7 @@ class WebSerial extends EventTarget {
 
         let bytesSent = 0;
         if (this.isNeedBatchWrite) {
-            bytesSent = await this.batchWrite(data);
+            bytesSent = await this.batchWrite(data, generation);
         } else {
             try {
                 await this.writer.write(data);

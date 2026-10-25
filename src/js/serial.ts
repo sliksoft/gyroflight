@@ -146,6 +146,8 @@ class Serial extends EventTarget {
     // nothing after it).
     #sendQueue: Promise<unknown> = Promise.resolve();
     #sendGeneration = 0;
+    /** Sends made and not yet finished by the transport (queued or being written). */
+    #pendingSends = 0;
 
     constructor() {
         super();
@@ -373,11 +375,25 @@ class Serial extends EventTarget {
                 return { bytesSent: 0 };
             }
         };
-        const queued = this.#sendQueue.then(run);
+        this.#pendingSends++;
+        const queued = this.#sendQueue.then(run).finally(() => this.#pendingSends--);
         this.#sendQueue = queued.catch(() => undefined);
         const result = await queued;
         callback?.(result);
         return result;
+    }
+
+    /**
+     * Gyroflight (audit WP8-F02 review): sends not yet finished by the transport, including ones it
+     * still holds after their MSP request gave up; a page does not yield the write lease meanwhile.
+     */
+    get pendingSends(): number {
+        return this.#pendingSends;
+    }
+
+    /** Gyroflight (audit WP8-F10 review): changes on every connect and disconnect. */
+    get connectionGeneration(): number {
+        return this.#sendGeneration;
     }
 
     #newSendQueue(): void {

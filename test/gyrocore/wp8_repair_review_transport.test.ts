@@ -33,6 +33,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MSP from "../../src/js/msp";
 import MSPCodes from "../../src/js/msp/MSPCodes";
+import { mspHelper } from "../../src/js/msp/MSPHelper";
 import { serial } from "../../src/js/serial";
 import { useConnectionStore } from "../../src/stores/connection";
 import { useFlightControllerStore } from "../../src/stores/fc";
@@ -259,5 +260,69 @@ describe("Codex review F09: no reply goes to the wrong command, no success befor
         feed(reply("answer-b"));
         await settle();
         expect(results).toEqual([{ lines: ["answer-b", ""], error: null }]);
+    });
+});
+
+describe("Codex review round 2 (F03/F09/F04)", () => {
+    beforeEach(() => {
+        MSP.clearListeners();
+        MSP.listen(mspHelper.process_data.bind(mspHelper));
+    });
+    afterEach(() => MSP.clearListeners());
+
+    const feed = (bytes: number[]) => MSP.read({ data: new Uint8Array(bytes).buffer });
+    const reply = (s: string) => [STX, ...Array.from(s, (c) => c.charCodeAt(0)), 0x0a, 0x03];
+
+    it("a legacy write whose retries ran out never leaves late from behind a stalled send", async () => {
+        autoComplete = false;
+        void MSP.promise(MSPCodes.MSP_STATUS).catch(() => undefined); // stalls in the transport
+        await settle();
+        MSP.send_message(MSPCodes.MSP_SET_PID, [1, 2, 3], false, () => undefined);
+        await vi.advanceTimersByTimeAsync(5 * MSP.TIMEOUT);
+        autoComplete = true;
+        wire[0].resolve(wire[0].bytes.length);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(mspCodesOnWire().filter((c) => c === MSPCodes.MSP_SET_PID)).toEqual([]);
+    });
+
+    it("a late failed send of an earlier command closes the session: its successor neither goes out nor succeeds", async () => {
+        autoComplete = false;
+        const results: Array<{ cmd: string; lines: string[]; error: unknown }> = [];
+        MSP.send_cli_command("get a", (lines, e) => results.push({ cmd: "a", lines, error: e ?? null }), {
+            timeoutMs: 100,
+        });
+        await settle();
+        const a = wire[0];
+        const c = serial.send(new Uint8Array([0x99]).buffer); // another send, held behind A
+        MSP.send_cli_command("set b = 1", (lines, e) => results.push({ cmd: "b", lines, error: e ?? null }));
+        await vi.advanceTimersByTimeAsync(150); // A times out: drain
+        feed(reply("late-a")); // A's late reply ends the drain; B leaves the queue (its bytes wait behind C)
+        await settle();
+        a.resolve(a.bytes.length - 2); // A's send turns out cut: the session is uncertain
+        await settle();
+        autoComplete = true;
+        wire[1]?.resolve(1); // C finishes
+        await c;
+        await settle();
+        expect(cliOnWire().filter((t) => t.startsWith("set b"))).toEqual([]);
+        const b = results.find((r) => r.cmd === "b");
+        expect(b?.error).toBeInstanceOf(Error);
+    });
+
+    it("the firmware's error answer to a SET rejects an awaiter (it resolved, and tabs took it for saved)", async () => {
+        const write = outcome(MSP.promise(MSPCodes.MSP_SET_OSD_CONFIG, [1, 2]));
+        await settle();
+        const code = MSPCodes.MSP_SET_OSD_CONFIG;
+        feed([0x24, 0x4d, 0x21, 0, code, code]);
+        const err = await write;
+        expect((err as Error).name).toBe("MspFirmwareRefusedError");
+    });
+
+    it("the firmware's error answer to a read still resolves with the answer (reads keep their meaning)", async () => {
+        const read = MSP.promise(MSPCodes.MSP_STATUS);
+        await settle();
+        const code = MSPCodes.MSP_STATUS;
+        feed([0x24, 0x4d, 0x21, 0, code, code]);
+        expect(await read).toMatchObject({ unsupported: 1 });
     });
 });

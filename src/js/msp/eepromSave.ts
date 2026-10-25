@@ -37,6 +37,7 @@ import MSPCodes from "./MSPCodes";
 import { serial } from "../serial";
 import { useConnectionStore } from "../../stores/connection";
 import { WriteRefusedError } from "../../composables/fcWriteGuard";
+import { MspFirmwareRefusedError } from "./mspErrors";
 
 export type EepromReplyState = "saved" | "no" | "unknown";
 
@@ -70,6 +71,21 @@ export class EepromSaveError extends Error {
 }
 
 /**
+ * The saved state after MSP_EEPROM_WRITE failed with `err`: "not_saved" when the write check refused
+ * it before it was sent, or when the firmware refused it and no earlier attempt may have saved;
+ * otherwise unknown (the firmware may have saved before the answer was lost).
+ */
+export function eepromSendErrorState(err: unknown): "not_saved" | "unknown" {
+    if (err instanceof WriteRefusedError) return "not_saved";
+    if (err instanceof MspFirmwareRefusedError) {
+        return eepromReplyState(err.response as Parameters<typeof eepromReplyState>[0]) === "no"
+            ? "not_saved"
+            : "unknown";
+    }
+    return "unknown";
+}
+
+/**
  * Sends MSP_EEPROM_WRITE and resolves only on the firmware's ACK; otherwise rejects with an
  * EepromSaveError saying what is known.
  */
@@ -84,7 +100,7 @@ export async function saveEeprom(): Promise<void> {
         reply = await MSP.promise(MSPCodes.MSP_EEPROM_WRITE);
     } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        throw new EepromSaveError(err instanceof WriteRefusedError ? "not_saved" : "unknown", detail, { cause: err });
+        throw new EepromSaveError(eepromSendErrorState(err), detail, { cause: err });
     }
     const state = eepromReplyState(reply);
     if (state === "no") throw new EepromSaveError("not_saved", "the flight controller refused it (armed?)");

@@ -90,6 +90,7 @@ beforeEach(() => {
     MSP.parked.clear();
     MSP.clearListeners();
     MSP.state = MSP.decoder_states.IDLE;
+    MSP.message_direction = 1; // as after a firmware answer: no test inherits another's '<'
     MSP.listen(mspHelper.process_data.bind(mspHelper));
     reboot.reinit.mockClear();
     reboot.tabSwitch.mockClear();
@@ -210,6 +211,28 @@ describe("Codex review of F04: what counts as the firmware's ACK", () => {
         await vi.advanceTimersByTimeAsync(5 * MSP.TIMEOUT);
         expect(((await done) as EepromSaveError).persistence).toBe("unknown");
         expect(reboot.tabSwitch).not.toHaveBeenCalled();
+    });
+
+    // Codex review round 2.
+    it("a frame with a direction byte the firmware never sends ('$M=') is no ACK", async () => {
+        const done = outcome(useReboot().saveAndReboot());
+        await vi.advanceTimersByTimeAsync(150);
+        const code = MSPCodes.MSP_EEPROM_WRITE;
+        MSP.read({ data: new Uint8Array([0x24, 0x4d, 0x3d, 0, code, code]).buffer });
+        await vi.advanceTimersByTimeAsync(10);
+        expect(eepromLogged()).toBe(false);
+        await vi.advanceTimersByTimeAsync(5 * MSP.TIMEOUT);
+        expect(((await done) as EepromSaveError).persistence).toBe("unknown");
+    });
+
+    it("a second save that joined a retried EEPROM request learns of the retry too (refusal: unknown)", async () => {
+        const first = outcome(useReboot().saveToEeprom());
+        await vi.advanceTimersByTimeAsync(MSP.TIMEOUT + 50); // the first attempt went unanswered, retried
+        const second = outcome(useReboot().saveToEeprom()); // identical request: attaches, no new send
+        await vi.advanceTimersByTimeAsync(10);
+        reply(MSPCodes.MSP_EEPROM_WRITE, { error: true });
+        expect(((await first) as EepromSaveError).persistence).toBe("unknown");
+        expect(((await second) as EepromSaveError).persistence).toBe("unknown");
     });
 
     it("a refusal of a retry (the first attempt's answer lost) leaves persistence unknown, not 'not saved'", async () => {

@@ -169,4 +169,20 @@ describe("WP8-F03 WebSerial: whole logical sends", () => {
         expect(await b).toEqual({ bytesSent: 5 });
         expect(writes.map((w) => w.bytes[0])).toEqual([0x11, 0x22]);
     });
+
+    // Codex review round 2: an old batch must not continue on the next connection's writer.
+    it("a frame cut by a disconnect does not continue on the next connection", async () => {
+        const { ws, writes } = await connected();
+        const old = ws.send(frame(0xaa, 100));
+        await flush();
+        expect(writes).toHaveLength(1);
+        await ws.disconnect();
+        const next = fakePort(0x2e3c);
+        ws.ports = [{ path: "serial_2", displayName: "AT32", port: next.port } as never];
+        expect(await ws.connect("serial_2", { baudRate: 115200 })).toBe(true);
+        writes[0].resolve(); // the old first chunk completes now
+        await flush();
+        expect(next.writes.flatMap((w) => w.bytes).includes(0xaa)).toBe(false);
+        expect((await old).bytesSent).toBeLessThan(100);
+    });
 });
