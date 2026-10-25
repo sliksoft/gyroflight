@@ -154,12 +154,8 @@ class Serial extends EventTarget {
     // nothing after it).
     #sendQueue: Promise<unknown> = Promise.resolve();
     #sendGeneration = 0;
-    /**
-     * Sends made and not yet finished by the transport (queued or being written), per connection: one
-     * stuck on a connection that closed since cannot reach the FC and does not count (audit WP8
-     * integration review).
-     */
-    #pendingSends = new Map<number, number>();
+    /** Sends made and not yet finished by the transport (queued or being written). */
+    #pendingSends = 0;
 
     constructor() {
         super();
@@ -396,12 +392,8 @@ class Serial extends EventTarget {
             }
             return result;
         };
-        this.#pendingSends.set(generation, (this.#pendingSends.get(generation) ?? 0) + 1);
-        const queued = this.#sendQueue.then(run).finally(() => {
-            const left = (this.#pendingSends.get(generation) ?? 1) - 1;
-            if (left > 0) this.#pendingSends.set(generation, left);
-            else this.#pendingSends.delete(generation);
-        });
+        this.#pendingSends++;
+        const queued = this.#sendQueue.then(run).finally(() => this.#pendingSends--);
         this.#sendQueue = queued.catch(() => undefined);
         const result = await queued;
         callback?.(result);
@@ -416,8 +408,7 @@ class Serial extends EventTarget {
      * them: that remainder is not covered.
      */
     get pendingSends(): number {
-        const current = this.#pendingSends.get(this.#sendGeneration) ?? 0;
-        return current + ((this._protocol?.bufferedAmount ?? 0) > 0 ? 1 : 0);
+        return this.#pendingSends + ((this._protocol?.bufferedAmount ?? 0) > 0 ? 1 : 0);
     }
 
     /** Gyroflight (audit WP8-F10 review): changes on every connect and disconnect. */

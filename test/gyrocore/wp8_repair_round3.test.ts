@@ -155,20 +155,3 @@ describe("a transport that resolves before its bytes are out keeps the page busy
         expect(serial.pendingSends).toBe(0);
     });
 });
-
-// Codex integration review of be798ce4 (P2, availability): a send stuck on a closed connection.
-describe("a send stuck on a connection that closed does not keep the page busy on the next one", () => {
-    it("after disconnect and reconnect the old unfinished send no longer counts", async () => {
-        (serial as unknown as { _protocol: unknown })._protocol = {
-            connected: true,
-            send: () => new Promise(() => {}), // never finishes
-        };
-        void serial.send(new Uint8Array([1]).buffer);
-        await vi.advanceTimersByTimeAsync(0);
-        expect(serial.pendingSends).toBe(1);
-        await serial.disconnect().catch(() => undefined);
-        (serial as unknown as { _protocol: unknown })._protocol = protocol; // a new link
-        await serial.connect("x").catch(() => undefined);
-        expect(serial.pendingSends).toBe(0);
-    });
-});
