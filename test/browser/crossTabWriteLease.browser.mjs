@@ -53,11 +53,19 @@ async function openTab(context) {
     await page.goto(URL, { waitUntil: "load", timeout: 120000 });
     await page.waitForFunction(() => typeof window.MSP === "object", null, { timeout: 120000 });
     await page.evaluate(async () => {
+        // The exact URLs the app loaded (Vite may add ?t=...): any other URL would be a second,
+        // separate module instance, not the app's.
+        const loaded = performance.getEntriesByType("resource").map((e) => e.name);
+        const url = (path) => {
+            const hit = loaded.find((n) => new URL(n).pathname === path);
+            if (!hit) throw new Error(`the app did not load ${path}`);
+            return hit;
+        };
         window.gf = {
-            guard: await import("/composables/fcWriteGuard.ts"),
-            lease: await import("/composables/fcWriteLease.ts"),
-            msp: (await import("/js/msp.ts")).default,
-            serial: (await import("/js/serial.ts")).serial,
+            guard: await import(url("/composables/fcWriteGuard.ts")),
+            lease: await import(url("/composables/fcWriteLease.ts")),
+            msp: (await import(url("/js/msp.ts"))).default,
+            serial: (await import(url("/js/serial.ts"))).serial,
         };
         window.gfSent = [];
     });
