@@ -155,11 +155,13 @@ class Serial extends EventTarget {
     #sendQueue: Promise<unknown> = Promise.resolve();
     #sendGeneration = 0;
     /**
-     * Sends made and not yet finished by the transport (queued or being written), per connection: one
-     * stuck on a connection that closed since cannot reach the FC and does not count (audit WP8
-     * integration review).
+     * Sends made and not yet finished by the transport (queued or being written), per connection
+     * generation. Those of a generation up to #closedThrough no longer count: the transport has
+     * finished closing that connection, so they cannot reach the FC (audit WP8 integration review).
+     * A new generation alone proves nothing: during teardown an old write may still go out.
      */
     #pendingSends = new Map<number, number>();
+    #closedThrough = -1;
 
     constructor() {
         super();
@@ -235,6 +237,11 @@ class Serial extends EventTarget {
                     // Drop lifecycle events arriving from a non-active transport.
                     if (lifecycleEvents.has(eventType) && instance !== this._protocol) {
                         return;
+                    }
+                    // Gyroflight hook (docs/gyrocore/UPSTREAM.md): the active transport reports its
+                    // connection closed (detail false: closing failed, not proof).
+                    if (eventType === "disconnect" && (event as CustomEvent).detail !== false) {
+                        this.#connectionClosed(this.#sendGeneration);
                     }
 
                     this.dispatchEvent(
@@ -353,10 +360,13 @@ class Serial extends EventTarget {
      * @returns Promise resolving to true if disconnection was successful
      */
     async disconnect(callback?: (result: boolean | void) => void): Promise<boolean | void> {
+        const closing = this.#sendGeneration;
         this.#newSendQueue();
         let result: boolean | void = false;
         try {
             result = (await this._protocol?.disconnect()) ?? false;
+            // Gyroflight: only a finished teardown shows nothing more of that connection goes out.
+            if (result !== false) this.#connectionClosed(closing);
         } catch (error) {
             console.error(`${this.logHead} Error during disconnect:`, error);
         }
@@ -416,13 +426,22 @@ class Serial extends EventTarget {
      * them: that remainder is not covered.
      */
     get pendingSends(): number {
-        const current = this.#pendingSends.get(this.#sendGeneration) ?? 0;
-        return current + ((this._protocol?.bufferedAmount ?? 0) > 0 ? 1 : 0);
+        let open = 0;
+        for (const [generation, count] of this.#pendingSends) {
+            if (generation > this.#closedThrough) open += count;
+        }
+        return open + ((this._protocol?.bufferedAmount ?? 0) > 0 ? 1 : 0);
     }
 
     /** Gyroflight (audit WP8-F10 review): changes on every connect and disconnect. */
     get connectionGeneration(): number {
         return this.#sendGeneration;
+    }
+
+    /** The connection of generation `generation` (and every earlier one) is closed. */
+    #connectionClosed(generation: number): void {
+        this.#closedThrough = Math.max(this.#closedThrough, generation);
+        if (generation === this.#sendGeneration) this.#newSendQueue();
     }
 
     #newSendQueue(): void {
