@@ -75,6 +75,8 @@ export interface MspRequest {
     write?: boolean;
     /** Gyroflight: a legacy request that stopped retrying; its queued bytes no longer go out. */
     exhausted?: boolean;
+    /** Gyroflight: transmissions of the identical in-flight request it attached to (that may have run). */
+    priorAttempts?: number;
     /**
      * Gyroflight: how many times its bytes were handed to the transport (passed stillWanted); 0 when
      * every attempt was stopped there; unset when the transport never asked.
@@ -742,7 +744,8 @@ const MSP = {
             }
         }
 
-        const requestExists = this.callbacks.some((i) => i.code === code && this._buffer_matches(i, view));
+        const same = this.callbacks.filter((i) => i.code === code && this._buffer_matches(i, view));
+        const requestExists = same.length > 0;
 
         const obj: MspRequest = {
             code,
@@ -756,6 +759,9 @@ const MSP = {
             recheck,
             foreignWrite,
             write,
+            // Gyroflight (audit WP8 review round 3): an identical request already went out this often;
+            // its answer, when it comes, may be to any of those, even after that request gave up.
+            priorAttempts: Math.max(0, ...same.map((i) => (i.attempts ?? 1) + (i.priorAttempts ?? 0))),
         };
 
         // errorAware entries always arm their own timer (even when deduped) so an awaiter

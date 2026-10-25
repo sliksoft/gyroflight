@@ -237,6 +237,14 @@ class Websocket extends EventTarget {
 
         return { bytesSent };
     }
+
+    /**
+     * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F02 review): bytes `send` handed to the
+     * browser that it has not put on the network yet (send resolves before that).
+     */
+    get bufferedAmount(): number {
+        return this.ws?.bufferedAmount ?? 0;
+    }
 }
 
 export default Websocket;

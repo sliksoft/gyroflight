@@ -447,7 +447,9 @@ class MspHelper {
         // to another's retried request).
         const attempts = Math.max(
             1,
-            ...dataHandler.callbacks.filter((e) => e?.code === dataHandler.code).map((e) => e.attempts ?? 1),
+            ...dataHandler.callbacks
+                .filter((e) => e?.code === dataHandler.code)
+                .map((e) => (e.attempts ?? 1) + (e.priorAttempts ?? 0)),
         );
         for (let i = dataHandler.callbacks.length - 1; i >= 0; i--) {
             const entry = dataHandler.callbacks[i];
@@ -818,7 +820,7 @@ class MspHelper {
         MSP.send_message(mspCode, false, false, callback);
     }
 
-    sendSerialConfig(callback?: () => void) {
+    sendSerialConfig(callback?: MspCallback) {
         const mspCode = MSPCodes.MSP2_COMMON_SET_SERIAL_CONFIG;
         MSP.send_message(mspCode, mspHelper.crunch(mspCode), false, callback);
     }

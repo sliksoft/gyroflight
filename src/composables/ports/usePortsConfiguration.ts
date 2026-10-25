@@ -162,12 +162,25 @@ export function usePortsConfiguration(
             );
         };
 
-        mspHelper.sendSerialConfig(() => {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 review round 3): each SET must be
+        // answered and not refused before the next step; a legacy callback also runs, without an
+        // answer, when the link is down.
+        const accepted = (reply: unknown) => {
+            const r = reply as { crcError?: boolean; unsupported?: number } | undefined;
+            if (r && !r.crcError && !r.unsupported) return true;
+            console.error("Ports save stopped: a SET was not acknowledged", r);
+            gui_log(i18n.getMessage("configurationSaveFailed"));
+            return false;
+        };
+        mspHelper.sendSerialConfig((serialReply?: unknown) => {
+            if (!accepted(serialReply)) return;
             MSP.send_message(
                 MSPCodes.MSP_SET_FEATURE_CONFIG,
                 mspHelper.crunch(MSPCodes.MSP_SET_FEATURE_CONFIG),
                 false,
-                saveEeprom,
+                (featureReply) => {
+                    if (accepted(featureReply)) saveEeprom();
+                },
             );
         });
     };

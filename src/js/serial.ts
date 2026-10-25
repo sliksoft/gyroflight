@@ -101,6 +101,8 @@ export interface SerialProtocol extends EventTarget {
     /** Unset on Android when the native plugin is missing: the constructor returns early. */
     connected?: boolean;
     connectionId?: string | false | null;
+    /** Gyroflight: bytes a transport accepted but has not sent yet (WebSocket); absent elsewhere. */
+    readonly bufferedAmount?: number;
     /** Traffic counters, read by port_usage. */
     bitrate?: number;
     bytesSent?: number;
@@ -385,10 +387,13 @@ class Serial extends EventTarget {
 
     /**
      * Gyroflight (audit WP8-F02 review): sends not yet finished by the transport, including ones it
-     * still holds after their MSP request gave up; a page does not yield the write lease meanwhile.
+     * still holds after their MSP request gave up, plus one while a transport that resolves early
+     * (WebSocket) still buffers bytes; a page does not yield the write lease meanwhile. A transport
+     * whose own driver or OS buffers bytes after resolving (USB serial, native TCP) cannot report
+     * them: that remainder is not covered.
      */
     get pendingSends(): number {
-        return this.#pendingSends;
+        return this.#pendingSends + ((this._protocol?.bufferedAmount ?? 0) > 0 ? 1 : 0);
     }
 
     /** Gyroflight (audit WP8-F10 review): changes on every connect and disconnect. */
