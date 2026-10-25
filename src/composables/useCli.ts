@@ -915,10 +915,13 @@ export function useCli(): Cli {
             return false;
         }
         let exitTimer: ReturnType<typeof setTimeout> | null = null;
+        // The connection this exit belongs to (WP8-F10 review): never reboot or drop a later one.
+        const connection = serial.connectionGeneration;
         const exitResult = (delivered: boolean) => {
             if (!exitPending) return;
             exitPending = false;
             if (exitTimer) clearTimeout(exitTimer);
+            if (serial.connectionGeneration !== connection) return;
             if (delivered) {
                 connectionStore.cliActive = false;
                 connectionStore.cliValid = false;

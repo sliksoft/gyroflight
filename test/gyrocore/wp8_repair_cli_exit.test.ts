@@ -180,6 +180,24 @@ describe("WP8-F10 CLI exit: a reboot only for an exit that went out whole", () =
         }
     });
 
+    // Codex review round 2: an exit's deadline belongs to its connection.
+    it("an old exit's deadline neither reboots nor drops a connection set up since", async () => {
+        vi.useFakeTimers();
+        try {
+            transport = () => new Promise(() => {});
+            const cli = cliTab();
+            expect(cli.cleanup()).toBe(true);
+            await serial.disconnect().catch(() => undefined); // the link went away
+            (serial as unknown as { _protocol: unknown })._protocol = fakeProtocol();
+            await serial.connect("x").catch(() => undefined); // a new connection
+            await vi.advanceTimersByTimeAsync(2500);
+            expect(backend.dropUnknownMode).not.toHaveBeenCalled();
+            expect(backend.reinit).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("with an uncertain state the exit goes out behind the line clearing; delivery counts all of it", async () => {
         localStorage.setItem(
             "gyroflight.fcTransactionState.v2.tx-u",
