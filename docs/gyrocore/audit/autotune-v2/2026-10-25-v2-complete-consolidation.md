@@ -71,6 +71,11 @@ symbool van. Er is geen functie, klasse of methode gewijzigd.
 **Publicatie.**
 - `origin` is publiek. Daarom zijn alleen rapporten en reviewteksten gepubliceerd waarin geen enkel lokaal pad, e-mailadres of sleutel voorkomt.
 - Vier rapporten met een lokaal pad zijn als `redacted/`-kopie gepubliceerd. De originelen blijven ongetrackt; hun SHA-256 staat in `README.md`.
+- **Correctie na de integrale review.** De scan vóór de push zocht alleen naar `/home/`. In de gepubliceerde kopie `redacted/2026-10-23-autotune-v2-recovery-validation-audit.md` (regels 51 en 273) stond daardoor nog een Windows-pad met een gebruikersnaam (`/mnt/c/Users/<naam>/…`); dat zit in de gepushte commit `d3f39ee2`.
+  - In de volgende commit is het vervangen door `<windows-home>`.
+  - Uit de geschiedenis gaat het niet weg: geen force-push of rebase, conform de opdracht.
+  - Hetzelfde pad stond al vóór deze opdracht publiek in de getrackte testfile `test/js/air65_yaw_open_loop_offline.test.ts:47` (sinds `b9f7fe03`; eerder als P2-3 gemeld). Die regel is niet gewijzigd. Op deze machine bestaat het bestand en draait die test echt op de AIR65-log, dus het pad weghalen zou die real-log-dekking stil in een SKIP veranderen. Dit blijft een open privacypunt (§13).
+  - De bredere scan van alle gepubliceerde auditbestanden toont verder alleen scratchpaden in de oudere, al getrackte `docs/gyrocore/audit/wu4/agentC_report.md` en `agentD_report.md` (niet door deze opdracht toegevoegd).
 - Ruwe sessielogs, prompts, exit-bestanden, manifests en testlogs zijn lokaal gebleven.
 - De pre-commit-hook (prettier) herformatteerde zes JSON-bewijsbestanden. Die zijn teruggezet naar hun originele bytes en daarna gecommit. Alle 70 bestanden zijn gecontroleerd byte-gelijk aan het origineel.
 
@@ -409,7 +414,13 @@ Ingevuld na de review op de definitieve HEAD.
 
 ## 13. Resterende P0/P1/P2
 
-Zie §12.1 en het statusblok.
+Geen open P0, P1 of P2 in de wijzigingen van deze opdracht (zie §12). Bestaande punten buiten die wijzigingen, die niet
+blokkeren maar wel moeten gebeuren:
+- **Privacy, al bestaand:** het Windows-pad met gebruikersnaam in `test/js/air65_yaw_open_loop_offline.test.ts:47`, en de scratchpaden in `docs/gyrocore/audit/wu4/agent{C,D}_report.md`.
+  - Advies: vervang het standaardpad door alleen de omgevingsvariabele (`GYROFLIGHT_AIR65_OCT18_BBL`).
+  - Neem de vervangen real-log-test dan op in de lokale run.
+  - De geschiedenis behoudt het pad.
+- **P3 uit de reviews:** zie §12.1 (onder andere de testharnas van `air65_autotune.local.test.ts` zonder `REF_DIR`, en de diagnostische PM van 318° op een afgewezen sweep).
 
 ## 14. Acceptatiecriteria
 

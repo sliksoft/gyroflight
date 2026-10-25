@@ -19,7 +19,8 @@ overschreven: het origineel blijft lokaal staan, en van elk origineel met een lo
 | `2026-10-25-wp8-software-baseline.md` | definitieve WP8-softwarebaseline |
 | `2026-10-25-v2-complete-consolidation.md` | consolidatie, hardwaregereedheid, gap analysis en stand van Autotune v2 |
 
-Een `redacted/`-kopie verschilt van het origineel alleen doordat `/home/<gebruiker>` is vervangen door `<home>`.
+Een `redacted/`-kopie verschilt van het origineel alleen doordat `/home/<gebruiker>` is vervangen door `<home>` en
+`/mnt/c/Users/<gebruiker>` door `<windows-home>`.
 
 | Origineel (lokaal, niet in Git) | SHA-256 |
 |---|---|
