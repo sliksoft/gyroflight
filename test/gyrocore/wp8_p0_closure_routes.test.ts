@@ -693,3 +693,14 @@ describe("an interrupted write stays uncertain across a restart; normal writes s
         expect(storedEntries()).toEqual([]);
     });
 });
+
+describe("Codex review of F08 (round 2): the read-only check and storage that turns unreadable", () => {
+    it("storage turning unreadable while the check reads the identity: never 'resolved'", async () => {
+        const pause = pauseAt(MSPCodes.MSP_API_VERSION);
+        const checking = checkTransactionState();
+        await pause.at;
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}broken`, "{not json");
+        pause.release();
+        expect(await checking).toEqual({ resolved: false, reasons: ["state:transaction_storage_unreadable"] });
+    });
+});

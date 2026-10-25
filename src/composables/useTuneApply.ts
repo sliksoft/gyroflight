@@ -55,7 +55,7 @@
 
 import MSP from "@/js/msp";
 import MSPCodes from "@/js/msp/MSPCodes";
-import { eepromReplyState } from "@/js/msp/eepromSave";
+import { eepromReplyState, eepromSendErrorState } from "@/js/msp/eepromSave";
 import { mspHelper } from "@/js/msp/MSPHelper";
 import { bit_check } from "@/js/bit";
 import { useFlightControllerStore } from "@/stores/fc";
@@ -382,7 +382,7 @@ async function verifyAndSave(
  * before it was sent, otherwise unknown (the firmware may have saved before the answer was lost).
  */
 function savedAfterSendError(err: unknown): "no" | "unknown" {
-    return err instanceof WriteRefusedError ? "no" : "unknown";
+    return eepromSendErrorState(err) === "not_saved" ? "no" : "unknown";
 }
 
 function errorText(err: unknown): string {
@@ -1378,6 +1378,9 @@ async function checkTransactionStateLocked(): Promise<TransactionStateCheck> {
     if (!fc.uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
     const states = useFcTransactionStore();
     states.sync();
+    const unreadable = { resolved: false, reasons: ["state:transaction_storage_unreadable"] };
+    // It may have turned unreadable while the identity was read (WP8-F08 review).
+    if (states.unreadable) return unreadable;
     const open = states.forUid(fc.uid);
     const reasons: string[] = [];
     for (const entry of open) {
@@ -1415,9 +1418,17 @@ async function checkTransactionStateLocked(): Promise<TransactionStateCheck> {
             if (diff.length) reasons.push(`state:${entry.backupId}:differs_from_backup:${diff.length}`);
         }
     }
-    if (!open.length) return { resolved: true, reasons: [] };
+    states.sync();
+    if (states.unreadable) return unreadable;
+    if (!open.length) {
+        const appeared = states.forUid(fc.uid);
+        return appeared.length
+            ? { resolved: false, reasons: appeared.map((e) => `state:${e.backupId}:changed_during_check`) }
+            : { resolved: true, reasons: [] };
+    }
     if (reasons.length) return { resolved: false, reasons };
     if (!states.resolveEntries(open)) return { resolved: false, reasons: ["state:not_stored"] };
+    if (states.unreadable) return unreadable;
     // An entry another page stored or changed during the awaited reads is not covered by them.
     const left = states.forUid(fc.uid);
     return left.length
