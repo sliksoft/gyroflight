@@ -49,6 +49,11 @@ class Websocket extends EventTarget {
     logHead: string;
     address: string;
     ws: WebSocket | null;
+    /**
+     * Gyroflight hook (audit WP8 transport closure): every socket this transport made that is not
+     * CLOSED yet, the current one and superseded ones that may still flush buffered bytes.
+     */
+    readonly #sockets = new Set<WebSocket>();
 
     constructor() {
         super();
@@ -139,6 +144,7 @@ class Websocket extends EventTarget {
             return;
         }
         this.ws = ws;
+        this.#sockets.add(ws);
         this.ws.onopen = (e: Event) => {
             if (this.ws !== ws) {
                 return;
@@ -239,11 +245,24 @@ class Websocket extends EventTarget {
     }
 
     /**
-     * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F02 review): bytes `send` handed to the
-     * browser that it has not put on the network yet (send resolves before that).
+     * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F02 review, WP8 transport closure): bytes
+     * `send` handed to the browser that it may still put on the network (send resolves before that),
+     * on every socket of this transport that is not CLOSED. An OPEN socket sends them; a CLOSING
+     * one still flushes them before its close frame, also after a reconnect superseded it. A CLOSED
+     * socket's connection is gone: what it still reports buffered can never go out, so it does not
+     * count (whether those bytes arrived is unknown; nothing claims they did). A state this code
+     * does not know counts (fail-closed).
      */
     get bufferedAmount(): number {
-        return this.ws?.bufferedAmount ?? 0;
+        let amount = 0;
+        for (const socket of this.#sockets) {
+            if (socket.readyState === WebSocket.CLOSED) {
+                this.#sockets.delete(socket);
+            } else {
+                amount += socket.bufferedAmount;
+            }
+        }
+        return amount;
     }
 }
 

@@ -66,6 +66,8 @@ async function openTab(context) {
             lease: await import(url("/composables/fcWriteLease.ts")),
             msp: (await import(url("/js/msp.ts"))).default,
             serial: (await import(url("/js/serial.ts"))).serial,
+            WebSerial: (await import(url("/js/protocols/WebSerial.ts"))).default,
+            Websocket: (await import(url("/js/protocols/WebSocket.ts"))).default,
         };
         window.gfSent = [];
     });
@@ -118,7 +120,43 @@ const fakeTransport = (page) =>
         };
     });
 
+/**
+ * Audit WP8 transport closure: connect this tab's facade through the app's own WebSerial adapter to
+ * an in-page SerialPort whose writes never return and whose close() the test settles; one SET-sized
+ * frame is then stuck in the adapter.
+ */
+const stuckWebSerial = (page) =>
+    page.evaluate(async () => {
+        const gate = {};
+        const port = {
+            getInfo: () => ({ usbVendorId: 0x0483, usbProductId: 0x5740 }),
+            open: async () => undefined,
+            close: () =>
+                new Promise((resolve, reject) => {
+                    gate.resolve = resolve;
+                    gate.reject = reject;
+                }),
+            addEventListener() {},
+            removeEventListener() {},
+            readable: {
+                getReader: () => ({ read: () => new Promise(() => {}), cancel: async () => {}, releaseLock() {} }),
+            },
+            writable: { getWriter: () => ({ write: () => new Promise(() => {}), releaseLock() {} }) },
+        };
+        const adapter = new window.gf.WebSerial();
+        adapter.ports = [{ path: "serial_fake", displayName: "fake", port }];
+        window.gf.serial._protocols.find((s) => s.name === "serial").instance = adapter;
+        window.gfClose = gate;
+        window.gfAdapter = adapter;
+        const opened = await window.gf.serial.connect("serial_fake");
+        void window.gf.serial.send(new Uint8Array([0x24, 0x4d, 0x3c, 0, 202, 202]).buffer);
+        await new Promise((r) => setTimeout(r, 20));
+        return opened === true && window.gf.serial.pendingSends === 1;
+    });
+const pendingSends = (page) => page.evaluate(() => window.gf.serial.pendingSends);
+
 const browser = await chromium.launch({ headless: true });
+console.log(`BROWSER ${browser.browserType().name()} ${browser.version()} (headless)`);
 try {
     // 1. Every tab may write; while another tab's transaction runs, it may not.
     {
@@ -284,6 +322,97 @@ try {
                 JSON.stringify(await outcome(a)),
             );
         }
+        await context.close();
+    }
+
+    // 7. Audit WP8 transport closure, WebSerial: tab B's write is stuck in the app's WebSerial
+    //    adapter. While B's port is closing, and after its close failed, A's transaction is refused;
+    //    once a close of that port is proven, A's transaction runs.
+    {
+        const context = await browser.newContext();
+        const a = await openTab(context);
+        const b = await openTab(context);
+        await until(async () => (await refusal(b)) === null);
+        check("tab B: a write stuck in the real WebSerial adapter counts", await stuckWebSerial(b));
+        await b.evaluate(() => {
+            window.gfDisconnect = window.gf.serial.disconnect();
+        });
+        await startTransaction(a);
+        await new Promise((r) => setTimeout(r, 1500));
+        check(
+            "while B's port is closing (close not yet resolved) A's transaction waits",
+            !(await entered(a)) && (await pendingSends(b)) === 1,
+        );
+        await b.evaluate(() => window.gfClose.reject(new Error("close failed")));
+        const failed = await b.evaluate(() => window.gfDisconnect);
+        const ok = await until(async () => (await outcome(a)) !== null, 12000);
+        check(
+            "B's close failed: disconnect() is false, the write still counts, A's transaction is refused and never ran",
+            failed === false &&
+                (await pendingSends(b)) === 1 &&
+                ok &&
+                JSON.stringify(await outcome(a)) === JSON.stringify(["fc:write_lease_timeout"]) &&
+                !(await entered(a)),
+            JSON.stringify({ failed, outcome: await outcome(a) }),
+        );
+        const closed = await b.evaluate(async () => {
+            const again = window.gf.serial.disconnect();
+            await new Promise((r) => setTimeout(r, 100));
+            window.gfClose.resolve();
+            return again;
+        });
+        check(
+            "B closes that port again and the close is proven: the stuck write no longer counts",
+            closed === true && (await pendingSends(b)) === 0,
+        );
+        await startTransaction(a);
+        check("…and A's transaction now gets the lease", await until(() => entered(a), 6000));
+        await release(a);
+        await context.close();
+    }
+
+    // 8. Audit WP8 transport closure, WebSocket: tab B's socket still reports buffered bytes. While
+    //    it is CLOSING they may still go out (A waits); once it is CLOSED they cannot (A runs).
+    {
+        const context = await browser.newContext();
+        const a = await openTab(context);
+        const b = await openTab(context);
+        await until(async () => (await refusal(b)) === null);
+        await b.evaluate(async () => {
+            class FakeSocket {
+                static CONNECTING = 0;
+                static OPEN = 1;
+                static CLOSING = 2;
+                static CLOSED = 3;
+                readyState = 1;
+                bufferedAmount = 64;
+                send() {}
+                close() {
+                    if (this.readyState !== 3) this.readyState = 2;
+                }
+                constructor() {
+                    window.gfSocket = this;
+                }
+            }
+            window.WebSocket = FakeSocket;
+            window.gf.serial._protocols.find((s) => s.name === "tcp").instance = new window.gf.Websocket();
+            await window.gf.serial.connect("ws://127.0.0.1:5761");
+            await window.gf.serial.disconnect();
+        });
+        await startTransaction(a);
+        await new Promise((r) => setTimeout(r, 1500));
+        check(
+            "B's WebSocket is CLOSING with 64 bytes buffered: A's transaction waits",
+            !(await entered(a)) && (await pendingSends(b)) === 1,
+        );
+        await b.evaluate(() => {
+            window.gfSocket.readyState = 3;
+        });
+        check(
+            "B's socket is CLOSED (bufferedAmount still 64): A's transaction gets the lease",
+            await until(() => entered(a), 8000),
+        );
+        await release(a);
         await context.close();
     }
 

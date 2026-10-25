@@ -21,6 +21,7 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { SerialProtocol } from "../../src/js/serial";
+import { TransportLink } from "../../src/js/protocols/TransportLink";
 
 // ---------------------------------------------------------------------------
 // serial.send() callback contract.
@@ -181,6 +182,9 @@ describe("WebBluetooth.send return value", () => {
         ble.writeCharacteristic = { writeValue: vi.fn().mockResolvedValue(undefined) } as unknown as Characteristic;
         ble.device = { gatt: { connected: true } } as unknown as Device;
         ble.writeQueue = Promise.resolve();
+        // An open connection (audit WP8 transport closure): connected, with its link.
+        ble.connected = true;
+        ble.link = new TransportLink();
 
         const result = await ble.send(new Uint8Array(20));
 

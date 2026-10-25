@@ -23,6 +23,10 @@ import { i18n } from "../localization";
 import { gui_log } from "../gui_log";
 import { bluetoothDevices, type BluetoothDeviceProfile } from "./devices";
 import type { SerialConnectOptions, SerialPayload } from "../serial";
+import { TransportLink } from "./TransportLink";
+
+/** How long a teardown waits for stopNotifications() before it disconnects GATT anyway. */
+const STOP_NOTIFICATIONS_MS = 2000;
 
 /** The W3C `BluetoothRemoteGATTCharacteristic`, as far as this transport uses it. */
 interface BleCharacteristic extends EventTarget {
@@ -109,8 +113,15 @@ class WebBluetooth extends EventTarget {
     bt11_crc_corruption_logged: boolean;
     /** Unset until the first connect; a teardown resets it to false, not null. */
     connectionId?: string | false;
-    /** Serialises writes; send() chains each write onto it. */
+    /** Serialises writes; send() chains each write onto it. A new connection starts a new one. */
     writeQueue: Promise<void> = Promise.resolve();
+    /**
+     * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 transport closure): the GATT connection
+     * this transport opened, closed only on proof (gatt.connected false after gatt.disconnect()). A
+     * device whose teardown failed is kept, so the next disconnect() runs it again and no new
+     * connection opens meanwhile.
+     */
+    link: TransportLink | null = null;
     server: BleServer | undefined;
     services: BleService[] | undefined;
     service: BleService | undefined;
@@ -211,7 +222,8 @@ class WebBluetooth extends EventTarget {
     // removed from the list — BLE links drop transiently (reboot/boot bounce) and the paired
     // device can be reconnected by path, so removing it would only force needless re-discovery.
     handleDisconnect(): void {
-        if (this.closeRequested) {
+        // A teardown that failed kept the device: the link dropping now is its chance to close.
+        if (this.closeRequested && (this._teardown || !this.device)) {
             return;
         }
         console.warn(`${this.logHead} Unsolicited GATT disconnect (device dropped the link) — tearing down`);
@@ -327,7 +339,16 @@ class WebBluetooth extends EventTarget {
         // by the resumed cleanup. The teardown promise never rejects.
         if (this._teardown) {
             await this._teardown;
-            this._teardown = null;
+        }
+        // Gyroflight (audit WP8 transport closure): a device whose teardown failed may still be
+        // connected; close it again, quietly, and open nothing while that fails.
+        if (this.closeRequested && this.device) {
+            this._teardown = this._startTeardown(false);
+            if (!(await this._teardown) || this.device) {
+                console.error(`${this.logHead} An earlier connection could not be closed, not opening another`);
+                this.dispatchEvent(new CustomEvent<boolean>("connect", { detail: false }));
+                return;
+            }
         }
 
         this.openRequested = true;
@@ -345,6 +366,9 @@ class WebBluetooth extends EventTarget {
             console.log(`${this.logHead} Connecting to GATT Server`);
 
             await this.gattConnect();
+            // The GATT link is up from here; a failed setup below is still closed against it.
+            this.link = new TransportLink();
+            this.writeQueue = Promise.resolve();
 
             gui_log(i18n.getMessage("bluetoothConnected", [this.device.name ?? ""]));
 
@@ -503,9 +527,13 @@ class WebBluetooth extends EventTarget {
         this.bytesReceived = 0;
         this.bytesSent = 0;
 
-        // if we are already closing, don't do it again — the in-progress teardown owns
-        // the outcome; report success so Serial.disconnect() doesn't coerce to false.
-        if (this.closeRequested) {
+        // A teardown in progress owns the outcome: wait for it and report it (audit WP8 transport
+        // closure), never success before the link is closed.
+        if (this._teardown) {
+            return this._teardown;
+        }
+        // A finished teardown let go of the device; one that failed kept it and runs again.
+        if (this.closeRequested && !this.device) {
             return true;
         }
         // Mark closing now — before the gatt.disconnect() below — so the gattserverdisconnected
@@ -513,11 +541,20 @@ class WebBluetooth extends EventTarget {
         this.closeRequested = true;
 
         // Publish the teardown so connect() can serialize behind it.
-        this._teardown = this._performTeardown();
+        this._teardown = this._startTeardown(true);
         return this._teardown;
     }
 
-    async _performTeardown(): Promise<boolean> {
+    _startTeardown(announce: boolean): Promise<boolean> {
+        const teardown = this._performTeardown(announce).finally(() => {
+            if (this._teardown === teardown) this._teardown = null;
+        });
+        return teardown;
+    }
+
+    async _performTeardown(announce = true): Promise<boolean> {
+        const link = this.link;
+        link?.closing();
         const doCleanup = async (): Promise<void> => {
             this.removeEventListener("receive", this.handleReceiveBytes as unknown as EventListener);
 
@@ -534,17 +571,29 @@ class WebBluetooth extends EventTarget {
                     // drop skips this): Chrome keeps the notify session marked active, and
                     // on Linux/BlueZ the next connection's startNotifications() can then
                     // resolve without re-arming the CCCD — subscribed but never receiving.
+                    // Bounded: a stack that never answers must not keep the link from closing.
                     if (this.device.gatt?.connected) {
+                        let timer: ReturnType<typeof setTimeout> | undefined;
                         try {
-                            await this.readCharacteristic.stopNotifications();
+                            await Promise.race([
+                                this.readCharacteristic.stopNotifications(),
+                                new Promise((resolve) => (timer = setTimeout(resolve, STOP_NOTIFICATIONS_MS))),
+                            ]);
                         } catch (error) {
                             console.warn(`${this.logHead} Failed to stop notifications during teardown:`, error);
+                        } finally {
+                            clearTimeout(timer);
                         }
                     }
                 }
 
                 if (this.device.gatt?.connected) {
                     this.device.gatt.disconnect();
+                }
+                // The proof: the browser reports this page's GATT connection down. Its pending writes
+                // are aborted, and their characteristics are dead for any later connection.
+                if (this.device.gatt?.connected) {
+                    throw new Error("GATT server still connected after disconnect()");
                 }
 
                 this.writeCharacteristic = null;
@@ -562,9 +611,10 @@ class WebBluetooth extends EventTarget {
                 `${this.logHead} Connection with ID: ${this.connectionId} closed, Sent: ${this.bytesSent} bytes, Received: ${this.bytesReceived} bytes`,
             );
 
+            link?.closed();
             this.connectionId = false;
             this.bitrate = 0;
-            this.dispatchEvent(new CustomEvent<boolean>("disconnect", { detail: true }));
+            if (announce) this.dispatchEvent(new CustomEvent<boolean>("disconnect", { detail: true }));
             // Report success explicitly — WebSerial/TauriSerial/VirtualSerial all return
             // true, and Serial.disconnect() coerces an undefined return to false.
             return true;
@@ -573,7 +623,8 @@ class WebBluetooth extends EventTarget {
             console.error(
                 `${this.logHead} Failed to close connection with ID: ${this.connectionId} closed, Sent: ${this.bytesSent} bytes, Received: ${this.bytesReceived} bytes`,
             );
-            this.dispatchEvent(new CustomEvent<boolean>("disconnect", { detail: false }));
+            link?.closeFailed();
+            if (announce) this.dispatchEvent(new CustomEvent<boolean>("disconnect", { detail: false }));
             return false;
         } finally {
             if (this.openCanceled) {
@@ -583,7 +634,12 @@ class WebBluetooth extends EventTarget {
     }
 
     async send(data: SerialPayload, cb?: SendCallback): Promise<WebBluetoothSendResult> {
-        if (!this.writeCharacteristic || typeof this.writeCharacteristic.writeValue !== "function") {
+        // Gyroflight (audit WP8 transport closure): a write belongs to the connection and the
+        // characteristic it was made on. One queued behind a stuck write never goes out on a later
+        // connection, nor during a teardown.
+        const link = this.link;
+        const characteristic = this.writeCharacteristic;
+        if (!characteristic || typeof characteristic.writeValue !== "function") {
             if (cb) {
                 cb({
                     error: "No write characteristic available or characteristic is invalid",
@@ -603,6 +659,11 @@ class WebBluetooth extends EventTarget {
             console.error(`${this.logHead} GATT Server is disconnected. Cannot perform GATT operations.`);
             return { bytesSent: 0 };
         }
+        if (!this.connected || link?.state !== "OPEN") {
+            cb?.({ error: "Connection is not open", bytesSent: 0 });
+            console.error(`${this.logHead} Connection is not open. Cannot perform GATT operations.`);
+            return { bytesSent: 0 };
+        }
 
         // There is no writable stream in the bluetooth API
         const dataBuffer = new Uint8Array(data);
@@ -612,10 +673,12 @@ class WebBluetooth extends EventTarget {
         // Serialize writes to prevent concurrent access
         this.writeQueue = this.writeQueue
             .then(async () => {
+                if (this.link !== link || link.state !== "OPEN") {
+                    cb?.({ error: "Connection closed before the write", bytesSent: 0 });
+                    return;
+                }
                 try {
-                    // Checked above; a teardown during an earlier queued write nulls it, and the
-                    // TypeError that follows lands in the catch below, as before.
-                    await this.writeCharacteristic!.writeValue(dataBuffer);
+                    await characteristic.writeValue(dataBuffer);
                     this.bytesSent += data.byteLength;
                     bytesSent = data.byteLength;
 

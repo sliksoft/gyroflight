@@ -48,6 +48,7 @@ import { useCli } from "../../src/composables/useCli";
 import autoRestoreInstance from "../../src/js/utils/AutoRestore";
 import { mspHelper } from "../../src/js/msp/MSPHelper";
 import WebBluetooth from "../../src/js/protocols/WebBluetooth";
+import { TransportLink } from "../../src/js/protocols/TransportLink";
 import { withFcWriteLock } from "../../src/composables/fcWriteGuard";
 import { useFailsafeSave } from "../../src/composables/failsafe/useFailsafeSave";
 
@@ -454,6 +455,8 @@ describe("Web Bluetooth queues sends: what the craft gets is still in check orde
         let first = true;
         Object.assign(ble, {
             connected: true,
+            // An open connection has its link (audit WP8 transport closure).
+            link: new TransportLink(),
             device: { gatt: { connected: true } },
             writeCharacteristic: {
                 writeValue: vi.fn(async (buf: Uint8Array) => {
