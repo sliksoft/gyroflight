@@ -66,6 +66,7 @@ import { sameUid } from "@/gyrocore/stores/tuneBackup";
 import {
     TRANSACTION_ENTRY_PREFIX,
     TRANSACTION_STORAGE_KEY,
+    legacyEntryId,
     readTransactionRecords,
     transactionKey,
     type KeyedTransaction,
@@ -120,7 +121,7 @@ function readStorage(): Stored {
         const ls = globalThis.localStorage;
         let read = readTransactionRecords(ls);
         if (read.ok && read.legacy) {
-            const moved = read.legacy.map((e, i) => ({ ...e, id: e.id ?? `tx-v1-${i}-${e.backupId}` }));
+            const moved = read.legacy.map((e, i) => ({ ...e, id: legacyEntryId(e, i) }));
             if (!moved.every(putEntry)) return { ok: false };
             ls.removeItem(TRANSACTION_STORAGE_KEY);
             read = readTransactionRecords(ls);

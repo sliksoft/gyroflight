@@ -89,13 +89,17 @@ export function isTransactionRecord(e: unknown): e is UncertainTransaction {
 
 export const transactionKey = (id: string) => TRANSACTION_ENTRY_PREFIX + id;
 
+/** The id an earlier-format entry (the `i`th of the list) gets when it is moved to its own key. */
+export const legacyEntryId = (e: UncertainTransaction, i: number) => e.id ?? `tx-v1-${i}-${e.backupId}`;
+
 export type TransactionRecords =
     { ok: true; entries: KeyedTransaction[]; legacy: UncertainTransaction[] | null } | { ok: false };
 
 /**
  * Every record in `ls`, without changing it: the entries under their own keys (each must be a
  * record whose id is its key's), and the earlier-format list if one is still stored. Not ok when
- * any of them cannot be read.
+ * any of them cannot be read, or (audit WP8-F08 review) when moving the list would overwrite
+ * anything: two of its entries get the same id, or one's key already holds a different entry.
  */
 export function readTransactionRecords(ls: Storage): TransactionRecords {
     try {
@@ -104,6 +108,12 @@ export function readTransactionRecords(ls: Storage): TransactionRecords {
         if (raw !== null) {
             const list = JSON.parse(raw) as unknown;
             if (!Array.isArray(list) || !list.every(isTransactionRecord)) return { ok: false };
+            const ids = list.map(legacyEntryId);
+            if (new Set(ids).size !== ids.length) return { ok: false };
+            for (let i = 0; i < list.length; i++) {
+                const there = ls.getItem(transactionKey(ids[i]));
+                if (there !== null && there !== JSON.stringify({ ...list[i], id: ids[i] })) return { ok: false };
+            }
             legacy = list;
         }
         const entries: KeyedTransaction[] = [];

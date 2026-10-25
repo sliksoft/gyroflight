@@ -39,6 +39,7 @@ import {
     TRANSACTION_STORAGE_KEY,
     useFcTransactionStore,
 } from "../../src/gyrocore/stores/fcTransactionState";
+import { checkTransactionState } from "../../src/composables/useTuneApply";
 
 const UID: [number, number, number] = [1, 2, 3];
 
@@ -202,5 +203,46 @@ describe("WP8-F08 the backup list itself unreadable", () => {
         const store = useTuneBackupStore();
         expect(store.save(backup("n", true))).toBe(false);
         expect(localStorage.getItem(BACKUP_STORAGE_KEY)).toBe(JSON.stringify({ id: "x" }));
+    });
+});
+
+describe("Codex review of F08: moving the old list never overwrites an entry", () => {
+    const UID2: [number, number, number] = [7, 7, 7];
+
+    it("two old entries with the same id: unreadable, nothing moved, both crafts stay blocked", () => {
+        const legacy = JSON.stringify([entry("x", "bk-1"), { ...entry("x", "bk-2"), uid: UID2 }]);
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, legacy);
+        const states = useFcTransactionStore();
+        expect(states.unreadable).toBe(true);
+        expect(states.blocks(UID).length).toBeGreaterThan(0);
+        expect(states.blocks(UID2).length).toBeGreaterThan(0);
+        expect(localStorage.getItem(TRANSACTION_STORAGE_KEY)).toBe(legacy);
+        expect(localStorage.getItem(`${TRANSACTION_ENTRY_PREFIX}x`)).toBeNull();
+    });
+
+    it("an old entry whose key already holds a different entry: unreadable, the stored one kept", () => {
+        const stored = JSON.stringify(entry("x", "bk-new"));
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}x`, stored);
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([entry("x", "bk-old")]));
+        const states = useFcTransactionStore();
+        expect(states.unreadable).toBe(true);
+        expect(localStorage.getItem(`${TRANSACTION_ENTRY_PREFIX}x`)).toBe(stored);
+    });
+
+    it("an old entry already moved once (same content at its key) still moves: readable, one entry", () => {
+        const e = { ...entry("x", "bk-1") };
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}x`, JSON.stringify({ ...e, id: "x" }));
+        localStorage.setItem(TRANSACTION_STORAGE_KEY, JSON.stringify([e]));
+        const states = useFcTransactionStore();
+        expect(states.unreadable).toBe(false);
+        expect(states.forUid(UID)).toHaveLength(1);
+        expect(localStorage.getItem(TRANSACTION_STORAGE_KEY)).toBeNull();
+    });
+
+    it("the read-only check never reports 'resolved' while the transaction storage is unreadable", async () => {
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}x`, JSON.stringify(entry("x", "b-0", { at: undefined })));
+        const result = await checkTransactionState();
+        expect(result.resolved).toBe(false);
+        expect(result.reasons).toEqual(["state:transaction_storage_unreadable"]);
     });
 });

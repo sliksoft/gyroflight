@@ -1369,6 +1369,10 @@ export async function checkTransactionState(): Promise<TransactionStateCheck> {
 }
 
 async function checkTransactionStateLocked(): Promise<TransactionStateCheck> {
+    // Unreadable storage holds entries this check cannot see: never "resolved" (audit WP8-F08 review).
+    const stored = useFcTransactionStore();
+    stored.sync();
+    if (stored.unreadable) return { resolved: false, reasons: ["state:transaction_storage_unreadable"] };
     assertConnectedReal();
     const fc = await readIdentity();
     if (!fc.uid) throw new ApplyBlockedError(["fc:identity_uid_missing"]);
