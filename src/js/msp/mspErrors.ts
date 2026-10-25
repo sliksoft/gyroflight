@@ -68,6 +68,22 @@ export class MspFirmwareRefusedError extends MspError {
     }
 }
 
+/**
+ * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 integration review): an answer to a write
+ * that cannot be told apart from the answer to an earlier transmission of the same code (MSP
+ * carries no request id, and an earlier one was still unanswered): it proves nothing for this
+ * write, which may or may not have run.
+ */
+export class MspAmbiguousAnswerError extends MspError {
+    readonly response: unknown;
+
+    constructor(message?: string, code?: number, response?: unknown) {
+        super(message, code);
+        this.name = "MspAmbiguousAnswerError";
+        this.response = response;
+    }
+}
+
 export class MspCrcError extends MspError {
     constructor(message?: string, code?: number) {
         super(message, code);

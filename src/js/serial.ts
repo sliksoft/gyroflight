@@ -79,6 +79,12 @@ export interface SerialSendOptions {
      * now refuse, must not go out late.
      */
     stillWanted?: () => boolean;
+    /**
+     * Told the transport's result before the next send may start (audit WP8 integration review):
+     * what the caller concludes from it (a failed CLI command closes its session) holds for the
+     * next send's stillWanted.
+     */
+    onResult?: (result: SerialSendResult) => void;
 }
 
 /** A device as a transport lists it. Bluetooth ids are strings ("unknown" for the vendor). */
@@ -366,7 +372,7 @@ class Serial extends EventTarget {
         options?: SerialSendOptions,
     ): Promise<SerialSendResult> {
         const generation = this.#sendGeneration;
-        const run = async (): Promise<SerialSendResult> => {
+        const attempt = async (): Promise<SerialSendResult> => {
             if (generation !== this.#sendGeneration || options?.stillWanted?.() === false) return { bytesSent: 0 };
             try {
                 // Guard the method too: virtual mode has no send(), and that is a
@@ -376,6 +382,15 @@ class Serial extends EventTarget {
                 console.error(`${this.logHead} Error sending data:`, error);
                 return { bytesSent: 0 };
             }
+        };
+        const run = async (): Promise<SerialSendResult> => {
+            const result = await attempt();
+            try {
+                options?.onResult?.(result);
+            } catch (error) {
+                console.error(`${this.logHead} send result handler threw:`, error);
+            }
+            return result;
         };
         this.#pendingSends++;
         const queued = this.#sendQueue.then(run).finally(() => this.#pendingSends--);

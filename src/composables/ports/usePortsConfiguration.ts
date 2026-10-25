@@ -166,8 +166,8 @@ export function usePortsConfiguration(
         // answered and not refused before the next step; a legacy callback also runs, without an
         // answer, when the link is down.
         const accepted = (reply: unknown) => {
-            const r = reply as { crcError?: boolean; unsupported?: number } | undefined;
-            if (r && !r.crcError && !r.unsupported) return true;
+            const r = reply as { crcError?: boolean; unsupported?: number; ambiguous?: boolean } | undefined;
+            if (r && !r.crcError && !r.unsupported && !r.ambiguous) return true;
             console.error("Ports save stopped: a SET was not acknowledged", r);
             gui_log(i18n.getMessage("configurationSaveFailed"));
             return false;

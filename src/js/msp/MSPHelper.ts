@@ -27,7 +27,7 @@ import semver from "semver";
 import vtxDeviceStatusFactory from "../utils/VtxDeviceStatus/VtxDeviceStatusFactory";
 import MSP from "../msp";
 import MSPCodes, { MSP2TextType } from "./MSPCodes";
-import { MspCrcError, MspFirmwareRefusedError } from "./mspErrors";
+import { MspAmbiguousAnswerError, MspCrcError, MspFirmwareRefusedError } from "./mspErrors";
 import { MspBuffer, MspDataView } from "./mspBytes";
 import {
     API_VERSION_1_45,
@@ -202,6 +202,7 @@ function deliverResponse(
     frame: MspFrame,
     attempts?: number,
     write?: boolean,
+    ambiguous?: boolean,
 ) {
     const { code, dataView: data, crcError } = frame;
     const response: MspResponse = {
@@ -211,6 +212,7 @@ function deliverResponse(
         crcError,
         unsupported: frame.unsupported,
         attempts,
+        ...(write && ambiguous ? { ambiguous: true } : {}),
     };
     // Legacy callbacks receive the original DataView with the crcError flag so they can choose
     // how to handle CRC errors; errorAware callbacks reject on crcError and otherwise receive the
@@ -220,6 +222,13 @@ function deliverResponse(
             callback(response);
         } else if (crcError) {
             callback(null, new MspCrcError(`CRC error for MSP code ${code}`, code));
+        } else if (write && ambiguous) {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 integration review): may be the
+            // answer to an earlier transmission of this code; it proves nothing for this write.
+            callback(
+                null,
+                new MspAmbiguousAnswerError(`MSP code ${code}: answer cannot be told apart`, code, response),
+            );
         } else if (write && frame.unsupported) {
             // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 review round 2): a write the
             // firmware refused is no success for an awaiter (it resolved before, and tabs took it
@@ -442,6 +451,7 @@ class MspHelper {
     // Removes and settles every pending request for the frame's code. Iterates in reverse because
     // it splices, and re-reads the queue each step because a callback may queue new requests.
     private settleCallbacks(dataHandler: MspFrame) {
+        (dataHandler as { _note_answer?: (code: number) => void })._note_answer?.(dataHandler.code);
         // Gyroflight (audit WP8 review round 2): one answer settles every waiter of this code; each
         // learns how often the request went out, counted over all of them (one may have attached
         // to another's retried request).
@@ -456,12 +466,17 @@ class MspHelper {
             if (entry?.code !== dataHandler.code) {
                 continue;
             }
+            // Gyroflight (audit WP8 integration review): a write still waiting for the transport
+            // has not been answered: this answer belongs to an earlier transmission.
+            if (entry.awaitingWire) {
+                continue;
+            }
 
             clearTimeout(entry.timer ?? undefined);
             dataHandler.callbacks.splice(i, 1);
 
             if (typeof entry.callback === "function") {
-                deliverResponse(entry.callback, entry.errorAware, dataHandler, attempts, entry.write);
+                deliverResponse(entry.callback, entry.errorAware, dataHandler, attempts, entry.write, entry.ambiguous);
             }
         }
     }

@@ -77,7 +77,9 @@ beforeEach(() => {
     sentCodes = [];
     protocol.connected = true;
     (serial as unknown as { _protocol: unknown })._protocol = protocol;
-    vi.spyOn(serial, "send").mockImplementation(async (data) => {
+    vi.spyOn(serial, "send").mockImplementation(async (data, _cb, opts) => {
+        // Like the facade: asked right before the transport; a request no longer wanted is not sent.
+        if (opts?.stillWanted?.() === false) return { bytesSent: 0 };
         const b = new Uint8Array(data as ArrayBuffer);
         if (b[0] === 0x24) sentCodes.push(b[1] === 0x4d ? b[4] : b[4] | (b[5] << 8));
         return { bytesSent: b.byteLength };
@@ -87,6 +89,7 @@ beforeEach(() => {
     fc.config.uid = [...UID];
     fc.config.armingDisabled = true;
     MSP.callbacks = [];
+    MSP.write_transmissions.clear();
     MSP.parked.clear();
     MSP.clearListeners();
     MSP.state = MSP.decoder_states.IDLE;

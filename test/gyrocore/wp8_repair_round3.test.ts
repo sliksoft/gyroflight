@@ -84,6 +84,7 @@ beforeEach(() => {
     fc.config.apiVersion = "1.47.0";
     fc.features.features = new Features(fc.config);
     MSP.callbacks = [];
+    MSP.write_transmissions.clear();
     MSP.parked.clear();
     MSP.clearListeners();
     MSP.state = MSP.decoder_states.IDLE;

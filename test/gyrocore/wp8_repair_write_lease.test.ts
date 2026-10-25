@@ -283,6 +283,7 @@ describe("WP8-F02 this page's guard and msp.ts against another page's transactio
         useConnectionStore().virtualMode = false;
         useFlightControllerStore().config.uid = [...UID];
         MSP.callbacks = [];
+        MSP.write_transmissions.clear();
         MSP.parked.clear();
     });
 

@@ -118,6 +118,7 @@ beforeEach(() => {
     useConnectionStore().virtualMode = false;
     useFlightControllerStore().config.uid = [...UID];
     MSP.callbacks = [];
+    MSP.write_transmissions.clear();
     MSP.parked.clear();
     MSP.cli_queue = [];
     MSP.cli_in_flight = null;

@@ -43,9 +43,12 @@ export type EepromReplyState = "saved" | "no" | "unknown";
 
 /** What an MSP_EEPROM_WRITE answer proves (see the header). */
 export function eepromReplyState(
-    reply: { crcError?: boolean; unsupported?: number | boolean; attempts?: number } | null | undefined,
+    reply:
+        | { crcError?: boolean; unsupported?: number | boolean; attempts?: number; ambiguous?: boolean }
+        | null
+        | undefined,
 ): EepromReplyState {
-    if (!reply || reply.crcError) return "unknown";
+    if (!reply || reply.crcError || reply.ambiguous) return "unknown";
     if (!reply.unsupported) return "saved";
     // A refusal of a retry says nothing of the earlier attempt, whose answer was lost: it may have saved.
     return (reply.attempts ?? 1) > 1 ? "unknown" : "no";

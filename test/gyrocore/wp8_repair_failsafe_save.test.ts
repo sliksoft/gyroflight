@@ -92,7 +92,9 @@ beforeEach(() => {
     frames = [];
     answers = () => "ack";
     (serial as unknown as { _protocol: unknown })._protocol = { connected: true };
-    vi.spyOn(serial, "send").mockImplementation(async (data) => {
+    vi.spyOn(serial, "send").mockImplementation(async (data, _cb, opts) => {
+        // Like the facade: asked right before the transport; a request no longer wanted is not sent.
+        if (opts?.stillWanted?.() === false) return { bytesSent: 0 };
         const b = Array.from(new Uint8Array(data as ArrayBuffer));
         if (b[0] === 0x24 && b[1] === 0x4d) {
             const code = b[4];
@@ -113,6 +115,7 @@ beforeEach(() => {
         { mode: 1, value: 1000 },
     ] as never;
     MSP.callbacks = [];
+    MSP.write_transmissions.clear();
     MSP.parked.clear();
     MSP.clearListeners();
     MSP.state = MSP.decoder_states.IDLE;

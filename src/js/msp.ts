@@ -49,6 +49,8 @@ export interface MspResponse {
     unsupported: number;
     /** Gyroflight: how many times the request went out before this answer (a retry: more than 1). */
     attempts?: number;
+    /** Gyroflight: this answer may belong to an earlier transmission of the same write code. */
+    ambiguous?: boolean;
 }
 
 /**
@@ -75,6 +77,13 @@ export interface MspRequest {
     write?: boolean;
     /** Gyroflight: a legacy request that stopped retrying; its queued bytes no longer go out. */
     exhausted?: boolean;
+    /**
+     * Gyroflight (audit WP8 integration review): a write whose bytes wait in the transport queue; an
+     * answer that comes meanwhile is not its own and does not settle it.
+     */
+    awaitingWire?: boolean;
+    /** Gyroflight: when it went out, an earlier transmission of its code was still unanswered. */
+    ambiguous?: boolean;
     /** Gyroflight: transmissions of the identical in-flight request it attached to (that may have run). */
     priorAttempts?: number;
     /**
@@ -110,11 +119,17 @@ interface CliQueueEntry {
  * up again. Nothing was sent.
  */
 export class CliSessionUncertainError extends Error {
-    readonly notSent = true;
+    /** False for the command in flight when the session turned uncertain: it may have gone out. */
+    readonly notSent: boolean;
 
-    constructor(command: string) {
-        super(`CLI "${command.split(/\s/)[0]}" not sent: the CLI session is uncertain, reconnect first`);
+    constructor(command: string, notSent = true) {
+        super(
+            notSent
+                ? `CLI "${command.split(/\s/)[0]}" not sent: the CLI session is uncertain, reconnect first`
+                : `CLI "${command.split(/\s/)[0]}" ended: the CLI session became uncertain while it was in flight`,
+        );
         this.name = "CliSessionUncertainError";
+        this.notSent = notSent;
     }
 }
 
@@ -203,6 +218,10 @@ const MSP = {
     crcError: false,
 
     callbacks: [] as MspRequest[],
+    // Gyroflight (audit WP8 integration review): per write code, the transmissions not answered yet
+    // (oldest first), for ANSWER_WINDOW_MS; an answer is matched to the oldest.
+    write_transmissions: new Map<number, Array<{ owner: MspRequest; at: number }>>(),
+    ANSWER_WINDOW_MS: 4000,
     parked: new Map<number, MspRequest[]>(), // errorAware requests parked behind an in-flight same-code request
     onTimeout: null as ((code: number) => void) | null, // invoked with the code when an errorAware request exhausts MAX_RETRIES
     // CRC error count; lives in the connection store so the status bar stays reactive.
@@ -444,7 +463,11 @@ const MSP = {
         this.cli_session_uncertain = true;
         for (const entry of this.cli_queue.splice(0, this.cli_queue.length)) this._refuse_uncertain_cli(entry);
         const inFlight = this.cli_in_flight;
-        if (inFlight) this._finish_cli([], new CliSessionUncertainError(inFlight.command), false);
+        if (inFlight) {
+            // It may have gone out unless the transport never took it (stillWanted stopped it).
+            const notSent = inFlight.delivery === "failed" && !!inFlight.refusedAtWire;
+            this._finish_cli([], new CliSessionUncertainError(inFlight.command, notSent), false);
+        }
     },
     /** The CLI text received so far for the command in flight (null when none is). */
     cliInFlightOutput(): string[] | null {
@@ -506,9 +529,16 @@ const MSP = {
                 : (cliCommandRefusal(entry.command) ?? undefined);
             return !entry.refusedAtWire;
         };
-        void Promise.resolve(serial.send(frame, undefined, { stillWanted })).then((result) =>
-            this._cli_delivered(entry, result?.bytesSent === frame.byteLength),
-        );
+        // The result is handled before the transport may take the next send (onResult), so a failed
+        // send closes the session before a successor's stillWanted runs. A transport replaced by a
+        // test double without onResult is handled when its promise settles.
+        let handled = false;
+        const onResult = (result: { bytesSent: number } | undefined) => {
+            if (handled) return;
+            handled = true;
+            this._cli_delivered(entry, result?.bytesSent === frame.byteLength);
+        };
+        void Promise.resolve(serial.send(frame, undefined, { stillWanted, onResult })).then(onResult);
     },
     /** Gyroflight: the transport's result for a CLI command (see _process_cli_queue). */
     _cli_delivered(entry: CliQueueEntry, delivered: boolean) {
@@ -575,7 +605,8 @@ const MSP = {
         }
 
         // A reply that came while the session turned uncertain may belong to another command.
-        const outcome = !error && this.cli_session_uncertain ? new CliSessionUncertainError(entry.command) : error;
+        const outcome =
+            !error && this.cli_session_uncertain ? new CliSessionUncertainError(entry.command, false) : error;
         try {
             entry.callback?.(outcome ? [] : lines, outcome);
         } catch (callbackError) {
@@ -773,7 +804,10 @@ const MSP = {
         this.callbacks.push(obj);
 
         // always send messages with data payload (even when there is a message already in the queue)
-        if (data || !requestExists) {
+        // Gyroflight (audit WP8 integration review): a write always goes out itself; an answer to an
+        // identical earlier one would not show what RAM held when this one was asked for.
+        if (data || !requestExists || write) {
+            obj.awaitingWire = write;
             void serial.send(
                 bufferOut,
                 (sendInfo: { bytesSent: number }) => {
@@ -906,6 +940,7 @@ const MSP = {
 
         entry.attempts = 1;
         entry.start = performance.now();
+        entry.awaitingWire = entry.write;
         this._arm_timer(entry);
         this.callbacks.push(entry);
 
@@ -930,7 +965,27 @@ const MSP = {
             return false;
         }
         obj.wireSends = (obj.wireSends ?? 0) + 1;
+        obj.awaitingWire = false;
+        if (obj.write) this._note_transmission(obj);
         return true;
+    },
+    /** Gyroflight: a write's bytes go to the transport now (see write_transmissions). */
+    _note_transmission(obj: MspRequest) {
+        const now = Date.now();
+        const list = (this.write_transmissions.get(obj.code) ?? []).filter((t) => now - t.at < this.ANSWER_WINDOW_MS);
+        if (list.some((t) => t.owner !== obj)) obj.ambiguous = true;
+        list.push({ owner: obj, at: now });
+        this.write_transmissions.set(obj.code, list);
+    },
+    /** Gyroflight: an answer to `code` came; it is matched to the oldest open transmission. */
+    _note_answer(code: number) {
+        const list = this.write_transmissions.get(code);
+        if (!list) return;
+        const now = Date.now();
+        const open = list.filter((t) => now - t.at < this.ANSWER_WINDOW_MS);
+        open.shift();
+        if (open.length) this.write_transmissions.set(code, open);
+        else this.write_transmissions.delete(code);
     },
     /**
      * @param {number} code MSP command code
@@ -976,6 +1031,7 @@ const MSP = {
     callbacks_cleanup(error: Error = new MspCancelledError("MSP queue cleared", undefined, "cleanup")) {
         const pending = this.callbacks;
         this.callbacks = [];
+        this.write_transmissions.clear();
 
         const parked: MspRequest[] = [];
         for (const queue of this.parked.values()) {
