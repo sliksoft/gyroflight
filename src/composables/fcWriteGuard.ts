@@ -348,8 +348,11 @@ export const cliCommandRefusal = (command: string) => cliSessionRefusal() ?? cli
 
 /**
  * Empties an interactive CLI's line buffer whatever it holds: there 0x7f deletes one character and
- * does nothing on an empty buffer, which holds at most CLI_IN_BUFFER_SIZE - 1 (cli.h 256; cli.c
- * processCharacterInteractive, processCharacter).
+ * does nothing on an empty buffer (cli.c processCharacterInteractive), and the buffer holds at most
+ * 256 characters (CLI_IN_BUFFER_SIZE 256; 4.3 to 2025.12 fill all 256, master 255; STM32F1 builds
+ * of 4.3 hold 128). Betaflight source 4.3-maintenance to master read 2026-10-25, not run on
+ * hardware: other firmware, or the non-interactive (STX) path, where 0x7f is ignored, are not
+ * covered. A line the firmware truncates still starts with the command checked here.
  */
 export const CLI_CLEAR_LINE = "\u007f".repeat(256);
 
