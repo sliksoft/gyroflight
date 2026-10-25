@@ -1,0 +1,213 @@
+[
+ {
+  "id": "T01",
+  "file": "src/js/serial.ts",
+  "reintroduces": "facade discounts a send whose link is only CLOSING/CLOSE_FAILED (early release)",
+  "result": "KILLED",
+  "tests": "Tests  7 failed | 140 passed (147)",
+  "killed_by": [
+   "× (2) the write hangs and the close fails: false, the send still counts, the other tab is refused; a later close releases it",
+   "× (3) two disconnects at once both wait for the one close and get its outcome",
+   "× (10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven",
+   "× (3) a second disconnect waits for the first teardown; nothing is reported closed before GATT is",
+   "× a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it",
+   "× (11) the other tab asks while the port is still closing: refused; after the close is proven: granted"
+  ]
+ },
+ {
+  "id": "T02",
+  "file": "src/js/serial.ts",
+  "reintroduces": "b3ca2c6a logic: a generation change counts as closure",
+  "result": "KILLED",
+  "tests": "Tests  7 failed | 140 passed (147)",
+  "killed_by": [
+   "× (2) the write hangs and the close fails: false, the send still counts, the other tab is refused; a later close releases it",
+   "× (3) two disconnects at once both wait for the one close and get its outcome",
+   "× (10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven",
+   "× (10b) forceClose whose close succeeds proves the link closed",
+   "× (3) a second disconnect waits for the first teardown; nothing is reported closed before GATT is",
+   "× a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it"
+  ]
+ },
+ {
+  "id": "T03",
+  "file": "src/js/serial.ts",
+  "reintroduces": "facade hands bytes to a closing link",
+  "result": "SURVIVED",
+  "tests": "Tests  147 passed (147)",
+  "killed_by": []
+ },
+ {
+  "id": "T04",
+  "file": "src/js/serial.ts",
+  "reintroduces": "a transport without links counts as closed",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× this page keeps the lease while a send of it is still with the transport (its request gave up)"
+  ]
+ },
+ {
+  "id": "T05",
+  "file": "src/js/protocols/WebSerial.ts",
+  "reintroduces": "swallowed port.close() error = proof (d0f94598 P1)",
+  "result": "KILLED",
+  "tests": "Tests  2 failed | 145 passed (147)",
+  "killed_by": [
+   "× (2) the write hangs and the close fails: false, the send still counts, the other tab is refused; a later close releases it",
+   "× (3) two disconnects at once both wait for the one close and get its outcome"
+  ]
+ },
+ {
+  "id": "T06",
+  "file": "src/js/protocols/WebSerial.ts",
+  "reintroduces": "second disconnect does not join the teardown",
+  "result": "KILLED",
+  "tests": "Tests  2 failed | 145 passed (147)",
+  "killed_by": [
+   "× (3) two disconnects at once both wait for the one close and get its outcome",
+   "× (10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven"
+  ]
+ },
+ {
+  "id": "T07",
+  "file": "src/js/protocols/WebSerial.ts",
+  "reintroduces": "connect opens a new port while an old one is unclosed",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× (2) the write hangs and the close fails: false, the send still counts, the other tab is refused; a later close releases it"
+  ]
+ },
+ {
+  "id": "T09",
+  "file": "src/js/protocols/WebSerial.ts",
+  "reintroduces": "link proven closed at teardown start (early release)",
+  "result": "KILLED",
+  "tests": "Tests  3 failed | 144 passed (147)",
+  "killed_by": [
+   "× (2) the write hangs and the close fails: false, the send still counts, the other tab is refused; a later close releases it",
+   "× (3) two disconnects at once both wait for the one close and get its outcome",
+   "× (11) the other tab asks while the port is still closing: refused; after the close is proven: granted"
+  ]
+ },
+ {
+  "id": "T10",
+  "file": "src/js/protocols/WebSerial.ts",
+  "reintroduces": "forceClose proves closure before close resolves",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× (10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven"
+  ]
+ },
+ {
+  "id": "T11",
+  "file": "src/js/protocols/WebBluetooth.ts",
+  "reintroduces": "second BLE disconnect returns true early (d0f94598 P1)",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× (3) a second disconnect waits for the first teardown; nothing is reported closed before GATT is"
+  ]
+ },
+ {
+  "id": "T12",
+  "file": "src/js/protocols/WebBluetooth.ts",
+  "reintroduces": "GATT still connected taken as closed",
+  "result": "KILLED",
+  "tests": "Tests  2 failed | 145 passed (147)",
+  "killed_by": [
+   "× a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it",
+   "× a failed teardown is run again by the next disconnect, which then proves the close"
+  ]
+ },
+ {
+  "id": "T13",
+  "file": "src/js/protocols/WebBluetooth.ts",
+  "reintroduces": "queued old BLE write goes out later",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× (6) a write queued behind a stuck one never goes out on the next connection"
+  ]
+ },
+ {
+  "id": "T14",
+  "file": "src/js/protocols/WebBluetooth.ts",
+  "reintroduces": "BLE write accepted during teardown",
+  "result": "SURVIVED",
+  "tests": "Tests  147 passed (147)",
+  "killed_by": []
+ },
+ {
+  "id": "T15",
+  "file": "src/js/protocols/WebBluetooth.ts",
+  "reintroduces": "BLE link closed at teardown start",
+  "result": "KILLED",
+  "tests": "Tests  2 failed | 145 passed (147)",
+  "killed_by": [
+   "× (3) a second disconnect waits for the first teardown; nothing is reported closed before GATT is",
+   "× a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it"
+  ]
+ },
+ {
+  "id": "T16",
+  "file": "src/js/protocols/WebSocket.ts",
+  "reintroduces": "CLOSING socket's buffer not counted (early release)",
+  "result": "KILLED",
+  "tests": "Tests  2 failed | 145 passed (147)",
+  "killed_by": [
+   "× (8) a CLOSING socket with buffered bytes counts, also after a reconnect superseded it",
+   "× a buffering WebSocket counts after the facade switched to another transport"
+  ]
+ },
+ {
+  "id": "T17",
+  "file": "src/js/protocols/WebSocket.ts",
+  "reintroduces": "superseded socket not watched",
+  "result": "KILLED",
+  "tests": "Tests  4 failed | 143 passed (147)",
+  "killed_by": [
+   "× (7) a CLOSED socket with bytes still reported buffered does not count",
+   "× (8) a CLOSING socket with buffered bytes counts, also after a reconnect superseded it",
+   "× an OPEN socket's buffer counts, and a socket in a state this code does not know counts too",
+   "× a buffering WebSocket counts after the facade switched to another transport"
+  ]
+ },
+ {
+  "id": "T18",
+  "file": "src/js/protocols/WebSocket.ts",
+  "reintroduces": "CLOSED socket's buffer counted (availability)",
+  "result": "KILLED",
+  "tests": "Tests  6 failed | 141 passed (147)",
+  "killed_by": [
+   "× (7) a CLOSED socket with bytes still reported buffered does not count",
+   "× (8) a CLOSING socket with buffered bytes counts, also after a reconnect superseded it",
+   "× a buffering WebSocket counts after the facade switched to another transport",
+   "× (9) while this tab's write is stuck on an open link the other tab's transaction is refused; once it ends, it runs",
+   "× (11) the other tab asks while the port is still closing: refused; after the close is proven: granted",
+   "× (11b) while the other tab's transaction runs after the yield, this tab's stuck old write cannot be resumed"
+  ]
+ },
+ {
+  "id": "T19",
+  "file": "src/js/serial.ts",
+  "reintroduces": "only the current transport's buffer counted",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× a buffering WebSocket counts after the facade switched to another transport"
+  ]
+ },
+ {
+  "id": "T20",
+  "file": "src/js/protocols/WebSerial.ts",
+  "reintroduces": "reader lock not released before close()",
+  "result": "KILLED",
+  "tests": "Tests  1 failed | 146 passed (147)",
+  "killed_by": [
+   "× (1) the write hangs and the port closes: the send no longer counts, and the other tab gets the lease"
+  ]
+ }
+]
