@@ -990,6 +990,9 @@
     "gyroflightV2Need_gain_change_chirp_flight_plus_baseline_repeat": {
         "message": "a CHIRP flight with changed PIDs plus a repeat with the current PIDs"
     },
+    "gyroflightV2Need_gain_change_flight_with_feedforward_unchanged": {
+        "message": "a gain-change CHIRP flight that leaves feedforward unchanged"
+    },
     "gyroflightV2Need_second_chirp_flight_same_tune": { "message": "a second CHIRP flight with the same tune" },
     "gyroflightV2Need_chirp_covering_the_crossover": {
         "message": "a CHIRP sweep whose identified band contains the loop crossover"
