@@ -80,6 +80,9 @@ class AutoRestore {
     private _save: "none" | "queued" | "sent" | "delivered" | "cut" = "none";
     private _saveTimer: ReturnType<typeof setTimeout> | null = null;
     private _whenCleanedUp: (() => void) | null = null;
+    // Gyroflight (audit WP8 integration review): the restore run the command loop belongs to; it
+    // changes when the run ends, and a loop of an ended run stops before its next command.
+    private _run = 0;
 
     canAttemptConnection(): boolean {
         const connectionStore = useConnectionStore();
@@ -209,6 +212,11 @@ class AutoRestore {
                 { timeoutMs: DEFAULT_COMMAND_TIMEOUT_MS },
             );
         }).catch((error) => {
+            // Gyroflight: not sent (refused, closed link, uncertain session) or cut by the link
+            // closing: the restore cannot go on line by line, it ends as failed.
+            if (Reflect.get(Object(error), "notSent") === true || Reflect.get(Object(error), "connectionClosed")) {
+                throw error;
+            }
             const message = String(error?.message ?? error);
             errors.push({ command, error: message });
             gui_log(`CLI command failed: ${command} — ${message}`);
@@ -218,9 +226,11 @@ class AutoRestore {
     async _sendCliCommands() {
         const cliLines = this._cliLines!;
         const errors: CliError[] = [];
+        const run = this._run;
 
         try {
             for (const line of cliLines) {
+                if (run !== this._run) return;
                 const trimmed = line.trim();
                 if (!trimmed || trimmed.startsWith("#")) {
                     continue;
@@ -253,6 +263,7 @@ class AutoRestore {
             }
 
             // Backup did not contain a `save` line — persist explicitly.
+            if (run !== this._run) return;
             await this._finishWithSave(errors);
         } catch (error) {
             console.error("AutoRestore: CLI command execution failed:", error);
@@ -275,6 +286,7 @@ class AutoRestore {
             console.warn(`AutoRestore: restore applied with ${errors.length} ignored CLI error(s)`, errors);
         }
 
+        if (!this._callback) return; // the run already ended
         gui_log(i18n.getMessage("buttonSaving"));
         const cleanedUp = new Promise<void>((resolve) => {
             this._whenCleanedUp = resolve;
@@ -334,8 +346,13 @@ class AutoRestore {
     }
 
     _cleanup(success: boolean, errorMsg: string | null, persistence?: CliSavePersistence) {
+        // Gyroflight: the run ends here, whatever still awaits it is released.
+        this._run++;
+        const released = this._whenCleanedUp;
+        this._whenCleanedUp = null;
         // Guard against double-invocation (e.g. timeout + disconnect)
         if (!this._callback) {
+            released?.();
             return;
         }
         const callback = this._callback;
@@ -363,8 +380,7 @@ class AutoRestore {
         removeTimeout(TIMEOUT_NAME);
 
         callback({ success, errors: errorMsg, skipped: this._skipped, ...(persistence ? { persistence } : {}) });
-        this._whenCleanedUp?.();
-        this._whenCleanedUp = null;
+        released?.();
     }
 
     async execute(cliLines: string[], callback: AutoRestoreCallback) {
@@ -375,6 +391,7 @@ class AutoRestore {
 
         this._cliLines = cliLines;
         this._callback = callback;
+        this._run++;
         this._save = "none";
         this._skipped = 0;
 
