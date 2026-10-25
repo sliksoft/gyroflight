@@ -52,6 +52,7 @@ import { serial, type SerialProtocol } from "../../src/js/serial";
 import WebSerial from "../../src/js/protocols/WebSerial";
 import WebBluetooth, { type BleDevice } from "../../src/js/protocols/WebBluetooth";
 import Websocket from "../../src/js/protocols/WebSocket";
+import { TransportLink } from "../../src/js/protocols/TransportLink";
 import "../../src/composables/fcWriteGuard"; // starts this page's lease
 import {
     createWriteLease,
@@ -164,6 +165,7 @@ function fakeBleDevice(id = "ble-1") {
     const writes: { connection: number; bytes: number[]; done: Deferred }[] = [];
     let connection = 0;
     let stopNotifications: () => Promise<unknown> = async () => undefined;
+    let startNotifications: () => Promise<unknown> = async () => undefined;
     let disconnectWorks = true;
     const characteristic = (uuid: string, n: number) => ({
         uuid,
@@ -174,7 +176,7 @@ function fakeBleDevice(id = "ble-1") {
             writes.push({ connection: n, bytes: Array.from(value), done });
             return done.promise;
         }),
-        startNotifications: vi.fn(async () => undefined),
+        startNotifications: vi.fn(() => startNotifications()),
         stopNotifications: vi.fn(() => stopNotifications()),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
@@ -202,6 +204,11 @@ function fakeBleDevice(id = "ble-1") {
             return gate;
         },
         stopNeverAnswers: () => (stopNotifications = () => new Promise(() => {})),
+        startWaits: () => {
+            const gate = deferred();
+            startNotifications = () => gate.promise;
+            return gate;
+        },
         disconnectFails: () => (disconnectWorks = false),
         disconnectWorks: () => (disconnectWorks = true),
     };
@@ -542,6 +549,23 @@ describe("WebBluetooth: a write belongs to its own connection; closing is proven
         gate.resolve();
     });
 
+    it("a write during the connect's setup (GATT up, connection not open yet) is refused", async () => {
+        const fake = fakeBleDevice();
+        const bt = new WebBluetooth();
+        bt.devices = [bt.createPort(fake.device)];
+        install("bluetooth", bt);
+        const gate = fake.startWaits();
+        const connecting = serial.connect(`bluetooth_${fake.device.id}`, { baudRate: 115200 });
+        await until(() => fake.gatt.connected && bt.writeCharacteristic !== null);
+        const direct = watch(bt.send(frame(9)));
+        await flush();
+        expect(fake.writes).toHaveLength(0);
+        expect(direct.value).toEqual({ bytesSent: 0 });
+        gate.resolve();
+        await connecting;
+        expect(bt.connected).toBe(true);
+    });
+
     it("(6) a write queued behind a stuck one never goes out on the next connection", async () => {
         const fake = fakeBleDevice();
         const bt = new WebBluetooth();
@@ -616,6 +640,23 @@ describe("WebBluetooth: a write belongs to its own connection; closing is proven
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe("the facade hands bytes only to an open link", () => {
+    it("a transport whose link is not OPEN gets no bytes, whatever its own checks say", async () => {
+        const link = new TransportLink();
+        const send = vi.fn(async (d: ArrayBuffer) => ({ bytesSent: d.byteLength }));
+        (serial as unknown as { _protocol: unknown })._protocol = { connected: true, link, send };
+        expect(await serial.send(frame(1))).toEqual({ bytesSent: 6 });
+        for (const end of [() => link.closing(), () => link.closeFailed(), () => link.closed()]) {
+            end();
+            expect(await serial.send(frame(2))).toEqual({ bytesSent: 0 });
+        }
+        expect(send).toHaveBeenCalledTimes(1);
+        (serial as unknown as { _protocol: unknown })._protocol = { connected: true, link: null, send };
+        expect(await serial.send(frame(3))).toEqual({ bytesSent: 0 });
+        expect(send).toHaveBeenCalledTimes(1);
     });
 });
 
