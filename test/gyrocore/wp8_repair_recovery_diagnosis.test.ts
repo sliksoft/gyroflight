@@ -251,6 +251,25 @@ describe("WP8-F07 the notice's diagnosis reads only", () => {
         wrapper.unmount();
     });
 
+    // Codex review round 3: once the store found storage unreadable, Restore and the check refuse.
+    it("offers no recovery while the store's unreadable latch is set, even if storage reads again", async () => {
+        useFlightControllerStore().config.uid = [...UID];
+        localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}tx-1`, JSON.stringify(entry({ saved: "no" })));
+        localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify([backup("bk-1")]));
+        const wrapper = mountNotice();
+        await wrapper.find("[data-gyrocore='uncertain-state-diagnose']").trigger("click");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(wrapper.find("[data-recovery='verified_restore,read_only_check']").exists()).toBe(true);
+        useFcTransactionStore().unreadable = true; // a storage failure latched
+        await new Promise((r) => setTimeout(r, 20));
+        expect(wrapper.find("[data-gyrocore='uncertain-state-diagnosis']").exists()).toBe(false);
+        await wrapper.find("[data-gyrocore='uncertain-state-diagnose']").trigger("click");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(wrapper.find("[data-gyrocore='uncertain-state-diagnosis']").exists()).toBe(false);
+        expect(wrapper.find("[data-gyrocore='uncertain-state-diagnosis-unreadable']").exists()).toBe(true);
+        wrapper.unmount();
+    });
+
     it("a diagnosis is dropped when the connected craft changes", async () => {
         useFlightControllerStore().config.uid = [...UID];
         localStorage.setItem(`${TRANSACTION_ENTRY_PREFIX}tx-1`, JSON.stringify(entry()));

@@ -91,7 +91,7 @@ let diagnosisRun = 0;
 
 // A diagnosis describes one craft and one set of entries: shown only while those are current.
 watch(
-    () => JSON.stringify([fc.config.uid, open.value]),
+    () => JSON.stringify([fc.config.uid, open.value, states.unreadable]),
     () => {
         diagnosisRun++;
         diagnosis.value = null;
@@ -109,8 +109,9 @@ async function onDiagnose() {
     const ownerActive = await transactionOwnerActive();
     const read = readTransactionRecords(globalThis.localStorage);
     if (run !== diagnosisRun) return;
-    diagnosisUnreadable.value = !read.ok;
-    if (!read.ok) {
+    // The store's latch counts too: once it found storage unreadable, Restore and the check refuse.
+    diagnosisUnreadable.value = !read.ok || states.unreadable;
+    if (!read.ok || diagnosisUnreadable.value) {
         diagnosis.value = null;
         return;
     }
