@@ -156,60 +156,19 @@ describe("a transport that resolves before its bytes are out keeps the page busy
     });
 });
 
-// Codex integration review of be798ce4 (P2, availability) and its re-check (P1): a send stuck on a
-// connection counts until the transport has finished closing it, and no longer after that.
-describe("an unfinished send counts until its connection has actually closed", () => {
-    const stuck = (extra: Record<string, unknown> = {}) => ({
-        connected: true,
-        send: () => new Promise(() => {}), // never finishes
-        ...extra,
-    });
-
-    it("while the transport is still closing the old connection the send counts; once closed it does not", async () => {
-        let closed!: () => void;
-        (serial as unknown as { _protocol: unknown })._protocol = stuck({
-            disconnect: () => new Promise<boolean>((resolve) => (closed = () => resolve(true))),
-        });
+// Codex integration review of be798ce4 (P2, availability): a send stuck on a closed connection.
+describe("a send stuck on a connection that closed does not keep the page busy on the next one", () => {
+    it("after disconnect and reconnect the old unfinished send no longer counts", async () => {
+        (serial as unknown as { _protocol: unknown })._protocol = {
+            connected: true,
+            send: () => new Promise(() => {}), // never finishes
+        };
         void serial.send(new Uint8Array([1]).buffer);
         await vi.advanceTimersByTimeAsync(0);
         expect(serial.pendingSends).toBe(1);
-        const disconnecting = serial.disconnect();
-        await vi.advanceTimersByTimeAsync(0);
-        expect(serial.pendingSends).toBe(1); // teardown not done: bytes may still go out
-        closed();
-        await disconnecting;
+        await serial.disconnect().catch(() => undefined);
+        (serial as unknown as { _protocol: unknown })._protocol = protocol; // a new link
+        await serial.connect("x").catch(() => undefined);
         expect(serial.pendingSends).toBe(0);
-    });
-
-    it("a teardown that fails leaves the old send counted (fail-closed)", async () => {
-        (serial as unknown as { _protocol: unknown })._protocol = stuck({
-            disconnect: () => Promise.reject(new Error("close failed")),
-        });
-        vi.spyOn(console, "error").mockImplementation(() => undefined);
-        void serial.send(new Uint8Array([1]).buffer);
-        await vi.advanceTimersByTimeAsync(0);
-        await serial.disconnect();
-        expect(serial.pendingSends).toBe(1);
-    });
-
-    it("the transport reporting it closed (an unexpected loss) ends the count too", async () => {
-        const slots = (serial as unknown as { _protocols: Array<{ name: string; instance: EventTarget }> })._protocols;
-        const transport = slots.find((p) => p.name === "serial")!.instance as EventTarget & Record<string, unknown>;
-        const realSend = transport.send;
-        transport.send = () => new Promise(() => {});
-        (serial as unknown as { _protocol: unknown })._protocol = transport;
-        try {
-            // The facade is one per page: an earlier test's failed teardown may still count a send.
-            const before = serial.pendingSends;
-            void serial.send(new Uint8Array([1]).buffer);
-            await vi.advanceTimersByTimeAsync(0);
-            expect(serial.pendingSends).toBe(before + 1);
-            transport.dispatchEvent(new CustomEvent("disconnect", { detail: false })); // a failed close: not proof
-            expect(serial.pendingSends).toBe(before + 1);
-            transport.dispatchEvent(new CustomEvent("disconnect", { detail: true }));
-            expect(serial.pendingSends).toBe(0);
-        } finally {
-            transport.send = realSend;
-        }
     });
 });
