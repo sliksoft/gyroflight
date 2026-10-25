@@ -221,6 +221,29 @@ describe("WP8-F02 the write lease between pages of one origin", () => {
         await until(() => a.issues().length === 0 && b.issues().length === 0);
     });
 
+    // Codex review round 2: a yield request that arrives before the exclusive request is queued.
+    it("a page that took the lease back before the request was queued is asked again", async () => {
+        const locks = createLockManager();
+        // The transaction's request reaches the lock manager 100 ms late (a descheduled page).
+        const late = {
+            request: (name: string, opts: never, cb: never) =>
+                new Promise((resolve, reject) =>
+                    setTimeout(() => (locks.request(name, opts, cb) as Promise<unknown>).then(resolve, reject), 100),
+                ),
+        };
+        const a = page(late as never, { quietMs: 10, waitMs: 1500 });
+        const b = page(locks, { quietMs: 10, waitMs: 1500 });
+        await until(() => b.issues().length === 0);
+        let ran = false;
+        await a.exclusive(
+            async () => {
+                ran = true;
+            },
+            (r) => new ApplyBlockedError(r),
+        );
+        expect(ran).toBe(true);
+    });
+
     it("without Web Locks nothing may write and no transaction runs (fail-closed)", async () => {
         const a = page(undefined);
         expect(a.issues()).toEqual([WRITE_LEASE_UNAVAILABLE]);
@@ -328,6 +351,37 @@ describe("WP8-F02 this page's guard and msp.ts against another page's transactio
         expect(sent).toEqual([]);
         release();
         await tx;
+    });
+
+    // Codex review round 2: busy is what is still with the transport, not an MSP retry timer.
+    it("this page keeps the lease while a send of it is still with the transport (its request gave up)", async () => {
+        await until(() => mspRequestRefusal(MSPCodes.MSP_SET_PID, [1]) === null);
+        vi.mocked(serial.send).mockRestore();
+        let finish!: (r: { bytesSent: number }) => void;
+        (serial as unknown as { _protocol: unknown })._protocol = {
+            connected: true,
+            send: () => new Promise((resolve) => (finish = resolve)),
+        };
+        void serial.send(new Uint8Array([0x23]).buffer); // raw CLI text, not in any MSP queue
+        const other = createWriteLease(
+            {
+                locks: () => (navigator as unknown as { locks: never }).locks,
+                channel: () => new BroadcastChannel(FC_WRITE_LEASE_CHANNEL) as never,
+                now: () => Date.now(),
+            },
+            { waitMs: 800 },
+        );
+        other.start();
+        pages.push(other);
+        await wait(700); // well past QUIET_MS
+        const err = await other
+            .exclusive(
+                async () => 1,
+                (r) => new ApplyBlockedError(r),
+            )
+            .catch((e: unknown) => e);
+        expect(refused(err)).toEqual([WRITE_LEASE_TIMEOUT]);
+        finish({ bytesSent: 1 });
     });
 
     it("this page's own transaction waits for the other page's save to end before it reads anything", async () => {

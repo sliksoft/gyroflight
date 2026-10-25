@@ -31,12 +31,14 @@
  *     lease in exclusive mode for its whole run, reads included. The exclusive grant means no other
  *     page of this origin holds it, so none admits a write until the transaction ends.
  *   - To get it, the transaction's page drops its own shared hold first (or it would wait on
- *     itself), aborts its own pending shared request, and asks the other pages to yield
- *     (BroadcastChannel). A page yields once it is quiet: no write of its own still awaiting its
- *     answer, no save in progress (useSaving), and none admitted in the last QUIET_MS. It then asks
- *     for the shared lease again; Web Locks grants that only after the exclusive one queued before
- *     it. The exclusive request gives up after LEASE_WAIT_MS (a page that never gets quiet, a frozen
- *     page): the transaction is refused, never run without it.
+ *     itself), aborts its own pending shared request, queues its exclusive request and asks the
+ *     other pages to yield (BroadcastChannel), again every YIELD_REPEAT_MS until granted. A page
+ *     yields once it is quiet: nothing it sent still with the transport, no write of its own still
+ *     awaiting its answer, no save in progress (useSaving), and none admitted in the last QUIET_MS.
+ *     It then asks for the shared lease again, which Web Locks grants after an exclusive request
+ *     queued before it (one queued later is asked again). The exclusive request gives up after
+ *     LEASE_WAIT_MS (a page that never gets quiet, a frozen page): the transaction is refused,
+ *     never run without it.
  *   - Without Web Locks no page holds the lease: every such write is refused (fail-closed).
  *
  * What it cannot do: it covers this browser origin only (not another browser, another origin, an
@@ -62,6 +64,8 @@ export const WRITE_LEASE_NOT_EXCLUSIVE = "fc:write_lease_not_exclusive";
 export const QUIET_MS = 300;
 /** How long a transaction waits for the other pages to yield. */
 export const LEASE_WAIT_MS = 8000;
+/** How often a waiting transaction asks the other pages again. */
+const YIELD_REPEAT_MS = 250;
 
 interface LockOptions {
     mode?: "shared" | "exclusive";
@@ -233,22 +237,30 @@ export function createWriteLease(
             state.release?.();
             const timeout = new AbortController();
             const timer = setTimeout(() => timeout.abort(), waitMs);
+            let asking: ReturnType<typeof setInterval> | undefined;
+            const exclusive = locks.request(FC_WRITE_LEASE, { mode: "exclusive", signal: timeout.signal }, async () => {
+                clearTimeout(timer);
+                clearInterval(asking);
+                state.exclusive = true;
+                try {
+                    return await fn();
+                } finally {
+                    state.exclusive = false;
+                }
+            });
+            // Asked after the request is queued, and again until it is granted: a page that took the
+            // lease back before the request was queued, or started meanwhile, is asked again (audit
+            // WP8-F02 review).
             channel?.postMessage({ type: "yield" });
+            if (!state.exclusive) asking = setInterval(() => channel?.postMessage({ type: "yield" }), YIELD_REPEAT_MS);
             try {
-                return await locks.request(FC_WRITE_LEASE, { mode: "exclusive", signal: timeout.signal }, async () => {
-                    clearTimeout(timer);
-                    state.exclusive = true;
-                    try {
-                        return await fn();
-                    } finally {
-                        state.exclusive = false;
-                    }
-                });
+                return await exclusive;
             } catch (err) {
                 if (timeout.signal.aborted && !state.exclusive) throw refuse([WRITE_LEASE_TIMEOUT]);
                 throw err;
             } finally {
                 clearTimeout(timer);
+                clearInterval(asking);
                 state.transaction = false;
                 acquireShared();
             }
