@@ -769,6 +769,64 @@
         "message": "The record of earlier writes in this browser cannot be read; until it can, every Apply is refused."
     },
     "gyroflightUncertainCheck": { "message": "Check flight controller state (read-only)" },
+    "gyroflightRecoveryDiagnose": { "message": "Diagnose (read-only)" },
+    "gyroflightRecoveryNotEvidence": {
+        "message": "This diagnosis only reads what this browser stored. It is not evidence that the flight controller is safe and it unlocks nothing."
+    },
+    "gyroflightRecoveryFinding_orphaned_in_progress": {
+        "message": "The write never finished and no tab is running it any more (the page was closed or crashed): where it stopped is unknown."
+    },
+    "gyroflightRecoveryFinding_in_progress_owner_active": {
+        "message": "A Gyroflight write or check is running in a tab of this browser now."
+    },
+    "gyroflightRecoveryFinding_in_progress_owner_unknown": {
+        "message": "The write never finished, and whether a tab is still running it cannot be read."
+    },
+    "gyroflightRecoveryFinding_backup_missing": {
+        "message": "The backup taken before this write is no longer stored."
+    },
+    "gyroflightRecoveryFinding_eeprom_state_unknown": {
+        "message": "Whether the values were saved to EEPROM is unknown."
+    },
+    "gyroflightRecoveryFinding_eeprom_saved_adjusted": {
+        "message": "The values were saved to EEPROM, but the flight controller adjusted them."
+    },
+    "gyroflightRecoveryFinding_profile_scope_unknown": {
+        "message": "Which PID profiles the write may have changed is unknown."
+    },
+    "gyroflightRecoveryFinding_profiles_several": {
+        "message": "The write may have changed more than one PID profile."
+    },
+    "gyroflightRecoveryFinding_profile_switch_seen": { "message": "A PID profile switch happened during the write." },
+    "gyroflightRecoveryFinding_interrupted_restore": { "message": "This was a Restore that did not finish." },
+    "gyroflightRecoveryFinding_blocked_by_other_entry": {
+        "message": "Another open entry of this craft keeps the recovery below from covering this one."
+    },
+    "gyroflightRecoveryAvailable_verified_restore": {
+        "message": "Recovery available in Gyroflight: a verified Restore of a trusted backup of the same profile."
+    },
+    "gyroflightRecoveryAvailable_read_only_check": {
+        "message": "Recovery available in Gyroflight: the read-only check (power-cycle the flight controller first)."
+    },
+    "gyroflightRecoveryAvailable_none": {
+        "message": "No recovery in Gyroflight can prove this state: writes to this craft stay blocked."
+    },
+    "gyroflightRecoveryStepDoNotFly": { "message": "Do not fly this craft until its configuration is known." },
+    "gyroflightRecoveryStepWaitForOwner": {
+        "message": "Wait for the other tab to finish, or close it, then diagnose again."
+    },
+    "gyroflightRecoveryStepCheck": {
+        "message": "Power-cycle the flight controller, reconnect, and run the read-only check."
+    },
+    "gyroflightRecoveryStepRestore": {
+        "message": "Run a Restore of the trusted backup of that profile; it is verified before it is saved."
+    },
+    "gyroflightRecoveryStepInspect": {
+        "message": "Inspect the configuration read-only: download this craft's backups and compare them with the CLI's 'diff all' output."
+    },
+    "gyroflightRecoveryStepOutside": {
+        "message": "To use Gyroflight on this craft again, re-establish a known configuration outside Gyroflight (for example flash with a full chip erase and apply a known-good diff), then remove this entry from the browser's site data by hand. Gyroflight cannot verify that step."
+    },
     "gyroflightPreviewNeedsRelease": {
         "message": "The preview is offered only when Apply is: the flight controller calculates it in the values the PID tab would save, so it needs the same checks (marked ✗ above)."
     },
