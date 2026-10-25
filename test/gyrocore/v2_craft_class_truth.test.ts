@@ -24,8 +24,11 @@
  *
  * wp7_end_to_end compares a 7-inch-like loop with an AIR65-like one only relatively. Here each
  * simulated flight (Blackbox bytes → Viewer decode → CHIRP qualification → engine) is compared with
- * the loop it was made from, L = G · C_fb from the logged controller: the measured crossover and
- * phase margin must match it for both classes, the measurement plan must follow from that crossover,
+ * the loop it was made from, L = G · C_fb from the logged controller: for both classes the measured
+ * crossover must lie within the resolution the evidence reports and the measurement plan must follow
+ * from that crossover; for the AIR65-like class, which the analysis resolves, the crossover must also
+ * be within 5 % and the phase margin within 3° of the truth (the 7-inch-like phase margin is not
+ * compared: its loop is not resolved, below),
  * and a sweep that never reaches the crossover must stop with a named reason. One synthetic class is
  * not evidence for the other; each is checked against its own truth.
  *
