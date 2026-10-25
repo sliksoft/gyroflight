@@ -443,14 +443,24 @@ const configDefaults = ref<Record<string, string | null>>({});
 const configChanges = ref<Record<string, string | null>>({});
 const configHasChanged = computed(() => Object.keys(configChanges.value).length > 0);
 
-const initializeDefaults = () => {
-    configDefaults.value = {
-        rxConfig: JSON.stringify({ rx_min_usec: rxConfig.value.rx_min_usec, rx_max_usec: rxConfig.value.rx_max_usec }),
-        failsafeConfig: JSON.stringify(failsafeConfig.value),
-        gpsRescue: gpsRescue.value ? JSON.stringify(gpsRescue.value) : null,
-        rxFailConfig: JSON.stringify(rxFailConfig.value),
-    };
-    configChanges.value = {};
+const currentConfig = (): Record<string, string | null> => ({
+    rxConfig: JSON.stringify({ rx_min_usec: rxConfig.value.rx_min_usec, rx_max_usec: rxConfig.value.rx_max_usec }),
+    failsafeConfig: JSON.stringify(failsafeConfig.value),
+    gpsRescue: gpsRescue.value ? JSON.stringify(gpsRescue.value) : null,
+    rxFailConfig: JSON.stringify(rxFailConfig.value),
+});
+
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F06): the baseline can be values taken
+// earlier (what a save sent); a field edited since stays changed.
+const initializeDefaults = (baseline: Record<string, string | null> = currentConfig()) => {
+    configDefaults.value = baseline;
+    const now = currentConfig();
+    configChanges.value = Object.fromEntries(Object.entries(now).filter(([key, value]) => value !== baseline[key]));
+};
+
+const captureBaseline = () => {
+    const sent = currentConfig();
+    return () => initializeDefaults(sent);
 };
 
 const trackChange = (key: string, newValue: string | null) => {
@@ -744,7 +754,7 @@ const gpsRescueAllowArmingWithoutFix = computed({
 
 // --- Save ---
 
-const { saveConfig } = useFailsafeSave(initializeDefaults);
+const { saveConfig } = useFailsafeSave(captureBaseline);
 
 onMounted(async () => {
     await loadConfig();

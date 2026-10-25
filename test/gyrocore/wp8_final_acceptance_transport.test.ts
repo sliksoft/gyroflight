@@ -405,8 +405,8 @@ describe("a refused write ends the save instead of leaving it on 'Saving' (Codex
             return undefined as never;
         });
         vi.spyOn(console, "error").mockImplementation(() => undefined);
-        const defaults = vi.fn();
-        const { saveConfig, isSaving } = useFailsafeSave(defaults);
+        const defaults = vi.fn(); // the baseline commit (WP8-F06: captured at the start, applied after the ACK)
+        const { saveConfig, isSaving } = useFailsafeSave(() => defaults);
         const saving = saveConfig().catch(() => undefined);
         await vi.advanceTimersByTimeAsync(1000);
         await saving;

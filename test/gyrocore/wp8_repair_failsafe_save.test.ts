@@ -133,8 +133,9 @@ afterEach(() => {
 });
 
 function failsafeSave() {
+    // `defaults` is what makes the values sent the tab's clean baseline (useFailsafeSave captureBaseline).
     const defaults = vi.fn();
-    const { saveConfig, isSaving } = useFailsafeSave(defaults);
+    const { saveConfig, isSaving } = useFailsafeSave(() => defaults);
     const done = saveConfig();
     return { defaults, isSaving, done };
 }
@@ -200,6 +201,58 @@ describe("WP8-F05 the RXFAIL writes end the Failsafe save, whatever happens to t
         expect(isSaving.value).toBe(false);
         expect(defaults).not.toHaveBeenCalled();
         expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
+    });
+});
+
+describe("Codex review of F05/F06", () => {
+    it("the firmware refuses an RXFAIL channel (error answer): the save ends, no EEPROM save, still dirty", async () => {
+        answers = (code) => (code === MSPCodes.MSP_SET_RXFAIL_CONFIG ? "error" : "ack");
+        const { defaults, isSaving, done } = failsafeSave();
+        await vi.advanceTimersByTimeAsync(5000);
+        await done;
+        expect(rxfailFrames()).toHaveLength(1);
+        expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
+        expect(defaults).not.toHaveBeenCalled();
+        expect(isSaving.value).toBe(false);
+        expect(log.gui).toHaveBeenCalled();
+    });
+
+    it("the firmware refuses the failsafe section (error answer): the save ends before RXFAIL", async () => {
+        answers = (code) => (code === MSPCodes.MSP_SET_FAILSAFE_CONFIG ? "error" : "ack");
+        const { defaults, done } = failsafeSave();
+        await vi.advanceTimersByTimeAsync(5000);
+        await done;
+        expect(rxfailFrames()).toHaveLength(0);
+        expect(codes()).not.toContain(MSPCodes.MSP_EEPROM_WRITE);
+        expect(defaults).not.toHaveBeenCalled();
+    });
+
+    it("cut short after a write went out (the queue cleared, a tab switch): the user is told, nothing is saved", async () => {
+        answers = (code) => (code === MSPCodes.MSP_SET_RXFAIL_CONFIG ? "none" : "ack");
+        const { defaults, isSaving, done } = failsafeSave();
+        await vi.advanceTimersByTimeAsync(100);
+        expect(rxfailFrames()).toHaveLength(1);
+        MSP.callbacks_cleanup();
+        await vi.advanceTimersByTimeAsync(100);
+        await done;
+        expect(isSaving.value).toBe(false);
+        expect(defaults).not.toHaveBeenCalled();
+        expect(log.gui).toHaveBeenCalledWith("gyroflightSaveInterrupted");
+    });
+
+    it("sends what the store held when the save started, even when it is edited during the save", async () => {
+        const fc = useFlightControllerStore();
+        const sentFailsafe = () => frames.find((f) => f.code === MSPCodes.MSP_SET_FAILSAFE_CONFIG)?.payload;
+        const delay0 = fc.failsafeConfig.failsafe_delay;
+        answers = (code) => {
+            // Edited while the first section is on its way.
+            if (code === MSPCodes.MSP_SET_RX_CONFIG) fc.failsafeConfig.failsafe_delay = delay0 + 7;
+            return "ack";
+        };
+        const { done } = failsafeSave();
+        await vi.advanceTimersByTimeAsync(5000);
+        await done;
+        expect(sentFailsafe()?.[0]).toBe(delay0 & 0xff);
     });
 });
 

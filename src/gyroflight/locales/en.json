@@ -1005,6 +1005,9 @@
         "message": "The save command did not reach the flight controller in full. Whether the configuration was saved is unknown: reconnect and check it before flying."
     },
     "gyroflightRestoreSaveNotSaved": { "message": "The configuration was not saved to EEPROM." },
+    "gyroflightSaveInterrupted": {
+        "message": "The save was interrupted after values were sent: the flight controller may hold some of them in RAM, not saved to EEPROM. Save again before flying."
+    },
     "gyroflightCliSaveNotVerified": {
         "message": "The save command went out, but the flight controller did not confirm that it saved to EEPROM. Reconnect and check the configuration before flying."
     },

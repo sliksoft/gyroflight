@@ -43,7 +43,7 @@ import { updateTabList } from "../utils/updateTabList";
 import { showErrorDialog } from "../utils/showErrorDialog";
 import { OSD } from "../../components/tabs/osd/osd";
 import { reinitializeConnection } from "../serial_backend";
-import type { MspCallback, MspFrame, MspResponse } from "../msp";
+import type { MspCallback, MspFrame, MspPayload, MspResponse } from "../msp";
 import type { CurrentMeterConfig, LedStripEntry } from "../../stores/fc.types";
 import type Features from "../Features";
 import type Beepers from "../Beepers";
@@ -724,15 +724,18 @@ class MspHelper {
      * answered, a refused retry (the first attempt may have run) or a cleared queue calls `onRefused`
      * and ends the chain; `onCompleteCallback` only after the firmware acknowledged every channel.
      */
-    sendRxFailConfig(onCompleteCallback: () => void, onRefused?: (reason: Error) => void) {
-        const fcStore = useFlightControllerStore();
+    sendRxFailConfig(
+        onCompleteCallback: () => void,
+        onRefused?: (reason: Error) => void,
+        channels: readonly { mode: number; value: number }[] = useFlightControllerStore().rxFailConfig,
+    ) {
         const send = async () => {
-            for (let rxFailIndex = 0; rxFailIndex < fcStore.rxFailConfig.length; rxFailIndex++) {
-                const rxFail = fcStore.rxFailConfig[rxFailIndex];
+            for (let rxFailIndex = 0; rxFailIndex < channels.length; rxFailIndex++) {
+                const rxFail = channels[rxFailIndex];
                 const buffer = new MspBuffer();
                 buffer.push8(rxFailIndex).push8(rxFail.mode).push16(rxFail.value);
                 // One channel at a time, in order, as the legacy chain did.
-                await MSP.promise(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer); // NOSONAR: sequential by design
+                await confirmedWrite(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer); // NOSONAR: sequential by design
             }
         };
         send().then(onCompleteCallback, (err: unknown) => {
@@ -838,6 +841,17 @@ class MspHelper {
                 },
             );
         }, 100); // 100ms delay before sending MSP_EEPROM_WRITE to ensure that all settings have been received
+    }
+}
+
+/**
+ * Gyroflight (audit WP8-F05 review): a SET the firmware acknowledged. Its error answer ('!': the
+ * firmware refused the values) rejects; MSP.promise alone resolves with it.
+ */
+export async function confirmedWrite(code: number, data?: MspPayload): Promise<void> {
+    const reply = await MSP.promise(code, data);
+    if (reply?.unsupported) {
+        throw new Error(`${getMSPCodeName(code)} refused by the flight controller`);
     }
 }
 

@@ -10,9 +10,16 @@ import { useFlightControllerStore } from "../../src/stores/fc";
 const saveAndReboot = vi.fn();
 
 vi.mock("../../src/js/msp", () => ({ default: { promise: vi.fn() } }));
-vi.mock("../../src/js/msp/MSPHelper", () => ({
-    mspHelper: { crunch: () => [], sendRxFailConfig: (callback: () => void) => callback() },
-}));
+vi.mock("../../src/js/msp/MSPHelper", async () => {
+    const { default: MSP } = await import("../../src/js/msp");
+    return {
+        mspHelper: { crunch: () => [], sendRxFailConfig: (callback: () => void) => callback() },
+        // An acknowledged write is the (mocked) MSP.promise resolving.
+        confirmedWrite: async (code: number, data: number[]) => {
+            await MSP.promise(code, data);
+        },
+    };
+});
 vi.mock("../../src/composables/useReboot", () => ({ useReboot: () => ({ saveAndReboot }) }));
 vi.mock("../../src/js/localization", () => ({ i18n: { getMessage: (key: string) => key } }));
 
@@ -65,6 +72,36 @@ describe("Failsafe MSP wiring", () => {
 
         expect(saveAndReboot).toHaveBeenCalledOnce();
         expect(vm.configHasChanged).toBe(false);
+    });
+
+    // Codex review of F06: an edit made while the save runs was never sent; it stays pending.
+    it("keeps an edit made during the save pending after the save is confirmed", async () => {
+        let finish!: () => void;
+        saveAndReboot.mockImplementation(
+            ({ onSaved }: { onSaved?: () => void } = {}) =>
+                new Promise<void>((resolve) => {
+                    finish = () => {
+                        onSaved?.();
+                        resolve();
+                    };
+                }),
+        );
+        wrapper = mountTab();
+        await flushPromises();
+        const fcStore = useFlightControllerStore();
+        const vm = wrapper.vm as unknown as { configHasChanged: boolean; saveConfig: () => Promise<void> };
+
+        fcStore.failsafeConfig.failsafe_delay += 1;
+        await nextTick();
+        const saving = vm.saveConfig();
+        await flushPromises();
+        fcStore.failsafeConfig.failsafe_delay += 1; // after the values were taken for this save
+        await nextTick();
+        finish();
+        await saving;
+        await nextTick();
+
+        expect(vm.configHasChanged).toBe(true);
     });
 
     // Gyroflight (audit WP8-F06): the RAM may hold the values, EEPROM does not; Save stays enabled.
