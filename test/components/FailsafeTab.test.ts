@@ -104,6 +104,24 @@ describe("Failsafe MSP wiring", () => {
         expect(vm.configHasChanged).toBe(true);
     });
 
+    // Codex review round 2 of F06: a save reboots, so an edit made meanwhile would be lost: none can be made.
+    it("locks the fields while the save runs", async () => {
+        let finish!: () => void;
+        saveAndReboot.mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+        wrapper = mountTab();
+        await flushPromises();
+        const vm = wrapper.vm as unknown as { saveConfig: () => Promise<void> };
+        const fields = () => wrapper.find("[data-gyrocore='failsafe-fields']").element as HTMLFieldSetElement;
+        expect(fields().disabled).toBe(false);
+        const saving = vm.saveConfig();
+        await flushPromises();
+        expect(fields().disabled).toBe(true);
+        finish();
+        await saving;
+        await nextTick();
+        expect(fields().disabled).toBe(false);
+    });
+
     // Gyroflight (audit WP8-F06): the RAM may hold the values, EEPROM does not; Save stays enabled.
     it("keeps the changes pending when the EEPROM save is not confirmed", async () => {
         saveAndReboot.mockRejectedValue(new Error("EEPROM save not confirmed (unknown)"));
