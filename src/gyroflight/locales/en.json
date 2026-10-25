@@ -1070,7 +1070,7 @@
         "message": "The save command went out, but the flight controller did not confirm that it saved to EEPROM. Reconnect and check the configuration before flying."
     },
     "gyroflightEepromNotConfirmed": {
-        "message": "The flight controller did not confirm the save to EEPROM. Its RAM may hold the new values while EEPROM still holds the old ones: they are lost on the next power cycle. Check the connection and save again."
+        "message": "The flight controller did not confirm the save to EEPROM. Its RAM may hold the new values while EEPROM still holds the old ones: they are lost on the next power cycle. Disconnect, reconnect and save again: on the same connection a lost answer can keep later saves unconfirmed."
     },
     "gyroflightCliExitNotDelivered": {
         "message": "Leaving the CLI failed: the exit command did not reach the flight controller in full, so it may still be in CLI mode. The connection was closed. Power-cycle the flight controller before connecting again."
