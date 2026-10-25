@@ -3,7 +3,7 @@
 **Datum:** 2026-10-25
 **Branch:** `feat/gyroflight-autotune-engine-v2`
 **HEAD vóór deze opdracht:** `6aee384edf5c050375273995ec8d61733ba3b965`
-**HEAD na deze opdracht:** zie het statusblok (§16)
+**HEAD na deze opdracht:** de commit die §16 invult (zie `git log`); beoordeelde inhoud `71af5bc5`
 
 ## 0. Samenvatting
 
@@ -410,7 +410,13 @@ lokale paden en is als `redacted/R3-procedure-review.md` gepubliceerd. Het origi
 
 ### 12.2 Integrale review
 
-Ingevuld na de review op de definitieve HEAD.
+| Review | HEAD | Uitkomst |
+|---|---|---|
+| I1 integraal: alles sinds `6aee384e`, productiecode, tests, publicatiescan en rapportclaims | `af9ab0d4` | REQUEST_CHANGES: 1 P2 (Windows-pad met gebruikersnaam in een gepubliceerde `redacted/`-kopie, §2). P3: dezelfde twee testbeperkingen als R1 |
+| I1b herbeoordeling, met een nieuwe scan van alle 83 toegevoegde of gewijzigde auditbestanden | `71af5bc5` | **APPROVE** 0/0/0 |
+
+Na `71af5bc5` volgt alleen de commit die dit statusblok invult (§12.2 en §16). Codex heeft die commit niet apart
+beoordeeld.
 
 ## 13. Resterende P0/P1/P2
 
@@ -463,8 +469,8 @@ Geen merge, geen PR. Zie het statusblok voor de exacte stand.
 GYROFLIGHT_V2_COMPLETE_CONSOLIDATION
 BRANCH=feat/gyroflight-autotune-engine-v2
 HEAD_BEFORE=6aee384edf5c050375273995ec8d61733ba3b965
-HEAD_AFTER=PENDING_INTEGRAL_REVIEW
-REMOTE_BACKUP=PENDING
+HEAD_AFTER=the commit recording this block, child of 71af5bc5 (reviewed content HEAD 71af5bc5; last code/test commit b38e2ee3)
+REMOTE_BACKUP=YES (origin/feat/gyroflight-autotune-engine-v2, fast-forward, no force; WP8 baseline pushed as d3f39ee2)
 WP8_SOFTWARE=PASS_SOFTWARE (baseline 6aee384e; F01-F10 CLOSED; transport P2 CLOSED)
 WP8_HARDWARE=NOT_EXECUTED
 BLACKBOX_DECODER=PASS (bit-exact on synthetic logs; parity with GyroCore on real AIR65 logs, local only; one craft and firmware)
@@ -490,11 +496,11 @@ TYPECHECK=PASS
 LINT=PASS
 BUILD=PASS
 BROWSER_TESTS=PASS (27/27)
-CODEX_REVIEW=PENDING_INTEGRAL_REVIEW
+CODEX_REVIEW=APPROVE (integral I1b at 71af5bc5: P0=0 P1=0 P2=0; per-part R1b, R2, R3b APPROVE)
 P0_OPEN=0
 P1_OPEN=0
 P2_OPEN=0
-PUSHED=PENDING
+PUSHED=YES
 MERGED=NO
 PR_CREATED=NO
 OVERALL_STATUS=CHECKPOINT_SOFTWARE_CONSOLIDATED (Autotune completion NOT reached: hardware, adaptive analysis and real-flight validation outstanding, §14)
