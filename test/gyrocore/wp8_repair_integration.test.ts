@@ -203,6 +203,30 @@ describe("R2: a failed AutoRestore stops its command loop", () => {
     });
 });
 
+describe("R2: a restore that ended between two commands sends no further one", () => {
+    it("ended during the pause between commands (no command in flight to fail): the next line never goes out", async () => {
+        const a = autoRestoreInstance as unknown as {
+            _callback: ((r: AutoRestoreResult) => void) | null;
+            _cliLines: string[] | null;
+            _sendCliCommands: () => Promise<void>;
+            _cleanup: (success: boolean, msg: string | null) => void;
+        };
+        a._callback = () => undefined;
+        a._cliLines = ["set a = 1", "set b = 2"];
+        (autoRestoreInstance as unknown as { _run: number })._run++;
+        const loop = a._sendCliCommands();
+        await settle();
+        expect(cliOnWire()).toEqual(["set a = 1"]);
+        MSP.read({ data: new Uint8Array([STX, 0x6f, 0x6b, 0x0a, 0x03]).buffer }); // "ok": the first line answered
+        await settle();
+        a._cleanup(false, "ended"); // the run ends while the loop waits between lines
+        (serial as unknown as { _protocol: unknown })._protocol = fakeTransport(); // a new link
+        await vi.advanceTimersByTimeAsync(10_000);
+        await loop;
+        expect(cliOnWire()).toEqual(["set a = 1"]);
+    });
+});
+
 describe("R2 (re-review): a result callback that throws still ends the restore's save wait", () => {
     it("the confirmed save's wait is released even when the result callback throws", async () => {
         const a = autoRestoreInstance as unknown as {
