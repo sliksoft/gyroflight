@@ -27,6 +27,11 @@
  * rpm_filter centres are not recoverable from the log.
  *
  * Reporting distinguishes EXECUTED vs SKIPPED when the known BBL is absent.
+ *
+ * The Oct-18 log is located through GYROFLIGHT_AIR65_OCT18_BBL or
+ * GYROFLIGHT_AIR65_BBL18 (same idiom as the *.local AIR65 tests). Unset: the
+ * cases are skipped and the marker test names the missing fixture. Set but
+ * missing or with another SHA-256: the file fails to load, it does not skip.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -44,18 +49,22 @@ import {
 } from "../../src/js/blackbox/betaflight_open_loop";
 import { cmag, csub } from "../../src/js/blackbox/betaflight_digital_controller";
 
-const DEFAULT_BBL = "<windows-home>/Downloads/drone/BTFL_BLACKBOX_LOG_AIR65_C_20261018_231421_BETAFPVG473.BBL";
+const BBL_ENV = ["GYROFLIGHT_AIR65_OCT18_BBL", "GYROFLIGHT_AIR65_BBL18"] as const;
 const EXPECTED_SHA256 = "dfe82bca2aaabbc2f53a20a93756137546cc648196226af622d43874eed7efcb";
 
 export type Air65PracticalStatus = "EXECUTED" | "SKIPPED";
 
 function loadAir65(): { bytes: Uint8Array; path: string } | null {
-    const path = process.env.GYROFLIGHT_AIR65_OCT18_BBL || process.env.GYROFLIGHT_AIR65_BBL || DEFAULT_BBL;
-    if (!existsSync(path)) return null;
+    const name = BBL_ENV.find((n) => process.env[n]);
+    if (!name) return null;
+    const path = process.env[name]!;
+    if (!existsSync(path)) {
+        throw new Error(`${name} is set but the AIR65 Oct-18 BBL fixture is not at that path`);
+    }
     const bytes = new Uint8Array(readFileSync(path));
     const hash = createHash("sha256").update(bytes).digest("hex");
     if (hash !== EXPECTED_SHA256 && !process.env.GYROFLIGHT_AIR65_BBL_ALLOW_ANY) {
-        return null;
+        throw new Error(`${name} does not point to the AIR65 Oct-18 BBL (SHA-256 mismatch)`);
     }
     return { bytes, path };
 }
@@ -65,7 +74,6 @@ const AIR65_PRACTICAL: Air65PracticalStatus = loaded ? "EXECUTED" : "SKIPPED";
 
 describe("GF-1 M2 AIR65 practical status", () => {
     it(`reports AIR65_PRACTICAL=${AIR65_PRACTICAL}`, () => {
-         
         console.log(JSON.stringify({ AIR65_PRACTICAL, bblPresent: Boolean(loaded) }));
         expect(["EXECUTED", "SKIPPED"]).toContain(AIR65_PRACTICAL);
         if (!loaded) {
@@ -142,7 +150,6 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
             expect.arrayContaining(["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"]),
         );
 
-         
         console.log(
             JSON.stringify({
                 AIR65_PRACTICAL: "EXECUTED",
@@ -198,7 +205,7 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
         });
         expect(pm.unityFeedbackEquivalent).toBe(false);
         expect(pm.status).toBe("NOT_VALIDATED");
-         
+
         console.log(
             JSON.stringify({
                 AIR65_PRACTICAL: "EXECUTED",
@@ -214,9 +221,10 @@ describe("GF-1 M2 AIR65 Oct-18 yaw offline open-loop", () => {
         );
     });
 
-    it.skipIf(Boolean(loaded))("skipped: known AIR65 BBL not available locally", () => {
-         
-        console.log(JSON.stringify({ AIR65_PRACTICAL: "SKIPPED", reason: "bbl_missing_or_hash_mismatch" }));
+    it.skipIf(Boolean(loaded))("skipped: AIR65 Oct-18 BBL fixture missing, set GYROFLIGHT_AIR65_BBL18", () => {
+        console.log(
+            JSON.stringify({ AIR65_PRACTICAL: "SKIPPED", reason: "fixture_missing_set_GYROFLIGHT_AIR65_BBL18" }),
+        );
         expect(AIR65_PRACTICAL).toBe("SKIPPED");
     });
 });
