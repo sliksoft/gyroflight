@@ -31,7 +31,9 @@
  * The Oct-18 log is located through GYROFLIGHT_AIR65_OCT18_BBL or
  * GYROFLIGHT_AIR65_BBL18 (same idiom as the *.local AIR65 tests). Unset: the
  * cases are skipped and the marker test names the missing fixture. Set but
- * missing or with another SHA-256: the file fails to load, it does not skip.
+ * missing, or with another SHA-256 while GYROFLIGHT_AIR65_BBL_ALLOW_ANY is
+ * unset: the file fails to load, it does not skip. ALLOW_ANY (any non-empty
+ * value) accepts any log on purpose and then reports EXECUTED.
  */
 
 import { existsSync, readFileSync } from "node:fs";
