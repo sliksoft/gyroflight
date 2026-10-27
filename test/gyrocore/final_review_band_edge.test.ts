@@ -33,6 +33,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cdiv,
@@ -70,7 +71,10 @@ function identify(maxHz: number, G: G) {
         return closedLoopFromPlant(G(f), frf.cReference, frf.cFeedback);
     });
     const L = (f: number) => cmag(cmul(G(f), evaluateControllerFrf(cfg, f).cFeedback));
-    return { m: loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true)), L };
+    return {
+        m: loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) })),
+        L,
+    };
 }
 const db = (x: number) => 20 * Math.log10(x);
 

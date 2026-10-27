@@ -82,6 +82,17 @@ export interface ClosedLoopLogOptions {
     firstIteration?: number;
     /** Arming time since boot (µs) of the first frame. */
     startTimeUs?: number;
+    /**
+     * Excitation amplitude factor as a function of the instantaneous sweep frequency (default 1): a
+     * hole or attenuation in the excitation (T3 audit, unexcited bins).
+     */
+    envelope?: (fHz: number) => number;
+    /**
+     * The generator stops at this frequency while the header still claims the full range (T3 audit,
+     * the 19 October generator stop): from there on the setpoint and debug[3] are 0 and debug[2]
+     * stays at the stop frequency.
+     */
+    abortAtHz?: number;
 }
 
 const RATE_HZ = 1000; // looptime 125 µs × pid_process_denom 8: the encoder's defaults.
@@ -159,9 +170,13 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
         for (let i = 0; i < n; i++) {
             const tt = i / RATE_HZ;
             // chirp.c: fchirp = f0 β^t, sinarg = k0 fchirp − k1 with k0 = 2π / ln β.
-            const fchirp = f0 * Math.pow(beta, tt);
+            let fchirp = f0 * Math.pow(beta, tt);
             const phase = ((2 * Math.PI) / Math.log(beta)) * (fchirp - f0);
-            const exc = Math.cos(phase);
+            let exc = Math.cos(phase) * (o.envelope ? o.envelope(fchirp) : 1);
+            if (o.abortAtHz !== undefined && fchirp > o.abortAtHz) {
+                fchirp = o.abortAtHz;
+                exc = 0;
+            }
             sp.push(Math.round(amp * exc));
             meta.push({ phase, f: fchirp, exc });
         }

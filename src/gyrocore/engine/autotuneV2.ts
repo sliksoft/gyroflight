@@ -78,6 +78,7 @@ import {
     type AnalysisProvenance,
     type AxisLoop,
     type ChainValidation,
+    type FrequencySupport,
     type LoopMargins,
     type SweepInfo,
 } from "./loopModel";
@@ -104,11 +105,16 @@ export interface ChirpAxisInput {
     /** Where `tf`'s resolution comes from: Welch segment, sample rate, window and segment count. */
     analysis?: AnalysisProvenance;
     /**
+     * Per-bin frequency support of `tf` (loopModel FREQUENCY_SUPPORT: observed generator range,
+     * input power, γ²(excitation → setpoint)); absent: unknown, and the margins stay MEASURED.
+     */
+    support?: FrequencySupport;
+    /**
      * The same window analysed with the longest Welch segment that still gives
      * UNCERTAINTY.minWelchSegments segments (logInput.ts finestWelchSegment): the finer
      * identification a model-class qualification can use (modelQualification.ts). Never `tf`.
      */
-    fine?: { tf: TransferFunction; analysis: AnalysisProvenance };
+    fine?: { tf: TransferFunction; analysis: AnalysisProvenance; support?: FrequencySupport };
 }
 
 export interface AutotuneLogInput {
@@ -412,6 +418,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                   sweep: sweepFromHeaders(qh),
                   // The window the analysis claims must lie in the qualification's own samples.
                   analysis: qc.analysis && qc.analysis.windowSamples <= qc.end - qc.start ? qc.analysis : null,
+                  support: qc.support ?? null,
               }
             : null;
     };
@@ -431,6 +438,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             loop: buildAxisLoop(axis, c.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis), {
                 sweep: sweepFromHeaders(h),
                 analysis: c.analysis ?? null,
+                support: c.support ?? null,
             }),
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,

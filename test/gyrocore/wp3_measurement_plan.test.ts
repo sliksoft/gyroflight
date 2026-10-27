@@ -27,6 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cdiv,
@@ -79,7 +80,10 @@ function plan(
     analysis: AnalysisProvenance | null = ANALYSIS,
 ) {
     const tf = syntheticTransferFunctionWithCoherence(freqs, T(g), coherence);
-    const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { sweep: SWEEP });
+    const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+        sweep: SWEEP,
+        support: declaredSupport(tf),
+    });
     const m = loopMargins(loop);
     return { p: planMeasurement("roll", loop, m, 4000, SWEEP, analysis), m, loop };
 }

@@ -271,8 +271,26 @@ Measurement uncertainty (`UNCERTAINTY`, WP3): per bin the random error of the H1
 9.91) from coherence and independent averages, carried to L with |C_ref / (C_ref − T·C_fb)|. Averages for the
 exponential Betaflight sweep (`sweepAverages`, from the log's chirp headers): T / (Ts² f ln(f1/f0)), at least 1 (near
 an AIR65 crossover: 1, whatever the Welch segment count). Fewer than 8 Welch segments: uncertainty unknown, no bounds. A
-bin whose ±2 ε reaches half its value is not identified: below the lowest kept bin it is left out (counted), above it
-the margins stay unbounded (`unidentified_bins_inside_band`). The bounds hold for every loop in the per-bin uncertainty
+bin whose ±2 ε reaches half its value is not identified and left out (counted).
+
+Frequency support (`FREQUENCY_SUPPORT`, `supportIssues`; T3 audit 2026-10-27, P1): coherence setpoint → gyro alone is no
+support. Per bin, on the grid of its own analysis (`logInput.frequencySupportFor`, reusing qualityV2 `classifyBinSupport`),
+a bin is SUPPORTED only inside the generator range the log observed (DEBUG_CHIRP debug[2], not the header), with input
+power (the setpoint's PSD · f within 15 dB of its median over the observed range: the exponential sweep is flat there),
+and with γ²(excitation → setpoint) ≥ 0.95 (debug[3]: the setpoint is the generator's). UNSUPPORTED bins are dropped from
+the loop (`crossover_band_unsupported`); UNKNOWN support (no DEBUG_CHIRP, unreliable observed sweep, no support evidence)
+keeps the bins as a measurement but bounds nothing (`frequency_support_unknown`). Every grid bin inside the decision band
+max(fc / 4, 2 Hz) … band end that does not reach the loop, for whatever reason, is a gap (`unidentified_bins_inside_band`,
+and `crossover_neighbour_bins_missing` when the crossing itself is read over one): the margins are then MEASURED, never
+bounds. The qualification follows the same contract on its own grid (`qualification:unidentified_bins_inside_band`, no
+PASS). A generator that stopped below 98 % of the header's end is `sweep_generator_stopped_early` when the stop lies
+below 1.5 × the band end, otherwise noted in the evidence (`sweep_generator_stopped_at`). The PID search treats unknown
+GM / |S| as not meeting the targets (no bandwidth increase on margins read on bins only) and asks for
+`chirp_with_full_band_support`. Regression: `t3_frequency_support.test.ts` (the counterexample: a ζ 0.001 / 0.0002 pair
+at 39.06 Hz on, 0.25 and 0.5 bin off the grid, one incoherent primary bin and 1–2 incoherent fine bins; before the
+contract a VALIDATED PM bound of 82° against a true 4.5–4.7°).
+
+The bounds hold for every loop in the per-bin uncertainty
 set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins any curve within the
 resolved-class allowance of the chord, i.e. within `allowance(i)` of the measured chord: the "capsule" of the step).
 PM: the lowest PM of any point of the unit circle inside a capsule (`capsulePmBound`, a scan of the circle that stays a

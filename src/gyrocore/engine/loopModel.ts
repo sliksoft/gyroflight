@@ -36,9 +36,11 @@
  * A margin is VALIDATED only when the chain model reproduced this log's gyroADC
  * (validateChain), the chain barely moved at the crossover during the sweep, the crossover
  * lies inside the identified band, a Verified Tune for this craft attests the prediction
- * method (verifiedTune.ts), and the model class the bounds assume (no loop feature narrower than
- * the bins resolve) is qualified by an independent, finer measurement (MarginEvidence). The model
- * alone never validates.
+ * method (verifiedTune.ts), every bin of the decision band is present and shown excited by the
+ * generator (FREQUENCY_SUPPORT: no gaps, observed sweep, input power, γ² excitation → setpoint), and
+ * the model class the bounds assume (no loop feature narrower than the bins resolve) is qualified by
+ * an independent, finer measurement over a band that meets the same support contract
+ * (MarginEvidence). The model alone never validates.
  */
 
 import {
@@ -54,6 +56,7 @@ import {
 import { extractPlantFromClosedLoop, type IdentifiedPlant } from "@/js/blackbox/betaflight_open_loop";
 import { fitDterm, type DtermFit } from "@/js/blackbox/betaflight_dterm_dynamic";
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
+import type { SupportClass } from "@/gyrocore/chirp/qualityV2/contract";
 import type { ChainSimulation, EffectiveChain } from "./gyroChain";
 
 /** Chain reproduces gyroADC: control band tight (decides PM), noise band looser (filter advice). */
@@ -266,6 +269,75 @@ export const PHASE_CHECKS = Object.freeze({
     plantPhaseMaxDeg: 0,
     octaveBins: 3,
 });
+
+/**
+ * Frequency support of the identified bins (T3 audit, frequency-support contract §10.1–10.4).
+ * Coherence setpoint → gyro alone is no support: a bin the generator never excited can still be
+ * coherent (the loop's own response to something else), a resonance can fall on one bin that drops
+ * out on coherence, and bins above the frequency where the generator actually stopped are residue.
+ * A bin counts as supported only when all of these hold, per bin, on the grid of its own analysis:
+ *
+ *   - it lies inside the generator range the log observed (DEBUG_CHIRP debug[2]), not the header's;
+ *   - its input (setpoint) has demonstrable spectral power (qualityV2 classifyBinSupport: COHERENT);
+ *   - the setpoint there is the generator's: γ²(excitation → setpoint) ≥ minExcitationCoherence (H8).
+ *
+ * Any bin of the grid inside the decision band max(fc / bandDivisor, bandFloorHz) … band end that
+ * does not reach the loop, for whatever reason (low coherence, unsupported, dropped for uncertainty,
+ * plant status), is a gap: the margins are then read on the bins only (MEASURED), never bounds. The
+ * same rule holds for the finer qualification measurement. Support that cannot be decided (no
+ * DEBUG_CHIRP channels, observed sweep unreliable) is unknown, which bounds nothing either.
+ *
+ *   minInputRelativePowerDb −15: the setpoint's Welch PSD at a bin, times the bin frequency (the
+ *     exponential sweep of chirp.c dwells 1/f per hertz, so PSD · f is flat over a sweep of constant
+ *     amplitude), against the median of that product over the observed generator range. A bin more
+ *     than 15 dB below it carries less than 3 % of the energy the sweep gave its neighbours: Hann
+ *     leakage from excited neighbours (sidelobes ≤ −31 dB) or noise, not excitation. Such a bin has no
+ *     input power (classifyBinSupport: INSUFFICIENT_SPECTRAL_SUPPORT). A legitimate sweep stays within
+ *     a few dB of flat (the AIR65 logs: +6 … +21 dB uncorrected, ≈ 0 dB corrected, in the crossover octave).
+ *   generatorStopTolerance 0.98: an observed generator end below this fraction of the header's end
+ *     frequency is a generator stop (the 19 October AIR65 pitch / yaw logs stopped at 206 / 268 Hz of
+ *     a 600 Hz header). It blocks bounds when the stop lies below QUALIFICATION_BAND_EXTENSION × the
+ *     band end (the tail the bounds lean on); above that it is reported with the evidence.
+ */
+export const FREQUENCY_SUPPORT = Object.freeze({
+    minExcitationCoherence: 0.95,
+    minInputRelativePowerDb: -15,
+    bandDivisor: 4,
+    bandFloorHz: 2,
+    generatorStopTolerance: 0.98,
+});
+
+export type BinSupportVerdict = "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+
+/** Support evidence of one Welch bin, on the grid of its own analysis. */
+export interface BinSupport {
+    /** qualityV2 classifyBinSupport on this grid (observed sweep, input power, coherence). */
+    class: SupportClass;
+    /** γ²(excitation → setpoint) at this bin; null when the excitation channel is not logged. */
+    excitationCoherence: number | null;
+    verdict: BinSupportVerdict;
+}
+
+/** Per-bin support of one transfer function and the generator range its log observed. */
+export interface FrequencySupport {
+    /** Observed generator range (debug[2], Hz); null when not logged or not reliable. */
+    observedHz: [number, number] | null;
+    /** By bin frequency (the transfer function's own grid). A bin absent here is unknown. */
+    bins: Map<number, BinSupport>;
+}
+
+/** The verdict one bin's support evidence gives (FREQUENCY_SUPPORT); fail-closed on anything unknown. */
+export function binSupportVerdict(cls: SupportClass, excitationCoherence: number | null): BinSupportVerdict {
+    if (cls === "UNKNOWN") return "UNKNOWN";
+    if (cls !== "COHERENT") return "UNSUPPORTED";
+    if (!(typeof excitationCoherence === "number" && Number.isFinite(excitationCoherence))) return "UNKNOWN";
+    return excitationCoherence >= FREQUENCY_SUPPORT.minExcitationCoherence ? "SUPPORTED" : "UNSUPPORTED";
+}
+
+/** Lowest frequency of the decision band around a crossover `fc` (FREQUENCY_SUPPORT). */
+export function decisionBandStartHz(fc: number): number {
+    return Math.max(fc / FREQUENCY_SUPPORT.bandDivisor, FREQUENCY_SUPPORT.bandFloorHz);
+}
 
 /** Sweep of a CHIRP measurement (Betaflight chirp.c: exponential, f(t) = f0 · (f1 / f0)^(t / T)). */
 export interface SweepInfo {
@@ -638,6 +710,10 @@ export interface AxisLoop {
     attested: boolean;
     /** Relative error of the identified L per bin (UNCERTAINTY). */
     uncertainty: LoopUncertainty;
+    /** Per-bin frequency support of the primary measurement (FREQUENCY_SUPPORT); null: unknown. */
+    support: FrequencySupport | null;
+    /** The sweep the primary log's headers describe (for the generator-stop check); null: unknown. */
+    sweep: SweepInfo | null;
     /**
      * The plant identified at a finer resolution from another flight of the same craft and
      * configuration (MODEL_CLASS_QUALIFICATION), its uncertainty and where its resolution comes
@@ -649,6 +725,8 @@ export interface AxisLoop {
         uncertainty: LoopUncertainty;
         /** Why its resolution is not shown to come from its samples (empty: it is). */
         provenanceIssues: string[];
+        /** Per-bin support on the qualification's own grid; null: unknown (no PASS then). */
+        support: FrequencySupport | null;
     } | null;
 }
 
@@ -701,9 +779,18 @@ export function buildAxisLoop(
         sweep?: SweepInfo | null;
         /** Where the finer resolution comes from; without it the qualification is not shown finer. */
         analysis?: AnalysisProvenance | null;
+        /** Per-bin support on its own grid (FREQUENCY_SUPPORT); absent: unknown, no PASS. */
+        support?: FrequencySupport | null;
     } | null = null,
-    /** The primary measurement's sweep and analysis (UNCERTAINTY averages). */
-    measurement: { sweep?: SweepInfo | null; analysis?: AnalysisProvenance | null } = {},
+    /**
+     * The primary measurement's sweep and analysis (UNCERTAINTY averages) and its per-bin support
+     * (FREQUENCY_SUPPORT; absent: unknown, so the margins stay MEASURED).
+     */
+    measurement: {
+        sweep?: SweepInfo | null;
+        analysis?: AnalysisProvenance | null;
+        support?: FrequencySupport | null;
+    } = {},
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
     const opts = { missingFilterInfo: missing, coherenceMin: LOOP_MIN_COHERENCE };
@@ -716,12 +803,15 @@ export function buildAxisLoop(
         chainValidated,
         attested,
         uncertainty: loopUncertainty(tf, cfg, measurement),
+        support: measurement.support ?? null,
+        sweep: measurement.sweep ?? null,
         qualification: qualification
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
                   source: { ...qualification.source },
                   uncertainty: loopUncertainty(qualification.tf, qualification.cfg ?? cfg, qualification),
                   provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
+                  support: qualification.support ?? null,
               }
             : null,
     };
@@ -777,11 +867,18 @@ export interface LoopPoint {
     err?: number;
 }
 
-/** Loop response of a candidate on the identified bins. */
+/**
+ * Loop response of a candidate on the identified bins: plant status ok, coherent, identified within
+ * its uncertainty, and not shown unsupported (FREQUENCY_SUPPORT: outside the observed generator
+ * range, no input power, or a setpoint that is not the generator's). A bin whose support is unknown
+ * stays in the loop (the values are still a measurement) and is reported by supportIssues, so it
+ * bounds nothing.
+ */
 export function candidateLoop(loop: AxisLoop, cand: LoopCandidate): LoopPoint[] {
     const out: LoopPoint[] = [];
     for (const b of loop.plant.bins) {
         if (b.status !== "ok" || !b.G || !(b.coherence >= LOOP_MIN_COHERENCE)) continue;
+        if (loop.support?.bins.get(b.frequencyHz)?.verdict === "UNSUPPORTED") continue;
         let G = b.G;
         if (cand.chain && loop.chain) {
             G = cmul(G, cdiv(cand.chain.frf(b.frequencyHz), loop.chain.frf(b.frequencyHz)));
@@ -809,14 +906,81 @@ export function binsDroppedForUncertainty(loop: AxisLoop): number[] {
     return out;
 }
 
+/** Frequencies of the identified bins candidateLoop leaves out because they are shown unsupported. */
+export function binsDroppedForSupport(loop: AxisLoop): number[] {
+    if (!loop.support) return [];
+    const out: number[] = [];
+    for (const b of loop.plant.bins) {
+        if (b.status !== "ok" || !b.G || !(b.coherence >= LOOP_MIN_COHERENCE)) continue;
+        if (loop.support.bins.get(b.frequencyHz)?.verdict === "UNSUPPORTED") out.push(b.frequencyHz);
+    }
+    return out;
+}
+
+const listHz = (xs: readonly number[]) =>
+    `${xs
+        .slice(0, 3)
+        .map((f) => f.toFixed(1))
+        .join(",")}${xs.length > 3 ? `,+${xs.length - 3}` : ""}Hz`;
+
 /**
- * Bins left out above the lowest kept one: an unresolved interval inside the band (a poorly
- * identified resonance would vanish with them), or a band end that moved down. Only the low edge,
- * where |T·C_fb| ≈ |C_ref| amplifies the error, may drop out.
+ * What keeps the bins of `loop` from supporting bounds (FREQUENCY_SUPPORT, audit §10.1–10.2):
+ *
+ *   - unidentified_bins_inside_band:N   bins of the grid inside the decision band (decisionBandStartHz
+ *     … the last kept bin) that did not reach the loop, for whatever reason: low coherence, plant
+ *     status, uncertainty, or support. A resonance narrower than the bins can vanish with one of
+ *     them (the T3 counterexample: one incoherent bin at the peak, PM 82° read against 4.7° true).
+ *   - crossover_band_unsupported:…      those of them the support evidence shows unexcited.
+ *   - crossover_neighbour_bins_missing:N  grid bins between the two kept bins the unity crossing is
+ *     read on: the crossing itself is interpolated over a gap.
+ *   - frequency_support_unknown:…       no support evidence for this measurement, or kept bins in
+ *     the band whose support could not be decided: coherence alone is not support.
+ *
+ * `fc` null (no crossing read): the band is the kept bins' own range.
  */
-function unidentifiedInsideBand(loop: AxisLoop, pts: LoopPoint[]): string[] {
-    const inside = binsDroppedForUncertainty(loop).filter((f) => pts.length > 0 && f > pts[0].f);
-    return inside.length ? [`unidentified_bins_inside_band:${inside.length}`] : [];
+export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | null): string[] {
+    const out: string[] = [];
+    if (!loop.support) out.push("frequency_support_unknown:no_support_evidence");
+    if (pts.length < 2) return out;
+    const lo = fc !== null ? decisionBandStartHz(fc) : pts[0].f;
+    const hi = pts[pts.length - 1].f;
+    const kept = new Set(pts.map((p) => p.f));
+    const missing: number[] = [];
+    const unsupported: number[] = [];
+    let unknown = 0;
+    for (const b of loop.plant.bins) {
+        const f = b.frequencyHz;
+        if (!(f >= lo) || f > hi) continue;
+        const verdict = loop.support ? (loop.support.bins.get(f)?.verdict ?? "UNKNOWN") : "UNKNOWN";
+        if (kept.has(f)) {
+            if (loop.support && verdict === "UNKNOWN") unknown++;
+            continue;
+        }
+        missing.push(f);
+        if (verdict === "UNSUPPORTED") unsupported.push(f);
+    }
+    if (missing.length) out.push(`unidentified_bins_inside_band:${missing.length}`);
+    if (unsupported.length) out.push(`crossover_band_unsupported:${listHz(unsupported)}`);
+    if (unknown) out.push(`frequency_support_unknown:${unknown}_bins`);
+    if (fc !== null) {
+        const i = pts.findIndex((p) => p.f >= fc);
+        if (i > 0) {
+            const between = loop.plant.bins.filter((b) => b.frequencyHz > pts[i - 1].f && b.frequencyHz < pts[i].f);
+            if (between.length) out.push(`crossover_neighbour_bins_missing:${between.length}`);
+        }
+    }
+    return out;
+}
+
+/**
+ * The generator stopped below the header's end frequency (FREQUENCY_SUPPORT.generatorStopTolerance):
+ * [observed end, header end], or null when not shown or not the case.
+ */
+export function generatorStop(loop: Pick<AxisLoop, "support" | "sweep">): [number, number] | null {
+    const observed = loop.support?.observedHz;
+    const f1 = loop.sweep?.f1Hz;
+    if (!observed || !(typeof f1 === "number" && f1 > 0)) return null;
+    return observed[1] < FREQUENCY_SUPPORT.generatorStopTolerance * f1 ? [observed[1], f1] : null;
 }
 
 /**
@@ -1259,7 +1423,10 @@ function qualifyModelClass(
 ): ModelClassQualification | null {
     const q = loop.qualification;
     if (!q) return null;
-    const finePts = candidateLoop({ ...loop, plant: q.plant, uncertainty: q.uncertainty }, cand);
+    // The qualification's loop on its own plant, uncertainty and per-bin support (the same support
+    // contract as the primary's, audit §10.4: a PASS over a gap would qualify what was not measured).
+    const qLoop: AxisLoop = { ...loop, plant: q.plant, uncertainty: q.uncertainty, support: q.support };
+    const finePts = candidateLoop(qLoop, cand);
     const fine = readLoop(finePts);
     const Q = MODEL_CLASS_QUALIFICATION;
     const fail: string[] = [];
@@ -1288,16 +1455,16 @@ function qualifyModelClass(
         );
     }
     let fb: UncertainBounds | null = null;
+    // Gaps and unsupported bins inside the qualification's own band (FREQUENCY_SUPPORT): no PASS.
+    const fineHoles = supportIssues(qLoop, finePts, fine.ok ? fine.fc : null);
+    insufficient.push(...fineHoles.map((x) => `qualification:${x}`));
     if (fine.ok) {
         fail.push(...fine.reasons.filter((x) => CONTRADICTS_CLASS.test(x)).map((x) => `qualification:${x}`));
         if (!fine.bounded && !fail.length) {
             insufficient.push(...fine.reasons.map((x) => `qualification:${x}`));
         }
         // The qualification's margins carry their own uncertainty, as the primary's do.
-        const qLoop = { ...loop, plant: q.plant, uncertainty: q.uncertainty };
-        const fineHoles = unidentifiedInsideBand(qLoop, finePts);
-        insufficient.push(...fineHoles.map((x) => `qualification:${x}`));
-        fb = fine.bounded && !fineHoles.length ? uncertainBounds(finePts, fine, q.uncertainty) : null;
+        fb = fine.bounded ? uncertainBounds(finePts, fine, q.uncertainty) : null;
         if (fb && !fb.uncertainty) insufficient.push(...fb.reasons.map((x) => `qualification:${x}`));
         const fpm = fb?.pm ?? fine.pm!;
         const fgm = fb ? fb.gm : fine.gm;
@@ -1341,7 +1508,15 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         assumptions: [],
         qualification: null,
     };
+    // A generator that stopped below the header's end (FREQUENCY_SUPPORT): the bins above its stop
+    // were dropped as unsupported, so the band ends there; said with the reasons, or with the
+    // evidence when the stop lies above the tail the bounds lean on.
+    const stop = generatorStop(loop);
     if (!read.ok) {
+        // Gaps the kept bins show even without a crossing (e.g. "loop gain below one" over a band
+        // that was never excited is a support defect, not a loop property).
+        reasons.push(...supportIssues(loop, pts, null));
+        if (stop) reasons.push(`sweep_generator_stopped_early:${stop[0].toFixed(1)}<${stop[1].toFixed(1)}Hz`);
         return {
             status: pts.length < 4 ? "UNAVAILABLE" : "NOT_VALIDATED",
             crossoverHz: null,
@@ -1357,6 +1532,14 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         };
     }
     const fc = read.fc!;
+    let stopNote: string | null = null;
+    if (stop) {
+        if (stop[0] < QUALIFICATION_BAND_EXTENSION * read.bandHz![1]) {
+            reasons.push(`sweep_generator_stopped_early:${stop[0].toFixed(1)}<${stop[1].toFixed(1)}Hz`);
+        } else {
+            stopNote = `sweep_generator_stopped_at:${stop[0].toFixed(1)}Hz_of_${stop[1].toFixed(1)}Hz`;
+        }
+    }
     // The chain model is validated on CHAIN_VALIDATED_BAND_HZ only: a crossover outside it, or a
     // candidate filter change judged above it, is not backed by that validation.
     const [bandLo, bandHi] = CHAIN_VALIDATED_BAND_HZ;
@@ -1376,13 +1559,14 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     let pm = read.pm!;
     let gm = read.gm;
     let sPeak = read.sPeak;
-    // The measurement uncertainty widens the bounds; unknown uncertainty, or bins left out as
-    // unidentified inside the band, leave no bounds.
-    const holes = unidentifiedInsideBand(loop, pts);
+    // The measurement uncertainty widens the bounds; unknown uncertainty, gaps inside the decision
+    // band or support that is missing or unknown (FREQUENCY_SUPPORT) leave no bounds.
+    const holes = supportIssues(loop, pts, fc);
     reasons.push(...holes);
-    const ub = read.bounded && !holes.length ? uncertainBounds(pts, read, loop.uncertainty) : null;
+    // The uncertainty is still worked out over a band with holes, for its reasons; it bounds nothing then.
+    const ub = read.bounded ? uncertainBounds(pts, read, loop.uncertainty) : null;
     if (ub && !ub.uncertainty) reasons.push(...ub.reasons);
-    if (!read.bounded || !ub?.uncertainty) {
+    if (!read.bounded || !ub?.uncertainty || holes.length) {
         evidence.level = "MEASURED";
         evidence.assumptions = ["values_read_on_bins_only"];
         // Without a known uncertainty the bins bound nothing: GM and |S| unknown, as for unresolved bins.
@@ -1392,7 +1576,10 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         pm = ub.pm;
         gm = ub.gm;
         sPeak = ub.sPeak;
-        evidence.uncertainty = { ...ub.uncertainty, droppedBins: binsDroppedForUncertainty(loop).length };
+        evidence.uncertainty = {
+            ...ub.uncertainty,
+            droppedBins: binsDroppedForUncertainty(loop).length + binsDroppedForSupport(loop).length,
+        };
         const width = RESOLVED_FEATURE_BINS * read.resolutionHz!;
         evidence.level = "MODEL_CONDITIONAL";
         evidence.minFeatureWidthHz = width;
@@ -1438,6 +1625,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
             reasons.push("model_class_not_qualified", ...issues, ...(q?.reasons ?? []), MODEL_CLASS_NEED);
         }
     }
+    if (stopNote) evidence.assumptions.push(stopNote);
     return {
         status: !reasons.length && evidence.level === "VALIDATED" ? "VALIDATED" : "NOT_VALIDATED",
         crossoverHz: fc,

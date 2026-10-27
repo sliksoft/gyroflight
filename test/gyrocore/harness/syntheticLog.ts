@@ -39,6 +39,7 @@ import {
 } from "../../../src/js/blackbox/betaflight_open_loop";
 import { dtermConfigFromHeaders, simulateDterm } from "../../../src/js/blackbox/betaflight_dterm_dynamic";
 import { chainConfigFromHeaders, simulateGyroChain } from "../../../src/gyrocore/engine/gyroChain";
+import { declaredSupport } from "./frequencySupport";
 import {
     analyzeAxisController,
     controllerConfigFromHeaders,
@@ -223,6 +224,8 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         if (o.welch) tf.numSegments = o.welch.segments;
         log.chirp[name] = {
             tf,
+            // SIMULATION: every bin declared supported, as a full DEBUG_CHIRP sweep would show.
+            support: declaredSupport(tf),
             ...w,
             state: "usable",
             ...(o.welch

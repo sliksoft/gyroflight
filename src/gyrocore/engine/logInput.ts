@@ -31,8 +31,12 @@ import { FlightLogIndex } from "@/blackbox-viewer/flightlog_index.js";
 import { extractOptionalBlackboxChannels } from "@/js/blackbox/flight_metrics_analysis";
 import type { M4BblReport } from "@/js/blackbox/m4_bbl_integration";
 import { WELCH_OVERLAP, type ChirpMeasurement, type ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
-import { welchTransferFunction } from "@/js/blackbox/spectral_analysis";
-import { UNCERTAINTY } from "./loopModel";
+import { USABLE_COHERENCE_MIN } from "@/gyrocore/chirp/quality";
+import { BETAFLIGHT_INPUT_POWER_FLOOR } from "@/gyrocore/chirp/qualityV2/analyze";
+import type { BinStatus, SweepV2 } from "@/gyrocore/chirp/qualityV2/contract";
+import { classifyBinSupport } from "@/gyrocore/chirp/qualityV2/coverage";
+import { welchPowerSpectrum, welchTransferFunction, type TransferFunction } from "@/js/blackbox/spectral_analysis";
+import { binSupportVerdict, FREQUENCY_SUPPORT, UNCERTAINTY, type FrequencySupport } from "./loopModel";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import type { AutotuneLogInput, ChirpAxisInput, FlightFragment } from "./autotuneV2";
@@ -51,6 +55,10 @@ const FIELDS = [
     "gyroUnfilt[1]",
     "gyroUnfilt[2]",
     "rcCommand[3]",
+    // DEBUG_CHIRP: the generator's frequency (deci-Hz) and excitation (×1000): the frequency support
+    // of each bin (loopModel FREQUENCY_SUPPORT). Absent when the log was not in that debug mode.
+    "debug[2]",
+    "debug[3]",
 ] as const;
 /** Rejected measurements still carry a transfer function: kept as diagnostics only (no proposal). */
 const STATE_RANK: Record<string, number> = { usable: 3, usable_with_warnings: 2, rejected: 1 };
@@ -103,6 +111,97 @@ export function finestWelchSegment(windowSamples: number): number | null {
     return 2 ** Math.floor(Math.log2(max));
 }
 
+/** The observed generator range of a measurement's qualityV2 report, or an unavailable one. */
+function observedSweepOf(m: ChirpMeasurement): SweepV2["observed"] {
+    return (
+        m.qualityV2?.sweep?.observed ?? {
+            availability: "UNAVAILABLE",
+            startHz: null,
+            endHz: null,
+            minHz: null,
+            maxHz: null,
+            runs: null,
+            reasons: ["observed_sweep_unavailable:no_quality_report"],
+        }
+    );
+}
+
+/**
+ * Per-bin frequency support of `tf`, identified from the samples `setpoint` (and the generator's
+ * excitation `excitation`, DEBUG_CHIRP debug[3], when logged) of one sweep window, on the grid of
+ * that analysis (loopModel FREQUENCY_SUPPORT):
+ *
+ *   - the qualityV2 support class of each bin (classifyBinSupport, reused as it is): inside the
+ *     observed generator range, Welch input power present, input relative power demonstrable (the
+ *     setpoint's Welch PSD above Betaflight's floor, relative to its median over the observed range),
+ *     coherence setpoint → gyro at least the usable minimum;
+ *   - γ²(excitation → setpoint) at the bin: whether the setpoint there is the generator's (H8).
+ *
+ * The analysis band of the quality gate plays no part: the engine's band is the identified one.
+ * Everything that cannot be computed (no excitation channel, a PSD that does not frame like `tf`)
+ * leaves the bin UNKNOWN, which the engine treats as no support. Exported for the synthetic tests.
+ */
+export function frequencySupportFor(
+    tf: TransferFunction,
+    o: {
+        sampleRateHz: number;
+        setpoint: ArrayLike<number>;
+        excitation: ArrayLike<number> | null;
+        observed: SweepV2["observed"];
+    },
+): FrequencySupport {
+    const obs = o.observed;
+    const observedHz: [number, number] | null =
+        obs.availability === "MEASURED" && obs.minHz !== null && obs.maxHz !== null && obs.maxHz > obs.minHz
+            ? [obs.minHz, obs.maxHz]
+            : null;
+    // The segment the transfer function was actually computed with (it may have been clamped).
+    const N = 2 * (tf.frequencies.length - 1);
+    const bins: FrequencySupport["bins"] = new Map();
+    if (!(N >= 4) || !(o.sampleRateHz > 0)) return { observedHz, bins };
+    const psd = welchPowerSpectrum(o.setpoint, o.sampleRateHz, N, WELCH_OVERLAP);
+    const framed = psd && psd.frequencies.length === tf.frequencies.length ? psd : null;
+    // Dwell-corrected input power (FREQUENCY_SUPPORT.minInputRelativePowerDb): PSD · f is flat over
+    // an exponential sweep of constant amplitude; its median over the observed range is the reference.
+    const weighted = (k: number) => (framed ? framed.psd[k] * framed.frequencies[k] : null);
+    let median: number | null = null;
+    if (framed && observedHz) {
+        const inside = Array.from(framed.psd, (_, k) => weighted(k)!)
+            .filter((p, k) => framed.frequencies[k] >= observedHz[0] && framed.frequencies[k] <= observedHz[1] && p > 0)
+            .sort((a, b) => a - b);
+        median = inside.length ? inside[Math.floor(inside.length / 2)] : null;
+    }
+    let es: TransferFunction | null = null;
+    if (o.excitation && o.excitation.length === o.setpoint.length && o.setpoint.length >= N) {
+        const t = welchTransferFunction(o.excitation, o.setpoint, o.sampleRateHz, N, WELCH_OVERLAP);
+        es = t.frequencies.length === tf.frequencies.length ? t : null;
+    }
+    for (let k = 0; k < tf.frequencies.length; k++) {
+        const f = tf.frequencies[k];
+        if (!(f > 0)) continue;
+        const coherence = tf.coherence[k];
+        const magnitudeDb = Number.isFinite(tf.magnitude[k]) ? tf.magnitude[k] : null;
+        const p = weighted(k);
+        const inputRelativePowerDb =
+            p !== null && median !== null && framed!.psd[k] > BETAFLIGHT_INPUT_POWER_FLOOR
+                ? 10 * Math.log10(p / median)
+                : null;
+        // Below the input-power floor the bin was not excited: no input power, whatever Welch kept.
+        const unexcited =
+            inputRelativePowerDb !== null && inputRelativePowerDb < FREQUENCY_SUPPORT.minInputRelativePowerDb;
+        const status: BinStatus =
+            magnitudeDb === null || unexcited
+                ? "NO_INPUT_POWER"
+                : coherence >= USABLE_COHERENCE_MIN
+                  ? "USABLE"
+                  : "WEAK_COHERENCE";
+        const cls = classifyBinSupport(f, status, coherence, magnitudeDb, inputRelativePowerDb, obs);
+        const excitationCoherence = es && Number.isFinite(es.coherence[k]) ? es.coherence[k] : null;
+        bins.set(f, { class: cls, excitationCoherence, verdict: binSupportVerdict(cls, excitationCoherence) });
+    }
+    return { observedHz, bins };
+}
+
 export function buildLogInputs(
     bytes: Uint8Array,
     sha256: string,
@@ -127,6 +226,7 @@ export function buildLogInputs(
         const unfilt = [ch["gyroUnfilt[0]"], ch["gyroUnfilt[1]"], ch["gyroUnfilt[2]"]].map(aligned);
         const chirp: Partial<Record<AxisName, ChirpAxisInput>> = {};
         const setpoint = [ch["setpoint[0]"], ch["setpoint[1]"], ch["setpoint[2]"]];
+        const excitation = aligned(ch["debug[3]"]);
         for (const [axis, m] of Object.entries(best) as [AxisName, ChirpMeasurement][]) {
             const start = firstAtOrAfter(t, m.startTimeUs);
             const end = firstAtOrAfter(t, m.endTimeUs);
@@ -134,6 +234,16 @@ export function buildLogInputs(
             const fs = m.sampleRate.effectiveRateHz;
             const N = finestWelchSegment(end - start);
             const sp = aligned(setpoint[ai]);
+            const observed = observedSweepOf(m);
+            const supportOf = (tf: TransferFunction) =>
+                fs && sp
+                    ? frequencySupportFor(tf, {
+                          sampleRateHz: fs,
+                          setpoint: sp.subarray(start, end),
+                          excitation: excitation ? excitation.subarray(start, end) : null,
+                          observed,
+                      })
+                    : undefined;
             // The finer identification for a model-class qualification: the same samples, the
             // longest segment that still averages enough (never the qualified `tf` itself).
             const fine =
@@ -146,6 +256,7 @@ export function buildLogInputs(
                               N,
                               WELCH_OVERLAP,
                           );
+                          const support = supportOf(tf);
                           return {
                               tf,
                               analysis: {
@@ -154,11 +265,14 @@ export function buildLogInputs(
                                   windowSamples: end - start,
                                   segments: tf.numSegments,
                               },
+                              ...(support ? { support } : {}),
                           };
                       })()
                     : undefined;
+            const support = supportOf(m.diagnostics!.transferFunction);
             chirp[axis] = {
                 ...(fine ? { fine } : {}),
+                ...(support ? { support } : {}),
                 tf: m.diagnostics!.transferFunction,
                 start,
                 end,

@@ -72,17 +72,25 @@ export interface AxisPidProposal {
 const NAMES = ["roll", "pitch", "yaw"] as const;
 
 /**
- * Every known margin meets its target. GM / |S| outside the identified band are unknown: the
- * search still respects PM, and the unknowns are reported as required measurements (the
- * release contract refuses unknown robustness).
+ * Every margin is known and meets its target. Unknown GM / |S| (bins that do not resolve the loop,
+ * a band that ends too early, or margins read on bins only, MEASURED) do not pass: a candidate
+ * whose robustness is unknown is not shown to meet anything, and the search proposes no bandwidth
+ * increase on it (T3 audit §10.5). The unknowns are reported as required measurements.
  */
 function meets(m: LoopMargins): boolean {
     return (
         m.phaseMarginDeg !== null &&
         m.phaseMarginDeg >= PID_TARGETS.minPhaseMarginDeg &&
-        (m.gainMarginDb === null || m.gainMarginDb >= PID_TARGETS.minGainMarginDb) &&
-        (m.sensitivityPeakDb === null || m.sensitivityPeakDb <= PID_TARGETS.maxSensitivityPeakDb)
+        m.gainMarginDb !== null &&
+        m.gainMarginDb >= PID_TARGETS.minGainMarginDb &&
+        m.sensitivityPeakDb !== null &&
+        m.sensitivityPeakDb <= PID_TARGETS.maxSensitivityPeakDb
     );
+}
+
+/** GM and |S| of these margins are known (bounds), whatever their values. */
+function robustnessKnown(m: LoopMargins): boolean {
+    return m.gainMarginDb !== null && m.sensitivityPeakDb !== null;
 }
 
 /** Margins computable at all (PM and crossover inside the band); GM / |S| may be unknown. */
@@ -187,10 +195,12 @@ export function optimizeAxisPid(
     }
     let best: { v: PidValues; m: LoopMargins } | null = null;
     let safest: { v: PidValues; m: LoopMargins } | null = null;
+    let anyRobust = robustnessKnown(curMargins);
     for (const v of searchGrid(current, segment)) {
         if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) continue;
         const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
         if (!pmKnown(m)) continue;
+        anyRobust ||= robustnessKnown(m);
         if (!safest || m.phaseMarginDeg! > safest.m.phaseMarginDeg!) safest = { v, m };
         if (meets(m) && (!best || m.crossoverHz! > best.m.crossoverHz!)) best = { v, m };
     }
@@ -204,6 +214,12 @@ export function optimizeAxisPid(
     } else if (best) {
         pick = best;
         outcome = meets(curMargins) ? "improved" : "restores_margins";
+    } else if (!anyRobust) {
+        // No candidate (nor the current tune) has bounded GM / |S|: the margins are read on bins only.
+        // Nothing can be shown to meet the targets, and no other tune is suggested on that basis.
+        pick = { v: current, m: curMargins };
+        outcome = "targets_not_reachable";
+        reasons.push("no_candidate_meets_all_targets", "robustness_unknown:gain_margin_and_sensitivity_unbounded");
     } else {
         pick = safest ?? { v: current, m: curMargins };
         outcome = "targets_not_reachable";
@@ -220,6 +236,12 @@ export function optimizeAxisPid(
         /^(loop_gain_(rising|near_unity|above_one)_at_band_end|phase_crossover_outside_identified_band)/,
     );
     const sBandEnd = has(/^sensitivity_peak_outside_identified_band/);
+    // Gaps or missing support inside the decision band (loopModel FREQUENCY_SUPPORT) need a sweep
+    // that excites the whole band, logged with DEBUG_CHIRP, not a finer resolution.
+    const unsupported = has(
+        /^(unidentified_bins_inside_band|crossover_band_unsupported|crossover_neighbour_bins_missing|frequency_support_unknown|sweep_generator_stopped_early)/,
+    );
+    if (unsupported) reasons.push("required_measurement:chirp_with_full_band_support");
     if (unresolved && (pick.m.gainMarginDb === null || pick.m.sensitivityPeakDb === null))
         reasons.push("required_measurement:chirp_with_finer_frequency_resolution");
     if (pick.m.gainMarginDb === null && (gmBandEnd || !unresolved))

@@ -27,6 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cdiv,
@@ -58,7 +59,8 @@ function margins(resonance: { hz: number; zeta: number } | null) {
         const c = evaluateControllerFrf(cfg, f);
         return closedLoopFromPlant(g(f), c.cReference, c.cFeedback);
     };
-    return loopMargins(buildAxisLoop(0, syntheticTransferFunction(grid(2), T), cfg, UNITY_CHAIN, true, true));
+    const tf = syntheticTransferFunction(grid(2), T);
+    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }));
 }
 
 describe("an unwrap step larger than PHASE_CHECKS.maxUnwrapStepDeg", () => {

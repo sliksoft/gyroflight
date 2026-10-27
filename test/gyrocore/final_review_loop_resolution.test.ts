@@ -35,6 +35,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cadd,
@@ -91,7 +92,7 @@ function margins(freqs: number[], G: G) {
         const c = evaluateControllerFrf(cfg, f);
         return closedLoopFromPlant(G(f), c.cReference, c.cFeedback);
     });
-    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true));
+    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }));
 }
 
 /** Independent reference: PM (every unity crossing), GM (every phase crossing) and max |S| of the analytic loop. */
@@ -310,7 +311,7 @@ describe("F-02: the PID search names the measurement an unresolved band needs", 
             const c = evaluateControllerFrf(cfg, f);
             return closedLoopFromPlant(smooth(f), c.cReference, c.cFeedback);
         });
-        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true);
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) });
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);
         expect(r.reasons).toContain("required_measurement:chirp_with_finer_frequency_resolution");
         expect(r.reasons).not.toContain("required_measurement:chirp_to_higher_frequency_for_gain_margin");

@@ -285,7 +285,10 @@ describe("2. the strongest software evidence: only Safety refuses; released, the
         return {
             ...q,
             chirp: Object.fromEntries(
-                Object.entries(q.chirp).map(([a, c]) => [a, { ...c!, fine: { tf: c!.tf, analysis: c!.analysis! } }]),
+                Object.entries(q.chirp).map(([a, c]) => [
+                    a,
+                    { ...c!, fine: { tf: c!.tf, analysis: c!.analysis!, support: c!.support } },
+                ]),
             ),
         };
     })();

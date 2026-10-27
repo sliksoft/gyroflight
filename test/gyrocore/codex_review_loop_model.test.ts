@@ -33,6 +33,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cdiv,
@@ -110,7 +111,7 @@ function resonantLoop(maxHz: number, resonance = true) {
         const frf = evaluateControllerFrf(cfg, f);
         return closedLoopFromPlant(G(f), frf.cReference, frf.cFeedback);
     });
-    const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true);
+    const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) });
     // Independent check on the analytic loop (not on the code under test).
     const L = (f: number) => cmag(cmul(G(f), evaluateControllerFrf(cfg, f).cFeedback));
     return { loop, L, freqs };

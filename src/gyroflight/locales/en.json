@@ -1048,6 +1048,9 @@
     "gyroflightV2Need_chirp_finer_resolution_model_class_qualification": {
         "message": "a CHIRP flight of the same craft and tune, identified at a frequency resolution at least 4.5× finer over the same band, to qualify the model assumption of the margin bounds"
     },
+    "gyroflightV2Need_chirp_with_full_band_support": {
+        "message": "a CHIRP whose generator excites the whole decision band (from a quarter of the crossover to the band end) without gaps, logged with DEBUG_CHIRP, so every frequency point the margins rest on is shown to be excited"
+    },
     "gyroflightV2Need_log_gyro_unfilt": { "message": "blackbox logging of gyroUnfilt" },
     "gyroflightV2Need_bidirectional_dshot_erpm_logging": { "message": "bidirectional DShot with eRPM logging" },
     "gyroflightV2Need_chirp_flight": { "message": "a CHIRP flight" },

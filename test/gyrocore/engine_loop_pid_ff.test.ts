@@ -26,6 +26,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cadd,
@@ -84,7 +85,9 @@ function truth(cfg: DigitalControllerConfig, K: number) {
 describe("loop margins on a synthetic loop", () => {
     const cfg = air65RollConfig();
     it("PM and |S| peak equal the ground truth of L = G·C_fb", () => {
-        const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true);
+        const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true, null, {
+            support: declaredSupport(tfFor(cfg, 80)),
+        });
         const m = loopMargins(loop);
         const t = truth(cfg, 80);
         // Linear interpolation between 0.5 Hz bins: within a few tenths of a degree.
@@ -98,17 +101,21 @@ describe("loop margins on a synthetic loop", () => {
 
     it("is VALIDATED only with a validated chain, a steady chain and an attestation", () => {
         const tf = tfFor(cfg, 80);
-        expect(loopMargins(buildAxisLoop(0, tf, cfg, steadyChain, false, true)).reasons).toContain(
-            "chain_model_not_validated_on_this_log",
-        );
-        expect(loopMargins(buildAxisLoop(0, tf, cfg, steadyChain, true, false)).reasons).toContain(
-            "independent_validation_missing",
-        );
+        expect(
+            loopMargins(buildAxisLoop(0, tf, cfg, steadyChain, false, true, null, { support: declaredSupport(tf) }))
+                .reasons,
+        ).toContain("chain_model_not_validated_on_this_log");
+        expect(
+            loopMargins(buildAxisLoop(0, tf, cfg, steadyChain, true, false, null, { support: declaredSupport(tf) }))
+                .reasons,
+        ).toContain("independent_validation_missing");
         const moving = { ...steadyChain, spread: () => ({ phaseDeg: 9, gainDb: 1 }) };
-        expect(loopMargins(buildAxisLoop(0, tf, cfg, moving, true, true)).reasons).toContain(
-            "chain_moves_at_crossover:9.0deg",
-        );
-        expect(loopMargins(buildAxisLoop(0, tf, cfg, null, true, true)).reasons).toContain("chain_spread_unknown");
+        expect(
+            loopMargins(buildAxisLoop(0, tf, cfg, moving, true, true, null, { support: declaredSupport(tf) })).reasons,
+        ).toContain("chain_moves_at_crossover:9.0deg");
+        expect(
+            loopMargins(buildAxisLoop(0, tf, cfg, null, true, true, null, { support: declaredSupport(tf) })).reasons,
+        ).toContain("chain_spread_unknown");
     });
 
     it("never extrapolates: a band that ends below the crossover gives no margin", () => {
@@ -123,7 +130,9 @@ describe("loop margins on a synthetic loop", () => {
                 );
             },
         );
-        const m = loopMargins(buildAxisLoop(0, short, cfg, steadyChain, true, true));
+        const m = loopMargins(
+            buildAxisLoop(0, short, cfg, steadyChain, true, true, null, { support: declaredSupport(short) }),
+        );
         expect(m.phaseMarginDeg).toBeNull();
         expect(m.reasons).toContain("crossover_outside_identified_band");
     });
@@ -136,11 +145,22 @@ describe("PID search", () => {
     it("with margin to spare it raises bandwidth and stays inside every target", () => {
         // SIMULATION: a synthetic finer identification (0.1 Hz) of the same plant stands in for the
         // model-class qualification log; contract logic only, never flight evidence.
-        const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true, {
-            tf: tfFor(cfg, 40, FINE_FREQS),
-            source: { sha256: "5".repeat(64), logIndex: 0 },
-            analysis: FINE_WELCH,
-        });
+        const fineTf = tfFor(cfg, 40, FINE_FREQS);
+        const loop = buildAxisLoop(
+            0,
+            tfFor(cfg, 40),
+            cfg,
+            steadyChain,
+            true,
+            true,
+            {
+                tf: fineTf,
+                source: { sha256: "5".repeat(64), logIndex: 0 },
+                analysis: FINE_WELCH,
+                support: declaredSupport(fineTf),
+            },
+            { support: declaredSupport(tfFor(cfg, 40)) },
+        );
         const r = optimizeAxisPid(loop, current);
         expect(r.outcome).toBe("improved");
         expect(r.proposedMargins.crossoverHz!).toBeGreaterThan(r.currentMargins.crossoverHz!);
@@ -151,14 +171,21 @@ describe("PID search", () => {
         expect(r.proposedMargins.evidence.level).toBe("VALIDATED");
         expect(r.status).toBe("VALIDATED");
         // Without the qualification the same search proposes the same values, but never as VALIDATED.
-        const bare = optimizeAxisPid(buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true), current);
+        const bare = optimizeAxisPid(
+            buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true, null, {
+                support: declaredSupport(tfFor(cfg, 40)),
+            }),
+            current,
+        );
         expect(bare.proposed).toEqual(r.proposed);
         expect(bare.proposedMargins.evidence.level).toBe("MODEL_CONDITIONAL");
         expect(bare.status).toBe("BLOCKED");
     });
 
     it("with too little margin it restores the targets instead of chasing bandwidth", () => {
-        const loop = buildAxisLoop(0, tfFor(cfg, 160), cfg, steadyChain, true, true);
+        const loop = buildAxisLoop(0, tfFor(cfg, 160), cfg, steadyChain, true, true, null, {
+            support: declaredSupport(tfFor(cfg, 160)),
+        });
         const before = loopMargins(loop);
         expect(before.phaseMarginDeg!).toBeLessThan(PID_TARGETS.minPhaseMarginDeg);
         const r = optimizeAxisPid(loop, current);
@@ -169,7 +196,9 @@ describe("PID search", () => {
     });
 
     it("a change is BLOCKED while its margins are not validated", () => {
-        const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, false);
+        const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, false, null, {
+            support: declaredSupport(tfFor(cfg, 40)),
+        });
         const r = optimizeAxisPid(loop, current);
         expect(r.changed).toBe(true);
         expect(r.status).toBe("BLOCKED");
@@ -179,7 +208,9 @@ describe("PID search", () => {
 
 describe("feedforward", () => {
     const cfg = air65RollConfig();
-    const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true);
+    const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true, null, {
+        support: declaredSupport(tfFor(cfg, 80)),
+    });
     it("is BLOCKED without acro stick data, naming the flight it needs", () => {
         const r = optimizeFeedforward(0, {
             loop,

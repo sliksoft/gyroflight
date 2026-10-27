@@ -44,7 +44,10 @@ const primary = syntheticLogInput("1".repeat(64));
 const withFine = (l: AutotuneLogInput): AutotuneLogInput => ({
     ...l,
     chirp: Object.fromEntries(
-        Object.entries(l.chirp).map(([a, c]) => [a, { ...c!, fine: { tf: c!.tf, analysis: c!.analysis! } }]),
+        Object.entries(l.chirp).map(([a, c]) => [
+            a,
+            { ...c!, fine: { tf: c!.tf, analysis: c!.analysis!, support: c!.support } },
+        ]),
     ),
 });
 const QUAL = withFine(simulatedQualificationLog());
@@ -168,7 +171,7 @@ describe("WP8 review: what a qualification flight must itself show", () => {
             chirp: Object.fromEntries(
                 Object.entries(QUAL.chirp).map(([a, c]) => {
                     const tf = { ...c!.fine!.tf, coherence: c!.fine!.tf.coherence.map(() => 0.5) };
-                    return [a, { ...c!, fine: { tf, analysis: c!.fine!.analysis } }];
+                    return [a, { ...c!, fine: { tf, analysis: c!.fine!.analysis, support: c!.fine!.support } }];
                 }),
             ),
         };

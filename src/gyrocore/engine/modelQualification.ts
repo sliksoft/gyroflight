@@ -142,7 +142,7 @@ function candidate(
             continue;
         }
         // The fine identification stands in for this log's measurement, with where it comes from.
-        chirp[a] = { ...c, tf: c.fine.tf, analysis: c.fine.analysis, fine: undefined };
+        chirp[a] = { ...c, tf: c.fine.tf, analysis: c.fine.analysis, support: c.fine.support, fine: undefined };
     }
     if (!Object.keys(chirp).length) rejected.push("qualification_no_usable_axis_with_finer_analysis");
     return { log: rejected.length ? null : { ...other, chirp }, rejected };

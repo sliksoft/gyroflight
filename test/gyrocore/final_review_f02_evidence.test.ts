@@ -32,6 +32,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cdiv,
@@ -90,8 +91,10 @@ const SOURCE = { sha256: SIMULATED_QUALIFICATION_SHA, logIndex: 0 };
 const PRIMARY_LOG = { sha256: "d".repeat(64), logIndex: 0, headerPairs: [] as [string, string][] };
 /** Chain validated, steady, attested: only the margin evidence is left open. */
 function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null = null): LoopMargins {
-    const q = fine ? { tf: tfOf(fine.freqs, fine.g), source: SOURCE, analysis: welchOf(fine.freqs) } : null;
-    return loopMargins(buildAxisLoop(0, tfOf(freqs, g), cfg, UNITY_CHAIN, true, true, q));
+    const qtf = fine ? tfOf(fine.freqs, fine.g) : null;
+    const q = fine ? { tf: qtf!, source: SOURCE, analysis: welchOf(fine.freqs), support: declaredSupport(qtf!) } : null;
+    const tf = tfOf(freqs, g);
+    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, q, { support: declaredSupport(tf) }));
 }
 /** SIMULATION: the Welch analysis a synthetic grid claims (its step from 4 kHz segments, 32 of them). */
 function welchOf(freqs: number[]) {
@@ -362,17 +365,31 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
     it("5f. finer bins that the qualification's samples cannot give (zero padding) are no qualification", () => {
         const fine = uniform(310, 0.1);
         // 0.1 Hz bins claimed from 0.5 Hz segments: interpolated, not resolved.
-        const q = { tf: tfOf(fine, smooth), source: SOURCE, analysis: { ...welchOf(uniform(200, 0.5)), segments: 32 } };
-        const m = loopMargins(buildAxisLoop(0, tfOf(uniform(200, 0.5), smooth), cfg, UNITY_CHAIN, true, true, q));
+        const fineTf = tfOf(fine, smooth);
+        const coarseTf = tfOf(uniform(200, 0.5), smooth);
+        const sup = { support: declaredSupport(coarseTf) };
+        const q = {
+            tf: fineTf,
+            source: SOURCE,
+            analysis: { ...welchOf(uniform(200, 0.5)), segments: 32 },
+            support: declaredSupport(fineTf),
+        };
+        const m = loopMargins(buildAxisLoop(0, coarseTf, cfg, UNITY_CHAIN, true, true, q, sup));
         expect(m.evidence.qualification!.reasons).toContain(
             "qualification_resolution_not_shown:bins_denser_than_segment_resolution",
         );
         expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
         const bare = loopMargins(
-            buildAxisLoop(0, tfOf(uniform(200, 0.5), smooth), cfg, UNITY_CHAIN, true, true, {
-                tf: tfOf(fine, smooth),
-                source: SOURCE,
-            }),
+            buildAxisLoop(
+                0,
+                coarseTf,
+                cfg,
+                UNITY_CHAIN,
+                true,
+                true,
+                { tf: fineTf, source: SOURCE, support: declaredSupport(fineTf) },
+                sup,
+            ),
         );
         expect(bare.evidence.qualification!.reasons).toContain(
             "qualification_resolution_not_shown:resolution_provenance_missing",
@@ -392,10 +409,18 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.status).toBe("NOT_VALIDATED");
         // The PID search never recommends on it and asks for resolution, not a higher CHIRP end.
-        const loop = buildAxisLoop(0, tfOf(uniform(200, 0.5), smooth), cfg, UNITY_CHAIN, true, true, {
-            tf: tfOf(uniform(200, 0.1), heavier),
-            source: SOURCE,
-        });
+        const coarseTf = tfOf(uniform(200, 0.5), smooth);
+        const heavierTf = tfOf(uniform(200, 0.1), heavier);
+        const loop = buildAxisLoop(
+            0,
+            coarseTf,
+            cfg,
+            UNITY_CHAIN,
+            true,
+            true,
+            { tf: heavierTf, source: SOURCE, support: declaredSupport(heavierTf) },
+            { support: declaredSupport(coarseTf) },
+        );
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);
         expect(r.status).not.toBe("VALIDATED");
         expect(r.reasons).not.toContain("required_measurement:chirp_to_higher_frequency_for_gain_margin");

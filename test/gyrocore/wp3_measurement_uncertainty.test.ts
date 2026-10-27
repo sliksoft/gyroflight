@@ -26,6 +26,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { declaredSupport } from "./harness/frequencySupport";
 import {
     air65RollConfig,
     cmul,
@@ -70,7 +71,7 @@ const T = (g: G) => (f: number) => {
 const marginsAt = (coherence: number, segments = 32) => {
     const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => coherence);
     tf.numSegments = segments;
-    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true));
+    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }));
 };
 
 describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)", () => {
@@ -100,7 +101,9 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         const one = syntheticTransferFunction(uniform(200, 0.5), T(smooth));
         one.numSegments = 1;
         expect(loopUncertainty(one, cfg).relErr).toBeNull();
-        const m = loopMargins(buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true));
+        const m = loopMargins(
+            buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(one) }),
+        );
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.gainMarginDb).toBeNull();
         expect(m.reasons).toContain("uncertainty_unknown:welch_segments:1");
@@ -129,7 +132,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     it("a bin whose ±2ε reaches half its value is not identified: left out, counted", () => {
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.99);
         tf.numSegments = 32;
-        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true);
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) });
         const m = loopMargins(loop);
         expect(binsDroppedForUncertainty(loop).length).toBeGreaterThan(0);
         expect(m.evidence.bandHz![0]).toBeGreaterThan(2);
@@ -141,7 +144,9 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     it("an unidentified bin inside the band (a poorly measured resonance would vanish there) leaves no bounds", () => {
         // One bin at 40 Hz just above the coherence limit: used, but its ±2ε is too large: left out.
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), (f) => (f === 40 ? 0.81 : 1));
-        const m = loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true));
+        const m = loopMargins(
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+        );
         expect(m.reasons).toContain("unidentified_bins_inside_band:1");
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.gainMarginDb).toBeNull();
@@ -150,7 +155,10 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     it("an error that changes what the bins show (the crossings) leaves no bounds, named", () => {
         const hot = { ...cfg, axis: { ...cfg.axis, p: cfg.axis.p * 3.5 } };
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.9);
-        const m = loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true), { cfg: hot });
+        const m = loopMargins(
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+            { cfg: hot },
+        );
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.gainMarginDb).toBeNull();
         expect(m.reasons.some((r) => r.startsWith("margin_uncertainty_changes_what_the_bins_show:"))).toBe(true);
@@ -175,7 +183,10 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const hot = { ...cfg, axis: { ...cfg.axis, p: cfg.axis.p * 3.5 } };
         const at = (g2: number) => {
             const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => g2);
-            return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true), { cfg: hot });
+            return loopMargins(
+                buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+                { cfg: hot },
+            );
         };
         const exact = at(1);
         const noisy = at(0.998);
@@ -243,7 +254,9 @@ describe("the phase the margins are read on", () => {
         // lowest bin would lie below −180°, a branch the model class excludes.
         const rotated: G = (f) => cmul(smooth(f), { re: -1, im: 0 });
         const tf = syntheticTransferFunction(uniform(200, 0.5), T(rotated));
-        const m = loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true));
+        const m = loopMargins(
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+        );
         expect(m.reasons.some((r) => r.startsWith("phase_branch_unverified:"))).toBe(true);
         expect(m.gainMarginDb).toBeNull();
         expect(m.evidence.level).not.toBe("MODEL_CONDITIONAL");
@@ -253,7 +266,9 @@ describe("the phase the margins are read on", () => {
         // A coarse grid near the crossover (≈ 9.6 Hz): bins every 8 Hz.
         const coarse = [1, 2, 3, 4, 5, ...Array.from({ length: 24 }, (_, i) => 6 + i * 8)];
         const tf = syntheticTransferFunction(coarse, T(smooth));
-        const m = loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true));
+        const m = loopMargins(
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+        );
         expect(m.reasons.some((r) => r.startsWith("crossover_insufficiently_resolved:"))).toBe(true);
         expect(m.gainMarginDb).toBeNull();
     });
