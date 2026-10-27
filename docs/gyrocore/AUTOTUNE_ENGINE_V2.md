@@ -332,8 +332,9 @@ qualityV2 measured that channel as the firmware's excitation (`firmwareExcitatio
 support is UNKNOWN (coherence is scale-invariant, so a foreign or corrupted channel would pass as support). A plant grid
 is checked against the analysis it comes from (sample rate / Welch segment, also the qualification's own): every step
 must be that step or a multiple of it (`frequency_grid_not_uniform:<n>_bins_removed`, a grid coarser than its analysis
-included) and nothing else (`…_steps_not_from_its_analysis`); MEASURED either way, since a grid with bins removed hides
-its own gaps from the gap rule. Without the analysis, a grid mostly on the lattice of its smallest step with multiples
+included) and nothing else (`…_steps_not_from_its_analysis`), since a grid with bins removed hides its own gaps from the gap
+rule. A primary grid that fails leaves the margins MEASURED; a qualification grid that fails is no PASS
+(`qualification:frequency_grid_not_uniform:…`), so the primary's bounds stay MODEL_CONDITIONAL at most. Without the analysis, a grid mostly on the lattice of its smallest step with multiples
 of it is refused the same way; a grid non-uniform by construction (log-spaced, jittered) is left to the resolution
 rules. `MarginEvidence.decisionBand.dropped` says why each missing decision-band bin dropped
 out (coherence, plant status, support, uncertainty; diagnostic only). On the AIR65 logs: the 19 October roll hole near

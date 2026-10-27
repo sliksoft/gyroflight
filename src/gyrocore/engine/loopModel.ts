@@ -589,6 +589,14 @@ const validBand = (b: unknown): b is [number, number] =>
 /** Same number or both null (exact: the budget's values are copies of the evidence's). */
 const sameNum = (x: unknown, y: unknown) => (x ?? null) === (y ?? null);
 
+/** Same [lowest, highest] averages, or both absent (exact copies; Codex continuation review). */
+const sameAverages = (x: unknown, y: unknown) => {
+    const a = Array.isArray(x) ? x : null;
+    const b = Array.isArray(y) ? y : null;
+    if (!a || !b) return a === null && b === null && (x ?? null) === null && (y ?? null) === null;
+    return a.length === 2 && b.length === 2 && sameNum(a[0], b[0]) && sameNum(a[1], b[1]);
+};
+
 /** Whether `b` says what the evidence `e` says, field by field (marginEvidenceIssues). */
 function budgetConsistent(b: UncertaintyBudget, e: Partial<MarginEvidence>): boolean {
     const u = e.uncertainty && typeof e.uncertainty === "object" ? (e.uncertainty as Partial<MarginUncertainty>) : null;
@@ -606,7 +614,11 @@ function budgetConsistent(b: UncertaintyBudget, e: Partial<MarginEvidence>): boo
         (rp.status === "UNTESTED" ? rp.meanAbsGRel === null : finite(rp.meanAbsGRel) && rp.meanAbsGRel >= 0);
     const statOk =
         st.includedInBounds === !!u &&
-        (!u || (st.known === true && sameNum(st.coverage, u.coverage) && sameNum(st.maxRelErr, u.maxRelErr))) &&
+        (!u ||
+            (st.known === true &&
+                sameNum(st.coverage, u.coverage) &&
+                sameNum(st.maxRelErr, u.maxRelErr) &&
+                sameAverages(st.averages, u.averages))) &&
         (u || st.coverage === UNCERTAINTY.coverage);
     const resOk =
         b.resolution.status === (c?.status ?? "NOT_CHECKED") &&

@@ -89,6 +89,8 @@ describe("the release contract requires the budget and refuses one that contradi
         for (const bad of [
             // Codex continuation review: duplicated numbers and the unknown list are checked too.
             { ...b, statistical: { ...b.statistical, coverage: 0 } },
+            { ...b, statistical: { ...b.statistical, averages: [999, 999] as [number, number] } },
+            { ...b, statistical: { ...b.statistical, averages: null } },
             { ...b, statistical: { ...b.statistical, maxRelErr: 99 } },
             { ...b, resolution: { ...b.resolution, deltaCrossoverPct: 999 } },
             { ...b, resolution: { ...b.resolution, deltaPhaseMarginDeg: -5 } },
