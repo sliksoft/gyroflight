@@ -207,25 +207,44 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         // A measured T carries this flight's own estimation noise (0.1 % gain, 0.1° phase, from the
         // same seed as the gyro): two flights never identify the same plant to the last bit, and the
         // engine treats an exact match as the same measurement (cross_log_identical_measurement).
-        const tf = syntheticTransferFunction(freqs, (f) => {
-            const frf = evaluateControllerFrf(cfg, f);
-            const T = closedLoopFromPlant(
-                plantFrf(f, { K, motorHz: 40, delayS: 0.002 }),
-                frf.cReference,
-                frf.cFeedback,
-            );
-            const g = 1 + 2e-3 * rnd();
-            const ph = (2e-3 * rnd() * Math.PI) / 180;
-            return {
-                re: g * (T.re * Math.cos(ph) - T.im * Math.sin(ph)),
-                im: g * (T.re * Math.sin(ph) + T.im * Math.cos(ph)),
-            };
+        const measuredT = (fr: number[]) =>
+            syntheticTransferFunction(fr, (f) => {
+                const frf = evaluateControllerFrf(cfg, f);
+                const T = closedLoopFromPlant(
+                    plantFrf(f, { K, motorHz: 40, delayS: 0.002 }),
+                    frf.cReference,
+                    frf.cFeedback,
+                );
+                const g = 1 + 2e-3 * rnd();
+                const ph = (2e-3 * rnd() * Math.PI) / 180;
+                return {
+                    re: g * (T.re * Math.cos(ph) - T.im * Math.sin(ph)),
+                    im: g * (T.re * Math.sin(ph) + T.im * Math.cos(ph)),
+                };
+            });
+        const tf = measuredT(freqs);
+        // SIMULATION: the resolution ladder of this window (adaptiveResolution.ts): the standard grid
+        // and the same plant on a grid twice as fine, each claiming the Welch analysis its step takes.
+        const finer = measuredT(Array.from({ length: 2 * (freqs.length - 1) + 1 }, (_, i) => 1 + (i * step) / 2));
+        const rungOf = (t: typeof tf, binStep: number) => ({
+            tf: t,
+            support: declaredSupport(t),
+            analysis: {
+                segmentSamples: Math.round(FS / binStep),
+                sampleRateHz: FS,
+                windowSamples: w.end - w.start,
+                segments: o.welch?.segments ?? t.numSegments,
+            },
         });
-        if (o.welch) tf.numSegments = o.welch.segments;
+        if (o.welch) {
+            tf.numSegments = o.welch.segments;
+            finer.numSegments = o.welch.segments;
+        }
         log.chirp[name] = {
             tf,
             // SIMULATION: every bin declared supported, as a full DEBUG_CHIRP sweep would show.
             support: declaredSupport(tf),
+            analyses: [rungOf(tf, step), rungOf(finer, step / 2)],
             ...w,
             state: "usable",
             ...(o.welch

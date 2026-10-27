@@ -37,6 +37,7 @@ import type { BinStatus, SweepV2 } from "@/gyrocore/chirp/qualityV2/contract";
 import { classifyBinSupport } from "@/gyrocore/chirp/qualityV2/coverage";
 import { welchPowerSpectrum, welchTransferFunction, type TransferFunction } from "@/js/blackbox/spectral_analysis";
 import { binSupportVerdict, FREQUENCY_SUPPORT, UNCERTAINTY, type FrequencySupport } from "./loopModel";
+import type { AnalysisOption } from "./adaptiveResolution";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import type { AutotuneLogInput, ChirpAxisInput, FlightFragment } from "./autotuneV2";
@@ -270,9 +271,39 @@ export function buildLogInputs(
                       })()
                     : undefined;
             const support = supportOf(m.diagnostics!.transferFunction);
+            // The resolution ladder (adaptiveResolution.ts): the same samples analysed from the standard
+            // segment up to the finest that still averages UNCERTAINTY.minWelchSegments segments, each
+            // rung with its own per-bin support. The engine picks the rung the crossover needs and
+            // checks it against the next one. Nothing is padded: every rung is a Welch estimate.
+            const analyses: AnalysisOption[] = [];
+            if (fs && sp && m.segmentSize) {
+                const spw = sp.subarray(start, end);
+                const gy = (ch[`gyroADC[${ai}]`] as Float64Array).subarray(start, end);
+                const top = Math.max(m.segmentSize, N ?? 0);
+                for (let n = m.segmentSize; n <= top; n *= 2) {
+                    const tf =
+                        n === m.segmentSize
+                            ? m.diagnostics!.transferFunction
+                            : fine && n === N
+                              ? fine.tf
+                              : welchTransferFunction(spw, gy, fs, n, WELCH_OVERLAP);
+                    const rungSupport = n === m.segmentSize ? support : fine && n === N ? fine.support : supportOf(tf);
+                    analyses.push({
+                        tf,
+                        analysis: {
+                            segmentSamples: n,
+                            sampleRateHz: fs,
+                            windowSamples: end - start,
+                            segments: tf.numSegments,
+                        },
+                        ...(rungSupport ? { support: rungSupport } : {}),
+                    });
+                }
+            }
             chirp[axis] = {
                 ...(fine ? { fine } : {}),
                 ...(support ? { support } : {}),
+                ...(analyses.length ? { analyses } : {}),
                 tf: m.diagnostics!.transferFunction,
                 start,
                 end,

@@ -30,6 +30,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
+import { declaredConvergence } from "./harness/resolutionConvergence";
 import { air65RollConfig, evaluateControllerFrf } from "../../src/js/blackbox/betaflight_digital_controller";
 import { closedLoopFromPlant, plantFrf, syntheticTransferFunction } from "../../src/js/blackbox/betaflight_open_loop";
 import { buildAxisLoop } from "../../src/gyrocore/engine/loopModel";
@@ -54,7 +55,10 @@ function rollLoop() {
         const frf = evaluateControllerFrf(cfg, f);
         return closedLoopFromPlant(plantFrf(f, { K: 30, motorHz: 40, delayS: 0.002 }), frf.cReference, frf.cFeedback);
     });
-    return buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) });
+    return buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+        support: declaredSupport(tf),
+        resolution: declaredConvergence(),
+    });
 }
 
 function segmentOf(record: ReturnType<typeof verifiedTuneAllAxesFixture>, fStep = 0): ValidatedSegment {

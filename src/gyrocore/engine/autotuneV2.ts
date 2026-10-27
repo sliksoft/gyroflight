@@ -80,8 +80,10 @@ import {
     type ChainValidation,
     type FrequencySupport,
     type LoopMargins,
+    type ResolutionConvergence,
     type SweepInfo,
 } from "./loopModel";
+import { chooseAnalysis, resolutionConvergence, type AnalysisOption } from "./adaptiveResolution";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
@@ -115,6 +117,13 @@ export interface ChirpAxisInput {
      * identification a model-class qualification can use (modelQualification.ts). Never `tf`.
      */
     fine?: { tf: TransferFunction; analysis: AnalysisProvenance; support?: FrequencySupport };
+    /**
+     * The resolution ladder of this window (logInput.ts): the same samples analysed from the standard
+     * Welch segment (first rung, `tf`) up to the finest that still averages enough, ascending. The
+     * engine reads the margins on the rung the crossover needs and checks it against the next one
+     * (adaptiveResolution.ts). Absent: the standard analysis, with its convergence unknown.
+     */
+    analyses?: AnalysisOption[];
 }
 
 export interface AutotuneLogInput {
@@ -292,6 +301,8 @@ interface AxisAnalysis {
     dterm: DtermDynamicConfig | null;
     dtermAccepted: boolean;
     window: [number, number];
+    /** The analysis the loop is read on (the adaptive rung; adaptiveResolution.ts). */
+    analysis: AnalysisProvenance | null;
 }
 
 /** D path (M5-B) and controller-in-force for one axis of one log. */
@@ -434,15 +445,42 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (!ctl) return;
         if (ctl.dterm) dtermReport.push({ axis: name, accepted: ctl.accepted, nrmse: ctl.nrmse });
         const eff = sim && chainCfg ? effectiveChainFrf(sim, chainCfg, axis, c.start, c.end) : null;
+        // Adaptive resolution (adaptiveResolution.ts, H1): from the standard analysis's crossover, the
+        // rung of the ladder whose bin spacing suits it, checked against the next finer rung of the
+        // same samples. Without a ladder the standard analysis is used and its convergence is unknown.
+        const sweep = sweepFromHeaders(h);
+        const ladder: AnalysisOption[] | null = c.analyses?.length
+            ? c.analyses
+            : c.analysis
+              ? [{ tf: c.tf, analysis: c.analysis, ...(c.support ? { support: c.support } : {}) }]
+              : null;
+        const probe = (r: AnalysisOption) => {
+            const loop = buildAxisLoop(axis, r.tf, ctl.cfg, eff, chainOk(axis), attested, null, {
+                sweep,
+                analysis: r.analysis,
+                support: r.support ?? null,
+            });
+            return { loop, margins: loopMargins(loop) };
+        };
+        let chosen = { tf: c.tf, analysis: c.analysis ?? null, support: c.support ?? null };
+        let resolution: ResolutionConvergence | null = null;
+        if (ladder) {
+            const pick = chooseAnalysis(ladder, probe(ladder[0]).margins.crossoverHz);
+            const r = ladder[pick.index];
+            chosen = { tf: r.tf, analysis: r.analysis, support: r.support ?? null };
+            resolution = resolutionConvergence(ladder, pick.index, probe, pick.reasons);
+        }
         axes[name] = {
-            loop: buildAxisLoop(axis, c.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis), {
-                sweep: sweepFromHeaders(h),
-                analysis: c.analysis ?? null,
-                support: c.support ?? null,
+            loop: buildAxisLoop(axis, chosen.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis), {
+                sweep,
+                analysis: chosen.analysis,
+                support: chosen.support,
+                resolution,
             }),
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,
             window: [c.start, c.end],
+            analysis: chosen.analysis,
         };
     });
 
@@ -730,7 +768,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             margins[name]!.current,
             log.sampleRateHz,
             sweepFromHeaders(h),
-            log.chirp[name]?.analysis ?? null,
+            // The analysis the margins were read on: the plan's durations are consistent with it.
+            axes[name]!.analysis,
         ),
     );
 

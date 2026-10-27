@@ -68,6 +68,7 @@ import { axisKeys } from "../../src/gyrocore/releaseGate/verifiedTune";
 import { closedLoopChirpLog, ratePlant, type Plant } from "./harness/closedLoopBbl";
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
 import { declaredSupport } from "./harness/frequencySupport";
+import { declaredConvergence } from "./harness/resolutionConvergence";
 
 const HEADERS = Object.fromEntries([
     ...[...SIM_IDENTITY_HEADERS, ...BETAFLIGHT_TUNE_HEADERS].map((l) => [
@@ -201,7 +202,7 @@ function build(
                       o.fineSupport === undefined ? declaredSupport(o.fine, { observedHz: [2, 400] }) : o.fineSupport,
               }
             : null,
-        { sweep: SWEEP, analysis: PRIMARY, support },
+        { sweep: SWEEP, analysis: PRIMARY, support, resolution: declaredConvergence(BIN, FS) },
     );
 }
 

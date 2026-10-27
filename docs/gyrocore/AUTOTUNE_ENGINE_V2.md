@@ -290,6 +290,24 @@ GM / |S| as not meeting the targets (no bandwidth increase on margins read on bi
 at 39.06 Hz on, 0.25 and 0.5 bin off the grid, one incoherent primary bin and 1–2 incoherent fine bins; before the
 contract a VALIDATED PM bound of 82° against a true 4.5–4.7°).
 
+Adaptive resolution (`adaptiveResolution.ts`, `ResolutionConvergence`; measurement audit 2026-10-26, B1 / H1): the
+standard analysis fixes its Welch segment on the sample rate (2048 samples at 4 kHz, 512 at 1 kHz: 1.95 Hz bins), and a
+loop that crosses low (7-inch-like, ≈ 7 Hz) was read on it with a systematic optimistic bias (fc +9 %, PM +1.5°).
+`logInput` now analyses every sweep window at a ladder of segment lengths (the standard one, doubled up to the finest that
+still averages 8 segments, `ChirpAxisInput.analyses`, each rung with its own support, nothing padded). From the standard
+rung's crossover `chooseAnalysis` takes the shortest segment whose bin spacing is at most 0.1 × fc (a window too short
+for that: `resolution_target_not_reachable`, `data_length_insufficient`, the finest rung is used). The margins are read on
+that rung and checked against the next finer one on the same samples (`resolutionConvergence`: fc within 3 %, PM within
+max(2°, 2 σ_PM)); only CONVERGED allows bounds, NOT_CONVERGED (`resolution_not_converged:fc|pm`) and UNKNOWN (no finer
+rung: `resolution_convergence_unknown:window_too_short_for_2x`; no verdict: `:not_checked`) leave the margins MEASURED.
+The verdict travels with the evidence (`MarginEvidence.convergence`), the release contract requires it
+(`resolution_convergence_missing`), and the measurement plan is drawn at the rung used. Bin spacing (fs / N), effective
+resolution (Hann ENBW, 1.5 bins) and uncertainty are reported apart. Regression: `adaptive_resolution.test.ts`
+(the 7-inch-like loop lands within 3 % / 2° of its truth on the 2048-sample rung; a 6 s window is said to be too
+short), `v2_craft_class_truth.test.ts` (B4: absolute fc and PM tolerances for the 7-inch-like class). On the real AIR65
+logs (4 kHz, 18 / 19 October) roll and pitch keep the 2048-sample rung (fc 26–28 Hz), yaw moves to 4096 (fc 16 Hz),
+and every rung converges against the next (|Δfc| ≤ 0.34 %, |ΔPM| ≤ 1.9°, σ_PM 3–5°).
+
 The bounds hold for every loop in the per-bin uncertainty
 set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins any curve within the
 resolved-class allowance of the chord, i.e. within `allowance(i)` of the measured chord: the "capsule" of the step).

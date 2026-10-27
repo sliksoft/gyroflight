@@ -472,6 +472,27 @@ export interface MarginUncertainty {
     nominal: { phaseMarginDeg: number; gainMarginDb: number | null; sensitivityPeakDb: number | null };
 }
 
+/**
+ * Whether the analysis the margins are read on is converged in resolution (adaptiveResolution.ts, H1):
+ * the same samples analysed with the next longer Welch segment read the same crossover (within 3 %)
+ * and phase margin (within max(2°, 2 σ_PM)). CONVERGED is the only verdict that lets the margins be
+ * bounds; NOT_CONVERGED and UNKNOWN (no finer analysis possible: the window is too short, or no
+ * verdict was computed) leave them MEASURED. The numbers describe the analysis used: bin spacing
+ * (fs / N) and effective resolution (the Hann window's noise bandwidth, 1.5 bins) are not the same
+ * thing, and neither is the uncertainty.
+ */
+export interface ResolutionConvergence {
+    status: "CONVERGED" | "NOT_CONVERGED" | "UNKNOWN";
+    usedSegmentSamples: number;
+    usedBinSpacingHz: number;
+    effectiveResolutionHz: number;
+    checkedAgainstSegmentSamples: number | null;
+    deltaCrossoverPct: number | null;
+    deltaPhaseMarginDeg: number | null;
+    phaseMarginSigmaDeg: number | null;
+    reasons: string[];
+}
+
 export interface MarginEvidence {
     level: MarginEvidenceLevel;
     /** Largest step between two adjacent identified bins (Hz): the frequency resolution of the margins. */
@@ -485,6 +506,8 @@ export interface MarginEvidence {
     qualification: ModelClassQualification | null;
     /** The uncertainty the bounds include; null: not known (no bounds then). */
     uncertainty?: MarginUncertainty | null;
+    /** The resolution-convergence verdict of the analysis used (H1); absent or not CONVERGED: no bounds. */
+    convergence?: ResolutionConvergence | null;
 }
 
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -531,6 +554,11 @@ export function marginEvidenceIssues(evidence: unknown): string[] {
         u.coverage * u.maxRelErr >= UNCERTAINTY.maxCoverageRelErr
     ) {
         out.push("margin_evidence_uncertainty_missing");
+    }
+    // The analysis the bounds are read on must be shown converged in resolution (H1; fail-closed).
+    const c = e.convergence as Partial<ResolutionConvergence> | null | undefined;
+    if (!c || typeof c !== "object" || c.status !== "CONVERGED" || !finite(c.usedBinSpacingHz)) {
+        out.push("resolution_convergence_missing");
     }
     const q = e.qualification as Partial<ModelClassQualification> | null | undefined;
     if (!q || typeof q !== "object") {
@@ -714,6 +742,8 @@ export interface AxisLoop {
     support: FrequencySupport | null;
     /** The sweep the primary log's headers describe (for the generator-stop check); null: unknown. */
     sweep: SweepInfo | null;
+    /** Resolution convergence of the analysis this loop is read on (H1); null: not checked, no bounds. */
+    resolution: ResolutionConvergence | null;
     /**
      * The plant identified at a finer resolution from another flight of the same craft and
      * configuration (MODEL_CLASS_QUALIFICATION), its uncertainty and where its resolution comes
@@ -783,13 +813,15 @@ export function buildAxisLoop(
         support?: FrequencySupport | null;
     } | null = null,
     /**
-     * The primary measurement's sweep and analysis (UNCERTAINTY averages) and its per-bin support
-     * (FREQUENCY_SUPPORT; absent: unknown, so the margins stay MEASURED).
+     * The primary measurement's sweep and analysis (UNCERTAINTY averages), its per-bin support
+     * (FREQUENCY_SUPPORT) and the resolution-convergence verdict of its analysis (H1); support or
+     * verdict absent: unknown, so the margins stay MEASURED.
      */
     measurement: {
         sweep?: SweepInfo | null;
         analysis?: AnalysisProvenance | null;
         support?: FrequencySupport | null;
+        resolution?: ResolutionConvergence | null;
     } = {},
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
@@ -805,6 +837,7 @@ export function buildAxisLoop(
         uncertainty: loopUncertainty(tf, cfg, measurement),
         support: measurement.support ?? null,
         sweep: measurement.sweep ?? null,
+        resolution: measurement.resolution ?? null,
         qualification: qualification
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
@@ -1563,10 +1596,17 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     // band or support that is missing or unknown (FREQUENCY_SUPPORT) leave no bounds.
     const holes = supportIssues(loop, pts, fc);
     reasons.push(...holes);
+    // The analysis must be shown converged in resolution (H1): a coarse analysis of a low crossover
+    // reads systematically optimistic margins. Not checked, unknown or not converged: no bounds.
+    const conv = loop.resolution;
+    evidence.convergence = conv;
+    const notConverged = !conv || conv.status !== "CONVERGED";
+    if (!conv) reasons.push("resolution_convergence_unknown:not_checked");
+    else if (conv.status !== "CONVERGED") reasons.push(...conv.reasons);
     // The uncertainty is still worked out over a band with holes, for its reasons; it bounds nothing then.
     const ub = read.bounded ? uncertainBounds(pts, read, loop.uncertainty) : null;
     if (ub && !ub.uncertainty) reasons.push(...ub.reasons);
-    if (!read.bounded || !ub?.uncertainty || holes.length) {
+    if (!read.bounded || !ub?.uncertainty || holes.length || notConverged) {
         evidence.level = "MEASURED";
         evidence.assumptions = ["values_read_on_bins_only"];
         // Without a known uncertainty the bins bound nothing: GM and |S| unknown, as for unresolved bins.

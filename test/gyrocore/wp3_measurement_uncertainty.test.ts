@@ -27,6 +27,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
+import { declaredConvergence } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cmul,
@@ -71,7 +72,12 @@ const T = (g: G) => (f: number) => {
 const marginsAt = (coherence: number, segments = 32) => {
     const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => coherence);
     tf.numSegments = segments;
-    return loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }));
+    return loopMargins(
+        buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+            support: declaredSupport(tf),
+            resolution: declaredConvergence(),
+        }),
+    );
 };
 
 describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)", () => {
@@ -102,7 +108,10 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         one.numSegments = 1;
         expect(loopUncertainty(one, cfg).relErr).toBeNull();
         const m = loopMargins(
-            buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(one) }),
+            buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true, null, {
+                support: declaredSupport(one),
+                resolution: declaredConvergence(),
+            }),
         );
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.gainMarginDb).toBeNull();
@@ -132,7 +141,10 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     it("a bin whose ±2ε reaches half its value is not identified: left out, counted", () => {
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.99);
         tf.numSegments = 32;
-        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) });
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+            support: declaredSupport(tf),
+            resolution: declaredConvergence(),
+        });
         const m = loopMargins(loop);
         expect(binsDroppedForUncertainty(loop).length).toBeGreaterThan(0);
         expect(m.evidence.bandHz![0]).toBeGreaterThan(2);
@@ -145,7 +157,10 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         // One bin at 40 Hz just above the coherence limit: used, but its ±2ε is too large: left out.
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), (f) => (f === 40 ? 0.81 : 1));
         const m = loopMargins(
-            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+                support: declaredSupport(tf),
+                resolution: declaredConvergence(),
+            }),
         );
         expect(m.reasons).toContain("unidentified_bins_inside_band:1");
         expect(m.evidence.level).toBe("MEASURED");
@@ -156,7 +171,10 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const hot = { ...cfg, axis: { ...cfg.axis, p: cfg.axis.p * 3.5 } };
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.9);
         const m = loopMargins(
-            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+                support: declaredSupport(tf),
+                resolution: declaredConvergence(),
+            }),
             { cfg: hot },
         );
         expect(m.evidence.level).toBe("MEASURED");
@@ -184,7 +202,10 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const at = (g2: number) => {
             const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => g2);
             return loopMargins(
-                buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+                buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+                    support: declaredSupport(tf),
+                    resolution: declaredConvergence(),
+                }),
                 { cfg: hot },
             );
         };
@@ -255,7 +276,10 @@ describe("the phase the margins are read on", () => {
         const rotated: G = (f) => cmul(smooth(f), { re: -1, im: 0 });
         const tf = syntheticTransferFunction(uniform(200, 0.5), T(rotated));
         const m = loopMargins(
-            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+                support: declaredSupport(tf),
+                resolution: declaredConvergence(),
+            }),
         );
         expect(m.reasons.some((r) => r.startsWith("phase_branch_unverified:"))).toBe(true);
         expect(m.gainMarginDb).toBeNull();
@@ -267,7 +291,10 @@ describe("the phase the margins are read on", () => {
         const coarse = [1, 2, 3, 4, 5, ...Array.from({ length: 24 }, (_, i) => 6 + i * 8)];
         const tf = syntheticTransferFunction(coarse, T(smooth));
         const m = loopMargins(
-            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) }),
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+                support: declaredSupport(tf),
+                resolution: declaredConvergence(),
+            }),
         );
         expect(m.reasons.some((r) => r.startsWith("crossover_insufficiently_resolved:"))).toBe(true);
         expect(m.gainMarginDb).toBeNull();

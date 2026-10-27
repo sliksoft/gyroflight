@@ -150,7 +150,10 @@ export function planMeasurement(
     margins: LoopMargins,
     sampleRateHz: number,
     sweep: SweepInfo | null,
-    /** The standard analysis of this axis (its Welch segment is the one the next flight gets too). */
+    /**
+     * The analysis the margins were read on (the adaptive rung, adaptiveResolution.ts): the next
+     * flight's sweep is planned at that segment, so its averages and duration belong together.
+     */
     analysis: AnalysisProvenance | null,
 ): AxisMeasurementPlan {
     const pts = candidateLoop(loop, { cfg: loop.cfg });
@@ -227,12 +230,13 @@ export function planMeasurement(
         Math.min(dfPrimary, margins.evidence.resolutionHz ?? dfPrimary) / RESOLVED_FEATURE_BINS;
     const wanted = pow2(sampleRateHz / dfPrimary);
     const executable = plan.segmentSamples.executable;
-    // The next flight is analysed with the standard segment whatever it needs: its dwell is planned at that one.
+    // The next flight is analysed at this rung (adaptiveResolution picks it from the crossover): its
+    // dwell is planned at that one. A finer rung than the window supports stays a diagnostic.
     plan.segmentSamples.primary = executable;
     plan.segmentSamples.qualification = pow2(sampleRateHz / plan.resolutionHz.qualification);
     if (executable === null) diagnostics.push("primary_analysis_segment_unknown");
     else if (wanted > executable) {
-        // Only the qualification's finer analysis (finestWelchSegment) reaches it: no flight changes the standard one.
+        // The rung used is still coarser than the loop's steps ask for: a longer window gives a finer rung.
         diagnostics.push(`primary_resolution_needs_finer_analysis:${executable}<${wanted}`);
     }
 

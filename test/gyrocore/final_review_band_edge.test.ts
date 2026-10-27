@@ -34,6 +34,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
+import { declaredConvergence } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cdiv,
@@ -72,7 +73,12 @@ function identify(maxHz: number, G: G) {
     });
     const L = (f: number) => cmag(cmul(G(f), evaluateControllerFrf(cfg, f).cFeedback));
     return {
-        m: loopMargins(buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, { support: declaredSupport(tf) })),
+        m: loopMargins(
+            buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+                support: declaredSupport(tf),
+                resolution: declaredConvergence(),
+            }),
+        ),
         L,
     };
 }

@@ -26,6 +26,7 @@
  */
 
 import { RESOLVED_FEATURE_BINS, type MarginEvidence } from "../../../src/gyrocore/engine/loopModel";
+import { declaredConvergence } from "./resolutionConvergence";
 
 export const SIMULATED_QUALIFICATION_SHA = "5".repeat(64);
 
@@ -45,6 +46,8 @@ export function simulatedQualifiedEvidence(pm: number, gm: number, s: number, re
             maxRelErr: 0.01,
             nominal: { phaseMarginDeg: pm, gainMarginDb: gm, sensitivityPeakDb: s },
         },
+        // The (simulated) analysis is declared converged in resolution, as the release contract requires.
+        convergence: declaredConvergence(resolutionHz),
         qualification: {
             source: { sha256: SIMULATED_QUALIFICATION_SHA, logIndex: 0 },
             resolutionHz: fine,

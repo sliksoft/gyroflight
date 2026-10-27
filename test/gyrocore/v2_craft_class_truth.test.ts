@@ -138,13 +138,19 @@ describe.each(Object.entries(CLASSES))("%s-like loop against its analytic truth"
             expect(m.reasons).not.toContain("identified_band_has_gaps");
         });
     } else {
-        it("7-inch-like: too coarse for its low crossover; MEASURED only, and the plan names the finer analysis", () => {
+        it("7-inch-like: read on a finer rung than the standard 512 samples; crossover within 3 % and phase margin within 2° of the truth (B4)", () => {
+            // Audit B4: an absolute tolerance on fc and a PM comparison, not "within the reported
+            // resolution" (which held with a 9 % error). The standard analysis read this loop 9 % high.
             const m = r.margins.roll!.current;
+            const conv = m.evidence.convergence!;
+            expect(conv.usedSegmentSamples).toBeGreaterThanOrEqual(2048);
+            expect(conv.usedBinSpacingHz).toBeLessThanOrEqual(0.1 * m.crossoverHz! * 1.001);
+            expect(Math.abs(m.crossoverHz! - t.crossoverHz) / t.crossoverHz).toBeLessThan(0.03);
+            expect(Math.abs(m.measured.phaseMarginDeg! - t.pmDeg)).toBeLessThan(2);
+            // One flight never validates; whatever the rung, the status says why.
+            expect(m.evidence.level).not.toBe("VALIDATED");
             const p = r.measurementPlan.find((x) => x.axis === "roll")!;
-            expect(m.evidence.level).toBe("MEASURED");
-            expect(m.reasons).toContain("identified_band_has_gaps");
-            expect(p.resolutionHz.primary!).toBeLessThan(p.resolutionHz.now!);
-            expect(p.diagnostics.some((d) => d.startsWith("primary_resolution_needs_finer_analysis:512<"))).toBe(true);
+            expect(p.segmentSamples.primary).toBe(conv.usedSegmentSamples);
         });
     }
 });
