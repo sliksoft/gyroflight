@@ -308,8 +308,9 @@ crossover it was read at: a PID or filter candidate moves the crossover, so its 
 with that candidate (`AxisLoop.resolutionFor`, `loopModel.resolutionVerdictFor`); a loop without `resolutionFor` gives
 every candidate `resolution_convergence_unknown:candidate_not_checked` (MEASURED), and the bin spacing of the analysis
 used is checked against every crossover the margins are read at (`RESOLUTION_TARGET`, Δf ≤ 0.1 × fc:
-`resolution_target_not_met`, NOT_CONVERGED) — a verdict copied from the current tune is never enough (release re-gate
-2026-10-27, P2-2; `regate_stop_candidate_convergence.test.ts`). Bin spacing (fs / N), effective
+`resolution_target_not_met` turns CONVERGED into NOT_CONVERGED; an UNKNOWN verdict stays UNKNOWN; an invalid crossover
+or bin spacing is UNKNOWN) — a verdict copied from the current tune is never enough (release re-gate 2026-10-27, P2-2;
+`regate_stop_candidate_convergence.test.ts`). Bin spacing (fs / N), effective
 resolution (Hann ENBW, 1.5 bins) and uncertainty are reported apart. Regression: `adaptive_resolution.test.ts`
 (the 7-inch-like loop lands within 3 % / 2° of its truth on the 2048-sample rung; a 6 s window is said to be too
 short), `v2_craft_class_truth.test.ts` (B4: absolute fc and PM tolerances for the 7-inch-like class). On the real AIR65

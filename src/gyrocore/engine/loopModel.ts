@@ -832,10 +832,19 @@ export function resolutionVerdictFor(loop: AxisLoop, cand: LoopCandidate, fc: nu
         };
     } else v = null;
     if (!v) return null;
+    // The target cannot be checked on an invalid crossover or bin spacing: UNKNOWN, never a pass
+    // (fail-closed; Codex re-gate review, P3).
+    if (!(finite(fc) && fc > 0) || !(finite(v.usedBinSpacingHz) && v.usedBinSpacingHz > 0)) {
+        const reason = "resolution_convergence_unknown:invalid_crossover_or_bin_spacing";
+        return v.status === "UNKNOWN" && v.reasons.includes(reason)
+            ? v
+            : { ...v, status: "UNKNOWN", reasons: [...v.reasons, reason] };
+    }
     const limit = RESOLUTION_TARGET.maxBinSpacingOfCrossover * fc;
-    if (finite(v.usedBinSpacingHz) && finite(fc) && fc > 0 && v.usedBinSpacingHz > limit * (1 + 1e-9)) {
+    if (v.usedBinSpacingHz > limit * (1 + 1e-9)) {
         const reason = `resolution_target_not_met:bin_spacing:${v.usedBinSpacingHz.toFixed(3)}Hz>${limit.toFixed(3)}Hz_at_fc:${fc.toFixed(2)}Hz`;
         if (!v.reasons.includes(reason)) {
+            // A CONVERGED verdict becomes NOT_CONVERGED; an UNKNOWN one stays UNKNOWN (with the reason).
             v = {
                 ...v,
                 status: v.status === "CONVERGED" ? "NOT_CONVERGED" : v.status,

@@ -369,6 +369,45 @@ describe("P2-2: a candidate's resolution verdict is its own, never the current t
         expect(direct).toEqual(v);
     });
 
+    it("an invalid crossover or bin spacing cannot pass the target check: UNKNOWN (Codex re-gate, P3)", () => {
+        const ladder = [512, 1024].map((n) => rung(K60, n));
+        const loop = engineLoop(K60, ladder);
+        for (const fc of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+            const v = resolutionVerdictFor(loop, { cfg: loop.cfg }, fc)!;
+            expect(v.status).toBe("UNKNOWN");
+            expect(v.reasons).toContain("resolution_convergence_unknown:invalid_crossover_or_bin_spacing");
+        }
+        const broken: AxisLoop = { ...loop, resolution: { ...loop.resolution!, usedBinSpacingHz: Number.NaN } };
+        expect(resolutionVerdictFor(broken, { cfg: loop.cfg }, 26)!.status).toBe("UNKNOWN");
+        // An UNKNOWN verdict stays UNKNOWN when the spacing also misses the target.
+        const unknown: AxisLoop = { ...loop, resolution: { ...loop.resolution!, status: "UNKNOWN", reasons: ["x"] } };
+        const v = resolutionVerdictFor(unknown, { cfg: loop.cfg }, 5)!;
+        expect(v.status).toBe("UNKNOWN");
+        expect(v.reasons.some((x) => x.startsWith("resolution_target_not_met"))).toBe(true);
+    });
+
+    it("a filter-chain candidate (same cfg object, another chain) is re-read too, never the current verdict", () => {
+        const ladder = [512, 1024, 2048].map((n) => rung(K60, n));
+        const loop = engineLoop(K60, ladder);
+        const cur = loopMargins(loop);
+        // A chain candidate that adds phase lag: the crossover barely moves, the margins do; the
+        // verdict is the rung comparison for that candidate (its own deltas), not the current tune's.
+        const lag: EffectiveChain = {
+            ...UNITY_CHAIN,
+            frf: (f) => ({ re: Math.cos((-f * Math.PI) / 180), im: Math.sin((-f * Math.PI) / 180) }),
+        };
+        const cand = loopMargins(loop, { cfg: loop.cfg, chain: lag });
+        expect(cand.measured.phaseMarginDeg!).toBeLessThan(cur.measured.phaseMarginDeg!);
+        const v = cand.evidence.convergence!;
+        expect(v.reasons).not.toContain("resolution_convergence_unknown:candidate_not_checked");
+        expect(v.checkedAgainstSegmentSamples).toBe(1024);
+        expect(v.deltaPhaseMarginDeg).not.toBe(cur.evidence.convergence!.deltaPhaseMarginDeg);
+        expect(v).toEqual(resolutionVerdictFor(loop, { cfg: loop.cfg, chain: lag }, cand.crossoverHz!));
+        // Without resolutionFor the same chain candidate is UNKNOWN.
+        const bare: AxisLoop = { ...loop, resolutionFor: null };
+        expect(loopMargins(bare, { cfg: loop.cfg, chain: lag }).evidence.convergence?.status).toBe("UNKNOWN");
+    });
+
     it("falling crossover: a candidate that lowers fc below what the rung resolves is MEASURED, with the target named", () => {
         const ladder = [512, 1024, 2048].map((n) => rung(K60, n));
         const loop = engineLoop(K60, ladder); // 26 Hz: the 512 rung (1.95 Hz) meets the target
@@ -428,6 +467,12 @@ describe("P2-2: a candidate's resolution verdict is its own, never the current t
         const v = proposed.evidence.convergence!;
         expect(v.reasons).not.toContain("resolution_convergence_unknown:candidate_not_checked");
         expect(v.checkedAgainstSegmentSamples).not.toBeNull();
+        // The proposal moved the crossover: its verdict is a different rung comparison (its own
+        // deltas), not the current tune's copied over.
+        if (proposed.crossoverHz !== null && Math.abs(proposed.crossoverHz - cur.crossoverHz!) > 0.5) {
+            expect(v.deltaCrossoverPct).not.toBe(cur.evidence.convergence!.deltaCrossoverPct);
+            expect(v.deltaPhaseMarginDeg).not.toBe(cur.evidence.convergence!.deltaPhaseMarginDeg);
+        }
         if (proposed.evidence.level !== "MEASURED") {
             expect(v.status).toBe("CONVERGED");
             expect(v.usedBinSpacingHz).toBeLessThanOrEqual(
