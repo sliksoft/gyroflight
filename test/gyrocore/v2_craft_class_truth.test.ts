@@ -166,6 +166,13 @@ describe.each(Object.entries(CLASSES))("%s-like loop against its analytic truth"
             expect(m.evidence.level).not.toBe("VALIDATED");
             const p = r.measurementPlan.find((x) => x.axis === "roll")!;
             expect(p.segmentSamples.primary).toBe(conv.usedSegmentSamples);
+            // Its phase falls late: the planned band reaches 1.5 × the phase crossover (B5), where the
+            // gain margin is read, instead of stopping at the −12 dB point.
+            const ext = p.diagnostics.find((x) => x.startsWith("band_extended_past_phase_crossover:"));
+            expect(ext).toBeDefined();
+            const fpc = Number(ext!.split(":")[1].replace("Hz", ""));
+            // The diagnostic gives fpc to 0.1 Hz.
+            expect(Math.abs(p.bandHz.primary![1] - 1.5 * fpc)).toBeLessThanOrEqual(1.5 * 0.05 + 1e-9);
         });
     }
 });

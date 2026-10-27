@@ -330,8 +330,12 @@ the phase unwrap restarts at every gap (`bodeTraceRuns.ts`, `test/components/bod
 Measurement qualification hardening (continuation B1): γ²(excitation → setpoint) is taken from debug[3] only when
 qualityV2 measured that channel as the firmware's excitation (`firmwareExcitation` MEASURED); otherwise the bins'
 support is UNKNOWN (coherence is scale-invariant, so a foreign or corrupted channel would pass as support). A plant grid
-that is a uniform grid with bins removed is refused (`frequency_grid_not_uniform:<n>_bins_removed`, MEASURED): it hides
-its own gaps from the gap rule. `MarginEvidence.decisionBand.dropped` says why each missing decision-band bin dropped
+is checked against the analysis it comes from (sample rate / Welch segment, also the qualification's own): every step
+must be that step or a multiple of it (`frequency_grid_not_uniform:<n>_bins_removed`, a grid coarser than its analysis
+included) and nothing else (`…_steps_not_from_its_analysis`); MEASURED either way, since a grid with bins removed hides
+its own gaps from the gap rule. Without the analysis, a grid mostly on the lattice of its smallest step with multiples
+of it is refused the same way; a grid non-uniform by construction (log-spaced, jittered) is left to the resolution
+rules. `MarginEvidence.decisionBand.dropped` says why each missing decision-band bin dropped
 out (coherence, plant status, support, uncertainty; diagnostic only). On the AIR65 logs: the 19 October roll hole near
 43 Hz is a coherence drop, the other in-band gaps are low-frequency uncertainty drops.
 
@@ -342,8 +346,11 @@ and σ_PM at the crossover, given at every evidence level so a MEASURED phase ma
 repeatability between flights (the cross-log plant check, `withRepeatability`; UNTESTED until another flight is
 compared; it gates the release through the model gate, not the bounds), systematic (the model-class qualification
 verdict, the gyro chain validation, and the sources named but not quantified), and the components still unknown. The
-release contract requires the budget and refuses one that contradicts the evidence (`uncertainty_budget_missing`,
-`uncertainty_budget_inconsistent`); it adds no gate of its own. On the AIR65 logs σ_PM is 3–5° at the crossover (e.g.
+release contract requires the budget and refuses one that contradicts the evidence, field by field and with the unknown
+list recomputed (`uncertainty_budget_missing`, `uncertainty_budget_inconsistent`). That is a new completeness and
+consistency requirement on the evidence record (a record without a budget, also one stored by an earlier version, is
+refused; Apply binds to the current analysis and recomputes it anyway), not a new physical threshold: the components
+are judged by the checks that already existed. On the AIR65 logs σ_PM is 3–5° at the crossover (e.g.
 roll 15.0° ± 4.0° on 18 October).
 
 The bounds hold for every loop in the per-bin uncertainty

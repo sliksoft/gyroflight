@@ -174,6 +174,52 @@ describe("the gap rule refuses a grid that is not uniform", () => {
     });
 });
 
+describe("the grid is checked against the analysis it comes from (Codex continuation review, P2)", () => {
+    const peak = 20 * (FS / 512);
+    const fineStep = FS / 4096;
+    const fine = () => anaTF(G60, cohWith(225), 4096, 8);
+
+    it("Codex's reproduction: bin 20 removed and the unused upper tail thinned — still MEASURED", () => {
+        // Keep k where k !== 20 && (k < 72 || k % 2 === 0): most steps are no longer the base step.
+        const drop = Array.from({ length: 257 }, (_, k) => k)
+            .filter((k) => !(k !== 20 && (k < 72 || k % 2 === 0)))
+            .map((k) => (k * FS) / 512);
+        const tf = anaTF(G60, cohWith(138), 512, 77, drop);
+        const m = loopMargins(build(tf, fine()));
+        expect(m.reasons.some((r) => r.startsWith("frequency_grid_not_uniform:"))).toBe(true);
+        expect(m.evidence.level).toBe("MEASURED");
+        expect(m.gainMarginDb).toBeNull();
+        // Without the analysis provenance the bins removed are still found (no majority rule).
+        const freqs = Array.from(tf.frequencies);
+        expect(gridNonUniformity(freqs)).toMatch(/^frequency_grid_not_uniform:\d+_bins_removed$/);
+        expect(gridNonUniformity(freqs, FS / 512)).toMatch(/^frequency_grid_not_uniform:\d+_bins_removed$/);
+    });
+
+    it("a grid coarser than its analysis (every other bin) is refused; a grid not on its analysis's spacing too", () => {
+        const full = Array.from({ length: 257 }, (_, k) => (k * FS) / 512);
+        expect(
+            gridNonUniformity(
+                full.filter((_, k) => k % 2 === 0),
+                FS / 512,
+            ),
+        ).toBe("frequency_grid_not_uniform:128_bins_removed");
+        expect(gridNonUniformity(full, FS / 600)).toMatch(/_steps_not_from_its_analysis$/);
+        expect(gridNonUniformity(full, FS / 512)).toBeNull();
+    });
+
+    it("the qualification's grid is judged against its own analysis, not the primary's", () => {
+        // A fine bin removed at the peak: refused on its own 0.244 Hz analysis.
+        const tf = anaTF(G60, cohWith(138), 512, 77);
+        const holed = anaTF(G60, cohWith(225), 4096, 8, [Math.floor(peak / fineStep) * fineStep]);
+        const m = loopMargins(build(tf, holed));
+        expect(m.evidence.qualification!.verdict).not.toBe("PASS");
+        expect(m.evidence.qualification!.reasons).toContain("qualification:frequency_grid_not_uniform:1_bins_removed");
+        expect(m.evidence.level).not.toBe("VALIDATED");
+        // The complete grids together are VALIDATED (its own step is not mistaken for a hole).
+        expect(loopMargins(build(tf, fine())).evidence.level).toBe("VALIDATED");
+    });
+});
+
 describe("decision-band drops are classified, never acted on", () => {
     it("a coherence hole in the band is counted as coherence; the verdict is the same as without the diagnostic", () => {
         const fcBin = 14 * (FS / 512); // ≈ 27.3 Hz, inside the band of the ≈ 26 Hz crossover

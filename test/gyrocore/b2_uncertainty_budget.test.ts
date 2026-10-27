@@ -73,9 +73,29 @@ describe("the release contract requires the budget and refuses one that contradi
         expect(marginEvidenceIssues({ ...ev, uncertaintyBudget: null })).toContain("uncertainty_budget_missing");
     });
 
+    it("the same budget after a JSON round trip (a stored proposal) still passes; an honest UNTESTED repeat too", () => {
+        expect(marginEvidenceIssues(JSON.parse(JSON.stringify(ev)))).toEqual([]);
+        const b = ev.uncertaintyBudget!;
+        const untested = {
+            ...b,
+            repeatability: { status: "UNTESTED" as const, meanAbsGRel: null },
+            unknown: ["repeatability_between_flights"],
+        };
+        expect(marginEvidenceIssues({ ...ev, uncertaintyBudget: untested })).toEqual([]);
+    });
+
     it("a budget that says something else than the evidence: refused", () => {
         const b = ev.uncertaintyBudget!;
         for (const bad of [
+            // Codex continuation review: duplicated numbers and the unknown list are checked too.
+            { ...b, statistical: { ...b.statistical, coverage: 0 } },
+            { ...b, statistical: { ...b.statistical, maxRelErr: 99 } },
+            { ...b, resolution: { ...b.resolution, deltaCrossoverPct: 999 } },
+            { ...b, resolution: { ...b.resolution, deltaPhaseMarginDeg: -5 } },
+            { ...b, unknown: ["statistical"] },
+            { ...b, statistical: { ...b.statistical, phaseMarginSigmaDeg: -1 } },
+            { ...b, repeatability: { status: "UNTESTED" as const, meanAbsGRel: 0.1 } },
+            { ...b, repeatability: { status: "PASS" as const, meanAbsGRel: null } },
             { ...b, resolution: { ...b.resolution, status: "UNKNOWN" as const } },
             { ...b, statistical: { ...b.statistical, includedInBounds: false } },
             { ...b, statistical: { ...b.statistical, known: false } },

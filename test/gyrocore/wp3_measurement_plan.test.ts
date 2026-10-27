@@ -104,17 +104,18 @@ describe("the plan follows the evidence rules", () => {
         // The band end is the later of two points (continuation B5): where |L| has fallen to bandEndDb
         // (the gain the band end must show), and 1.5 × the phase crossover (where the GM is read).
         expect(db(hi)).toBeLessThanOrEqual(PLAN.bandEndDb + 1e-9);
+        // This loop's phase crosses −180° at ≈ 66 Hz, past its −12 dB point: the band is extended to
+        // 1.5 × that crossing (asserted unconditionally: the extension must happen here).
         const ext = p.diagnostics.find((x) => x.startsWith("band_extended_past_phase_crossover:"));
-        if (ext) {
-            const fpc = Number(ext.split(":")[1].replace("Hz", ""));
-            expect(hi).toBeCloseTo(QUALIFICATION_BAND_EXTENSION * fpc, 0);
-            // The phase really is at −180° there (the bins' reading of the analytic loop, ±1 bin).
-            const phaseAt = (f: number) => (Math.atan2(L(f).im, L(f).re) * 180) / Math.PI;
-            expect(Math.abs(Math.abs(phaseAt(fpc)) - 180)).toBeLessThan(10);
-            expect(db(hi - 0.5)).toBeLessThanOrEqual(PLAN.bandEndDb);
-        } else {
-            expect(db(hi - 0.5)).toBeGreaterThan(PLAN.bandEndDb);
-        }
+        expect(ext).toBeDefined();
+        const fpc = Number(ext!.split(":")[1].replace("Hz", ""));
+        expect(fpc).toBeGreaterThan(fc);
+        expect(hi).toBeCloseTo(QUALIFICATION_BAND_EXTENSION * fpc, 0);
+        // The phase really is at −180° there (the bins' reading of the analytic loop, ±1 bin).
+        const phaseAt = (f: number) => (Math.atan2(L(f).im, L(f).re) * 180) / Math.PI;
+        expect(Math.abs(Math.abs(phaseAt(fpc)) - 180)).toBeLessThan(10);
+        // Without the extension the band would have ended at the −12 dB point, below 1.5 × fpc.
+        expect(db(hi - 0.5)).toBeLessThanOrEqual(PLAN.bandEndDb);
         expect(p.bandHz.qualification![1]).toBeCloseTo(QUALIFICATION_BAND_EXTENSION * 200, 6);
     });
 

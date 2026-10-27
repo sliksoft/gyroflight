@@ -586,6 +586,38 @@ const validBand = (b: unknown): b is [number, number] =>
  * (loopMargins) and that the release contract repeats on whatever reaches it. Fail-closed: missing,
  * malformed or inconsistent metadata is an issue, never a pass.
  */
+/** Same number or both null (exact: the budget's values are copies of the evidence's). */
+const sameNum = (x: unknown, y: unknown) => (x ?? null) === (y ?? null);
+
+/** Whether `b` says what the evidence `e` says, field by field (marginEvidenceIssues). */
+function budgetConsistent(b: UncertaintyBudget, e: Partial<MarginEvidence>): boolean {
+    const u = e.uncertainty && typeof e.uncertainty === "object" ? (e.uncertainty as Partial<MarginUncertainty>) : null;
+    const c =
+        e.convergence && typeof e.convergence === "object" ? (e.convergence as Partial<ResolutionConvergence>) : null;
+    const q =
+        e.qualification && typeof e.qualification === "object"
+            ? (e.qualification as Partial<ModelClassQualification>)
+            : null;
+    const st = b.statistical;
+    const rp = b.repeatability;
+    const sigmaOk = st.phaseMarginSigmaDeg === null || (finite(st.phaseMarginSigmaDeg) && st.phaseMarginSigmaDeg >= 0);
+    const repOk =
+        ["PASS", "PARTIAL", "FAIL", "UNTESTED"].includes(rp.status) &&
+        (rp.status === "UNTESTED" ? rp.meanAbsGRel === null : finite(rp.meanAbsGRel) && rp.meanAbsGRel >= 0);
+    const statOk =
+        st.includedInBounds === !!u &&
+        (!u || (st.known === true && sameNum(st.coverage, u.coverage) && sameNum(st.maxRelErr, u.maxRelErr))) &&
+        (u || st.coverage === UNCERTAINTY.coverage);
+    const resOk =
+        b.resolution.status === (c?.status ?? "NOT_CHECKED") &&
+        sameNum(b.resolution.deltaCrossoverPct, c?.deltaCrossoverPct) &&
+        sameNum(b.resolution.deltaPhaseMarginDeg, c?.deltaPhaseMarginDeg);
+    const sysOk = b.systematic.modelClass === (q?.verdict ?? "NOT_QUALIFIED");
+    const unknown = Array.isArray(b.unknown) ? [...b.unknown].sort() : null;
+    const unknownOk = !!unknown && JSON.stringify(unknown) === JSON.stringify([...budgetUnknowns(b)].sort());
+    return sigmaOk && repOk && statOk && resOk && sysOk && unknownOk;
+}
+
 export function marginEvidenceIssues(evidence: unknown): string[] {
     if (!evidence || typeof evidence !== "object") return ["margin_evidence_missing"];
     const e = evidence as Partial<MarginEvidence>;
@@ -627,25 +659,16 @@ export function marginEvidenceIssues(evidence: unknown): string[] {
     if (!c || typeof c !== "object" || c.status !== "CONVERGED" || !finite(c.usedBinSpacingHz)) {
         out.push("resolution_convergence_missing");
     }
-    // The uncertainty budget must be there and agree with the evidence it describes (continuation
-    // B2; fail-closed). The components themselves are judged by the checks above and below; here a
-    // budget that is missing, or that says something else than the evidence, is refused.
+    // The uncertainty budget must be there and agree, field by field, with the evidence it describes
+    // (continuation B2, Codex continuation review; fail-closed). This is a completeness and
+    // consistency requirement on the evidence record: a record without a budget (also one stored by
+    // an earlier version) is refused. The components themselves are judged by the checks above and
+    // below; a budget that duplicates one of them with another value is refused.
     const b = e.uncertaintyBudget as Partial<UncertaintyBudget> | null | undefined;
     if (!b || typeof b !== "object" || !b.statistical || !b.resolution || !b.systematic || !b.repeatability) {
         out.push("uncertainty_budget_missing");
-    } else {
-        const qv = (e.qualification as Partial<ModelClassQualification> | null | undefined)?.verdict ?? "NOT_QUALIFIED";
-        const cv = (e.convergence as Partial<ResolutionConvergence> | null | undefined)?.status ?? "NOT_CHECKED";
-        const bounded = !!u && typeof u === "object";
-        if (
-            b.statistical.includedInBounds !== bounded ||
-            (bounded && b.statistical.known !== true) ||
-            b.resolution.status !== cv ||
-            b.systematic.modelClass !== qv ||
-            !Array.isArray(b.unknown)
-        ) {
-            out.push("uncertainty_budget_inconsistent");
-        }
+    } else if (!budgetConsistent(b as UncertaintyBudget, e)) {
+        out.push("uncertainty_budget_inconsistent");
     }
     const q = e.qualification as Partial<ModelClassQualification> | null | undefined;
     if (!q || typeof q !== "object") {
@@ -842,6 +865,11 @@ export interface AxisLoop {
      */
     resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
     /**
+     * Bin spacing of the analysis the plant's grid comes from (sample rate / Welch segment, Hz);
+     * null when the analysis is not known. The gap rule checks the grid against it (gridNonUniformity).
+     */
+    analysisStepHz?: number | null;
+    /**
      * The plant identified at a finer resolution from another flight of the same craft and
      * configuration (MODEL_CLASS_QUALIFICATION), its uncertainty and where its resolution comes
      * from, or null.
@@ -856,6 +884,8 @@ export interface AxisLoop {
         support: FrequencySupport | null;
         /** The sweep the qualification log's headers describe (generator-stop check); null: unknown. */
         sweep: SweepInfo | null;
+        /** Bin spacing of the qualification's own analysis (Hz); null: not known. */
+        analysisStepHz?: number | null;
     } | null;
 }
 
@@ -999,6 +1029,7 @@ export function buildAxisLoop(
         sweep: measurement.sweep ?? null,
         resolution: measurement.resolution ?? null,
         resolutionFor: measurement.resolutionFor ?? null,
+        analysisStepHz: analysisStep(measurement.analysis),
         qualification: qualification
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
@@ -1007,9 +1038,17 @@ export function buildAxisLoop(
                   provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
                   support: qualification.support ?? null,
                   sweep: qualification.sweep ?? null,
+                  analysisStepHz: analysisStep(qualification.analysis),
               }
             : null,
     };
+}
+
+/** Bin spacing (Hz) of an analysis, or null when it is not known or not valid. */
+function analysisStep(a: AnalysisProvenance | null | undefined): number | null {
+    return a && finite(a.sampleRateHz) && finite(a.segmentSamples) && a.sampleRateHz > 0 && a.segmentSamples > 0
+        ? a.sampleRateHz / a.segmentSamples
+        : null;
 }
 
 /**
@@ -1139,7 +1178,10 @@ export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | nul
     // The gap rule counts missing bins against the analysis grid; a grid that is not uniform (a
     // transfer function with bins removed, not a Welch estimate) hides its own gaps. Every producer
     // in the engine gives a full grid; anything else bounds nothing (fail-closed, release gate P3).
-    const grid = gridNonUniformity(loop.plant.bins.map((b) => b.frequencyHz));
+    const grid = gridNonUniformity(
+        loop.plant.bins.map((b) => b.frequencyHz),
+        loop.analysisStepHz ?? null,
+    );
     if (grid) out.push(grid);
     if (pts.length < 2) return out;
     const lo = fc !== null ? decisionBandStartHz(fc) : pts[0].f;
@@ -1173,26 +1215,42 @@ export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | nul
 }
 
 /**
- * Whether the grid `freqs` (ascending, the plant's bins, DC included) is a uniform grid with bins
- * removed: most steps equal the smallest one and others are integer multiples of it. That is the
- * shape of a Welch grid whose transfer function lost bins, and it hides its own gaps from the gap
- * rule. A grid that is non-uniform by construction (log-spaced, jittered: no step a clean multiple
- * of another) is not such a grid. A reason when it is (or when a step is not positive), else null.
+ * Whether the grid `freqs` (ascending, the plant's bins, DC included) is complete: a Welch grid
+ * whose transfer function lost bins hides its own gaps from the gap rule (release gate G2,
+ * Codex continuation review). A reason when it is not, else null.
+ *
+ *   - `expectedStepHz` known (the analysis's sample rate / segment): every step must be that step
+ *     or an integer multiple of it (the multiples are bins removed), and the smallest step must be
+ *     it (a grid coarser than its analysis is a decimated one).
+ *   - not known: any step that is an integer multiple (≥ 2) of the smallest step is bins removed;
+ *     a grid non-uniform by construction (log-spaced, jittered: no step a clean multiple of another)
+ *     is left to the resolution rules.
+ *   - a step that is not positive is refused either way.
  */
-export function gridNonUniformity(freqs: readonly number[]): string | null {
+export function gridNonUniformity(freqs: readonly number[], expectedStepHz: number | null = null): string | null {
     if (freqs.length < 3) return null;
     const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
     if (steps.some((d) => !(d > 0))) return "frequency_grid_not_uniform:non_positive_step";
-    const base = Math.min(...steps);
     const tol = 1e-6;
-    const onBase = steps.filter((d) => Math.abs(d - base) <= tol * base).length;
-    if (onBase * 2 < steps.length) return null;
+    const known = typeof expectedStepHz === "number" && Number.isFinite(expectedStepHz) && expectedStepHz > 0;
+    const base = known ? expectedStepHz : Math.min(...steps);
     let removed = 0;
+    let foreign = 0;
+    let onLattice = 0;
     for (const d of steps) {
         const k = d / base;
-        if (k >= 1.5 && Math.abs(k - Math.round(k)) <= tol * k) removed += Math.round(k) - 1;
+        const n = Math.round(k);
+        if (n >= 1 && Math.abs(k - n) <= tol * k) {
+            removed += n - 1;
+            onLattice++;
+        } else foreign++;
     }
-    return removed ? `frequency_grid_not_uniform:${removed}_bins_removed` : null;
+    if (known && foreign) return `frequency_grid_not_uniform:${foreign}_steps_not_from_its_analysis`;
+    // Without the analysis: a grid whose steps are mostly off the smallest step's lattice is
+    // non-uniform by construction (a log-spaced grid meets the lattice only at exact decades).
+    if (!known && onLattice * 2 < steps.length) return null;
+    if (removed) return `frequency_grid_not_uniform:${removed}_bins_removed`;
+    return null;
 }
 
 /** Why the grid bins of the decision band did not reach the loop (diagnostic, audit B2). */
@@ -1784,7 +1842,14 @@ function qualifyModelClass(
     if (!q) return null;
     // The qualification's loop on its own plant, uncertainty and per-bin support (the same support
     // contract as the primary's, audit §10.4: a PASS over a gap would qualify what was not measured).
-    const qLoop: AxisLoop = { ...loop, plant: q.plant, uncertainty: q.uncertainty, support: q.support };
+    const qLoop: AxisLoop = {
+        ...loop,
+        plant: q.plant,
+        uncertainty: q.uncertainty,
+        support: q.support,
+        // Its grid is judged against its own analysis, never the primary's.
+        analysisStepHz: q.analysisStepHz ?? null,
+    };
     const finePts = candidateLoop(qLoop, cand);
     const fine = readLoop(finePts);
     const Q = MODEL_CLASS_QUALIFICATION;
