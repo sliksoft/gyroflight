@@ -525,6 +525,8 @@ export interface DecisionBandCoherence {
     keptBins: number;
     minCoherence: number;
     meanCoherence: number;
+    /** Why the other bins did not reach the loop, by the first cause (diagnostic; no verdict). */
+    dropped?: DecisionBandDrops;
 }
 
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -1066,6 +1068,11 @@ const listHz = (xs: readonly number[]) =>
 export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | null): string[] {
     const out: string[] = [];
     if (!loop.support) out.push("frequency_support_unknown:no_support_evidence");
+    // The gap rule counts missing bins against the analysis grid; a grid that is not uniform (a
+    // transfer function with bins removed, not a Welch estimate) hides its own gaps. Every producer
+    // in the engine gives a full grid; anything else bounds nothing (fail-closed, release gate P3).
+    const grid = gridNonUniformity(loop.plant.bins.map((b) => b.frequencyHz));
+    if (grid) out.push(grid);
     if (pts.length < 2) return out;
     const lo = fc !== null ? decisionBandStartHz(fc) : pts[0].f;
     const hi = pts[pts.length - 1].f;
@@ -1097,6 +1104,32 @@ export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | nul
     return out;
 }
 
+/**
+ * Whether the grid `freqs` (ascending, the plant's bins, DC included) is uniform: every step within
+ * 1e-6 relative of the median step. A reason when it is not, else null.
+ */
+export function gridNonUniformity(freqs: readonly number[]): string | null {
+    if (freqs.length < 3) return null;
+    const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
+    if (steps.some((d) => !(d > 0))) return "frequency_grid_not_uniform:non_positive_step";
+    const sorted = [...steps].sort((a, b) => a - b);
+    const step = sorted[Math.floor(sorted.length / 2)];
+    const off = steps.filter((s) => Math.abs(s - step) > 1e-6 * step).length;
+    return off ? `frequency_grid_not_uniform:${off}_steps` : null;
+}
+
+/** Why the grid bins of the decision band did not reach the loop (diagnostic, audit B2). */
+export interface DecisionBandDrops {
+    /** Plant status other than coherence: singular denominator, non-finite T, out of the plant's range. */
+    plantStatus: number;
+    /** Coherence setpoint → gyro below LOOP_MIN_COHERENCE. */
+    coherence: number;
+    /** Shown unsupported (FREQUENCY_SUPPORT). */
+    support: number;
+    /** ± k ε reaching half the bin's value (UNCERTAINTY). */
+    uncertainty: number;
+}
+
 /** The coherence over the decision band of `loop` around `fc`, up to the last kept bin (audit B2). */
 export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: number): DecisionBandCoherence | null {
     if (pts.length < 2) return null;
@@ -1107,15 +1140,33 @@ export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: numb
     let keptBins = 0;
     let min = Infinity;
     let sum = 0;
+    const dropped: DecisionBandDrops = { plantStatus: 0, coherence: 0, support: 0, uncertainty: 0 };
+    const relErr = loop.uncertainty?.relErr;
     for (const b of loop.plant.bins) {
         if (!(b.frequencyHz >= fromHz) || b.frequencyHz > toHz) continue;
         const g2 = Number.isFinite(b.coherence) ? b.coherence : 0;
         gridBins++;
-        if (kept.has(b.frequencyHz)) keptBins++;
         min = Math.min(min, g2);
         sum += g2;
+        if (kept.has(b.frequencyHz)) {
+            keptBins++;
+            continue;
+        }
+        // The first reason candidateLoop would leave the bin out for (its own order of checks); the
+        // plant is extracted with LOOP_MIN_COHERENCE, so a low-coherence bin carries that status.
+        if (b.status === "low_coherence" || (b.status === "ok" && b.G && !(b.coherence >= LOOP_MIN_COHERENCE)))
+            dropped.coherence++;
+        else if (b.status !== "ok" || !b.G) dropped.plantStatus++;
+        else if (loop.support?.bins.get(b.frequencyHz)?.verdict === "UNSUPPORTED") dropped.support++;
+        else {
+            const err = relErr?.get(b.frequencyHz);
+            if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr) dropped.uncertainty++;
+            else dropped.plantStatus++;
+        }
     }
-    return gridBins ? { fromHz, toHz, gridBins, keptBins, minCoherence: min, meanCoherence: sum / gridBins } : null;
+    return gridBins
+        ? { fromHz, toHz, gridBins, keptBins, minCoherence: min, meanCoherence: sum / gridBins, dropped }
+        : null;
 }
 
 /**

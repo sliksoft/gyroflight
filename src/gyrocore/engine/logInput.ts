@@ -236,12 +236,18 @@ export function buildLogInputs(
             const N = finestWelchSegment(end - start);
             const sp = aligned(setpoint[ai]);
             const observed = observedSweepOf(m);
+            // γ²(excitation → setpoint) only from a channel qualityV2 measured as the firmware's
+            // excitation (debug[3] = sin/cos × 1000 of chirp.c); a constant, out-of-range or missing
+            // channel is another signal, and coherence is scale-invariant, so it would pass as
+            // support. Not MEASURED: no excitation, the bins' support is UNKNOWN (fail-closed;
+            // release gate 2026-10-27, P3).
+            const excitationTrusted = m.qualityV2?.excitation?.firmwareExcitation?.availability === "MEASURED";
             const supportOf = (tf: TransferFunction) =>
                 fs && sp
                     ? frequencySupportFor(tf, {
                           sampleRateHz: fs,
                           setpoint: sp.subarray(start, end),
-                          excitation: excitation ? excitation.subarray(start, end) : null,
+                          excitation: excitation && excitationTrusted ? excitation.subarray(start, end) : null,
                           observed,
                       })
                     : undefined;
