@@ -843,14 +843,13 @@ export function resolutionVerdictFor(loop: AxisLoop, cand: LoopCandidate, fc: nu
     const limit = RESOLUTION_TARGET.maxBinSpacingOfCrossover * fc;
     if (v.usedBinSpacingHz > limit * (1 + 1e-9)) {
         const reason = `resolution_target_not_met:bin_spacing:${v.usedBinSpacingHz.toFixed(3)}Hz>${limit.toFixed(3)}Hz_at_fc:${fc.toFixed(2)}Hz`;
-        if (!v.reasons.includes(reason)) {
-            // A CONVERGED verdict becomes NOT_CONVERGED; an UNKNOWN one stays UNKNOWN (with the reason).
-            v = {
-                ...v,
-                status: v.status === "CONVERGED" ? "NOT_CONVERGED" : v.status,
-                reasons: [...v.reasons, reason],
-            };
-        }
+        // A CONVERGED verdict becomes NOT_CONVERGED whatever its reasons already say; an UNKNOWN one
+        // stays UNKNOWN; the reason is named once.
+        v = {
+            ...v,
+            status: v.status === "CONVERGED" ? "NOT_CONVERGED" : v.status,
+            reasons: v.reasons.includes(reason) ? v.reasons : [...v.reasons, reason],
+        };
     }
     return v;
 }

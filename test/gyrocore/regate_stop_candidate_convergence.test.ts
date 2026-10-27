@@ -467,8 +467,14 @@ describe("P2-2: a candidate's resolution verdict is its own, never the current t
         const v = proposed.evidence.convergence!;
         expect(v.reasons).not.toContain("resolution_convergence_unknown:candidate_not_checked");
         expect(v.checkedAgainstSegmentSamples).not.toBeNull();
-        // The proposal moved the crossover: its verdict is a different rung comparison (its own
-        // deltas), not the current tune's copied over.
+        // A single synthetic flight has no validated chain and no qualification, so the search never
+        // proposes a change here (targets_not_reachable, the current values): the proposal's verdict is
+        // then the current tune's own, by identity. Whenever a proposal does move the crossover, its
+        // verdict must be a different rung comparison (its own deltas), not the current tune's copied
+        // over; the engine's wiring for that case is covered above with the same probe closure
+        // (engineLoop) and by the filter-chain candidate.
+        const pid = r.pid.find((p) => p.axis === "roll")!;
+        if (!pid.changed) expect(proposed.crossoverHz).toBe(cur.crossoverHz);
         if (proposed.crossoverHz !== null && Math.abs(proposed.crossoverHz - cur.crossoverHz!) > 0.5) {
             expect(v.deltaCrossoverPct).not.toBe(cur.evidence.convergence!.deltaCrossoverPct);
             expect(v.deltaPhaseMarginDeg).not.toBe(cur.evidence.convergence!.deltaPhaseMarginDeg);
