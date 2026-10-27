@@ -327,6 +327,25 @@ is taken per contiguous run of valid in-flight samples and averaged over the run
 `filter_noise_contiguous.test.ts`). Bode plot (audit B7): traces are drawn per run of grid-adjacent coherent bins and
 the phase unwrap restarts at every gap (`bodeTraceRuns.ts`, `test/components/bodeTraceRuns.test.ts`).
 
+Measurement qualification hardening (continuation B1): γ²(excitation → setpoint) is taken from debug[3] only when
+qualityV2 measured that channel as the firmware's excitation (`firmwareExcitation` MEASURED); otherwise the bins'
+support is UNKNOWN (coherence is scale-invariant, so a foreign or corrupted channel would pass as support). A plant grid
+that is a uniform grid with bins removed is refused (`frequency_grid_not_uniform:<n>_bins_removed`, MEASURED): it hides
+its own gaps from the gap rule. `MarginEvidence.decisionBand.dropped` says why each missing decision-band bin dropped
+out (coherence, plant status, support, uncertainty; diagnostic only). On the AIR65 logs: the 19 October roll hole near
+43 Hz is a coherence drop, the other in-band gaps are low-frequency uncertainty drops.
+
+Uncertainty budget (`MarginEvidence.uncertaintyBudget`, continuation B2; measurement audit B3): per set of margins,
+apart, each with the gate that already acts on it — resolution (the H1 verdict and its deltas: agreement between rungs,
+not accuracy; bounds only when CONVERGED), statistical (Bendat & Piersol random error: known, folded into the bounds,
+and σ_PM at the crossover, given at every evidence level so a MEASURED phase margin carries its spread too),
+repeatability between flights (the cross-log plant check, `withRepeatability`; UNTESTED until another flight is
+compared; it gates the release through the model gate, not the bounds), systematic (the model-class qualification
+verdict, the gyro chain validation, and the sources named but not quantified), and the components still unknown. The
+release contract requires the budget and refuses one that contradicts the evidence (`uncertainty_budget_missing`,
+`uncertainty_budget_inconsistent`); it adds no gate of its own. On the AIR65 logs σ_PM is 3–5° at the crossover (e.g.
+roll 15.0° ± 4.0° on 18 October).
+
 The bounds hold for every loop in the per-bin uncertainty
 set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins any curve within the
 resolved-class allowance of the chord, i.e. within `allowance(i)` of the measured chord: the "capsule" of the step).
@@ -346,7 +365,8 @@ lowest bin) plus the controller's; at least three bins in the octave around the 
 margins unbounded (`MEASURED`). These are the model's assumptions, carried in `MarginEvidence.assumptions`.
 
 Measurement planner (`engine/measurementPlan.ts`, informative, shown under the margins): per axis the band (to
-|L| ≤ −12 dB, extrapolated along the tail; a qualification 1.5 × further), the bin step the measured phase slope needs
+|L| ≤ −12 dB, extrapolated along the tail, and at least 1.5 × the phase crossover the bins show, where the gain margin
+is read — continuation B5, `band_extended_past_phase_crossover`; a qualification 1.5 × further), the bin step the measured phase slope needs
 and the qualification's (÷ RESOLVED_FEATURE_BINS), the power-of-two Welch segment for both, the averages needed at the
 crossover for 2 σ ≤ 2.5° and the length of the one sweep over the planned band that gives them (repeated sweeps are
 not combined by the analysis, so the plan never asks for repeats), and what the data show (coherence dips,
