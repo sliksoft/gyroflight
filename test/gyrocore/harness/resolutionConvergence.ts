@@ -27,7 +27,23 @@
  * same samples (autotuneV2). This is test input, never evidence about any flight.
  */
 
-import type { ResolutionConvergence } from "../../../src/gyrocore/engine/loopModel";
+import type { LoopCandidate, ResolutionConvergence } from "../../../src/gyrocore/engine/loopModel";
+
+/**
+ * SIMULATION: the declared verdict for the controller in force and for every candidate the PID or
+ * filter search reads on the same analytic grid (AxisLoop.resolution / resolutionFor). The bin
+ * spacing declared here is still checked against each candidate's own crossover by
+ * loopModel.resolutionVerdictFor (RESOLUTION_TARGET): a declaration never waives that.
+ */
+export function declaredResolution(
+    binSpacingHz = 0.5,
+    sampleRateHz = 4000,
+): { resolution: ResolutionConvergence; resolutionFor: (cand: LoopCandidate) => ResolutionConvergence } {
+    return {
+        resolution: declaredConvergence(binSpacingHz, sampleRateHz),
+        resolutionFor: () => declaredConvergence(binSpacingHz, sampleRateHz),
+    };
+}
 
 /** A CONVERGED verdict for an analytic grid of `binSpacingHz` (checked against twice the segment). */
 export function declaredConvergence(binSpacingHz = 0.5, sampleRateHz = 4000): ResolutionConvergence {

@@ -245,7 +245,7 @@ export function optimizeAxisPid(
     // A resolution not shown converged (adaptiveResolution.ts) needs a longer window of the same
     // sweep (a finer rung with enough segments), not a higher end frequency.
     const unconverged = has(
-        /^(resolution_not_converged|resolution_convergence_unknown|resolution_target_not_reachable|data_length_insufficient)/,
+        /^(resolution_not_converged|resolution_convergence_unknown|resolution_target_not_reachable|resolution_target_not_met|data_length_insufficient)/,
     );
     if (unconverged) reasons.push("required_measurement:chirp_longer_window_for_resolution");
     if (unresolved && (pick.m.gainMarginDb === null || pick.m.sensitivityPeakDb === null))

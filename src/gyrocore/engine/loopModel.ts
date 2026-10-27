@@ -759,8 +759,18 @@ export interface AxisLoop {
     support: FrequencySupport | null;
     /** The sweep the primary log's headers describe (for the generator-stop check); null: unknown. */
     sweep: SweepInfo | null;
-    /** Resolution convergence of the analysis this loop is read on (H1); null: not checked, no bounds. */
+    /**
+     * Resolution convergence of the analysis this loop is read on (H1), for the controller in force
+     * (`cfg`, unchanged chain); null: not checked, no bounds. It holds for that crossover only.
+     */
     resolution: ResolutionConvergence | null;
+    /**
+     * The same verdict for another candidate (a PID or filter change moves the crossover): the rungs
+     * of the same samples re-read with that candidate (autotuneV2). Absent: a candidate's convergence
+     * is unknown and its margins stay MEASURED (release re-gate 2026-10-27, P2-2: a verdict copied
+     * from the current tune is never enough).
+     */
+    resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
     /**
      * The plant identified at a finer resolution from another flight of the same craft and
      * configuration (MODEL_CLASS_QUALIFICATION), its uncertainty and where its resolution comes
@@ -783,6 +793,57 @@ export interface LoopCandidate {
     cfg: DigitalControllerConfig;
     /** Mean chain response of the candidate's gyro filters over the same window; null: unchanged. */
     chain?: EffectiveChain | null;
+}
+
+/**
+ * The resolution target the margins must be read at (adaptiveResolution.ts ADAPTIVE_RESOLUTION):
+ * bin spacing at most this fraction of the crossover, checked for the crossover the margins are
+ * actually read at, the current tune's or a candidate's (release re-gate 2026-10-27, P2-2).
+ */
+export const RESOLUTION_TARGET = Object.freeze({ maxBinSpacingOfCrossover: 0.1 });
+
+/**
+ * The resolution-convergence verdict that applies to `cand`'s margins read at crossover `fc`:
+ *
+ *   - the controller in force with an unchanged chain: the loop's own verdict (`resolution`);
+ *   - any other candidate: `resolutionFor(cand)`, the rungs re-read with that candidate; without it
+ *     the verdict is UNKNOWN (`resolution_convergence_unknown:candidate_not_checked`): a verdict
+ *     from another crossover is not evidence for this one;
+ *   - either way, the bin spacing the verdict was read on must meet RESOLUTION_TARGET at `fc`
+ *     (`resolution_target_not_met`), or the verdict is NOT_CONVERGED: the ladder was chosen for the
+ *     current tune's crossover, and a candidate that moves it down can be read too coarsely.
+ *
+ * Null when no verdict exists at all (not checked). Exported for its tests.
+ */
+export function resolutionVerdictFor(loop: AxisLoop, cand: LoopCandidate, fc: number): ResolutionConvergence | null {
+    const own = cand.cfg === loop.cfg && !cand.chain;
+    let v: ResolutionConvergence | null;
+    if (own) v = loop.resolution;
+    else if (loop.resolutionFor) v = loop.resolutionFor(cand);
+    else if (loop.resolution) {
+        v = {
+            ...loop.resolution,
+            status: "UNKNOWN",
+            checkedAgainstSegmentSamples: null,
+            deltaCrossoverPct: null,
+            deltaPhaseMarginDeg: null,
+            phaseMarginSigmaDeg: null,
+            reasons: ["resolution_convergence_unknown:candidate_not_checked"],
+        };
+    } else v = null;
+    if (!v) return null;
+    const limit = RESOLUTION_TARGET.maxBinSpacingOfCrossover * fc;
+    if (finite(v.usedBinSpacingHz) && finite(fc) && fc > 0 && v.usedBinSpacingHz > limit * (1 + 1e-9)) {
+        const reason = `resolution_target_not_met:bin_spacing:${v.usedBinSpacingHz.toFixed(3)}Hz>${limit.toFixed(3)}Hz_at_fc:${fc.toFixed(2)}Hz`;
+        if (!v.reasons.includes(reason)) {
+            v = {
+                ...v,
+                status: v.status === "CONVERGED" ? "NOT_CONVERGED" : v.status,
+                reasons: [...v.reasons, reason],
+            };
+        }
+    }
+    return v;
 }
 
 export interface LoopMargins {
@@ -841,6 +902,8 @@ export function buildAxisLoop(
         analysis?: AnalysisProvenance | null;
         support?: FrequencySupport | null;
         resolution?: ResolutionConvergence | null;
+        /** The verdict for another candidate (AxisLoop.resolutionFor); absent: unknown for candidates. */
+        resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
     } = {},
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
@@ -857,6 +920,7 @@ export function buildAxisLoop(
         support: measurement.support ?? null,
         sweep: measurement.sweep ?? null,
         resolution: measurement.resolution ?? null,
+        resolutionFor: measurement.resolutionFor ?? null,
         qualification: qualification
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
@@ -1616,8 +1680,13 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     }
     const fc = read.fc!;
     let stopNote: string | null = null;
+    // A stop inside the tail the bounds lean on (below QUALIFICATION_BAND_EXTENSION × the band end)
+    // blocks the bounds: the band ends where the generator stopped, not where the loop does, so the
+    // band end is a support artefact and GM / |S| read on it bound nothing (release re-gate
+    // 2026-10-27, P2-1: the reason alone left the evidence level untouched).
+    const stopBlocks = stop !== null && stop[0] < QUALIFICATION_BAND_EXTENSION * read.bandHz![1];
     if (stop) {
-        if (stop[0] < QUALIFICATION_BAND_EXTENSION * read.bandHz![1]) {
+        if (stopBlocks) {
             reasons.push(`sweep_generator_stopped_early:${stop[0].toFixed(1)}<${stop[1].toFixed(1)}Hz`);
         } else {
             stopNote = `sweep_generator_stopped_at:${stop[0].toFixed(1)}Hz_of_${stop[1].toFixed(1)}Hz`;
@@ -1647,9 +1716,11 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     const holes = supportIssues(loop, pts, fc);
     reasons.push(...holes);
     evidence.decisionBand = decisionBandCoherence(loop, pts, fc);
-    // The analysis must be shown converged in resolution (H1): a coarse analysis of a low crossover
-    // reads systematically optimistic margins. Not checked, unknown or not converged: no bounds.
-    const conv = loop.resolution;
+    // The analysis must be shown converged in resolution (H1) for the crossover these margins are
+    // read at (the candidate's, not the current tune's: resolutionVerdictFor): a coarse analysis of
+    // a low crossover reads systematically optimistic margins. Not checked, unknown, not converged
+    // or read too coarsely for this crossover: no bounds.
+    const conv = resolutionVerdictFor(loop, cand, fc);
     evidence.convergence = conv;
     const notConverged = !conv || conv.status !== "CONVERGED";
     if (!conv) reasons.push("resolution_convergence_unknown:not_checked");
@@ -1661,7 +1732,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     // The uncertainty is still worked out over a band with holes, for its reasons; it bounds nothing then.
     const ub = read.bounded ? uncertainBounds(pts, read, loop.uncertainty) : null;
     if (ub && !ub.uncertainty) reasons.push(...ub.reasons);
-    if (!read.bounded || !ub?.uncertainty || holes.length || notConverged || sweepMissing) {
+    if (!read.bounded || !ub?.uncertainty || holes.length || notConverged || sweepMissing || stopBlocks) {
         evidence.level = "MEASURED";
         evidence.assumptions = ["values_read_on_bins_only"];
         // Without a known uncertainty the bins bound nothing: GM and |S| unknown, as for unresolved bins.

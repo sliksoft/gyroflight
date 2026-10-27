@@ -28,7 +28,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cdiv,
@@ -84,7 +84,7 @@ function plan(
     const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
         sweep: SWEEP,
         support: declaredSupport(tf),
-        resolution: declaredConvergence(),
+        ...declaredResolution(),
     });
     const m = loopMargins(loop);
     return { p: planMeasurement("roll", loop, m, 4000, SWEEP, analysis), m, loop };

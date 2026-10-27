@@ -36,7 +36,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cadd,
@@ -96,7 +96,7 @@ function margins(freqs: number[], G: G) {
     return loopMargins(
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         }),
     );
@@ -320,7 +320,7 @@ describe("F-02: the PID search names the measurement an unresolved band needs", 
         });
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);

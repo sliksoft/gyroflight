@@ -284,7 +284,9 @@ max(fc / 4, 2 Hz) … band end that does not reach the loop, for whatever reason
 and `crossover_neighbour_bins_missing` when the crossing itself is read over one): the margins are then MEASURED, never
 bounds. The qualification follows the same contract on its own grid (`qualification:unidentified_bins_inside_band`, no
 PASS). A generator that stopped below 98 % of the header's end is `sweep_generator_stopped_early` when the stop lies
-below 1.5 × the band end, otherwise noted in the evidence (`sweep_generator_stopped_at`). The PID search treats unknown
+below 1.5 × the band end, and that stop blocks the bounds (the margins stay MEASURED, GM / |S| unknown: the band ends
+where the generator stopped, so its end is a support artefact; release re-gate 2026-10-27, P2-1); above that it is
+noted in the evidence (`sweep_generator_stopped_at`). The PID search treats unknown
 GM / |S| as not meeting the targets (no bandwidth increase on margins read on bins only) and asks for
 `chirp_with_full_band_support`. Regression: `t3_frequency_support.test.ts` (the counterexample: a ζ 0.001 / 0.0002 pair
 at 39.06 Hz on, 0.25 and 0.5 bin off the grid, one incoherent primary bin and 1–2 incoherent fine bins; before the
@@ -301,7 +303,13 @@ that rung and checked against the next finer one on the same samples (`resolutio
 max(2°, 2 σ_PM)); only CONVERGED allows bounds, NOT_CONVERGED (`resolution_not_converged:fc|pm`) and UNKNOWN (no finer
 rung: `resolution_convergence_unknown:window_too_short_for_2x`; no verdict: `:not_checked`) leave the margins MEASURED.
 The verdict travels with the evidence (`MarginEvidence.convergence`), the release contract requires it
-(`resolution_convergence_missing`), and the measurement plan is drawn at the rung used. Bin spacing (fs / N), effective
+(`resolution_convergence_missing`), and the measurement plan is drawn at the rung used. The verdict holds for the
+crossover it was read at: a PID or filter candidate moves the crossover, so its verdict is read again on the same rungs
+with that candidate (`AxisLoop.resolutionFor`, `loopModel.resolutionVerdictFor`); a loop without `resolutionFor` gives
+every candidate `resolution_convergence_unknown:candidate_not_checked` (MEASURED), and the bin spacing of the analysis
+used is checked against every crossover the margins are read at (`RESOLUTION_TARGET`, Δf ≤ 0.1 × fc:
+`resolution_target_not_met`, NOT_CONVERGED) — a verdict copied from the current tune is never enough (release re-gate
+2026-10-27, P2-2; `regate_stop_candidate_convergence.test.ts`). Bin spacing (fs / N), effective
 resolution (Hann ENBW, 1.5 bins) and uncertainty are reported apart. Regression: `adaptive_resolution.test.ts`
 (the 7-inch-like loop lands within 3 % / 2° of its truth on the 2048-sample rung; a 6 s window is said to be too
 short), `v2_craft_class_truth.test.ts` (B4: absolute fc and PM tolerances for the 7-inch-like class). On the real AIR65

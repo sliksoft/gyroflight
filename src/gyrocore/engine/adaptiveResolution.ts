@@ -60,6 +60,7 @@
 
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 import {
+    RESOLUTION_TARGET,
     UNCERTAINTY,
     type AnalysisProvenance,
     type AxisLoop,
@@ -69,7 +70,8 @@ import {
 } from "./loopModel";
 
 export const ADAPTIVE_RESOLUTION = Object.freeze({
-    maxBinSpacingOfCrossover: 0.1,
+    // Shared with loopModel.resolutionVerdictFor, which re-checks it at every candidate's crossover.
+    maxBinSpacingOfCrossover: RESOLUTION_TARGET.maxBinSpacingOfCrossover,
     hannEnbwBins: 1.5,
     maxCrossoverChange: 0.03,
     minPhaseMarginChangeDeg: 2,

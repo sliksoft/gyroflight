@@ -33,7 +33,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cdiv,
@@ -106,7 +106,7 @@ function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null =
     return loopMargins(
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, q, {
             support: declaredSupport(tf),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         }),
     );
@@ -384,7 +384,7 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
         const coarseTf = tfOf(uniform(200, 0.5), smooth);
         const sup = {
             support: declaredSupport(coarseTf),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         };
         const q = {
@@ -450,7 +450,7 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
             },
             {
                 support: declaredSupport(coarseTf),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             },
         );

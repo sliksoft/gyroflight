@@ -27,7 +27,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cmul,
@@ -75,7 +75,7 @@ const marginsAt = (coherence: number, segments = 32) => {
     return loopMargins(
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         }),
     );
@@ -111,7 +111,7 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         const m = loopMargins(
             buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(one),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
@@ -145,7 +145,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         tf.numSegments = 32;
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const m = loopMargins(loop);
@@ -162,7 +162,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const m = loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
@@ -177,7 +177,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const m = loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
             { cfg: hot },
@@ -209,7 +209,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
             return loopMargins(
                 buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                     support: declaredSupport(tf),
-                    resolution: declaredConvergence(),
+                    ...declaredResolution(),
                     sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
                 }),
                 { cfg: hot },
@@ -284,7 +284,7 @@ describe("the phase the margins are read on", () => {
         const m = loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
@@ -300,7 +300,7 @@ describe("the phase the margins are read on", () => {
         const m = loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );

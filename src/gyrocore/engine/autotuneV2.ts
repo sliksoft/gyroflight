@@ -79,6 +79,7 @@ import {
     type AxisLoop,
     type ChainValidation,
     type FrequencySupport,
+    type LoopCandidate,
     type LoopMargins,
     type ResolutionConvergence,
     type SweepInfo,
@@ -454,21 +455,38 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             : c.analysis
               ? [{ tf: c.tf, analysis: c.analysis, ...(c.support ? { support: c.support } : {}) }]
               : null;
-        const probe = (r: AnalysisOption) => {
-            const loop = buildAxisLoop(axis, r.tf, ctl.cfg, eff, chainOk(axis), attested, null, {
-                sweep,
-                analysis: r.analysis,
-                support: r.support ?? null,
-            });
-            return { loop, margins: loopMargins(loop) };
+        // One loop per rung (the plant of a rung does not depend on the candidate), read with the
+        // controller in force or with a candidate: the same probe serves the current tune's verdict
+        // and every candidate's (loopModel.resolutionVerdictFor, P2-2).
+        const rungLoops = new Map<AnalysisOption, AxisLoop>();
+        const rungLoop = (r: AnalysisOption) => {
+            let loop = rungLoops.get(r);
+            if (!loop) {
+                loop = buildAxisLoop(axis, r.tf, ctl.cfg, eff, chainOk(axis), attested, null, {
+                    sweep,
+                    analysis: r.analysis,
+                    support: r.support ?? null,
+                });
+                rungLoops.set(r, loop);
+            }
+            return loop;
         };
+        const probeWith = (cand: LoopCandidate | null) => (r: AnalysisOption) => {
+            const loop = rungLoop(r);
+            return { loop, margins: cand ? loopMargins(loop, cand) : loopMargins(loop) };
+        };
+        const probe = probeWith(null);
         let chosen = { tf: c.tf, analysis: c.analysis ?? null, support: c.support ?? null };
         let resolution: ResolutionConvergence | null = null;
+        let resolutionFor: ((cand: LoopCandidate) => ResolutionConvergence) | null = null;
         if (ladder) {
             const pick = chooseAnalysis(ladder, probe(ladder[0]).margins.crossoverHz);
             const r = ladder[pick.index];
             chosen = { tf: r.tf, analysis: r.analysis, support: r.support ?? null };
             resolution = resolutionConvergence(ladder, pick.index, probe, pick.reasons);
+            // A candidate (PID or filter change) moves the crossover: its verdict is read on the same
+            // rungs with that candidate, never copied from the current tune.
+            resolutionFor = (cand) => resolutionConvergence(ladder, pick.index, probeWith(cand), pick.reasons);
         }
         axes[name] = {
             loop: buildAxisLoop(axis, chosen.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis), {
@@ -476,6 +494,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                 analysis: chosen.analysis,
                 support: chosen.support,
                 resolution,
+                resolutionFor,
             }),
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,

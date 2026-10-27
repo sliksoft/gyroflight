@@ -34,7 +34,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cdiv,
@@ -76,7 +76,7 @@ function identify(maxHz: number, G: G) {
         m: loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         ),

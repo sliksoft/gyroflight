@@ -30,7 +30,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import { air65RollConfig, evaluateControllerFrf } from "../../src/js/blackbox/betaflight_digital_controller";
 import { closedLoopFromPlant, plantFrf, syntheticTransferFunction } from "../../src/js/blackbox/betaflight_open_loop";
 import { buildAxisLoop } from "../../src/gyrocore/engine/loopModel";
@@ -57,7 +57,7 @@ function rollLoop() {
     });
     return buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
         support: declaredSupport(tf),
-        resolution: declaredConvergence(),
+        ...declaredResolution(),
         sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
     });
 }

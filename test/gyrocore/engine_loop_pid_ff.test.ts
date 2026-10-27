@@ -27,7 +27,7 @@
 
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
     cadd,
@@ -88,7 +88,7 @@ describe("loop margins on a synthetic loop", () => {
     it("PM and |S| peak equal the ground truth of L = G·C_fb", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true, null, {
             support: declaredSupport(tfFor(cfg, 80)),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const m = loopMargins(loop);
@@ -108,7 +108,7 @@ describe("loop margins on a synthetic loop", () => {
             loopMargins(
                 buildAxisLoop(0, tf, cfg, steadyChain, false, true, null, {
                     support: declaredSupport(tf),
-                    resolution: declaredConvergence(),
+                    ...declaredResolution(),
                     sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
                 }),
             ).reasons,
@@ -117,7 +117,7 @@ describe("loop margins on a synthetic loop", () => {
             loopMargins(
                 buildAxisLoop(0, tf, cfg, steadyChain, true, false, null, {
                     support: declaredSupport(tf),
-                    resolution: declaredConvergence(),
+                    ...declaredResolution(),
                     sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
                 }),
             ).reasons,
@@ -127,7 +127,7 @@ describe("loop margins on a synthetic loop", () => {
             loopMargins(
                 buildAxisLoop(0, tf, cfg, moving, true, true, null, {
                     support: declaredSupport(tf),
-                    resolution: declaredConvergence(),
+                    ...declaredResolution(),
                     sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
                 }),
             ).reasons,
@@ -136,7 +136,7 @@ describe("loop margins on a synthetic loop", () => {
             loopMargins(
                 buildAxisLoop(0, tf, cfg, null, true, true, null, {
                     support: declaredSupport(tf),
-                    resolution: declaredConvergence(),
+                    ...declaredResolution(),
                     sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
                 }),
             ).reasons,
@@ -158,7 +158,7 @@ describe("loop margins on a synthetic loop", () => {
         const m = loopMargins(
             buildAxisLoop(0, short, cfg, steadyChain, true, true, null, {
                 support: declaredSupport(short),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
@@ -191,7 +191,7 @@ describe("PID search", () => {
             },
             {
                 support: declaredSupport(tfFor(cfg, 40)),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             },
         );
@@ -208,7 +208,7 @@ describe("PID search", () => {
         const bare = optimizeAxisPid(
             buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true, null, {
                 support: declaredSupport(tfFor(cfg, 40)),
-                resolution: declaredConvergence(),
+                ...declaredResolution(),
                 sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
             current,
@@ -221,7 +221,7 @@ describe("PID search", () => {
     it("with too little margin it restores the targets instead of chasing bandwidth", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 160), cfg, steadyChain, true, true, null, {
             support: declaredSupport(tfFor(cfg, 160)),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const before = loopMargins(loop);
@@ -236,7 +236,7 @@ describe("PID search", () => {
     it("a change is BLOCKED while its margins are not validated", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, false, null, {
             support: declaredSupport(tfFor(cfg, 40)),
-            resolution: declaredConvergence(),
+            ...declaredResolution(),
             sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const r = optimizeAxisPid(loop, current);
@@ -250,7 +250,7 @@ describe("feedforward", () => {
     const cfg = air65RollConfig();
     const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true, null, {
         support: declaredSupport(tfFor(cfg, 80)),
-        resolution: declaredConvergence(),
+        ...declaredResolution(),
         sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
     });
     it("is BLOCKED without acro stick data, naming the flight it needs", () => {

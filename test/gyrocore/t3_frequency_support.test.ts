@@ -68,7 +68,7 @@ import { axisKeys } from "../../src/gyrocore/releaseGate/verifiedTune";
 import { closedLoopChirpLog, ratePlant, type Plant } from "./harness/closedLoopBbl";
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
 import { declaredSupport } from "./harness/frequencySupport";
-import { declaredConvergence } from "./harness/resolutionConvergence";
+import { declaredResolution } from "./harness/resolutionConvergence";
 
 const HEADERS = Object.fromEntries([
     ...[...SIM_IDENTITY_HEADERS, ...BETAFLIGHT_TUNE_HEADERS].map((l) => [
@@ -87,14 +87,20 @@ const UNITY_CHAIN: EffectiveChain = {
     dynNotchHz: [],
 };
 const FS = 1000;
-const N = 512;
+// The primary grid: 1024 samples at 1 kHz (0.977 Hz bins). The K 40 loop crosses near 12 Hz, and the
+// resolution target (loopModel RESOLUTION_TARGET: bin spacing ≤ 0.1 × fc) is checked at every
+// crossover the margins are read at, the current tune's and each candidate's (release re-gate
+// 2026-10-27, P2-2); the 512-sample grid of the original counterexample (1.95 Hz) no longer meets
+// it there. The peak stays at 39.0625 Hz, on this grid too.
+const N = 1024;
 const BIN = FS / N;
-const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
-const PRIMARY = { segmentSamples: N, sampleRateHz: FS, windowSamples: 20000, segments: 77 };
-const FINE_N = 4096;
-const FINE = { segmentSamples: FINE_N, sampleRateHz: FS, windowSamples: 20000, segments: 8 };
+const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 40 };
+const WINDOW = 40000;
+const PRIMARY = { segmentSamples: N, sampleRateHz: FS, windowSamples: WINDOW, segments: 77 };
+const FINE_N = 8192;
+const FINE = { segmentSamples: FINE_N, sampleRateHz: FS, windowSamples: WINDOW, segments: 8 };
 const SOURCE = { sha256: "a".repeat(64), logIndex: 2 };
-const PEAK_HZ = 20 * BIN; // 39.0625 Hz: on the primary grid
+const PEAK_HZ = 40 * BIN; // 39.0625 Hz: on the primary grid
 
 /** Pole/zero pair at fr: peak gain ζz/ζp, phase back to 0 away from fr (LOOP_RESOLUTION's own class). */
 const dipole =
@@ -202,7 +208,7 @@ function build(
                       o.fineSupport === undefined ? declaredSupport(o.fine, { observedHz: [2, 400] }) : o.fineSupport,
               }
             : null,
-        { sweep: SWEEP, analysis: PRIMARY, support, resolution: declaredConvergence(BIN, FS) },
+        { sweep: SWEEP, analysis: PRIMARY, support, ...declaredResolution(BIN, FS) },
     );
 }
 
