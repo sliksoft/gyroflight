@@ -267,6 +267,8 @@ describe("the convergence verdict (H1)", () => {
     });
 });
 
+// Each case synthesises a Blackbox log and runs the whole engine (ladder, candidate probes, PID and
+// filter searches): about 3 s alone, more under the full suite's parallel load; an explicit timeout.
 describe("end to end on synthetic flights (SIMULATION)", () => {
     it("7-inch-like, 20 s sweep: the engine reads the loop on a finer rung and lands within 3 % / 2° of the truth", () => {
         const G = ratePlant(SEVEN_INCH);
@@ -291,7 +293,7 @@ describe("end to end on synthetic flights (SIMULATION)", () => {
             expect(m.evidence.level).toBe("MEASURED");
             expect(m.reasons.some((r) => r.startsWith("resolution_"))).toBe(true);
         }
-    });
+    }, 60_000);
 
     it("7-inch-like, 6 s sweep: too short for the resolution its crossover needs, which is said, and nothing is bounded", () => {
         const G = ratePlant(SEVEN_INCH);
@@ -312,7 +314,7 @@ describe("end to end on synthetic flights (SIMULATION)", () => {
         }
         expect(r.pid.find((p) => p.axis === "roll")!.status).toBe("BLOCKED");
         expect(r.releasableProposal).toBeNull();
-    });
+    }, 60_000);
 
     it("AIR65-like, 20 s sweep: the standard rung suffices, is checked against the next one and converges", () => {
         const G = ratePlant(AIR65_LIKE);
@@ -325,5 +327,5 @@ describe("end to end on synthetic flights (SIMULATION)", () => {
         expect(conv.status).toBe("CONVERGED");
         expect(Math.abs(m.crossoverHz! - t.fc) / t.fc).toBeLessThan(0.03);
         expect(Math.abs(m.measured.phaseMarginDeg! - t.pm)).toBeLessThan(2);
-    });
+    }, 60_000);
 });

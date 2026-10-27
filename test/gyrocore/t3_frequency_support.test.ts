@@ -513,6 +513,8 @@ describe("the observed generator range, not the header's", () => {
     });
 });
 
+// Each case synthesises a Blackbox log and runs the whole engine (ladder, candidate probes, PID and
+// filter searches): about 3 s alone, more under the full suite's parallel load; an explicit timeout.
 describe("end to end: support from a synthetic DEBUG_CHIRP log (SIMULATION)", () => {
     const plant = ratePlant({ K: 60, motorHz: 40, delayS: 0.002 });
     const sha = "e".repeat(64);
@@ -548,7 +550,7 @@ describe("end to end: support from a synthetic DEBUG_CHIRP log (SIMULATION)", ()
         const m = r.margins.roll!.current;
         expect(m.reasons.some((x) => x.startsWith("frequency_support_unknown"))).toBe(false);
         expect(m.reasons.some((x) => x.startsWith("sweep_generator_stopped"))).toBe(false);
-    });
+    }, 60_000);
 
     it("the generator stopped at 60 % of the crossover while the header claims 200 Hz: named, no margin, BLOCKED", () => {
         const fcHz = truth(plant, cfg).fc!;
@@ -572,7 +574,7 @@ describe("end to end: support from a synthetic DEBUG_CHIRP log (SIMULATION)", ()
         }
         expect(r.pid.find((p) => p.axis === "roll")!.status).toBe("BLOCKED");
         expect(r.releasableProposal?.items.length ?? 0).toBe(0);
-    });
+    }, 60_000);
 
     it("an excitation hole around the crossover: the hole's bins are unsupported, the band named, BLOCKED", () => {
         const fcHz = truth(plant, cfg).fc!;
@@ -608,7 +610,7 @@ describe("end to end: support from a synthetic DEBUG_CHIRP log (SIMULATION)", ()
             ).toBe(true);
         }
         expect(r.pid.find((p) => p.axis === "roll")!.status).toBe("BLOCKED");
-    });
+    }, 60_000);
 
     it("frequencySupportFor reuses the qualityV2 classes: outside the observed range is never support", () => {
         const tf = anaTF(SMOOTH, cfg, cohWith(138));
@@ -640,5 +642,5 @@ describe("end to end: support from a synthetic DEBUG_CHIRP log (SIMULATION)", ()
         });
         expect(unknown.observedHz).toBeNull();
         expect([...unknown.bins.values()].every((b) => b.verdict === "UNKNOWN")).toBe(true);
-    });
+    }, 60_000);
 });
