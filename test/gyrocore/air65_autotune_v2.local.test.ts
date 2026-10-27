@@ -122,4 +122,53 @@ describe.skipIf(!present)("AIR65: autotune engine v2 end to end (local only)", (
         }
         writeReport("air65_autotune_v2", out);
     }, 1_800_000);
+
+    it("frequency support and adaptive resolution on the real sweeps (T3 audit, 2026-10-27)", () => {
+        const a = load("bbl18")[0];
+        const b = load("bbl19")[0];
+        const r18 = runAutotuneV2({ primary: a, others: [], verifiedTune: null, createdAt: "2026-10-27T00:00:00Z" });
+        const r19 = runAutotuneV2({ primary: b, others: [], verifiedTune: null, createdAt: "2026-10-27T00:00:00Z" });
+        for (const [r, log] of [
+            [r18, a],
+            [r19, b],
+        ] as const) {
+            for (const axis of ["roll", "pitch", "yaw"] as const) {
+                const c = log.chirp[axis]!;
+                // DEBUG_CHIRP is logged: the support of every rung is known, the observed generator range too.
+                expect(c.support?.observedHz).not.toBeNull();
+                expect(c.analyses!.length).toBeGreaterThanOrEqual(3);
+                expect(c.analyses![0].analysis.segmentSamples).toBe(2048);
+                const m = r.margins[axis]!.current;
+                // The crossovers are supported: no unsupported or unknown bin inside the decision band
+                // (the T3 audit's finding on these logs), and every rung used converges against the next.
+                expect(m.reasons.some((x) => x.startsWith("crossover_band_unsupported"))).toBe(false);
+                expect(m.reasons.some((x) => x.startsWith("frequency_support_unknown"))).toBe(false);
+                expect(m.evidence.convergence?.status).toBe("CONVERGED");
+                expect(m.evidence.convergence!.usedSegmentSamples).toBeGreaterThanOrEqual(2048);
+                // One flight, no Verified Tune, margins read on bins only: nothing is proposed.
+                expect(m.evidence.level).toBe("MEASURED");
+                expect(r.pid.find((p) => p.axis === axis)!.status).toBe("BLOCKED");
+            }
+            expect(r.releasableProposal).toBeNull();
+        }
+        // 19 October roll: the one-bin coherence hole near 43 Hz inside the decision band is a gap now.
+        expect(r19.margins.roll!.current.reasons.some((x) => x.startsWith("unidentified_bins_inside_band:"))).toBe(
+            true,
+        );
+        // 19 October pitch / yaw: the generator stopped at 206 / 268 Hz of a 600 Hz header. Above
+        // 1.5 × the band end it does not touch the margins, and it is said with the evidence.
+        for (const axis of ["pitch", "yaw"] as const) {
+            const c = b.chirp[axis]!;
+            expect(c.support!.observedHz![1]).toBeLessThan(300);
+            expect(
+                r19.margins[axis]!.current.evidence.assumptions.some((x) =>
+                    x.startsWith("sweep_generator_stopped_at:"),
+                ),
+            ).toBe(true);
+        }
+        // 18 October: the generator reached the header's end on every axis.
+        for (const axis of ["roll", "pitch", "yaw"] as const) {
+            expect(a.chirp[axis]!.support!.observedHz![1]).toBeGreaterThan(590);
+        }
+    }, 1_800_000);
 });

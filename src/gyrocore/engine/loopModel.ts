@@ -508,6 +508,23 @@ export interface MarginEvidence {
     uncertainty?: MarginUncertainty | null;
     /** The resolution-convergence verdict of the analysis used (H1); absent or not CONVERGED: no bounds. */
     convergence?: ResolutionConvergence | null;
+    /**
+     * Diagnostic (audit B2): the coherence setpoint → gyro over the decision band
+     * decisionBandStartHz(fc) … band end, on every grid bin there (kept or not). Shown next to the
+     * quality gate's fixed-band mean; it changes no verdict.
+     */
+    decisionBand?: DecisionBandCoherence | null;
+}
+
+/** Coherence over the decision band of a loop (diagnostic, audit B2). */
+export interface DecisionBandCoherence {
+    fromHz: number;
+    toHz: number;
+    /** Grid bins inside the band, and how many of them reached the loop. */
+    gridBins: number;
+    keptBins: number;
+    minCoherence: number;
+    meanCoherence: number;
 }
 
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -1003,6 +1020,27 @@ export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | nul
         }
     }
     return out;
+}
+
+/** The coherence over the decision band of `loop` around `fc`, up to the last kept bin (audit B2). */
+export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: number): DecisionBandCoherence | null {
+    if (pts.length < 2) return null;
+    const fromHz = decisionBandStartHz(fc);
+    const toHz = pts[pts.length - 1].f;
+    const kept = new Set(pts.map((p) => p.f));
+    let gridBins = 0;
+    let keptBins = 0;
+    let min = Infinity;
+    let sum = 0;
+    for (const b of loop.plant.bins) {
+        if (!(b.frequencyHz >= fromHz) || b.frequencyHz > toHz) continue;
+        const g2 = Number.isFinite(b.coherence) ? b.coherence : 0;
+        gridBins++;
+        if (kept.has(b.frequencyHz)) keptBins++;
+        min = Math.min(min, g2);
+        sum += g2;
+    }
+    return gridBins ? { fromHz, toHz, gridBins, keptBins, minCoherence: min, meanCoherence: sum / gridBins } : null;
 }
 
 /**
@@ -1596,6 +1634,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     // band or support that is missing or unknown (FREQUENCY_SUPPORT) leave no bounds.
     const holes = supportIssues(loop, pts, fc);
     reasons.push(...holes);
+    evidence.decisionBand = decisionBandCoherence(loop, pts, fc);
     // The analysis must be shown converged in resolution (H1): a coarse analysis of a low crossover
     // reads systematically optimistic margins. Not checked, unknown or not converged: no bounds.
     const conv = loop.resolution;

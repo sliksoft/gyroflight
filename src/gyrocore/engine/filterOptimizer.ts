@@ -99,8 +99,11 @@ interface Eval {
     phaseGain: number[];
 }
 
+/** Welch segment of the noise estimate (samples). */
+export const NOISE_WELCH_SEGMENT = 1024;
+
 function bandPower(signal: Float64Array, fs: number): number | null {
-    const ps = welchPowerSpectrum(signal, fs, 1024, 0.5);
+    const ps = welchPowerSpectrum(signal, fs, NOISE_WELCH_SEGMENT, 0.5);
     if (!ps) return null;
     let p = 0;
     for (let k = 0; k < ps.frequencies.length; k++) {
@@ -109,10 +112,37 @@ function bandPower(signal: Float64Array, fs: number): number | null {
     return p * (ps.frequencies[1] - ps.frequencies[0]);
 }
 
-function maskedConcat(x: ArrayLike<number>, valid: Uint8Array, mask: Uint8Array): Float64Array {
-    const out: number[] = [];
-    for (let k = 0; k < valid.length; k++) if (valid[k] && mask[k] && Number.isFinite(x[k])) out.push(Number(x[k]));
-    return Float64Array.from(out);
+/**
+ * Noise-band power of `x` over the samples that are both valid and in flight (`valid`, `mask`),
+ * estimated per contiguous run of such samples and averaged over the runs, each weighted by the
+ * Welch segments it holds (measurement audit B6). Concatenating the runs before one Welch estimate
+ * would splice unrelated samples together: every splice is a step the window turns into broadband
+ * power inside the noise band, which is then charged to the filters. A run shorter than one Welch
+ * segment carries no estimate; null when no run is long enough (the caller treats that as unknown).
+ * Exported for its test.
+ */
+export function maskedBandPower(x: ArrayLike<number>, valid: Uint8Array, mask: Uint8Array, fs: number): number | null {
+    let weighted = 0;
+    let weight = 0;
+    let run: number[] = [];
+    const flush = () => {
+        if (run.length >= NOISE_WELCH_SEGMENT) {
+            const p = bandPower(Float64Array.from(run), fs);
+            if (p !== null) {
+                // welchPowerSpectrum's segment count at 50 % overlap.
+                const segments = Math.floor((run.length - NOISE_WELCH_SEGMENT) / (NOISE_WELCH_SEGMENT / 2)) + 1;
+                weighted += p * segments;
+                weight += segments;
+            }
+        }
+        run = [];
+    };
+    for (let k = 0; k < valid.length; k++) {
+        if (valid[k] && mask[k] && Number.isFinite(x[k])) run.push(Number(x[k]));
+        else flush();
+    }
+    flush();
+    return weight > 0 ? weighted / weight : null;
 }
 
 /** Worst phase margin over the qualified axes (a rejected measurement never drives a proposal). */
@@ -126,7 +156,7 @@ function evaluateChain(ctx: FilterContext, cfg: GyroChainConfig, base: Eval | nu
     const sim = simulateGyroChain(ctx.input, cfg);
     let noise = 0;
     for (let a = 0; a < 3; a++)
-        noise += bandPower(maskedConcat(sim.out[a], sim.valid, ctx.flightMask), ctx.sampleRateHz) ?? Number.NaN;
+        noise += maskedBandPower(sim.out[a], sim.valid, ctx.flightMask, ctx.sampleRateHz) ?? Number.NaN;
     const margins: LoopMargins[] = [];
     const phaseGain: number[] = [];
     for (const ax of ctx.axes) {
@@ -302,7 +332,7 @@ function optimizeDterm(ctx: FilterContext): FilterGroupResult {
                 { timeUs: ctx.input.timeUs, gyro: ctx.gyroAdc[a.loop.axis], rcThrottle: ctx.input.rcThrottle },
                 cand,
             );
-            p += bandPower(maskedConcat(sim.d, sim.valid, ctx.flightMask), ctx.sampleRateHz) ?? Number.NaN;
+            p += maskedBandPower(sim.d, sim.valid, ctx.flightMask, ctx.sampleRateHz) ?? Number.NaN;
         }
         return p;
     };

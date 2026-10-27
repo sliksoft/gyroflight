@@ -34,6 +34,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useAutotuneStore } from "@/stores/autotune";
 import UiBox from "../../elements/UiBox.vue";
 import * as d3 from "d3";
+import { contiguousRuns, unwrapPhaseByRun } from "./bodeTraceRuns";
 import type { AxisName } from "@/composables/useAutotune";
 
 interface FrequencyPoint {
@@ -300,25 +301,9 @@ function drawPhase(
 
     const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
-    // Unwrap phase per trace
-    const unwrappedTraces = traces.map((t) => {
-        const pts: BodePoint[] = [];
-        for (let i = 0; i < t.points.length; i++) {
-            if (i === 0) {
-                pts.push({ ...t.points[i] });
-            } else {
-                let diff = t.points[i].phase - t.points[i - 1].phase;
-                while (diff > 180) {
-                    diff -= 360;
-                }
-                while (diff < -180) {
-                    diff += 360;
-                }
-                pts.push({ ...t.points[i], phase: pts[i - 1].phase + diff });
-            }
-        }
-        return { ...t, points: pts };
-    });
+    // Unwrap phase per trace, restarting at every gap in the coherent bins (audit B7): across a gap the
+    // loop is not measured, so no unwrap step is taken there and no line is drawn there.
+    const unwrappedTraces = traces.map((t) => ({ ...t, points: unwrapPhaseByRun(t.points) }));
 
     let yMin = Infinity;
     let yMax = -Infinity;
@@ -566,13 +551,25 @@ function drawTracesAndAxes<P extends FrequencyPoint>(
         .y((d) => yScale(yValue(d)))
         .curve(d3.curveMonotoneX);
 
+    // One path per contiguous run of coherent bins: a line is never drawn across bins that were
+    // left out (audit B7), and a lone bin is drawn as a dot.
     for (const t of traces) {
-        g.append("path")
-            .datum(t.points)
-            .attr("fill", "none")
-            .attr("stroke", t.color)
-            .attr("stroke-width", 2)
-            .attr("d", line);
+        for (const run of contiguousRuns(t.points)) {
+            if (run.length === 1) {
+                g.append("circle")
+                    .attr("cx", xScale(run[0].freq))
+                    .attr("cy", yScale(yValue(run[0])))
+                    .attr("r", 2)
+                    .attr("fill", t.color);
+                continue;
+            }
+            g.append("path")
+                .datum(run)
+                .attr("fill", "none")
+                .attr("stroke", t.color)
+                .attr("stroke-width", 2)
+                .attr("d", line);
+        }
     }
 
     g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(8, "~s"));

@@ -496,6 +496,21 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (chirp.state === "rejected") {
             // Diagnostics only: margins on the coherent bins, never a proposal.
             const m = loopMargins(ax.loop);
+            // Audit B2, diagnostic only: the quality gate judges a fixed band (5–100 Hz mean coherence);
+            // when the decision band around this loop's crossover is fully kept and supported, say so
+            // next to the rejection. The rejection stands: a gate changes only with H1–H8 evidence.
+            const band = m.evidence.decisionBand;
+            const supportDefect = m.reasons.some((r) =>
+                /^(unidentified_bins_inside_band|crossover_band_unsupported|crossover_neighbour_bins_missing|frequency_support_unknown|sweep_generator_stopped_early)/.test(
+                    r,
+                ),
+            );
+            const decisionBandNote =
+                band && band.keptBins === band.gridBins && !supportDefect
+                    ? [
+                          `fixed_band_gate_rejected_while_decision_band_supported:${band.fromHz.toFixed(1)}-${band.toHz.toFixed(1)}Hz:min_coherence:${band.minCoherence.toFixed(2)}`,
+                      ]
+                    : [];
             pid.push({
                 axis: name,
                 current,
@@ -508,6 +523,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                 reasons: [
                     "chirp_measurement_rejected",
                     ...(chirp.qualificationReasons ?? []),
+                    ...decisionBandNote,
                     `required_measurement:chirp_${name}_meeting_qualification`,
                 ],
             });

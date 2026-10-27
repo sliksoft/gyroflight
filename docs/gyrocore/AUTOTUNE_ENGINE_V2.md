@@ -308,6 +308,16 @@ short), `v2_craft_class_truth.test.ts` (B4: absolute fc and PM tolerances for th
 logs (4 kHz, 18 / 19 October) roll and pitch keep the 2048-sample rung (fc 26–28 Hz), yaw moves to 4096 (fc 16 Hz),
 and every rung converges against the next (|Δfc| ≤ 0.34 %, |ΔPM| ≤ 1.9°, σ_PM 3–5°).
 
+Decision-band coherence (`MarginEvidence.decisionBand`, audit B2, diagnostic only): the coherence setpoint → gyro over
+every grid bin of max(fc / 4, 2 Hz) … band end, kept or not, next to the quality gate's fixed 5–100 Hz mean. A rejected
+measurement whose decision band is fully kept and supported gets
+`fixed_band_gate_rejected_while_decision_band_supported:<band>:min_coherence:<γ²>` with its rejection; the rejection
+stands (a gate changes only with H1–H8 evidence). Noise estimate of the filter optimizer (audit B6): the noise-band power
+is taken per contiguous run of valid in-flight samples and averaged over the runs weighted by their Welch segments
+(`maskedBandPower`), never over spliced stretches (a splice is a step the window charges to the noise band;
+`filter_noise_contiguous.test.ts`). Bode plot (audit B7): traces are drawn per run of grid-adjacent coherent bins and
+the phase unwrap restarts at every gap (`bodeTraceRuns.ts`, `test/components/bodeTraceRuns.test.ts`).
+
 The bounds hold for every loop in the per-bin uncertainty
 set (each bin's L within ±2 ε in gain and phase, independently, either sign; between bins any curve within the
 resolved-class allowance of the chord, i.e. within `allowance(i)` of the measured chord: the "capsule" of the step).
