@@ -56,7 +56,8 @@ export function simulatedQualifiedEvidence(pm: number, gm: number, s: number, re
                 includedInBounds: true,
                 coverage: 2,
                 maxRelErr: 0.01,
-                phaseMarginSigmaDeg: (0.01 * 180) / Math.PI,
+                // The same σ_PM as the declared convergence verdict (one source; marginEvidenceIssues).
+                phaseMarginSigmaDeg: 0,
                 averages: [1, 1],
             },
             repeatability: { status: "PASS", meanAbsGRel: 0.05 },

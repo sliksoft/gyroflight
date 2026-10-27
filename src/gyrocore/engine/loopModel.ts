@@ -608,7 +608,10 @@ function budgetConsistent(b: UncertaintyBudget, e: Partial<MarginEvidence>): boo
             : null;
     const st = b.statistical;
     const rp = b.repeatability;
-    const sigmaOk = st.phaseMarginSigmaDeg === null || (finite(st.phaseMarginSigmaDeg) && st.phaseMarginSigmaDeg >= 0);
+    const sigmaOk =
+        (st.phaseMarginSigmaDeg === null || (finite(st.phaseMarginSigmaDeg) && st.phaseMarginSigmaDeg >= 0)) &&
+        // A σ_PM the H1 verdict carries is the budget's (Codex follow-up): exact copy.
+        (!finite(c?.phaseMarginSigmaDeg) || sameNum(st.phaseMarginSigmaDeg, c!.phaseMarginSigmaDeg));
     const repOk =
         ["PASS", "PARTIAL", "FAIL", "UNTESTED"].includes(rp.status) &&
         (rp.status === "UNTESTED" ? rp.meanAbsGRel === null : finite(rp.meanAbsGRel) && rp.meanAbsGRel >= 0);
@@ -1359,7 +1362,13 @@ export function uncertaintyBudgetOf(loop: AxisLoop, evidence: MarginEvidence, fc
             includedInBounds: !!evidence.uncertainty,
             coverage: UNCERTAINTY.coverage,
             maxRelErr: evidence.uncertainty?.maxRelErr ?? maxRelErr,
-            phaseMarginSigmaDeg: fc !== null && finite(fc) ? phaseMarginSigmaDegAt(loop, fc) : null,
+            // One source: the H1 verdict's σ_PM when it has one (the same relative error at the same
+            // crossover), otherwise the loop's own at this crossover.
+            phaseMarginSigmaDeg: finite(conv?.phaseMarginSigmaDeg)
+                ? conv!.phaseMarginSigmaDeg
+                : fc !== null && finite(fc)
+                  ? phaseMarginSigmaDegAt(loop, fc)
+                  : null,
             averages: loop.uncertainty?.averages ?? null,
         },
         repeatability: { status: "UNTESTED", meanAbsGRel: null },

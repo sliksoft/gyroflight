@@ -96,6 +96,10 @@ describe("the release contract requires the budget and refuses one that contradi
             { ...b, resolution: { ...b.resolution, deltaPhaseMarginDeg: -5 } },
             { ...b, unknown: ["statistical"] },
             { ...b, statistical: { ...b.statistical, phaseMarginSigmaDeg: -1 } },
+            // σ_PM must be the verdict's when the verdict carries one (Codex follow-up): 0 here.
+            { ...b, statistical: { ...b.statistical, phaseMarginSigmaDeg: 99 } },
+            { ...b, statistical: { ...b.statistical, phaseMarginSigmaDeg: null } },
+            { ...b, statistical: { ...b.statistical, phaseMarginSigmaDeg: 0.5 } },
             { ...b, repeatability: { status: "UNTESTED" as const, meanAbsGRel: 0.1 } },
             { ...b, repeatability: { status: "PASS" as const, meanAbsGRel: null } },
             { ...b, resolution: { ...b.resolution, status: "UNKNOWN" as const } },
@@ -122,6 +126,8 @@ describe("the budget of real engine margins (one synthetic flight, then two)", (
         // Resolution: the H1 verdict of the rung used, with its deltas.
         expect(b.resolution.status).toBe(m.evidence.convergence!.status);
         expect(b.resolution.deltaCrossoverPct).toBe(m.evidence.convergence!.deltaCrossoverPct);
+        // σ_PM has one source: the verdict's, at the same crossover.
+        expect(b.statistical.phaseMarginSigmaDeg).toBe(m.evidence.convergence!.phaseMarginSigmaDeg);
         // Statistical: known per bin, not folded into bounds (there are none), σ_PM at the crossover.
         expect(b.statistical.known).toBe(true);
         expect(b.statistical.includedInBounds).toBe(false);
