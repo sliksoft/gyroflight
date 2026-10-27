@@ -83,6 +83,7 @@ import {
     type LoopMargins,
     type ResolutionConvergence,
     type SweepInfo,
+    withRepeatability,
 } from "./loopModel";
 import { chooseAnalysis, resolutionConvergence, type AnalysisOption } from "./adaptiveResolution";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
@@ -726,8 +727,9 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                 candSim && candChain
                     ? effectiveChainFrf(candSim, candChain, ax.loop.axis, ax.window[0], ax.window[1])
                     : null;
-            const proposed = loopMargins(ax.loop, { cfg, chain });
-            margins[name] = { current: loopMargins(ax.loop), proposed };
+            // Repeatability between flights (the cross-log plant check above) in each budget (B2).
+            const proposed = withRepeatability(loopMargins(ax.loop, { cfg, chain }), crossLogPlant[name]);
+            margins[name] = { current: withRepeatability(loopMargins(ax.loop), crossLogPlant[name]), proposed };
             releaseMargins.push({
                 axis: name,
                 status: proposed.status,

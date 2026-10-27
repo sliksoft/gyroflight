@@ -60,6 +60,7 @@
 
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 import {
+    phaseMarginSigmaDegAt,
     RESOLUTION_TARGET,
     UNCERTAINTY,
     type AnalysisProvenance,
@@ -137,22 +138,6 @@ export function chooseAnalysis(
     };
 }
 
-/** σ of the phase margin (degrees) from the loop's per-bin relative error at the bin nearest `fc`. */
-function phaseMarginSigmaDeg(loop: AxisLoop, fc: number): number | null {
-    const relErr = loop.uncertainty.relErr;
-    if (!relErr) return null;
-    let best: number | null = null;
-    let dist = Infinity;
-    for (const [f, e] of relErr) {
-        const d = Math.abs(f - fc);
-        if (d < dist) {
-            dist = d;
-            best = e;
-        }
-    }
-    return best === null ? null : (best * 180) / Math.PI;
-}
-
 /**
  * Whether the margins read on rung `index` are converged against the next finer rung of the same
  * samples (H1). `probe` builds the loop and margins of one rung with the same controller, chain,
@@ -202,7 +187,7 @@ export function resolutionConvergence(
     }
     const dFc = (fc1 - fc0) / fc0;
     const dPm = pm1 - pm0;
-    const sigma = phaseMarginSigmaDeg(a.loop, fc0);
+    const sigma = phaseMarginSigmaDegAt(a.loop, fc0);
     const pmLimit = Math.max(ADAPTIVE_RESOLUTION.minPhaseMarginChangeDeg, sigma === null ? 0 : 2 * sigma);
     const reasons = [...chosenReasons];
     if (Math.abs(dFc) > ADAPTIVE_RESOLUTION.maxCrossoverChange) {

@@ -514,6 +514,54 @@ export interface MarginEvidence {
      * quality gate's fixed-band mean; it changes no verdict.
      */
     decisionBand?: DecisionBandCoherence | null;
+    /**
+     * Where the uncertainty of these margins comes from, component by component (continuation B2).
+     * A report of the gates, not a new gate of its own: every component either bounds the margins
+     * (statistical, resolution, model class; loopMargins) or blocks the release (repeatability between
+     * flights: the release model gate `cross_log_plant`). marginEvidenceIssues requires it present and
+     * consistent with the evidence it describes (fail-closed).
+     */
+    uncertaintyBudget?: UncertaintyBudget | null;
+}
+
+/** The uncertainty of one set of margins, by component (MarginEvidence.uncertaintyBudget). */
+export interface UncertaintyBudget {
+    /** Agreement of the analysis with the next finer rung of the same samples (H1). Not accuracy. */
+    resolution: {
+        status: ResolutionConvergence["status"] | "NOT_CHECKED";
+        deltaCrossoverPct: number | null;
+        deltaPhaseMarginDeg: number | null;
+    };
+    /**
+     * The random (Bendat & Piersol) error of the identified loop: known when every bin's relative
+     * error is; `phaseMarginSigmaDeg` at the crossover is given whatever the evidence level, so a
+     * MEASURED phase margin carries its spread too; `includedInBounds` when the bounds fold it in.
+     */
+    statistical: {
+        known: boolean;
+        includedInBounds: boolean;
+        coverage: number;
+        maxRelErr: number | null;
+        phaseMarginSigmaDeg: number | null;
+        averages: [number, number] | null;
+    };
+    /**
+     * Repeatability between independent flights of the same craft and configuration: the cross-log
+     * plant check (autotuneV2). UNTESTED until the engine has compared another flight; it blocks the
+     * release unless PASS (release model gate), not the bounds.
+     */
+    repeatability: { status: "PASS" | "PARTIAL" | "FAIL" | "UNTESTED"; meanAbsGRel: number | null };
+    /**
+     * Systematic errors: what the model class assumes, whether an independent finer flight
+     * qualified it, whether the gyro chain model is validated, and what is not quantified at all.
+     */
+    systematic: {
+        modelClass: ModelClassQualification["verdict"] | "NOT_QUALIFIED";
+        chainValidated: boolean;
+        notQuantified: string[];
+    };
+    /** The components not known for these margins (each leaves the margins short of a release). */
+    unknown: string[];
 }
 
 /** Coherence over the decision band of a loop (diagnostic, audit B2). */
@@ -578,6 +626,26 @@ export function marginEvidenceIssues(evidence: unknown): string[] {
     const c = e.convergence as Partial<ResolutionConvergence> | null | undefined;
     if (!c || typeof c !== "object" || c.status !== "CONVERGED" || !finite(c.usedBinSpacingHz)) {
         out.push("resolution_convergence_missing");
+    }
+    // The uncertainty budget must be there and agree with the evidence it describes (continuation
+    // B2; fail-closed). The components themselves are judged by the checks above and below; here a
+    // budget that is missing, or that says something else than the evidence, is refused.
+    const b = e.uncertaintyBudget as Partial<UncertaintyBudget> | null | undefined;
+    if (!b || typeof b !== "object" || !b.statistical || !b.resolution || !b.systematic || !b.repeatability) {
+        out.push("uncertainty_budget_missing");
+    } else {
+        const qv = (e.qualification as Partial<ModelClassQualification> | null | undefined)?.verdict ?? "NOT_QUALIFIED";
+        const cv = (e.convergence as Partial<ResolutionConvergence> | null | undefined)?.status ?? "NOT_CHECKED";
+        const bounded = !!u && typeof u === "object";
+        if (
+            b.statistical.includedInBounds !== bounded ||
+            (bounded && b.statistical.known !== true) ||
+            b.resolution.status !== cv ||
+            b.systematic.modelClass !== qv ||
+            !Array.isArray(b.unknown)
+        ) {
+            out.push("uncertainty_budget_inconsistent");
+        }
     }
     const q = e.qualification as Partial<ModelClassQualification> | null | undefined;
     if (!q || typeof q !== "object") {
@@ -1105,17 +1173,26 @@ export function supportIssues(loop: AxisLoop, pts: LoopPoint[], fc: number | nul
 }
 
 /**
- * Whether the grid `freqs` (ascending, the plant's bins, DC included) is uniform: every step within
- * 1e-6 relative of the median step. A reason when it is not, else null.
+ * Whether the grid `freqs` (ascending, the plant's bins, DC included) is a uniform grid with bins
+ * removed: most steps equal the smallest one and others are integer multiples of it. That is the
+ * shape of a Welch grid whose transfer function lost bins, and it hides its own gaps from the gap
+ * rule. A grid that is non-uniform by construction (log-spaced, jittered: no step a clean multiple
+ * of another) is not such a grid. A reason when it is (or when a step is not positive), else null.
  */
 export function gridNonUniformity(freqs: readonly number[]): string | null {
     if (freqs.length < 3) return null;
     const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
     if (steps.some((d) => !(d > 0))) return "frequency_grid_not_uniform:non_positive_step";
-    const sorted = [...steps].sort((a, b) => a - b);
-    const step = sorted[Math.floor(sorted.length / 2)];
-    const off = steps.filter((s) => Math.abs(s - step) > 1e-6 * step).length;
-    return off ? `frequency_grid_not_uniform:${off}_steps` : null;
+    const base = Math.min(...steps);
+    const tol = 1e-6;
+    const onBase = steps.filter((d) => Math.abs(d - base) <= tol * base).length;
+    if (onBase * 2 < steps.length) return null;
+    let removed = 0;
+    for (const d of steps) {
+        const k = d / base;
+        if (k >= 1.5 && Math.abs(k - Math.round(k)) <= tol * k) removed += Math.round(k) - 1;
+    }
+    return removed ? `frequency_grid_not_uniform:${removed}_bins_removed` : null;
 }
 
 /** Why the grid bins of the decision band did not reach the loop (diagnostic, audit B2). */
@@ -1167,6 +1244,91 @@ export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: numb
     return gridBins
         ? { fromHz, toHz, gridBins, keptBins, minCoherence: min, meanCoherence: sum / gridBins, dropped }
         : null;
+}
+
+/**
+ * σ of the phase margin (degrees) at the crossover `fc`, from the loop's per-bin relative error at
+ * the bin nearest `fc` (the relative error of L in magnitude is its phase error in radians); null
+ * when the error is not known.
+ */
+export function phaseMarginSigmaDegAt(loop: Pick<AxisLoop, "uncertainty">, fc: number): number | null {
+    const relErr = loop.uncertainty.relErr;
+    if (!relErr) return null;
+    let best: number | null = null;
+    let dist = Infinity;
+    for (const [f, e] of relErr) {
+        const d = Math.abs(f - fc);
+        if (d < dist) {
+            dist = d;
+            best = e;
+        }
+    }
+    return best === null ? null : (best * 180) / Math.PI;
+}
+
+/** Systematic error sources the engine names but does not quantify (UncertaintyBudget.systematic). */
+const NOT_QUANTIFIED = Object.freeze([
+    "resolution_convergence_is_agreement_between_rungs_not_accuracy",
+    "input_power_floor_not_calibrated_on_amplitude_scheduled_sweeps",
+]);
+
+/** The uncertainty budget of margins read on `loop` at crossover `fc` with `evidence` (continuation B2). */
+export function uncertaintyBudgetOf(loop: AxisLoop, evidence: MarginEvidence, fc: number | null): UncertaintyBudget {
+    const conv = evidence.convergence ?? null;
+    const relErr = loop.uncertainty?.relErr ?? null;
+    const maxRelErr = relErr && relErr.size ? Math.max(...relErr.values()) : null;
+    const q = evidence.qualification;
+    const budget: UncertaintyBudget = {
+        resolution: {
+            status: conv?.status ?? "NOT_CHECKED",
+            deltaCrossoverPct: conv?.deltaCrossoverPct ?? null,
+            deltaPhaseMarginDeg: conv?.deltaPhaseMarginDeg ?? null,
+        },
+        statistical: {
+            known: relErr !== null,
+            includedInBounds: !!evidence.uncertainty,
+            coverage: UNCERTAINTY.coverage,
+            maxRelErr: evidence.uncertainty?.maxRelErr ?? maxRelErr,
+            phaseMarginSigmaDeg: fc !== null && finite(fc) ? phaseMarginSigmaDegAt(loop, fc) : null,
+            averages: loop.uncertainty?.averages ?? null,
+        },
+        repeatability: { status: "UNTESTED", meanAbsGRel: null },
+        systematic: {
+            modelClass: q ? q.verdict : "NOT_QUALIFIED",
+            chainValidated: loop.chainValidated,
+            notQuantified: [...NOT_QUANTIFIED, ...(loop.chainValidated ? [] : ["gyro_chain_model"])],
+        },
+        unknown: [],
+    };
+    return { ...budget, unknown: budgetUnknowns(budget) };
+}
+
+function budgetUnknowns(b: UncertaintyBudget): string[] {
+    const out: string[] = [];
+    if (!b.statistical.known) out.push("statistical");
+    if (b.resolution.status !== "CONVERGED") out.push("resolution");
+    if (b.repeatability.status === "UNTESTED") out.push("repeatability_between_flights");
+    if (b.systematic.modelClass !== "PASS") out.push("model_class");
+    return out;
+}
+
+/**
+ * The same margins with the repeatability between flights the engine measured (the cross-log plant
+ * check, autotuneV2); a status other than PASS / PARTIAL / FAIL is UNTESTED.
+ */
+export function withRepeatability(
+    m: LoopMargins,
+    crossLog: { status: string; meanAbsGRel: number } | null | undefined,
+): LoopMargins {
+    const b = m.evidence.uncertaintyBudget;
+    if (!b) return m;
+    const status = crossLog && ["PASS", "PARTIAL", "FAIL"].includes(crossLog.status) ? crossLog.status : "UNTESTED";
+    const repeatability = {
+        status: status as UncertaintyBudget["repeatability"]["status"],
+        meanAbsGRel: status === "UNTESTED" ? null : crossLog!.meanAbsGRel,
+    };
+    const next = { ...b, repeatability };
+    return { ...m, evidence: { ...m.evidence, uncertaintyBudget: { ...next, unknown: budgetUnknowns(next) } } };
 }
 
 /**
@@ -1723,6 +1885,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         // that was never excited is a support defect, not a loop property).
         reasons.push(...supportIssues(loop, pts, null));
         if (stop) reasons.push(`sweep_generator_stopped_early:${stop[0].toFixed(1)}<${stop[1].toFixed(1)}Hz`);
+        evidence.uncertaintyBudget = uncertaintyBudgetOf(loop, evidence, null);
         return {
             status: pts.length < 4 ? "UNAVAILABLE" : "NOT_VALIDATED",
             crossoverHz: null,
@@ -1825,6 +1988,8 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
             gm = both(gm, q.gainMarginDb, Math.min);
             sPeak = both(sPeak, q.sensitivityPeakDb, Math.max);
         }
+        // The budget describes the evidence as it stands now (the promotion check reads it).
+        evidence.uncertaintyBudget = uncertaintyBudgetOf(loop, evidence, fc);
         const issues = marginEvidenceIssues({ ...evidence, level: "VALIDATED" });
         if (!issues.length) {
             evidence.level = "VALIDATED";
@@ -1851,6 +2016,7 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
         }
     }
     if (stopNote) evidence.assumptions.push(stopNote);
+    evidence.uncertaintyBudget = uncertaintyBudgetOf(loop, evidence, fc);
     return {
         status: !reasons.length && evidence.level === "VALIDATED" ? "VALIDATED" : "NOT_VALIDATED",
         crossoverHz: fc,

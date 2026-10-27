@@ -48,6 +48,21 @@ export function simulatedQualifiedEvidence(pm: number, gm: number, s: number, re
         },
         // The (simulated) analysis is declared converged in resolution, as the release contract requires.
         convergence: declaredConvergence(resolutionHz),
+        // The (simulated) uncertainty budget, consistent with the evidence above (B2).
+        uncertaintyBudget: {
+            resolution: { status: "CONVERGED", deltaCrossoverPct: 0, deltaPhaseMarginDeg: 0 },
+            statistical: {
+                known: true,
+                includedInBounds: true,
+                coverage: 2,
+                maxRelErr: 0.01,
+                phaseMarginSigmaDeg: (0.01 * 180) / Math.PI,
+                averages: [1, 1],
+            },
+            repeatability: { status: "PASS", meanAbsGRel: 0.05 },
+            systematic: { modelClass: "PASS", chainValidated: true, notQuantified: [] },
+            unknown: [],
+        },
         qualification: {
             source: { sha256: SIMULATED_QUALIFICATION_SHA, logIndex: 0 },
             resolutionHz: fine,

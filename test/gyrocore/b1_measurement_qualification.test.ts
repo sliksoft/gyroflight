@@ -139,8 +139,17 @@ describe("the gap rule refuses a grid that is not uniform", () => {
     it("gridNonUniformity: a full Welch grid passes, a grid with a bin removed does not", () => {
         const full = Array.from({ length: 257 }, (_, k) => (k * FS) / 512);
         expect(gridNonUniformity(full)).toBeNull();
-        expect(gridNonUniformity(full.filter((_, k) => k !== 20))).toBe("frequency_grid_not_uniform:1_steps");
+        expect(gridNonUniformity(full.filter((_, k) => k !== 20))).toBe("frequency_grid_not_uniform:1_bins_removed");
         expect(gridNonUniformity([0, 1, 1, 2])).toBe("frequency_grid_not_uniform:non_positive_step");
+        // Two bins removed in one place count as two.
+        expect(gridNonUniformity(full.filter((_, k) => k !== 20 && k !== 21))).toBe(
+            "frequency_grid_not_uniform:2_bins_removed",
+        );
+        // Grids that are non-uniform by construction are not uniform grids with bins removed.
+        const log = Array.from({ length: 140 }, (_, i) => 10 ** (i / 60));
+        expect(gridNonUniformity(log)).toBeNull();
+        const jittered = Array.from({ length: 400 }, (_, i) => 0.5 * i + 0.15 * Math.sin(i * 1.7));
+        expect(gridNonUniformity(jittered)).toBeNull();
     });
 
     it("control: the same loop on the full grid is VALIDATED", () => {
@@ -155,12 +164,12 @@ describe("the gap rule refuses a grid that is not uniform", () => {
         const fine = anaTF(G60, cohWith(225), 4096, 8, [Math.floor(peak / fineStep) * fineStep]);
         const loop = build(tf, fine);
         const m = loopMargins(loop);
-        expect(m.reasons).toContain("frequency_grid_not_uniform:1_steps");
+        expect(m.reasons).toContain("frequency_grid_not_uniform:1_bins_removed");
         expect(m.evidence.level).toBe("MEASURED");
         expect(m.gainMarginDb).toBeNull();
         expect(m.sensitivityPeakDb).toBeNull();
         expect(supportIssues(loop, candidateLoop(loop, { cfg }), m.crossoverHz)).toContain(
-            "frequency_grid_not_uniform:1_steps",
+            "frequency_grid_not_uniform:1_bins_removed",
         );
     });
 });
