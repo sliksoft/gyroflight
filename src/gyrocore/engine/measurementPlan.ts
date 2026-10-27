@@ -206,6 +206,29 @@ export function planMeasurement(
         if (hi === null) diagnostics.push("loop_not_falling_at_band_end");
         required.add("required_measurement:chirp_to_higher_frequency_for_gain_margin");
     }
+    // The gain margin is read at the phase crossover (−180° − k·360°), and the band end must lie
+    // far enough beyond it to be bounded (loopModel readLoop / BAND_END): a band that ends where |L|
+    // reaches bandEndDb can stop short of it on a craft whose phase falls late (7-inch-like: the
+    // planned flight then never gives a GM, and the next plan asks for the same band). When the
+    // bins show the phase crossover, the band reaches QUALIFICATION_BAND_EXTENSION × it
+    // (continuation B5). This asks for a wider sweep; no gate changes with it.
+    const phaseCrossHz = (() => {
+        for (let i = 1; i < pts.length; i++) {
+            if (pts[i].f <= fc) continue;
+            const a = ph[i - 1];
+            const b = ph[i];
+            for (let n = Math.ceil((Math.min(a, b) + 180) / 360); n * 360 - 180 <= Math.max(a, b); n++) {
+                const target = n * 360 - 180;
+                if (a === b || target === a) continue;
+                return pts[i - 1].f + ((target - a) / (b - a)) * (pts[i].f - pts[i - 1].f);
+            }
+        }
+        return null;
+    })();
+    if (hi !== null && phaseCrossHz !== null && QUALIFICATION_BAND_EXTENSION * phaseCrossHz > hi) {
+        diagnostics.push(`band_extended_past_phase_crossover:${phaseCrossHz.toFixed(1)}Hz`);
+        hi = QUALIFICATION_BAND_EXTENSION * phaseCrossHz;
+    }
     if (hi !== null) {
         plan.bandHz.primary = [lo, hi];
         plan.bandHz.qualification = [lo, QUALIFICATION_BAND_EXTENSION * Math.max(hi, end)];

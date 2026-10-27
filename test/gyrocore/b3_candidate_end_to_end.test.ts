@@ -34,7 +34,7 @@
  *     on the same rungs, and its bin spacing meets the target at the proposed crossover;
  *   - the proposal stays BLOCKED and nothing is released (MODEL_CONDITIONAL is never VALIDATED).
  *
- * SIMULATION: 5-inch-like and AIR65-like rate plants (parameters are assumptions, not calibrated
+ * SIMULATION: 7-inch-like, 5-inch-like and AIR65-like rate plants (parameters are assumptions, not calibrated
  * craft). Software-contract evidence only, never flight evidence.
  */
 
@@ -58,6 +58,9 @@ const run = (primary: AutotuneLogInput): AutotuneV2Result =>
     runAutotuneV2({ primary, others: [], verifiedTune: null, createdAt: "2026-10-27T00:00:00Z" });
 
 const CLASSES = {
+    // 7-inch-like: crossover ≈ 6.8 Hz (assumption); its planned band reaches past the phase
+    // crossover since the planner extends it there (continuation B5).
+    sevenInch: { K: 30, motorHz: 15, delayS: 0.004 },
     // 5-inch-like: crossover ≈ 13 Hz (assumption).
     fiveInch: { K: 45, motorHz: 25, delayS: 0.003 },
     // AIR65-like: crossover ≈ 26 Hz.

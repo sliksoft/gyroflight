@@ -93,15 +93,28 @@ function plan(
 describe("the plan follows the evidence rules", () => {
     const { p, m, loop } = plan(smooth, () => 0.995);
 
-    it("band: from a quarter of the crossover up to |L| ≤ −12 dB; a qualification 1.5× further", () => {
+    it("band: from a quarter of the crossover up to |L| ≤ −12 dB and 1.5× past the phase crossover; a qualification 1.5× further", () => {
         expect(p.crossoverHz).toBeCloseTo(m.crossoverHz!, 9);
         expect(p.bandHz.primary![0]).toBeCloseTo(m.crossoverHz! / 4, 9);
         const fc = m.crossoverHz!;
         const L = (f: number) => cmul(smooth(f), evaluateControllerFrf(cfg, f).cFeedback);
         const db = (f: number) => 20 * Math.log10(Math.hypot(L(f).re, L(f).im));
-        expect(db(p.bandHz.primary![1])).toBeLessThanOrEqual(PLAN.bandEndDb + 1e-9);
-        expect(db(p.bandHz.primary![1] - 0.5)).toBeGreaterThan(PLAN.bandEndDb);
-        expect(p.bandHz.primary![1]).toBeGreaterThan(fc);
+        const hi = p.bandHz.primary![1];
+        expect(hi).toBeGreaterThan(fc);
+        // The band end is the later of two points (continuation B5): where |L| has fallen to bandEndDb
+        // (the gain the band end must show), and 1.5 × the phase crossover (where the GM is read).
+        expect(db(hi)).toBeLessThanOrEqual(PLAN.bandEndDb + 1e-9);
+        const ext = p.diagnostics.find((x) => x.startsWith("band_extended_past_phase_crossover:"));
+        if (ext) {
+            const fpc = Number(ext.split(":")[1].replace("Hz", ""));
+            expect(hi).toBeCloseTo(QUALIFICATION_BAND_EXTENSION * fpc, 0);
+            // The phase really is at −180° there (the bins' reading of the analytic loop, ±1 bin).
+            const phaseAt = (f: number) => (Math.atan2(L(f).im, L(f).re) * 180) / Math.PI;
+            expect(Math.abs(Math.abs(phaseAt(fpc)) - 180)).toBeLessThan(10);
+            expect(db(hi - 0.5)).toBeLessThanOrEqual(PLAN.bandEndDb);
+        } else {
+            expect(db(hi - 0.5)).toBeGreaterThan(PLAN.bandEndDb);
+        }
         expect(p.bandHz.qualification![1]).toBeCloseTo(QUALIFICATION_BAND_EXTENSION * 200, 6);
     });
 

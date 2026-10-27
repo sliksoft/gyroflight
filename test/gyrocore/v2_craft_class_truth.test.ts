@@ -53,8 +53,11 @@ import { cmul, evaluateControllerFrf } from "../../src/js/blackbox/betaflight_di
 import { closedLoopChirpLog, ratePlant, type ClosedLoopLogOptions, type Plant } from "./harness/closedLoopBbl";
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
 
+// SIMULATION: rate-plant parameters per craft class are assumptions, not calibrated craft.
+// AIR65-like crosses ≈ 26 Hz, 5-inch-like ≈ 13 Hz (continuation B5), 7-inch-like ≈ 6.8 Hz.
 const CLASSES = {
     air65: { K: 60, motorHz: 40, delayS: 0.002 },
+    fiveInch: { K: 45, motorHz: 25, delayS: 0.003 },
     sevenInch: { K: 30, motorHz: 15, delayS: 0.004 },
 } as const;
 
@@ -136,6 +139,18 @@ describe.each(Object.entries(CLASSES))("%s-like loop against its analytic truth"
             expect(Math.abs(m.crossoverHz! - t.crossoverHz) / t.crossoverHz).toBeLessThan(0.05);
             expect(Math.abs(m.measured.phaseMarginDeg! - t.pmDeg)).toBeLessThan(3);
             expect(m.reasons).not.toContain("identified_band_has_gaps");
+        });
+    } else if (name === "fiveInch") {
+        it("5-inch-like: read on a finer rung than the standard 512 samples; crossover within 3 % and phase margin within 2° of the truth (B5)", () => {
+            const m = r.margins.roll!.current;
+            const conv = m.evidence.convergence!;
+            expect(conv.usedSegmentSamples).toBeGreaterThanOrEqual(1024);
+            expect(conv.usedBinSpacingHz).toBeLessThanOrEqual(0.1 * m.crossoverHz! * 1.001);
+            expect(Math.abs(m.crossoverHz! - t.crossoverHz) / t.crossoverHz).toBeLessThan(0.03);
+            expect(Math.abs(m.measured.phaseMarginDeg! - t.pmDeg)).toBeLessThan(2);
+            expect(m.evidence.level).not.toBe("VALIDATED");
+            const p = r.measurementPlan.find((x) => x.axis === "roll")!;
+            expect(p.segmentSamples.primary).toBe(conv.usedSegmentSamples);
         });
     } else {
         it("7-inch-like: read on a finer rung than the standard 512 samples; crossover within 3 % and phase margin within 2° of the truth (B4)", () => {
