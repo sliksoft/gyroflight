@@ -173,9 +173,12 @@ describe("coverage of the uncertainty bounds over random errors of the assumed s
         const bounded = runs.filter((m) => m.evidence.level === "MODEL_CONDITIONAL");
         expect(bounded.length).toBeGreaterThanOrEqual(0.5 * runs.length);
         const pmOk = bounded.filter((m) => m.phaseMarginDeg! <= t.pm + 1e-9).length;
-        const gmOk = bounded.filter((m) => m.gainMarginDb === null || m.gainMarginDb <= t.gm + 1e-9).length;
+        // GM coverage over the runs that carry a GM bound (an absent bound is not a success).
+        const withGm = bounded.filter((m) => m.gainMarginDb !== null);
+        expect(withGm.length).toBeGreaterThanOrEqual(0.5 * bounded.length);
+        const gmOk = withGm.filter((m) => m.gainMarginDb! <= t.gm + 1e-9).length;
         expect(pmOk / bounded.length).toBeGreaterThanOrEqual(0.95);
-        expect(gmOk / bounded.length).toBeGreaterThanOrEqual(0.95);
+        expect(gmOk / withGm.length).toBeGreaterThanOrEqual(0.95);
         for (const m of bounded) expect(m.phaseMarginDeg!).toBeLessThanOrEqual(m.measured.phaseMarginDeg! + 1e-9);
         // Seeds without bounds say why, and are MEASURED only.
         for (const m of runs.filter((x) => x.evidence.level !== "MODEL_CONDITIONAL")) {

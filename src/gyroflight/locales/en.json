@@ -1048,6 +1048,9 @@
     "gyroflightV2Need_chirp_finer_resolution_model_class_qualification": {
         "message": "a CHIRP flight of the same craft and tune, identified at a frequency resolution at least 4.5× finer over the same band, to qualify the model assumption of the margin bounds"
     },
+    "gyroflightV2Need_chirp_longer_window_for_resolution": {
+        "message": "a longer CHIRP sweep of the same range (more samples per axis), so the loop can be analysed with longer FFT segments and its resolution shown converged"
+    },
     "gyroflightV2Need_chirp_with_full_band_support": {
         "message": "a CHIRP whose generator excites the whole decision band (from a quarter of the crossover to the band end) without gaps, logged with DEBUG_CHIRP, so every frequency point the margins rest on is shown to be excited"
     },

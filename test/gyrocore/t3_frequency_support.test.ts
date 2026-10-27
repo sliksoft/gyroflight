@@ -470,6 +470,24 @@ describe("the observed generator range, not the header's", () => {
         expect(m.evidence.level).toBe("VALIDATED");
     });
 
+    it("a qualification whose generator stopped inside its own tail is no PASS (Codex review)", () => {
+        // Qualification band to 225 Hz with the generator stopping at 225 Hz of a 400 Hz header: below
+        // 1.5 × its band end, so its own tail is not shown bounded; the primary is untouched.
+        const stop = loopMargins(
+            build(tf, {
+                fine,
+                fineSupport: declaredSupport(fine, { observedHz: [2, 225] }),
+            }),
+        );
+        expect(stop.evidence.qualification!.verdict).toBe("INSUFFICIENT");
+        expect(stop.evidence.qualification!.reasons).toContain(
+            "qualification:sweep_generator_stopped_early:225.0<400.0Hz",
+        );
+        expect(stop.evidence.level).toBe("MODEL_CONDITIONAL");
+        // The same qualification with its generator reaching the header's end passes.
+        expect(loopMargins(build(tf, { fine })).evidence.level).toBe("VALIDATED");
+    });
+
     it("a generator that reached the header's end is no stop", () => {
         expect(generatorStop(build(tf, { observedHz: [2, 396] }))).toBeNull();
         expect(generatorStop(build(tf, { support: null }))).toBeNull();

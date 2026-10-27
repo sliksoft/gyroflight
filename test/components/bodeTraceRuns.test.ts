@@ -54,6 +54,24 @@ describe("gaps between coherent bins", () => {
         ]);
     });
 
+    it("with the grid step given, surviving points two bins apart are gaps, not a coarser grid (Codex review)", () => {
+        // On a 2 Hz grid every other bin was rejected: the survivors alone look like a 4 Hz grid.
+        const pts = grid([2, 6, 10, 14]);
+        expect(contiguousRuns(pts).length).toBe(1); // the fallback cannot know
+        expect(contiguousRuns(pts, 2).map((r) => r.map((p) => p.freq))).toEqual([[2], [6], [10], [14]]);
+        expect(
+            unwrapPhaseByRun(
+                [
+                    { freq: 2, phase: 170 },
+                    { freq: 6, phase: -170 },
+                ],
+                2,
+            ).map((p) => p.phase),
+        ).toEqual([170, -170]);
+        // Two surviving adjacent points: one run of two.
+        expect(contiguousRuns(grid([2, 4]), 2).map((r) => r.length)).toEqual([2]);
+    });
+
     it("a contiguous trace is one run; a lone coherent bin is a run of one", () => {
         expect(contiguousRuns(grid([2, 4, 6, 8])).length).toBe(1);
         expect(contiguousRuns(grid([2, 4, 6, 20, 30, 32])).map((r) => r.length)).toEqual([3, 1, 2]);

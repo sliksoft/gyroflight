@@ -242,11 +242,19 @@ export function optimizeAxisPid(
         /^(unidentified_bins_inside_band|crossover_band_unsupported|crossover_neighbour_bins_missing|frequency_support_unknown|sweep_generator_stopped_early)/,
     );
     if (unsupported) reasons.push("required_measurement:chirp_with_full_band_support");
+    // A resolution not shown converged (adaptiveResolution.ts) needs a longer window of the same
+    // sweep (a finer rung with enough segments), not a higher end frequency.
+    const unconverged = has(
+        /^(resolution_not_converged|resolution_convergence_unknown|resolution_target_not_reachable|data_length_insufficient)/,
+    );
+    if (unconverged) reasons.push("required_measurement:chirp_longer_window_for_resolution");
     if (unresolved && (pick.m.gainMarginDb === null || pick.m.sensitivityPeakDb === null))
         reasons.push("required_measurement:chirp_with_finer_frequency_resolution");
-    if (pick.m.gainMarginDb === null && (gmBandEnd || !unresolved))
+    // GM / |S| unknown for a named reason (gaps, support, resolution) is not a band-end problem.
+    const explained = unresolved || unsupported || unconverged;
+    if (pick.m.gainMarginDb === null && (gmBandEnd || !explained))
         reasons.push("required_measurement:chirp_to_higher_frequency_for_gain_margin");
-    if (pick.m.sensitivityPeakDb === null && (sBandEnd || !unresolved))
+    if (pick.m.sensitivityPeakDb === null && (sBandEnd || !explained))
         reasons.push("required_measurement:chirp_to_higher_frequency_for_sensitivity_peak");
     const changed = !same(pick.v);
     if (changed && pick.m.status !== "VALIDATED") reasons.push(...pick.m.reasons.map((r) => `margins:${r}`));

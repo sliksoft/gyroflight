@@ -774,6 +774,8 @@ export interface AxisLoop {
         provenanceIssues: string[];
         /** Per-bin support on the qualification's own grid; null: unknown (no PASS then). */
         support: FrequencySupport | null;
+        /** The sweep the qualification log's headers describe (generator-stop check); null: unknown. */
+        sweep: SweepInfo | null;
     } | null;
 }
 
@@ -862,6 +864,7 @@ export function buildAxisLoop(
                   uncertainty: loopUncertainty(qualification.tf, qualification.cfg ?? cfg, qualification),
                   provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
                   support: qualification.support ?? null,
+                  sweep: qualification.sweep ?? null,
               }
             : null,
     };
@@ -1529,6 +1532,14 @@ function qualifyModelClass(
     // Gaps and unsupported bins inside the qualification's own band (FREQUENCY_SUPPORT): no PASS.
     const fineHoles = supportIssues(qLoop, finePts, fine.ok ? fine.fc : null);
     insufficient.push(...fineHoles.map((x) => `qualification:${x}`));
+    // The qualification's generator must have reached past the tail its own bounds lean on (the
+    // same stop policy as the primary's): a stop inside it is no PASS (Codex review, 2026-10-27).
+    const qStop = generatorStop({ support: q.support, sweep: q.sweep });
+    if (qStop && (!fine.bandHz || qStop[0] < QUALIFICATION_BAND_EXTENSION * fine.bandHz[1])) {
+        insufficient.push(
+            `qualification:sweep_generator_stopped_early:${qStop[0].toFixed(1)}<${qStop[1].toFixed(1)}Hz`,
+        );
+    }
     if (fine.ok) {
         fail.push(...fine.reasons.filter((x) => CONTRADICTS_CLASS.test(x)).map((x) => `qualification:${x}`));
         if (!fine.bounded && !fail.length) {

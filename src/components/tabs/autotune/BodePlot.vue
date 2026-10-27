@@ -56,6 +56,14 @@ interface Trace<P> {
     key: AxisName;
     color: string;
     points: P[];
+    /** Bin spacing of the analysis grid the points come from (Hz); gaps are judged against it. */
+    gridStepHz?: number;
+}
+
+/** Bin spacing of a transfer-function grid (its first two bins), or undefined. */
+function gridStepOf(frequencies: ArrayLike<number>): number | undefined {
+    const step = frequencies.length > 1 ? frequencies[1] - frequencies[0] : 0;
+    return step > 0 ? step : undefined;
 }
 
 type PlotGroup = d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -136,7 +144,7 @@ function getVisibleTraces(): Trace<BodePoint>[] {
                 });
             }
         }
-        return [{ key: a.key, color: AXIS_COLORS[a.key], points }];
+        return [{ key: a.key, color: AXIS_COLORS[a.key], points, gridStepHz: gridStepOf(tf.frequencies) }];
     });
 }
 
@@ -162,7 +170,7 @@ function getSensitivityTraces(): Trace<FrequencyPoint>[] {
                 });
             }
         }
-        return [{ key: a.key, color: AXIS_COLORS[a.key], points }];
+        return [{ key: a.key, color: AXIS_COLORS[a.key], points, gridStepHz: gridStepOf(s.frequencies) }];
     });
 }
 
@@ -303,7 +311,7 @@ function drawPhase(
 
     // Unwrap phase per trace, restarting at every gap in the coherent bins (audit B7): across a gap the
     // loop is not measured, so no unwrap step is taken there and no line is drawn there.
-    const unwrappedTraces = traces.map((t) => ({ ...t, points: unwrapPhaseByRun(t.points) }));
+    const unwrappedTraces = traces.map((t) => ({ ...t, points: unwrapPhaseByRun(t.points, t.gridStepHz) }));
 
     let yMin = Infinity;
     let yMax = -Infinity;
@@ -554,7 +562,7 @@ function drawTracesAndAxes<P extends FrequencyPoint>(
     // One path per contiguous run of coherent bins: a line is never drawn across bins that were
     // left out (audit B7), and a lone bin is drawn as a dot.
     for (const t of traces) {
-        for (const run of contiguousRuns(t.points)) {
+        for (const run of contiguousRuns(t.points, t.gridStepHz)) {
             if (run.length === 1) {
                 g.append("circle")
                     .attr("cx", xScale(run[0].freq))

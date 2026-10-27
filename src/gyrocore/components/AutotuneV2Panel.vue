@@ -566,6 +566,7 @@ const MARGIN_NEEDS = new Set([
     "required_measurement:chirp_finer_resolution_model_class_qualification",
     "required_measurement:chirp_with_finer_frequency_resolution",
     "required_measurement:chirp_with_full_band_support",
+    "required_measurement:chirp_longer_window_for_resolution",
     "required_measurement:chirp_to_higher_frequency_for_gain_margin",
     "required_measurement:chirp_to_higher_frequency_for_sensitivity_peak",
 ]);

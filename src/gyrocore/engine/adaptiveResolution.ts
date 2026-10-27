@@ -59,7 +59,6 @@
  */
 
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
-import { cmag } from "@/js/blackbox/betaflight_digital_controller";
 import {
     UNCERTAINTY,
     type AnalysisProvenance,
@@ -216,10 +215,4 @@ export function resolutionConvergence(
         phaseMarginSigmaDeg: sigma,
         reasons,
     };
-}
-
-/** |L| at the crossover of the finer rung, for diagnostics only (unused values never reach a gate). */
-export function loopGainAt(loop: AxisLoop, fHz: number): number | null {
-    const bin = loop.plant.bins.find((b) => b.frequencyHz === fHz);
-    return bin?.G ? cmag(bin.G) : null;
 }
