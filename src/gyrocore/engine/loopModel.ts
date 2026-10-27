@@ -1534,6 +1534,7 @@ function qualifyModelClass(
     insufficient.push(...fineHoles.map((x) => `qualification:${x}`));
     // The qualification's generator must have reached past the tail its own bounds lean on (the
     // same stop policy as the primary's): a stop inside it is no PASS (Codex review, 2026-10-27).
+    if (!q.sweep) insufficient.push("qualification:sweep_headers_missing");
     const qStop = generatorStop({ support: q.support, sweep: q.sweep });
     if (qStop && (!fine.bandHz || qStop[0] < QUALIFICATION_BAND_EXTENSION * fine.bandHz[1])) {
         insufficient.push(
@@ -1653,10 +1654,14 @@ export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cf
     const notConverged = !conv || conv.status !== "CONVERGED";
     if (!conv) reasons.push("resolution_convergence_unknown:not_checked");
     else if (conv.status !== "CONVERGED") reasons.push(...conv.reasons);
+    // Without the sweep the log's headers describe, the generator-stop check cannot run: no bounds
+    // (fail-closed, Codex review round 2).
+    const sweepMissing = !loop.sweep;
+    if (sweepMissing) reasons.push("sweep_headers_missing");
     // The uncertainty is still worked out over a band with holes, for its reasons; it bounds nothing then.
     const ub = read.bounded ? uncertainBounds(pts, read, loop.uncertainty) : null;
     if (ub && !ub.uncertainty) reasons.push(...ub.reasons);
-    if (!read.bounded || !ub?.uncertainty || holes.length || notConverged) {
+    if (!read.bounded || !ub?.uncertainty || holes.length || notConverged || sweepMissing) {
         evidence.level = "MEASURED";
         evidence.assumptions = ["values_read_on_bins_only"];
         // Without a known uncertainty the bins bound nothing: GM and |S| unknown, as for unresolved bins.

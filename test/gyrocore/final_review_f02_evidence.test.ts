@@ -93,12 +93,21 @@ const PRIMARY_LOG = { sha256: "d".repeat(64), logIndex: 0, headerPairs: [] as [s
 /** Chain validated, steady, attested: only the margin evidence is left open. */
 function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null = null): LoopMargins {
     const qtf = fine ? tfOf(fine.freqs, fine.g) : null;
-    const q = fine ? { tf: qtf!, source: SOURCE, analysis: welchOf(fine.freqs), support: declaredSupport(qtf!) } : null;
+    const q = fine
+        ? {
+              tf: qtf!,
+              source: SOURCE,
+              analysis: welchOf(fine.freqs),
+              support: declaredSupport(qtf!),
+              sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+          }
+        : null;
     const tf = tfOf(freqs, g);
     return loopMargins(
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, q, {
             support: declaredSupport(tf),
             resolution: declaredConvergence(),
+            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         }),
     );
 }
@@ -373,7 +382,11 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
         // 0.1 Hz bins claimed from 0.5 Hz segments: interpolated, not resolved.
         const fineTf = tfOf(fine, smooth);
         const coarseTf = tfOf(uniform(200, 0.5), smooth);
-        const sup = { support: declaredSupport(coarseTf), resolution: declaredConvergence() };
+        const sup = {
+            support: declaredSupport(coarseTf),
+            resolution: declaredConvergence(),
+            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+        };
         const q = {
             tf: fineTf,
             source: SOURCE,
@@ -393,7 +406,12 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
                 UNITY_CHAIN,
                 true,
                 true,
-                { tf: fineTf, source: SOURCE, support: declaredSupport(fineTf) },
+                {
+                    tf: fineTf,
+                    source: SOURCE,
+                    support: declaredSupport(fineTf),
+                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                },
                 sup,
             ),
         );
@@ -424,8 +442,17 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
             UNITY_CHAIN,
             true,
             true,
-            { tf: heavierTf, source: SOURCE, support: declaredSupport(heavierTf) },
-            { support: declaredSupport(coarseTf), resolution: declaredConvergence() },
+            {
+                tf: heavierTf,
+                source: SOURCE,
+                support: declaredSupport(heavierTf),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            },
+            {
+                support: declaredSupport(coarseTf),
+                resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            },
         );
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);
         expect(r.status).not.toBe("VALIDATED");

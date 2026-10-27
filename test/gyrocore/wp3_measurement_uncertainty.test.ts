@@ -76,6 +76,7 @@ const marginsAt = (coherence: number, segments = 32) => {
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             resolution: declaredConvergence(),
+            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         }),
     );
 };
@@ -111,6 +112,7 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
             buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(one),
                 resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
         expect(m.evidence.level).toBe("MEASURED");
@@ -144,6 +146,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             resolution: declaredConvergence(),
+            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const m = loopMargins(loop);
         expect(binsDroppedForUncertainty(loop).length).toBeGreaterThan(0);
@@ -160,6 +163,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
         expect(m.reasons).toContain("unidentified_bins_inside_band:1");
@@ -174,6 +178,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
             { cfg: hot },
         );
@@ -205,6 +210,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
                 buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                     support: declaredSupport(tf),
                     resolution: declaredConvergence(),
+                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
                 }),
                 { cfg: hot },
             );
@@ -279,6 +285,7 @@ describe("the phase the margins are read on", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
         expect(m.reasons.some((r) => r.startsWith("phase_branch_unverified:"))).toBe(true);
@@ -294,6 +301,7 @@ describe("the phase the margins are read on", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         );
         expect(m.reasons.some((r) => r.startsWith("crossover_insufficiently_resolved:"))).toBe(true);

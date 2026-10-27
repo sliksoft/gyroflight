@@ -31,6 +31,9 @@ import type { TransferFunction } from "../../../src/js/blackbox/spectral_analysi
 import type { BinSupportVerdict, FrequencySupport } from "../../../src/gyrocore/engine/loopModel";
 import type { SupportClass } from "../../../src/gyrocore/chirp/qualityV2/contract";
 
+/** The sweep the contract tests declare for their analytic grids (SIMULATION). */
+export const SIM_SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
+
 /**
  * Every bin of `tf` supported (COHERENT, γ²(excitation → setpoint) 0.999), the observed generator
  * range the whole grid above 0 Hz unless given. `except` overrides single bins (by frequency, to
@@ -49,7 +52,11 @@ export function declaredSupport(
     } = {},
 ): FrequencySupport {
     const f = Array.from(tf.frequencies).filter((x) => x > 0);
-    const observedHz = o.observedHz === undefined ? ([f[0], f[f.length - 1]] as [number, number]) : o.observedHz;
+    // Default: the generator swept the whole grid and on to SIM_SWEEP's end (no generator stop).
+    const observedHz =
+        o.observedHz === undefined
+            ? ([f[0], Math.max(f[f.length - 1], SIM_SWEEP.f1Hz)] as [number, number])
+            : o.observedHz;
     const bins: FrequencySupport["bins"] = new Map();
     for (const hz of f) {
         const inside = !observedHz || (hz >= observedHz[0] && hz <= observedHz[1]);

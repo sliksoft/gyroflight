@@ -115,6 +115,7 @@ function resonantLoop(maxHz: number, resonance = true) {
     const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
         support: declaredSupport(tf),
         resolution: declaredConvergence(),
+        sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
     });
     // Independent check on the analytic loop (not on the code under test).
     const L = (f: number) => cmag(cmul(G(f), evaluateControllerFrf(cfg, f).cFeedback));

@@ -97,6 +97,7 @@ function margins(freqs: number[], G: G) {
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             resolution: declaredConvergence(),
+            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         }),
     );
 }
@@ -320,6 +321,7 @@ describe("F-02: the PID search names the measurement an unresolved band needs", 
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             resolution: declaredConvergence(),
+            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
         });
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);
         expect(r.reasons).toContain("required_measurement:chirp_with_finer_frequency_resolution");

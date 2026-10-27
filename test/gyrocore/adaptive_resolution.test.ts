@@ -236,6 +236,7 @@ describe("the convergence verdict (H1)", () => {
                     analysis: base.analysis,
                     support: base.support,
                     resolution,
+                    sweep: { f0Hz: 2, f1Hz: 200, durationS: 20 },
                 }),
             );
         const none = at(null);

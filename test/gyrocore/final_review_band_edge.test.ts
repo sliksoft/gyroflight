@@ -77,6 +77,7 @@ function identify(maxHz: number, G: G) {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 resolution: declaredConvergence(),
+                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
             }),
         ),
         L,

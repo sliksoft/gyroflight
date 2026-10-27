@@ -94,6 +94,10 @@ export const SYNTH_HEADERS: [string, string][] = [
     ["rpm_filter_min_hz", "100"],
     ["rpm_filter_fade_range_hz", "50"],
     ["rpm_filter_lpf_hz", "150"],
+    // SIMULATION: the sweep the synthetic windows stand for (loopModel generator-stop check).
+    ["chirp_frequency_start_deci_hz", "20"],
+    ["chirp_frequency_end_deci_hz", "2000"],
+    ["chirp_time_seconds", "20"],
     ["chirp_lag_freq_hz", "3"],
     ["chirp_lead_freq_hz", "30"],
     ["rc_smoothing_active_cutoffs_ff_sp_thr", "53,53"],
@@ -228,7 +232,7 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         const finer = measuredT(Array.from({ length: 2 * (freqs.length - 1) + 1 }, (_, i) => 1 + (i * step) / 2));
         const rungOf = (t: typeof tf, binStep: number) => ({
             tf: t,
-            support: declaredSupport(t),
+            support: declaredSupport(t, { observedHz: [1, 200] }),
             analysis: {
                 segmentSamples: Math.round(FS / binStep),
                 sampleRateHz: FS,
@@ -243,7 +247,7 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         log.chirp[name] = {
             tf,
             // SIMULATION: every bin declared supported, as a full DEBUG_CHIRP sweep would show.
-            support: declaredSupport(tf),
+            support: declaredSupport(tf, { observedHz: [1, 200] }),
             analyses: [rungOf(tf, step), rungOf(finer, step / 2)],
             ...w,
             state: "usable",

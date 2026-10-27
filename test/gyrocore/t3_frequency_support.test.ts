@@ -488,6 +488,19 @@ describe("the observed generator range, not the header's", () => {
         expect(loopMargins(build(tf, { fine })).evidence.level).toBe("VALIDATED");
     });
 
+    it("a qualification without sweep headers cannot be checked for a stop: INSUFFICIENT (Codex round 2)", () => {
+        const loop = build(tf, { fine });
+        const q = loop.qualification!;
+        const m = loopMargins({ ...loop, qualification: { ...q, sweep: null } });
+        expect(m.evidence.qualification!.verdict).toBe("INSUFFICIENT");
+        expect(m.evidence.qualification!.reasons).toContain("qualification:sweep_headers_missing");
+        expect(m.evidence.level).toBe("MODEL_CONDITIONAL");
+        // The primary without its sweep headers bounds nothing either.
+        const bare = loopMargins({ ...loop, sweep: null });
+        expect(bare.evidence.level).toBe("MEASURED");
+        expect(bare.reasons).toContain("sweep_headers_missing");
+    });
+
     it("a generator that reached the header's end is no stop", () => {
         expect(generatorStop(build(tf, { observedHz: [2, 396] }))).toBeNull();
         expect(generatorStop(build(tf, { support: null }))).toBeNull();
