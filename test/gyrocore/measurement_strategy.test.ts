@@ -27,7 +27,9 @@
 import { describe, expect, it } from "vitest";
 import type { AxisMeasurementPlan } from "../../src/gyrocore/engine/measurementPlan";
 import {
+    analysisGridHz,
     buildMeasurementStrategy,
+    firmwareChirpSweep,
     narrowBandAround,
     narrowSweepDurationS,
     SESSION,
@@ -69,31 +71,70 @@ describe("narrow-band helpers", () => {
         expect(narrow).toBeGreaterThan(0);
     });
 
-    it("narrow duration satisfies production sweepAverages at exact boundaries", async () => {
+    it("narrow duration satisfies production sweepAverages on the firmware-quantized band", async () => {
         const { sweepAverages } = await import("../../src/gyrocore/engine/loopModel");
         const hz = 5;
         const N = 512;
         const fs = 4000;
         const needed = 125;
-        const band = narrowBandAround(hz, [1, 200]);
-        const dur = narrowSweepDurationS(hz, needed, N, fs, band)!;
-        const got = sweepAverages(
-            hz,
-            { segmentSamples: N, sampleRateHz: fs, segments: needed * 2 },
-            { f0Hz: band[0], f1Hz: band[1], durationS: dur },
-            Math.ceil(dur * fs),
-        );
+        const grid = analysisGridHz(hz, N, fs);
+        const band = narrowBandAround(grid, [1, 200]);
+        const dur = narrowSweepDurationS(grid, needed, N, fs, band)!;
+        const sweep = firmwareChirpSweep(band, dur);
+        const windowOf = Math.floor(dur * fs) - 1;
+        const segments = Math.max(1, Math.floor((windowOf - N) / (N / 2)) + 1);
+        const got = sweepAverages(grid, { segmentSamples: N, sampleRateHz: fs, segments }, sweep, windowOf);
         expect(got).toBeGreaterThanOrEqual(needed);
-        // One second less must fail the production counter (boundary contract).
         if (dur > 1) {
+            const shortSweep = firmwareChirpSweep(band, dur - 1);
+            const shortWin = Math.floor((dur - 1) * fs) - 1;
+            const shortSeg = Math.max(1, Math.floor((shortWin - N) / (N / 2)) + 1);
             const short = sweepAverages(
-                hz,
-                { segmentSamples: N, sampleRateHz: fs, segments: needed * 2 },
-                { f0Hz: band[0], f1Hz: band[1], durationS: dur - 1 },
-                Math.ceil((dur - 1) * fs),
+                grid,
+                { segmentSamples: N, sampleRateHz: fs, segments: shortSeg },
+                shortSweep,
+                shortWin,
             );
             expect(short).toBeLessThan(needed);
         }
+    });
+
+    it("snaps interpolated decisions to the FFT bin and firmware 0.1 Hz edges", async () => {
+        const { sweepAverages } = await import("../../src/gyrocore/engine/loopModel");
+        const N = 1024;
+        const fs = 4000;
+        const s = buildMeasurementStrategy(
+            stubPlan({
+                sampleRateHz: fs,
+                segmentSamples: { primary: N, qualification: null, executable: N },
+                bandHz: { primary: [1, 200], qualification: null },
+                sweep: { f0Hz: 1, f1Hz: 200, durationS: 400 },
+                qualificationSweep: null,
+                averagesAt: [
+                    {
+                        purpose: "gain_crossover",
+                        hz: 38.64671444865743,
+                        needed: 47,
+                        now: 0,
+                        primary: 0,
+                        qualification: null,
+                    },
+                ],
+            }),
+        );
+        const narrow = s.sessions.find((x) => x.kind === "narrow_band_followup")!;
+        expect(narrow.targets[0].hz).toBe(39.0625);
+        expect(Number.isInteger(Math.round(narrow.sweep.f0Hz * 10))).toBe(true);
+        expect(Number.isInteger(Math.round(narrow.sweep.f1Hz * 10))).toBe(true);
+        const windowOf = Math.floor(narrow.sweep.durationS * fs) - 1;
+        const segments = Math.max(1, Math.floor((windowOf - N) / (N / 2)) + 1);
+        const got = sweepAverages(
+            narrow.targets[0].hz,
+            { segmentSamples: N, sampleRateHz: fs, segments },
+            narrow.sweep,
+            windowOf,
+        );
+        expect(got).toBeGreaterThanOrEqual(47);
     });
 
     it("uses the plan analysis sample rate, not a mismatched log rate", () => {

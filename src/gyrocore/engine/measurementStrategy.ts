@@ -108,10 +108,37 @@ export function narrowBandAround(
 }
 
 /**
+ * Welch analysis grid: the FFT bin nearest `hz` (same grid the full-band planner uses).
+ */
+export function analysisGridHz(hz: number, segmentSamples: number, sampleRateHz: number): number {
+    const df = sampleRateHz / segmentSamples;
+    if (!(df > 0 && hz > 0)) return hz;
+    return Math.max(df, Math.round(hz / df) * df);
+}
+
+/**
+ * Sweep edges as the firmware stores them (chirp_frequency_start/end in 0.1 Hz), matching
+ * measurementPlan.ts. Duration stays in whole seconds.
+ */
+export function firmwareChirpSweep(
+    band: [number, number],
+    durationS: number,
+): {
+    f0Hz: number;
+    f1Hz: number;
+    durationS: number;
+} {
+    return {
+        f0Hz: Math.max(0.1, Math.floor(band[0] * 10 + 1e-9) / 10),
+        f1Hz: Math.ceil(band[1] * 10 - 1e-9) / 10,
+        durationS,
+    };
+}
+
+/**
  * Duration of an exponential sweep that puts `needed` whole segments of length N at `hz`, using the
- * same dwell law as loopModel (1/f per hertz). The continuous estimate is only a start: the returned
- * duration must satisfy production `sweepAverages` (≥ needed) with the observed window clipped to the
- * sweep (Codex release-gate P2, 2026-10-28). Returns null when inputs are invalid or unsatisfiable.
+ * same dwell law as loopModel. Counts on the analysis FFT grid and the firmware-quantized band
+ * (Codex release-gate P2, 2026-10-28). Returns null when inputs are invalid or unsatisfiable.
  */
 export function narrowSweepDurationS(
     hz: number,
@@ -121,22 +148,36 @@ export function narrowSweepDurationS(
     band: [number, number],
 ): number | null {
     if (!(hz > 0 && needed >= 1 && segmentSamples > 0 && sampleRateHz > 0 && band[1] > band[0])) return null;
+    const gridHz = analysisGridHz(hz, segmentSamples, sampleRateHz);
+    const fwBand: [number, number] = [firmwareChirpSweep(band, 1).f0Hz, firmwareChirpSweep(band, 1).f1Hz];
+    if (!(fwBand[1] > fwBand[0])) return null;
+    if (gridHz < fwBand[0] || gridHz > fwBand[1]) return null;
+
     const df = sampleRateHz / segmentSamples;
-    const lo = Math.max(hz - df / 2, band[0]);
-    const hi = Math.min(hz + df / 2, band[1]);
+    const lo = Math.max(gridHz - df / 2, fwBand[0]);
+    const hi = Math.min(gridHz + df / 2, fwBand[1]);
     if (!(hi > lo)) return null;
-    const L = Math.log(band[1] / band[0]);
+    const L = Math.log(fwBand[1] / fwBand[0]);
     const binL = Math.log(hi / lo);
     if (!(binL > 0 && L > 0)) return null;
+
+    // Same window/segment model as measurementPlan.solve (AIR65: window one sample short of T·fs).
+    const windowOf = (T: number) => Math.floor(T * sampleRateHz) - 1;
+    const segmentsOf = (T: number) =>
+        Math.max(1, Math.floor((windowOf(T) - segmentSamples) / (segmentSamples / 2)) + 1);
+    const count = (T: number) =>
+        sweepAverages(
+            gridHz,
+            { segmentSamples, sampleRateHz, segments: segmentsOf(T) },
+            firmwareChirpSweep(band, T),
+            windowOf(T),
+        );
+
     let durationS = Math.ceil(((needed * segmentSamples) / sampleRateHz) * (L / binL));
-    if (!(durationS >= 1)) return null;
-    // Cap must not bind below `needed` while we solve for dwell.
-    const analysis = { segmentSamples, sampleRateHz, segments: Math.max(needed * 2, 1) };
+    if (!(durationS >= 1)) durationS = 1;
     const limit = durationS + Math.max(needed * segmentSamples, 10_000);
     for (; durationS <= limit; durationS++) {
-        const sweep = { f0Hz: band[0], f1Hz: band[1], durationS };
-        const windowSamples = Math.ceil(durationS * sampleRateHz);
-        if (sweepAverages(hz, analysis, sweep, windowSamples) >= needed) return durationS;
+        if (count(durationS) >= needed) return durationS;
     }
     return null;
 }
@@ -198,17 +239,19 @@ export function buildMeasurementStrategy(
         let narrowTotal = 0;
         for (const d of decisions) {
             if (d.status === "ADEQUATE" || d.needed === null) continue;
-            const nb = narrowBandAround(d.hz, band);
-            const dur = narrowSweepDurationS(d.hz, d.needed, N, fs, nb);
+            const gridHz = analysisGridHz(d.hz, N, fs);
+            const nb = narrowBandAround(gridHz, band);
+            const dur = narrowSweepDurationS(gridHz, d.needed, N, fs, nb);
             if (dur === null) continue;
             narrowTotal += dur;
+            const sweep = firmwareChirpSweep(nb, dur);
             sessions.push({
                 kind: "narrow_band_followup",
                 axis: plan.axis,
-                sweep: { f0Hz: nb[0], f1Hz: nb[1], durationS: dur },
+                sweep,
                 windowSamples: Math.ceil(dur * fs),
-                purpose: `narrow_${d.purpose}_at_${d.hz.toFixed(1)}Hz`,
-                targets: [{ purpose: d.purpose, hz: d.hz, needed: d.needed }],
+                purpose: `narrow_${d.purpose}_at_${gridHz.toFixed(1)}Hz`,
+                targets: [{ purpose: d.purpose, hz: gridHz, needed: d.needed }],
             });
         }
         designNotes.push(
