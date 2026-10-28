@@ -229,12 +229,47 @@ try {
         concurrent.aConnected === false && concurrent.bConnected === false,
     );
 
-    // 6. Worker crash → sync fallback settles (never hangs); Apply stays disconnected.
-    const crash = await page.evaluate(async () => {
-        // Force the next Worker construction to emit an error event immediately.
+    // 5b. Aborting one concurrent request must not leave the sibling pending forever.
+    const abortSibling = await page.evaluate(async () => {
+        const mk = (h) => ({
+            primary: window.gfAt.synth.syntheticLogInput(h),
+            others: [],
+            verifiedTune: null,
+            createdAt: "2026-10-28T00:00:00Z",
+        });
+        const ac = new AbortController();
+        const a = window.gfAt.client.runAutotuneV2Cancellable(mk("7".repeat(64)), ac.signal);
+        const b = window.gfAt.client.runAutotuneV2Cancellable(mk("8".repeat(64)));
+        await new Promise((r) => window.setTimeout(r, 0));
+        ac.abort();
+        const settled = await Promise.allSettled([a, b]);
+        return {
+            aStatus: settled[0].status,
+            aName: settled[0].status === "rejected" ? settled[0].reason?.name : null,
+            bStatus: settled[1].status,
+            bConnected: settled[1].status === "fulfilled" ? settled[1].value.qualification.connectedToApply : null,
+        };
+    });
+    check(
+        "aborting one concurrent request rejects it without stranding the sibling",
+        abortSibling.aStatus === "rejected" &&
+            abortSibling.aName === "AbortError" &&
+            abortSibling.bStatus === "fulfilled" &&
+            abortSibling.bConnected === false,
+        JSON.stringify(abortSibling),
+    );
+
+    await page.close();
+
+    // 6. Worker crash on a fresh module instance (cached worker from prior tests must not hide BoomWorker).
+    const crashPage = await openPage(browser);
+    const crash = await crashPage.evaluate(async () => {
+        // Patch Worker BEFORE any further client use; terminate by aborting so the next run constructs anew.
         const RealWorker = window.Worker;
+        let boomConstructed = 0;
         window.Worker = class BoomWorker extends RealWorker {
             constructor(url, opts) {
+                boomConstructed++;
                 super(url, opts);
                 queueMicrotask(() => {
                     this.dispatchEvent(new ErrorEvent("error", { message: "injected_worker_crash" }));
@@ -242,7 +277,22 @@ try {
             }
         };
         try {
-            // Prior abort terminated the cached worker; next call constructs a new one → boom.
+            const ac = new AbortController();
+            const warm = window.gfAt.client.runAutotuneV2Cancellable(
+                {
+                    primary: window.gfAt.synth.syntheticLogInput("9".repeat(64)),
+                    others: [],
+                    verifiedTune: null,
+                },
+                ac.signal,
+            );
+            ac.abort();
+            try {
+                await warm;
+            } catch {
+                /* AbortError expected */
+            }
+            // Module still caches workerFailed=false and worker=null after terminate; next run uses BoomWorker.
             const payload = {
                 primary: window.gfAt.synth.syntheticLogInput("d".repeat(64)),
                 others: [],
@@ -252,25 +302,37 @@ try {
             const out = await window.gfAt.client.runAutotuneV2Cancellable(payload);
             return {
                 ok: true,
+                boomConstructed,
                 connected: out.qualification.connectedToApply,
                 released: !!out.result.releasableProposal,
             };
         } catch (e) {
-            return { ok: false, message: String(e && e.message ? e.message : e) };
+            return {
+                ok: false,
+                boomConstructed,
+                message: String(e && e.message ? e.message : e),
+            };
         } finally {
             window.Worker = RealWorker;
         }
     });
     check(
+        "injected BoomWorker was constructed for the crash probe",
+        crash.boomConstructed >= 1,
+        `boomConstructed=${crash.boomConstructed}`,
+    );
+    check(
         "worker crash fails closed: sync fallback or error, Apply disconnected",
         (crash.ok && crash.connected === false && crash.released === false) || crash.ok === false,
         crash.message || `released=${crash.released}`,
     );
+    await crashPage.close();
 
     // 7. Reload drops module state — no stale worker results accepted across reload.
-    await page.reload({ waitUntil: "load", timeout: 120000 });
-    await loadEngine(page);
-    const afterReload = await page.evaluate(async () => {
+    const reloadPage = await openPage(browser);
+    await reloadPage.reload({ waitUntil: "load", timeout: 120000 });
+    await loadEngine(reloadPage);
+    const afterReload = await reloadPage.evaluate(async () => {
         const payload = {
             primary: window.gfAt.synth.syntheticLogInput("f".repeat(64)),
             others: [],
@@ -289,7 +351,7 @@ try {
         afterReload.match && afterReload.connected === false,
     );
 
-    await page.close();
+    await reloadPage.close();
 } finally {
     await browser.close();
 }

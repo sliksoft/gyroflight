@@ -27,6 +27,7 @@
  * failed worker runs never replace a newer analysis.
  */
 
+import { toRaw } from "vue";
 import { runAutotuneV2, type AutotuneV2Input, type AutotuneV2Result } from "./autotuneV2";
 import { assessModelQualification, type ModelQualificationReport } from "./modelQualification";
 import type { AutotuneWorkerRequest, AutotuneWorkerResponse } from "./autotuneV2.worker";
@@ -36,9 +37,20 @@ export interface AutotuneV2ComputeOutcome {
     qualification: ModelQualificationReport;
 }
 
+type PendingRun = {
+    id: number;
+    input: AutotuneV2Input;
+    signal: AbortSignal | null | undefined;
+    resolve: (v: AutotuneV2ComputeOutcome) => void;
+    reject: (e: unknown) => void;
+    settled: boolean;
+    cleanup: () => void;
+};
+
 let nextId = 1;
 let worker: Worker | null = null;
 let workerFailed = false;
+const pending = new Map<number, PendingRun>();
 
 function getWorker(): Worker | null {
     if (workerFailed) return null;
@@ -81,11 +93,68 @@ function resolveSyncOrReject(
     }
 }
 
+function settlePending(p: PendingRun, fn: () => void): void {
+    if (p.settled) return;
+    p.settled = true;
+    pending.delete(p.id);
+    p.cleanup();
+    fn();
+}
+
+/**
+ * Deep-clone engine input for postMessage. Vue reactive proxies (Verified Tune from the store)
+ * are not structured-cloneable; strip them before cloning.
+ */
+function cloneForWorker(input: AutotuneV2Input): AutotuneV2Input {
+    const detached: AutotuneV2Input = {
+        ...input,
+        verifiedTune: input.verifiedTune
+            ? (structuredClone(toRaw(input.verifiedTune)) as AutotuneV2Input["verifiedTune"])
+            : null,
+        others: input.others?.map((o) => toRaw(o)) ?? input.others,
+        primary: toRaw(input.primary),
+    };
+    return structuredClone(detached);
+}
+
+function isDataCloneError(err: unknown): boolean {
+    return (
+        (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "DataCloneError") ||
+        (err instanceof Error && /DataCloneError|could not be cloned/i.test(err.message))
+    );
+}
+
+/**
+ * Terminate the shared worker and settle every in-flight request so none is left hanging.
+ * The aborted id (if any) rejects with AbortError; others fall back to the sync engine.
+ */
+function terminateSharedWorker(abortedId?: number): void {
+    const w = worker;
+    worker = null;
+    if (w) {
+        try {
+            w.terminate();
+        } catch {
+            /* ignore */
+        }
+    }
+    const stranded = [...pending.values()];
+    for (const p of stranded) {
+        if (abortedId !== undefined && p.id === abortedId) {
+            settlePending(p, () => p.reject(new DOMException("Aborted", "AbortError")));
+        } else {
+            settlePending(p, () => resolveSyncOrReject(p.input, p.signal, p.resolve, p.reject));
+        }
+    }
+}
+
 /**
  * Run the engine (and informative model-class assessment) for `input`. When `signal` aborts, the
  * worker is cancelled and terminated so a blocking compute cannot keep running after the UI moved
- * on; the promise rejects with AbortError. Crash / construction failure falls back once to the
- * main-thread engine (same numerical path). Callers must still discard stale store writes after abort.
+ * on; the promise rejects with AbortError. Concurrent in-flight requests on the shared worker are
+ * settled (sync fallback), never left pending. Crash / construction / clone failure falls back to
+ * the main-thread engine (same numerical path) without stranding siblings. Callers must still
+ * discard stale store writes after abort.
  */
 export function runAutotuneV2Cancellable(
     input: AutotuneV2Input,
@@ -102,13 +171,22 @@ export function runAutotuneV2Cancellable(
     }
     const id = nextId++;
     return new Promise((resolve, reject) => {
-        let settled = false;
-        const settle = (fn: () => void) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            fn();
+        const pendingRun: PendingRun = {
+            id,
+            input,
+            signal,
+            resolve,
+            reject,
+            settled: false,
+            cleanup: () => {
+                signal?.removeEventListener("abort", onAbort);
+                w.removeEventListener("message", onMessage);
+                w.removeEventListener("error", onError);
+                w.removeEventListener("messageerror", onMessageError);
+            },
         };
+        pending.set(id, pendingRun);
+
         const onAbort = () => {
             try {
                 const cancel: AutotuneWorkerRequest = { type: "cancel", id };
@@ -117,63 +195,78 @@ export function runAutotuneV2Cancellable(
                 /* worker may already be gone */
             }
             // Cancel alone cannot interrupt a synchronous runAutotuneV2 inside the worker.
-            try {
-                w.terminate();
-            } catch {
-                /* ignore */
-            }
-            worker = null;
-            settle(() => reject(new DOMException("Aborted", "AbortError")));
+            terminateSharedWorker(id);
         };
         const onMessage = (ev: MessageEvent<AutotuneWorkerResponse>) => {
             const msg = ev.data;
             if (!msg || typeof msg !== "object" || msg.id !== id) return;
             if (msg.type === "result") {
-                settle(() => resolve({ result: msg.result, qualification: msg.qualification }));
+                settlePending(pendingRun, () => resolve({ result: msg.result, qualification: msg.qualification }));
             } else if (msg.type === "error") {
-                settle(() => reject(new Error(msg.message || "autotune_worker_error")));
+                settlePending(pendingRun, () => reject(new Error(msg.message || "autotune_worker_error")));
             } else {
-                settle(() => reject(new Error("autotune_worker_invalid_message")));
+                settlePending(pendingRun, () => reject(new Error("autotune_worker_invalid_message")));
             }
         };
         const onError = (ev: ErrorEvent) => {
             workerFailed = true;
+            // Settle every pending (including this one via sync fallback) — do not leave siblings hanging.
+            const stranded = [...pending.values()];
             try {
                 w.terminate();
             } catch {
                 /* ignore */
             }
             worker = null;
-            settle(() => resolveSyncOrReject(input, signal, resolve, reject));
+            for (const p of stranded) {
+                settlePending(p, () => resolveSyncOrReject(p.input, p.signal, p.resolve, p.reject));
+            }
             void ev;
         };
         const onMessageError = () => {
             workerFailed = true;
+            const stranded = [...pending.values()];
             try {
                 w.terminate();
             } catch {
                 /* ignore */
             }
             worker = null;
-            settle(() => reject(new Error("autotune_worker_message_error")));
+            for (const p of stranded) {
+                settlePending(p, () => p.reject(new Error("autotune_worker_message_error")));
+            }
         };
-        const cleanup = () => {
-            signal?.removeEventListener("abort", onAbort);
-            w.removeEventListener("message", onMessage);
-            w.removeEventListener("error", onError);
-            w.removeEventListener("messageerror", onMessageError);
-        };
+
         signal?.addEventListener("abort", onAbort, { once: true });
         w.addEventListener("message", onMessage);
         w.addEventListener("error", onError);
         w.addEventListener("messageerror", onMessageError);
-        const req: AutotuneWorkerRequest = { type: "run", id, input };
+
+        let wire: AutotuneV2Input;
+        try {
+            wire = cloneForWorker(input);
+        } catch (err) {
+            // Clone failed (unexpected proxy shape): sync once; keep the worker for later plain inputs.
+            settlePending(pendingRun, () => resolveSyncOrReject(input, signal, resolve, reject));
+            void err;
+            return;
+        }
+
+        const req: AutotuneWorkerRequest = { type: "run", id, input: wire };
         try {
             w.postMessage(req);
         } catch (err) {
-            workerFailed = true;
-            worker = null;
-            settle(() => resolveSyncOrReject(input, signal, resolve, reject));
+            if (isDataCloneError(err)) {
+                // Do not permanently disable the worker for a one-off non-cloneable payload.
+                settlePending(pendingRun, () => resolveSyncOrReject(input, signal, resolve, reject));
+            } else {
+                workerFailed = true;
+                worker = null;
+                const stranded = [...pending.values()];
+                for (const p of stranded) {
+                    settlePending(p, () => resolveSyncOrReject(p.input, p.signal, p.resolve, p.reject));
+                }
+            }
             void err;
         }
     });

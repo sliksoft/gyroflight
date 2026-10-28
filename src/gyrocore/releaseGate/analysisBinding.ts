@@ -50,13 +50,16 @@ export function currentAnalysisInput(): AutotuneV2Input | null {
     if (!picked) return null;
     const id = logIdentity(picked.primary.headerPairs);
     const firmware = id.firmwareRevision?.split(/\s+/)[1] ?? null;
+    // forCraft returns a Vue proxy from the reactive records store; the worker path needs plain
+    // structured-cloneable data (Codex release-gate P2, 2026-10-28).
+    const verified = useVerifiedTuneStore().forCraft(
+        id.uid,
+        firmware,
+        loggedAbsoluteValues(picked.primary.headerPairs),
+    );
     return {
         ...picked,
-        verifiedTune: useVerifiedTuneStore().forCraft(
-            id.uid,
-            firmware,
-            loggedAbsoluteValues(picked.primary.headerPairs),
-        ),
+        verifiedTune: verified ? plainCopy(toRaw(verified)) : null,
     };
 }
 
