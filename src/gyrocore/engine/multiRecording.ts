@@ -53,17 +53,12 @@ export interface AggregateAveragesResult {
 }
 
 /**
- * Content key for a claim: sample-rate, segment length, sweep edges and duration, and the average
- * count. Two claims that share sha256 or this key are the same evidence.
+ * Sample-identity key for a claim. Acquisition settings alone must not collide independent
+ * flights that happen to share the same sweep parameters (Codex final 2026-10-28, P2).
+ * Identical bytes share sha256; that is the duplicate detector.
  */
-export function claimContentKey(
-    analysis: Pick<AnalysisProvenance, "segmentSamples" | "sampleRateHz">,
-    sweep: SweepInfo,
-    averages: number,
-): string {
-    return [analysis.sampleRateHz, analysis.segmentSamples, sweep.f0Hz, sweep.f1Hz, sweep.durationS, averages].join(
-        ":",
-    );
+export function claimContentKey(sha256: string): string {
+    return sha256;
 }
 
 /**
@@ -83,18 +78,18 @@ export function averageClaimAt(
         logIndex: log.logIndex,
         hz,
         averages: n,
-        contentKey: claimContentKey(analysis, sweep, n),
+        contentKey: claimContentKey(log.sha256),
     };
 }
 
 /**
- * Sum whole-segment averages at one frequency across claims. Duplicate sha256 or contentKey is
- * counted once. Callers must only pass claims that already passed identity / config checks.
+ * Sum whole-segment averages at one frequency across claims. Duplicate sample identity (sha256)
+ * is counted once. Independent recordings with identical acquisition settings still sum.
+ * Callers must only pass claims that already passed identity / config checks.
  */
 export function aggregateAverageClaims(hz: number, claims: RecordingAverageClaim[]): AggregateAveragesResult {
     const rejected: string[] = [];
     const seenSha = new Set<string>();
-    const seenContent = new Set<string>();
     let sum = 0;
     const contributors: string[] = [];
     for (const c of claims) {
@@ -106,16 +101,11 @@ export function aggregateAverageClaims(hz: number, claims: RecordingAverageClaim
             rejected.push(`duplicate_sha256:${c.id}`);
             continue;
         }
-        if (seenContent.has(c.contentKey)) {
-            rejected.push(`duplicate_content:${c.id}`);
-            continue;
-        }
         if (!(Number.isInteger(c.averages) && c.averages >= 1)) {
             rejected.push(`non_positive_averages:${c.id}`);
             continue;
         }
         seenSha.add(c.sha256);
-        seenContent.add(c.contentKey);
         sum += c.averages;
         contributors.push(c.id);
     }

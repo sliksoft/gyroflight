@@ -59,16 +59,16 @@ describe("adversarial software qualification (SIMULATION)", () => {
         }
     }, 120_000);
 
-    it("duplicate recording content does not stack independent averages", () => {
+    it("duplicate sha256 does not stack; distinct hashes with the same settings do", () => {
         const log = syntheticLogInput("b".repeat(64));
         const analysis = { segmentSamples: 512, sampleRateHz: 4000, windowSamples: 80_000, segments: 18 };
         const sweep = { f0Hz: 1, f1Hz: 200, durationS: 20 };
         const a = averageClaimAt(log, 5, analysis, sweep);
         expect(a).not.toBeNull();
-        const dup = { ...a!, id: "other-id", sha256: "c".repeat(64) };
-        const sum = aggregateAverageClaims(5, [a!, dup]);
-        expect(sum.averages).toBe(a!.averages);
-        expect(sum.rejected.some((x) => x.startsWith("duplicate_content:"))).toBe(true);
+        const sameSha = { ...a!, id: "other-id", logIndex: 1 };
+        const otherSha = { ...a!, id: "c:0", sha256: "c".repeat(64), contentKey: "c".repeat(64) };
+        expect(aggregateAverageClaims(5, [a!, sameSha]).averages).toBe(a!.averages);
+        expect(aggregateAverageClaims(5, [a!, otherSha]).averages).toBe(2 * a!.averages);
     });
 
     it("incompatible configuration cannot improve multi-recording qualification", () => {

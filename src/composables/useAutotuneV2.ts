@@ -26,6 +26,7 @@
  * (slider modes included), and writes only after the user's yes, bound to that preview.
  */
 
+import { watch } from "vue";
 import { i18n } from "@/js/localization";
 import { analyzeM4BblFile } from "@/js/blackbox/m4_bbl_integration";
 import { useDialog } from "@/composables/useDialog";
@@ -186,6 +187,14 @@ export function useAutotuneV2() {
         store.state = "calculating";
         store.errorMessage = "";
         const abort = new AbortController();
+        // Cancel the worker as soon as sources change (Codex final 2026-10-28, P2); discarding the
+        // result alone left obsolete work running until completion.
+        const stopRevisionWatch = watch(
+            () => store.revision,
+            (r) => {
+                if (r !== revision) abort.abort();
+            },
+        );
         try {
             await buildInputs();
             // The same input the write authority recomputes at Apply (analysisBinding.ts).
@@ -209,6 +218,7 @@ export function useAutotuneV2() {
             store.state = "error";
             store.errorMessage = reasonsOf(err).join(", ");
         } finally {
+            stopRevisionWatch();
             if (store.revision === revision) store.progressMessage = "";
         }
     }

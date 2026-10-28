@@ -37,36 +37,29 @@ const ANALYSIS = { segmentSamples: 512, sampleRateHz: 4000, windowSamples: 80_00
 const SWEEP = { f0Hz: 1, f1Hz: 200, durationS: 20 };
 
 describe("aggregateAverageClaims", () => {
-    it("sums distinct recordings and rejects duplicate sha or content", () => {
+    it("sums independent recordings with identical settings; rejects duplicate sha only", () => {
         const a: RecordingAverageClaim = {
             id: "a:0",
             sha256: "a".repeat(64),
             logIndex: 0,
             hz: 26,
-            averages: 3,
-            contentKey: "k1",
+            averages: 9,
+            contentKey: "a".repeat(64),
         };
+        // Same acquisition settings / average count as `a`, different sample identity.
         const b: RecordingAverageClaim = {
             id: "b:0",
             sha256: "b".repeat(64),
             logIndex: 0,
             hz: 26,
-            averages: 4,
-            contentKey: "k2",
+            averages: 9,
+            contentKey: "b".repeat(64),
         };
         const dupSha: RecordingAverageClaim = { ...a, id: "a:1", logIndex: 1, averages: 9 };
-        const dupContent: RecordingAverageClaim = {
-            id: "c:0",
-            sha256: "c".repeat(64),
-            logIndex: 0,
-            hz: 26,
-            averages: 4,
-            contentKey: "k2",
-        };
-        const r = aggregateAverageClaims(26, [a, b, dupSha, dupContent]);
-        expect(r.averages).toBe(7);
+        const r = aggregateAverageClaims(26, [a, b, dupSha]);
+        expect(r.averages).toBe(18);
         expect(r.contributors).toEqual(["a:0", "b:0"]);
-        expect(r.rejected).toEqual(["duplicate_sha256:a:1", "duplicate_content:c:0"]);
+        expect(r.rejected).toEqual(["duplicate_sha256:a:1"]);
     });
 
     it("averageClaimAt returns null when the window holds no whole segment at hz", () => {
