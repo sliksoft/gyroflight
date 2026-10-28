@@ -48,6 +48,7 @@ import {
     marginEvidenceIssues,
     sectorDistanceToMinusOne,
     sweepAverages,
+    sweepDwellSamples,
     UNCERTAINTY,
 } from "../../src/gyrocore/engine/loopModel";
 import type { EffectiveChain } from "../../src/gyrocore/engine/gyroChain";
@@ -95,13 +96,48 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         expect(u.relErr!.get(f)).toBeCloseTo(expected, 12);
     });
 
-    it("averages for an exponential sweep: T / (Ts² · f · ln(f1/f0)) segments, at least 1, at most the window's", () => {
+    it("averages for an exponential sweep: whole segments in the bin's dwell, counted in whole samples; 0 is unknown, never 1", () => {
         const sweep = { f0Hz: 1, f1Hz: 400, durationS: 20 };
-        // AIR65-like: 0.512 s segments, 77 of them.
-        expect(sweepAverages(40, 0.512, 77, sweep)).toBe(1);
-        expect(sweepAverages(2, 0.512, 77, sweep)).toBe(Math.floor(20 / (0.512 ** 2 * 2 * Math.log(400))));
-        expect(sweepAverages(0.01, 0.512, 77, sweep)).toBe(39);
-        expect(sweepAverages(40, 0.512, 77, null)).toBe(1);
+        // AIR65-like: 512-sample segments at 1 kHz (1.953 Hz bins), 77 of them.
+        const a = { segmentSamples: 512, sampleRateHz: 1000, segments: 77 };
+        const dwell = (f: number) => sweepDwellSamples(f, 1000 / 512, 1000, sweep);
+        // The dwell is the integer difference of the sweep's sample indices at the bin's edges.
+        const L = Math.log(400);
+        const t = (f: number) => (20 * Math.log(f)) / L;
+        expect(dwell(2)).toBe(Math.floor(1000 * t(2 + 1000 / 1024)) - Math.floor(1000 * t(2 - 1000 / 1024)));
+        expect(sweepAverages(2, a, sweep)).toBe(Math.floor(dwell(2) / 512));
+        expect(sweepAverages(2, a, sweep)).toBe(6);
+        // 40 Hz: 163 samples of dwell, less than one 512-sample segment: unknown (was rounded up to 1).
+        expect(dwell(40)).toBeLessThan(512);
+        expect(sweepAverages(40, a, sweep)).toBe(0);
+        // Below the sweep's start nothing was excited (was 39 by the continuous formula's cap).
+        expect(sweepAverages(0.01, a, sweep)).toBe(0);
+        // Without the sweep or the analysis: unknown (was 1).
+        expect(sweepAverages(40, a, null)).toBe(0);
+        expect(sweepAverages(40, null, sweep)).toBe(0);
+        // At most the window's non-overlapping segments.
+        expect(sweepAverages(1.5, { ...a, segments: 3 }, { ...sweep, durationS: 2000 })).toBe(2);
+    });
+
+    it("the count never exceeds what the continuous dwell allows (property)", () => {
+        const sweep = { f0Hz: 2, f1Hz: 300, durationS: 37.3 };
+        for (const [N, fs] of [
+            [512, 1000],
+            [2048, 4000],
+            [4096, 4032.258],
+            [1024, 1000],
+        ] as const) {
+            const L = Math.log(300 / 2);
+            for (let f = 2.2; f < 300; f *= 1.07) {
+                const df = fs / N;
+                const lo = Math.max(f - df / 2, 2);
+                const hi = Math.min(f + df / 2, 300);
+                const continuous = (fs * 37.3 * Math.log(hi / lo)) / L;
+                const n = sweepAverages(f, { segmentSamples: N, sampleRateHz: fs, segments: 10_000 }, sweep);
+                expect(Number.isInteger(n)).toBe(true);
+                expect(n * N).toBeLessThanOrEqual(continuous + 1);
+            }
+        }
     });
 
     it("fewer than the minimum Welch segments: the uncertainty is unknown (one segment has γ² ≡ 1)", () => {

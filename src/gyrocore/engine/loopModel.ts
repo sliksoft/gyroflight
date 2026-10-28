@@ -359,18 +359,76 @@ export interface AnalysisProvenance {
 }
 
 /**
- * Independent averages at `fHz` in a Welch estimate of an exponential sweep: the sweep dwells
- * T / (f · ln(f1 / f0)) per hertz, so one bin of width 1/Ts is excited for T / (Ts · f · ln(f1/f0))
- * seconds, i.e. that many / Ts non-overlapping segments; at least 1, at most the non-overlapping
- * count of the whole window. Without the sweep: 1 (each frequency excited once).
+ * What a bin with less than one whole Welch segment of sweep dwell (sweepAverages 0) counts as, per
+ * measurement path (planner safety repair 2026-10-28). The count itself is the same integer count on
+ * both paths; only this policy differs, and the planner reads the same constant.
+ *
+ *   qualification  UNKNOWN: the bin's error is unknown and bounds nothing, so a qualification that
+ *                  leans on it is no PASS. The model-class qualification is where the planned and
+ *                  the delivered averages must agree (the segment contract, qualificationRung.ts).
+ *   primary        COUNTED_AS_ONE: the legacy count of one average, now named on every margin
+ *                  (`sub_segment_dwell_counted_as_one:<n>_bins` in the uncertainty budget's
+ *                  systematic.notQuantified). Changing it is a change of the error model, a separate
+ *                  research question; the primary alone never reaches VALIDATED evidence.
  */
-export function sweepAverages(fHz: number, segmentS: number, segments: number, sweep: SweepInfo | null): number {
-    const cap = Math.max(1, Math.floor((segments + 1) / 2));
-    if (!sweep || !(sweep.f1Hz > sweep.f0Hz && sweep.f0Hz > 0 && sweep.durationS > 0 && segmentS > 0 && fHz > 0)) {
-        return 1;
+export const SUB_SEGMENT_DWELL = Object.freeze({ primary: "COUNTED_AS_ONE", qualification: "UNKNOWN" } as const);
+
+export type MeasurementPath = keyof typeof SUB_SEGMENT_DWELL;
+
+/**
+ * Samples the exponential sweep f(t) = f0 · (f1 / f0)^(t / T) (chirp.c) spends inside the bin
+ * [fHz − binHz / 2, fHz + binHz / 2), counted on the sample grid of `sampleRateHz`: the integer
+ * difference of the first sample indices at the bin's two edges (edges clipped to the sweep).
+ * Exported for its tests and the planner (planner safety repair 2026-10-28).
+ */
+export function sweepDwellSamples(fHz: number, binHz: number, sampleRateHz: number, sweep: SweepInfo): number {
+    const { f0Hz: f0, f1Hz: f1, durationS: T } = sweep;
+    const L = Math.log(f1 / f0);
+    const tAt = (f: number) => (T * Math.log(Math.min(Math.max(f, f0), f1) / f0)) / L;
+    return Math.max(
+        0,
+        Math.floor(sampleRateHz * tAt(fHz + binHz / 2)) - Math.floor(sampleRateHz * tAt(fHz - binHz / 2)),
+    );
+}
+
+/**
+ * Independent averages at `fHz` in a Welch estimate of an exponential sweep, counted in whole samples
+ * and whole segments (planner safety repair 2026-10-28): the sweep's dwell in the bin
+ * (sweepDwellSamples) holds floor(dwell / N) non-overlapping segments of N samples; at most the
+ * non-overlapping count of the whole window. 0 when the dwell is shorter than one segment, when the
+ * sweep or the analysis is not known or not valid: the bin's averages are then UNKNOWN, never
+ * rounded up to one (loopUncertainty leaves its error unknown, so it bounds nothing).
+ */
+export function sweepAverages(
+    fHz: number,
+    analysis: Pick<AnalysisProvenance, "segmentSamples" | "sampleRateHz" | "segments"> | null,
+    sweep: SweepInfo | null,
+): number {
+    if (!analysis || !sweep) return 0;
+    const N = analysis.segmentSamples;
+    const fs = analysis.sampleRateHz;
+    if (
+        !(Number.isInteger(N) && N > 0 && fs > 0 && Number.isFinite(fs) && fHz > 0) ||
+        !(sweep.f1Hz > sweep.f0Hz && sweep.f0Hz > 0 && sweep.durationS > 0)
+    ) {
+        return 0;
     }
-    const n = Math.floor(sweep.durationS / (segmentS * segmentS * fHz * Math.log(sweep.f1Hz / sweep.f0Hz)));
-    return Math.min(cap, Math.max(1, n));
+    const cap = Math.max(0, Math.floor((analysis.segments + 1) / 2));
+    return Math.min(cap, Math.floor(sweepDwellSamples(fHz, fs / N, fs, sweep) / N));
+}
+
+/**
+ * κ = |C_ref / (C_ref − T · C_fb)| at `fHz`: how a relative error of the closed-loop T becomes a
+ * relative error of the identified L (and G). Infinite at a singular denominator. Shared by
+ * loopUncertainty and the measurement planner, which needs it where a bin's error is not known.
+ */
+export function loopErrorGain(T: { re: number; im: number }, cfg: DigitalControllerConfig, fHz: number): number {
+    const frf = evaluateControllerFrf(cfg, fHz);
+    const den = cmag({
+        re: frf.cReference.re - (T.re * frf.cFeedback.re - T.im * frf.cFeedback.im),
+        im: frf.cReference.im - (T.re * frf.cFeedback.im + T.im * frf.cFeedback.re),
+    });
+    return den > 1e-12 ? cmag(frf.cReference) / den : Infinity;
 }
 
 /** Per identified bin, the relative error of L (UNCERTAINTY); `relErr` null when it cannot be known. */
@@ -380,6 +438,8 @@ export interface LoopUncertainty {
     averages: [number, number] | null;
     /** Independent averages used at each bin. */
     averagesByHz?: Map<number, number>;
+    /** Bins with less than one whole segment of dwell that SUB_SEGMENT_DWELL counted as one average. */
+    subSegmentBinsCountedAsOne?: number;
     reasons: string[];
 }
 
@@ -388,40 +448,53 @@ export function loopUncertainty(
     tf: TransferFunction,
     cfg: DigitalControllerConfig,
     measurement: { sweep?: SweepInfo | null; analysis?: AnalysisProvenance | null } = {},
+    /** Which SUB_SEGMENT_DWELL policy applies (the primary measurement or the model-class qualification). */
+    path: MeasurementPath = "primary",
 ): LoopUncertainty {
     const K = tf.numSegments;
     if (!(Number.isInteger(K) && K >= UNCERTAINTY.minWelchSegments)) {
         return { relErr: null, averages: null, reasons: [`uncertainty_unknown:welch_segments:${K}`] };
     }
-    const step = tf.frequencies.length > 1 ? tf.frequencies[1] - tf.frequencies[0] : 0;
-    const segmentS = measurement.analysis
-        ? measurement.analysis.segmentSamples / measurement.analysis.sampleRateHz
-        : step > 0
-          ? 1 / step
-          : 0;
+    // Averages are counted on the analysis's own segment and sample grid (whole samples, whole
+    // segments); without the analysis or the sweep they are unknown (sweepAverages 0).
+    const analysis = measurement.analysis ? { ...measurement.analysis, segments: K } : null;
     const relErr = new Map<number, number>();
     const averagesByHz = new Map<number, number>();
     let lo = Infinity;
     let hi = 0;
+    let unknown = 0;
+    let countedAsOne = 0;
     for (let k = 0; k < tf.frequencies.length; k++) {
         const f = tf.frequencies[k];
         const g2 = tf.coherence[k];
         if (!(g2 > 0 && g2 <= 1) || !(f > 0)) continue;
-        const n = sweepAverages(f, segmentS, K, measurement.sweep ?? null);
+        const counted = sweepAverages(f, analysis, measurement.sweep ?? null);
+        let n = counted;
+        if (counted < 1) {
+            // Less than one whole segment of dwell (SUB_SEGMENT_DWELL): unknown on the qualification
+            // path; counted as one, and named, on the primary path.
+            if (SUB_SEGMENT_DWELL[path] === "UNKNOWN") {
+                averagesByHz.set(f, 0);
+                lo = Math.min(lo, 0);
+                unknown++;
+                continue;
+            }
+            n = 1;
+            countedAsOne++;
+        }
         averagesByHz.set(f, n);
         lo = Math.min(lo, n);
         hi = Math.max(hi, n);
         const eT = Math.sqrt(1 - g2) / (Math.sqrt(g2) * Math.sqrt(2 * n));
-        const T = { re: tf.hReal[k], im: tf.hImag[k] };
-        const frf = evaluateControllerFrf(cfg, f);
-        const den = cmag({
-            re: frf.cReference.re - (T.re * frf.cFeedback.re - T.im * frf.cFeedback.im),
-            im: frf.cReference.im - (T.re * frf.cFeedback.im + T.im * frf.cFeedback.re),
-        });
-        const kappa = den > 1e-12 ? cmag(frf.cReference) / den : Infinity;
-        relErr.set(f, eT * kappa);
+        relErr.set(f, eT * loopErrorGain({ re: tf.hReal[k], im: tf.hImag[k] }, cfg, f));
     }
-    return { relErr, averages: Number.isFinite(lo) ? [lo, hi] : null, averagesByHz, reasons: [] };
+    return {
+        relErr,
+        averages: Number.isFinite(lo) ? [lo, hi] : null,
+        averagesByHz,
+        subSegmentBinsCountedAsOne: countedAsOne,
+        reasons: unknown ? [`uncertainty_unknown:dwell_below_one_segment:${unknown}_bins`] : [],
+    };
 }
 
 /**
@@ -1049,7 +1122,12 @@ export function buildAxisLoop(
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
                   source: { ...qualification.source },
-                  uncertainty: loopUncertainty(qualification.tf, qualification.cfg ?? cfg, qualification),
+                  uncertainty: loopUncertainty(
+                      qualification.tf,
+                      qualification.cfg ?? cfg,
+                      qualification,
+                      "qualification",
+                  ),
                   provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
                   support: qualification.support ?? null,
                   sweep: qualification.sweep ?? null,
@@ -1327,16 +1405,20 @@ export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: numb
 export function phaseMarginSigmaDegAt(loop: Pick<AxisLoop, "uncertainty">, fc: number): number | null {
     const relErr = loop.uncertainty.relErr;
     if (!relErr) return null;
-    let best: number | null = null;
+    // The bin nearest fc among every bin whose averages were counted; its error unknown (less than
+    // one segment of dwell): σ unknown, never a neighbour's.
+    const grid = loop.uncertainty.averagesByHz ? [...loop.uncertainty.averagesByHz.keys()] : [...relErr.keys()];
+    let nearest: number | null = null;
     let dist = Infinity;
-    for (const [f, e] of relErr) {
+    for (const f of grid) {
         const d = Math.abs(f - fc);
         if (d < dist) {
             dist = d;
-            best = e;
+            nearest = f;
         }
     }
-    return best === null ? null : (best * 180) / Math.PI;
+    const e = nearest === null ? undefined : relErr.get(nearest);
+    return e === undefined ? null : (e * 180) / Math.PI;
 }
 
 /** Systematic error sources the engine names but does not quantify (UncertaintyBudget.systematic). */
@@ -1375,7 +1457,13 @@ export function uncertaintyBudgetOf(loop: AxisLoop, evidence: MarginEvidence, fc
         systematic: {
             modelClass: q ? q.verdict : "NOT_QUALIFIED",
             chainValidated: loop.chainValidated,
-            notQuantified: [...NOT_QUANTIFIED, ...(loop.chainValidated ? [] : ["gyro_chain_model"])],
+            notQuantified: [
+                ...NOT_QUANTIFIED,
+                ...(loop.chainValidated ? [] : ["gyro_chain_model"]),
+                ...(loop.uncertainty?.subSegmentBinsCountedAsOne
+                    ? [`sub_segment_dwell_counted_as_one:${loop.uncertainty.subSegmentBinsCountedAsOne}_bins`]
+                    : []),
+            ],
         },
         unknown: [],
     };

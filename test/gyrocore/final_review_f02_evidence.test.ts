@@ -34,6 +34,7 @@
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
+import { declaredQualificationSweep } from "./harness/qualificationSweep";
 import {
     air65RollConfig,
     cdiv,
@@ -99,7 +100,15 @@ function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null =
               source: SOURCE,
               analysis: welchOf(fine.freqs),
               support: declaredSupport(qtf!),
-              sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+              // SIMULATION: the sweep these fine bins need (one whole segment of dwell per bin,
+              // SUB_SEGMENT_DWELL.qualification), declared like their support.
+              sweep: declaredQualificationSweep({
+                  segmentSamples: welchOf(fine.freqs).segmentSamples,
+                  sampleRateHz: welchOf(fine.freqs).sampleRateHz,
+                  f0Hz: 1,
+                  f1Hz: 400,
+                  topHz: Math.max(...fine.freqs),
+              }),
           }
         : null;
     const tf = tfOf(freqs, g);

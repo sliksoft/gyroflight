@@ -69,6 +69,7 @@ import { closedLoopChirpLog, ratePlant, type Plant } from "./harness/closedLoopB
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
+import { declaredQualificationSweep } from "./harness/qualificationSweep";
 
 const HEADERS = Object.fromEntries([
     ...[...SIM_IDENTITY_HEADERS, ...BETAFLIGHT_TUNE_HEADERS].map((l) => [
@@ -99,6 +100,17 @@ const WINDOW = 40000;
 const PRIMARY = { segmentSamples: N, sampleRateHz: FS, windowSamples: WINDOW, segments: 77 };
 const FINE_N = 8192;
 const FINE = { segmentSamples: FINE_N, sampleRateHz: FS, windowSamples: WINDOW, segments: 8 };
+/**
+ * SIMULATION: the sweep the qualification's 0.122 Hz bins up to 225 Hz need (at least one whole segment
+ * of dwell per bin; loopModel SUB_SEGMENT_DWELL.qualification), declared like its support.
+ */
+const QUAL_SWEEP = declaredQualificationSweep({
+    segmentSamples: FINE_N,
+    sampleRateHz: FS,
+    f0Hz: 1,
+    f1Hz: 400,
+    topHz: 225,
+});
 const SOURCE = { sha256: "a".repeat(64), logIndex: 2 };
 const PEAK_HZ = 40 * BIN; // 39.0625 Hz: on the primary grid
 
@@ -202,7 +214,7 @@ function build(
             ? {
                   tf: o.fine,
                   source: SOURCE,
-                  sweep: SWEEP,
+                  sweep: QUAL_SWEEP,
                   analysis: FINE,
                   support:
                       o.fineSupport === undefined ? declaredSupport(o.fine, { observedHz: [2, 400] }) : o.fineSupport,

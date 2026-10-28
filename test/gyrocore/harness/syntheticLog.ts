@@ -40,6 +40,7 @@ import {
 import { dtermConfigFromHeaders, simulateDterm } from "../../../src/js/blackbox/betaflight_dterm_dynamic";
 import { chainConfigFromHeaders, simulateGyroChain } from "../../../src/gyrocore/engine/gyroChain";
 import { declaredSupport } from "./frequencySupport";
+import { declaredQualificationSweep } from "./qualificationSweep";
 import {
     analyzeAxisController,
     controllerConfigFromHeaders,
@@ -123,14 +124,27 @@ export interface SyntheticLogOptions {
      * overlapping); without it the transfer function carries no analysis provenance.
      */
     welch?: { segments: number; windowS: number };
+    /**
+     * SIMULATION: the CHIRP sweep the log's headers declare (chirp_frequency_start / end, chirp_time
+     * _seconds); default 2–200 Hz over 20 s.
+     */
+    sweep?: { f0Hz: number; f1Hz: number; durationS: number };
 }
 
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
     const o = typeof opts === "number" ? { seconds: opts } : opts;
     const seconds = o.seconds ?? 11;
     const n = Math.round(seconds * FS);
+    const sweepHeader: Record<string, string> = o.sweep
+        ? {
+              chirp_frequency_start_deci_hz: String(Math.round(o.sweep.f0Hz * 10)),
+              chirp_frequency_end_deci_hz: String(Math.round(o.sweep.f1Hz * 10)),
+              chirp_time_seconds: String(o.sweep.durationS),
+          }
+        : {};
     const headerPairs: [string, string][] = SYNTH_HEADERS.map(([k, v]) => {
         const axis = k.replace("PID", "") as "roll" | "pitch" | "yaw";
+        if (k in sweepHeader) return [k, sweepHeader[k]];
         return k.endsWith("PID") && o.pids?.[axis] ? [k, o.pids[axis]!.join(",")] : [k, v];
     });
     const h = Object.fromEntries(headerPairs);
@@ -273,9 +287,22 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
  * Its band reaches 160 Hz (QUALIFICATION_BAND_EXTENSION × the primary's 100 Hz, and more), and
  * its bins claim the Welch analysis that 0.1 Hz takes: 40 000-sample segments, 8 of them at 50 %
  * overlap, so a 45 s sweep window, which the log holds.
+ *
+ * Its headers declare the sweep those bins need (planner safety repair 2026-10-28): the qualification
+ * counts averages in whole segments and leaves a bin with less than one segment of dwell unknown, so
+ * a 0.1 Hz grid to 160 Hz takes an exponential sweep of about a day (declaredQualificationSweep). The
+ * samples behind it are not simulated; the analytic bins are, as before.
  */
+export const SIMULATED_QUALIFICATION_SWEEP = declaredQualificationSweep({
+    segmentSamples: Math.round(FS / 0.1),
+    sampleRateHz: FS,
+    f0Hz: 1,
+    f1Hz: 200,
+    topHz: 160,
+});
+
 export function simulatedQualificationLog(
-    opts: Omit<SyntheticLogOptions, "binStepHz" | "maxHz" | "welch"> = {},
+    opts: Omit<SyntheticLogOptions, "binStepHz" | "maxHz" | "welch" | "sweep"> = {},
 ): AutotuneLogInput {
     return syntheticLogInput("5a".repeat(32), {
         seconds: 46,
@@ -283,5 +310,6 @@ export function simulatedQualificationLog(
         binStepHz: 0.1,
         maxHz: 160,
         welch: { segments: 8, windowS: 45 },
+        sweep: SIMULATED_QUALIFICATION_SWEEP,
     });
 }

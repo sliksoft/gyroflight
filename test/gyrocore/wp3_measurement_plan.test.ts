@@ -52,6 +52,7 @@ import {
 } from "../../src/gyrocore/engine/loopModel";
 import { PLAN, planMeasurement } from "../../src/gyrocore/engine/measurementPlan";
 import { qualificationSegmentSamples } from "../../src/gyrocore/engine/qualificationRung";
+import { expectPrimaryPlanDelivers, expectQualificationPlanDelivers } from "./harness/planContract";
 import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import type { EffectiveChain } from "../../src/gyrocore/engine/gyroChain";
 import { syntheticLogInput } from "./harness/syntheticLog";
@@ -159,22 +160,19 @@ describe("the plan follows the evidence rules", () => {
         expect(p.averages.needed).toBe(Math.max(1, Math.ceil(((1 - g2) * kappa * kappa) / (2 * g2 * sigma * sigma))));
         expect(p.averages.now).toBe(1);
         expect(p.requiredMeasurements).toContain("required_measurement:chirp_longer_sweep_for_averages");
-        // One sweep over the planned band giving n averages at fc: T = n · Ts² · fc · ln(f1/f0)
-        // (the analysis does not combine repeated sweeps, so the plan never asks for repeats).
-        const Ts = p.segmentSamples.primary! / 4000;
+        // One sweep over the planned band giving every stability decision (gain crossing, phase
+        // crossing, |S| peak) its averages on the planned segment, counted in whole samples, and no
+        // longer (planner safety repair 2026-10-28); the analysis does not combine repeated sweeps,
+        // so the plan never asks for repeats.
         expect(p.sweep!.f0Hz).toBeCloseTo(p.bandHz.primary![0], 9);
         expect(p.sweep!.f1Hz).toBeCloseTo(p.bandHz.primary![1], 9);
-        expect(p.sweep!.durationS).toBeCloseTo(
-            Math.max(
-                p.averages.needed! * Ts * Ts * fc * Math.log(p.sweep!.f1Hz / p.sweep!.f0Hz),
-                (Ts * (UNCERTAINTY.minWelchSegments + 1)) / 2,
-            ),
-            6,
-        );
+        expect(p.averagesAt.find((a) => a.purpose === "gain_crossover")!.needed).toBe(p.averages.needed);
+        expect(p.averagesAt.some((a) => a.purpose === "phase_crossover")).toBe(true);
+        expect(p.averagesAt.some((a) => a.purpose === "sensitivity_peak")).toBe(true);
+        expectPrimaryPlanDelivers(p, 4000);
         expect("repeats" in p.sweep!).toBe(false);
-        const TsQ = p.segmentSamples.qualification! / 4000;
-        expect(p.qualificationSweep!.durationS).toBeGreaterThanOrEqual((TsQ * (UNCERTAINTY.minWelchSegments + 1)) / 2);
         expect(p.qualificationSweep!.f1Hz).toBeCloseTo(p.bandHz.qualification![1], 9);
+        expectQualificationPlanDelivers(p, 4000);
     });
 
     it("always asks for the model-class qualification flight; no change to any analysis", () => {

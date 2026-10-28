@@ -52,6 +52,7 @@ import {
 import { cmul, evaluateControllerFrf } from "../../src/js/blackbox/betaflight_digital_controller";
 import { closedLoopChirpLog, ratePlant, type ClosedLoopLogOptions, type Plant } from "./harness/closedLoopBbl";
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
+import { expectPrimaryPlanDelivers, expectQualificationPlanDelivers } from "./harness/planContract";
 
 // SIMULATION: rate-plant parameters per craft class are assumptions, not calibrated craft.
 // AIR65-like crosses ≈ 26 Hz, 5-inch-like ≈ 13 Hz (continuation B5), 7-inch-like ≈ 6.8 Hz.
@@ -120,11 +121,10 @@ describe.each(Object.entries(CLASSES))("%s-like loop against its analytic truth"
         expect(p.bandHz.primary![0]).toBeGreaterThanOrEqual(fc / 4 - 1e-9);
         expect(p.bandHz.primary![0]).toBeLessThan(fc);
         expect(p.bandHz.primary![1]).toBeGreaterThan(fc);
-        const Ts = p.segmentSamples.primary! / 1000;
-        expect(p.sweep!.durationS).toBeCloseTo(
-            Math.max(p.averages.needed! * Ts * Ts * fc * Math.log(p.sweep!.f1Hz / p.sweep!.f0Hz), (Ts * 9) / 2),
-            6,
-        );
+        // The duration every stability decision's averages need on the planned segment, counted in
+        // whole samples (planner safety repair 2026-10-28), and no longer.
+        expectPrimaryPlanDelivers(p, 1000);
+        expectQualificationPlanDelivers(p, 1000);
     });
 
     it("no validation is claimed from this one flight", () => {

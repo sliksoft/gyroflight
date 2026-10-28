@@ -61,6 +61,7 @@ import { closedLoopChirpLog, ratePlant, type Plant } from "./harness/closedLoopB
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
+import { declaredQualificationSweep } from "./harness/qualificationSweep";
 
 const HEADERS = Object.fromEntries([
     ...[...SIM_IDENTITY_HEADERS, ...BETAFLIGHT_TUNE_HEADERS].map((l) => [
@@ -80,6 +81,8 @@ const UNITY_CHAIN: EffectiveChain = {
 };
 const FS = 1000;
 const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
+// SIMULATION: the sweep the qualification's 0.244 Hz bins up to 225 Hz need (SUB_SEGMENT_DWELL.qualification).
+const QSWEEP = declaredQualificationSweep({ segmentSamples: 4096, sampleRateHz: FS, f0Hz: 1, f1Hz: 400, topHz: 225 });
 
 /** Analytic T of `G` on the 512-sample grid, coherence `coh(f)`, minus the bins in `drop` (Hz). */
 function anaTF(G: Plant, coh: (f: number) => number, n: number, K: number, drop: number[] = []): TransferFunction {
@@ -123,7 +126,7 @@ const build = (tf: TransferFunction, fine: TransferFunction) =>
         {
             tf: fine,
             source: { sha256: "a".repeat(64), logIndex: 2 },
-            sweep: SWEEP,
+            sweep: QSWEEP,
             analysis: { segmentSamples: 4096, sampleRateHz: FS, windowSamples: 20000, segments: 8 },
             support: declaredSupport(fine, { observedHz: [2, 400] }),
         },

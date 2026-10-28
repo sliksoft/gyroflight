@@ -111,10 +111,16 @@ describe.each(Object.entries(CLASSES))(
             expect(["improved", "restores_margins"]).toContain(pid.outcome);
             expect(pid.proposed).not.toEqual(pid.current);
 
-            // The candidate's crossover is its own.
+            // The candidate is a real move of the tune (some gain by more than 5 %), and its crossover is
+            // its own, computed for it, not the current tune's copied over. (Planner safety repair
+            // 2026-10-28: on the longer flight the planner now asks for, the AIR65-like search raises P
+            // and lowers D, which leaves the crossover within one bin; the 7- and 5-inch-like searches
+            // still move it by more than one bin. The crossover shift alone is no proof of a move.)
             const fc0 = current.crossoverHz!;
             const fc1 = pid.proposedMargins.crossoverHz!;
-            expect(Math.abs(fc1 - fc0) / fc0).toBeGreaterThan(0.05);
+            const gains = ["p", "i", "d"] as const;
+            expect(gains.some((g) => Math.abs(pid.proposed[g] - pid.current[g]) > 0.05 * pid.current[g])).toBe(true);
+            expect(fc1).not.toBe(fc0);
 
             // Its resolution verdict is a rung comparison of its own, not the current tune's copied over.
             const v0 = current.evidence.convergence!;

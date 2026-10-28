@@ -99,7 +99,12 @@ function perturbedTF(G: Plant, seed: number | null): TransferFunction {
         const plant = G(ff);
         let T = cdiv(cmul(plant, c.cReference), cadd({ re: 1, im: 0 }, cmul(plant, c.cFeedback)));
         if (g) {
-            const n = sweepAverages(ff, N / FS, SEGMENTS, SWEEP);
+            // The primary path's policy (loopModel SUB_SEGMENT_DWELL.primary): less than one whole
+            // segment of dwell is counted as one average, as loopUncertainty does.
+            const n = Math.max(
+                1,
+                sweepAverages(ff, { segmentSamples: N, sampleRateHz: FS, segments: SEGMENTS }, SWEEP),
+            );
             const eps = Math.sqrt(1 - COHERENCE) / (Math.sqrt(COHERENCE) * Math.sqrt(2 * n));
             const gain = 1 + eps * g();
             const phase = eps * g();
