@@ -278,7 +278,8 @@ describe("AutotuneV2Panel", () => {
         expect(roll.getAttribute("data-evidence")).toBe("VALIDATED");
         expect(roll.querySelector(".text-green-500")).not.toBeNull();
         const detail = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="roll"]')!;
-        expect(detail.textContent).toContain("gyroflightV2EvidenceQualified|5a5a5a5a|0.100|0.451");
+        // SIMULATED_QUALIFICATION_SHA is "5".repeat(64); the panel shows the first 8 hex chars.
+        expect(detail.textContent).toContain("gyroflightV2EvidenceQualified|55555555|0.100|0.451");
         expect(detail.textContent).not.toContain("gyroflightV2EvidenceNeeded");
     });
 });

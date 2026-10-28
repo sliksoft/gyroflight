@@ -83,8 +83,10 @@ function plan(
     analysis: AnalysisProvenance | null = ANALYSIS,
 ) {
     const tf = syntheticTransferFunctionWithCoherence(freqs, T(g), coherence);
+    // Sweep without a matching analysed window is ambiguous (Codex Gate 1): averages stay unknown.
+    // When the planner is given an analysis, the loop must use the same provenance.
     const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
-        sweep: SWEEP,
+        ...(analysis ? { sweep: SWEEP, analysis } : {}),
         support: declaredSupport(tf),
         ...declaredResolution(),
     });

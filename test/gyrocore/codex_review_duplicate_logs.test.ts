@@ -94,7 +94,7 @@ describe("P1-02: a duplicate is not an independent repeat", () => {
         expect(sameHash.crossLogRejected).toContain(`cross_log_duplicate_of_primary:${"1".repeat(64)}:0`);
         expect(released(sameHash)).toBe(false);
         expect(evaluateRelease(sameHash.releasableProposal ?? sameHash.proposal!).blocks).toEqual(
-            expect.arrayContaining(["model_quality:cross_log_plant_untested:roll"]),
+            expect.arrayContaining(["safety_evidence:cross_log_plant_untested:roll"]),
         );
     });
 
