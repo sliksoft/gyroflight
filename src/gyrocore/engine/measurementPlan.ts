@@ -383,6 +383,7 @@ export function planMeasurement(
         minSamples: number,
         extra: { hz: number; n: number; purpose: string }[],
         label: string,
+        needTop = false,
     ) => {
         const fs = sampleRateHz;
         const df = fs / N;
@@ -398,11 +399,23 @@ export function planMeasurement(
             all.push({ hz: g, n: t.n, purpose: t.purpose });
         }
         // The analysed window can be one sample short of the sweep (the real AIR65 logs: 79 999 of 80 000).
-        const segmentsOf = (T: number) => Math.max(1, Math.floor((Math.floor(T * fs) - 1 - N) / (N / 2)) + 1);
+        // The analysed window can be one sample short of the sweep (the real AIR65 logs: 79 999 of
+        // 80 000): segments and every bin's dwell are counted inside that window.
+        const windowOf = (T: number) => Math.floor(T * fs) - 1;
+        const segmentsOf = (T: number) => Math.max(1, Math.floor((windowOf(T) - N) / (N / 2)) + 1);
         const count = (hz: number, T: number) =>
-            sweepAverages(hz, { segmentSamples: N, sampleRateHz: fs, segments: segmentsOf(T) }, firmwareSweep(band, T));
-        const ok = (T: number) => T * fs >= minSamples && all.every((t) => count(t.hz, T) >= t.n);
-        // Whole seconds: grow until every target is met (bounded), then the shortest such length.
+            sweepAverages(
+                hz,
+                { segmentSamples: N, sampleRateHz: fs, segments: segmentsOf(T) },
+                firmwareSweep(band, T),
+                windowOf(T),
+            );
+        // The highest bin of the executable sweep (its 0.1 Hz upper edge), where the dwell is shortest.
+        const topOf = (T: number) => Math.floor(firmwareSweep(band, T).f1Hz / df) * df;
+        const ok = (T: number) =>
+            T * fs >= minSamples && all.every((t) => count(t.hz, T) >= t.n) && (!needTop || count(topOf(T), T) >= 1);
+        // Whole seconds: grow until every target is met (bounded), then bisect. The integer count is not
+        // strictly monotone in T, so the result is a short passing length, each one checked by ok().
         let hi = Math.max(1, Math.ceil(minSamples / fs));
         const LIMIT_S = 1e9;
         while (!ok(hi) && hi < LIMIT_S) hi = Math.max(hi + 1, Math.ceil(hi * 1.5));
@@ -446,14 +459,15 @@ export function planMeasurement(
             if (unknownTargets.length) {
                 diagnostics.push("qualification_not_planned:averages_unknown");
             } else {
-                const qdf = sampleRateHz / Nq;
-                const top = Math.floor(plan.bandHz.qualification[1] / qdf) * qdf;
+                // Every bin of its band known: at least one whole segment of dwell at the highest bin of
+                // the executable sweep (Codex review 2026-10-28: taken after rounding the band edge).
                 const qual = solve(
                     plan.bandHz.qualification,
                     Nq,
                     (Nq * (UNCERTAINTY.minWelchSegments + 1)) / 2,
-                    [{ hz: top, n: 1, purpose: "band_top" }],
+                    [],
                     "qualification",
+                    true,
                 );
                 if (qual) {
                     plan.qualificationSweep = qual.sweep;

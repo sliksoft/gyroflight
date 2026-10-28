@@ -43,14 +43,14 @@ export function oracleAverages(sweep: Sweep, N: number, fs: number, hz: number):
     const L = Math.log(sweep.f1Hz / sweep.f0Hz);
     const f = (k: number) => sweep.f0Hz * Math.exp((L * k) / (fs * T));
     const kOf = (x: number) => (fs * T * Math.log(Math.min(Math.max(x, sweep.f0Hz), sweep.f1Hz) / sweep.f0Hz)) / L;
-    const last = Math.floor(fs * T);
+    // The analysed window, one sample short of the sweep as on real logs: indices 0 … W − 1.
+    const last = Math.floor(fs * T) - 2;
     let n = 0;
     for (let k = Math.max(0, Math.floor(kOf(lo)) - 2); k <= Math.min(last, Math.ceil(kOf(hi)) + 2); k++) {
         const fk = f(k);
         if (fk > lo && fk < hi) n++;
     }
-    // The analysed window, one sample short of the sweep as on real logs.
-    const W = Math.floor(fs * T) - 1;
+    const W = last + 1;
     const K = W >= N ? Math.floor((W - N) / (N / 2)) + 1 : 0;
     return Math.min(Math.floor((K + 1) / 2), Math.floor(n / N));
 }
@@ -104,8 +104,8 @@ export function expectQualificationPlanDelivers(p: AxisMeasurementPlan, fs: numb
         expect(delivered, `${a.purpose} at ${a.hz.toFixed(1)} Hz`).toBeGreaterThanOrEqual(a.needed!);
         expect(a.qualification!).toBeLessThanOrEqual(delivered);
     }
-    // The highest bin of the planned qualification band (the band's own top, inside the sweep).
-    const top = Math.floor(p.bandHz.qualification![1] / df) * df;
+    // The highest bin of the executable sweep (its rounded 0.1 Hz upper edge), not of the planned band.
+    const top = Math.floor(s.f1Hz / df) * df;
     expect(oracleAverages(s, N, fs, top)).toBeGreaterThanOrEqual(1);
     expect(p.windowSamples.qualification!).toBeGreaterThanOrEqual((N * (UNCERTAINTY.minWelchSegments + 1)) / 2);
 }

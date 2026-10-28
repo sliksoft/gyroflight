@@ -39,7 +39,7 @@ import {
     qualificationSegmentSamples,
     selectQualificationRung,
 } from "../../src/gyrocore/engine/qualificationRung";
-import { RESOLVED_FEATURE_BINS } from "../../src/gyrocore/engine/loopModel";
+import { RESOLVED_FEATURE_BINS, sweepAverages } from "../../src/gyrocore/engine/loopModel";
 import type { AnalysisOption } from "../../src/gyrocore/engine/adaptiveResolution";
 import { buildLogInputs, finestWelchSegment } from "../../src/gyrocore/engine/logInput";
 import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
@@ -126,6 +126,25 @@ function decoded(o: ClosedLoopLogOptions, name: string): AutotuneLogInput {
     expect(log, name).toBeDefined();
     return log;
 }
+
+describe("a shorter adequate rung is read with its own count (Codex review 2026-10-28, P2)", () => {
+    it("accepted, but at a clipped band edge its own count is zero there: unknown, never the plan's", () => {
+        // Codex's example: primary 1024 @ 1 kHz → contract 8192; sweep 1 → 100 Hz over 45 000 s.
+        const primary = rung(1024, 1000).analysis;
+        const sweep = { f0Hz: 1, f1Hz: 100, durationS: 45_000 };
+        const sel = selectQualificationRung([rung(8190, 1000), rung(8192, 1000)], primary, sweep);
+        expect(sel.rung!.analysis.segmentSamples).toBe(8190);
+        const big = 1_000_000;
+        // The contract's highest bin gets one average; the shorter rung's bin there, centred on the
+        // sweep's end, gets none: its error is unknown on the qualification path (no PASS).
+        expect(sweepAverages(99.9755859375, { segmentSamples: 8192, sampleRateHz: 1000, segments: big }, sweep)).toBe(
+            1,
+        );
+        // The 8190 rung's own bin there is centred on 100 Hz (819 × 1000 / 8190), clipped by the sweep's end.
+        expect(819 * (1000 / 8190)).toBeCloseTo(100, 9);
+        expect(sweepAverages(100, { segmentSamples: 8190, sampleRateHz: 1000, segments: big }, sweep)).toBe(0);
+    });
+});
 
 describe("regression: the planned 5-inch-like qualification flight (922 s) is read on the contract rung", () => {
     // SIMULATION: the 5-inch-like rate plant (assumption) and the qualification sweep the planner asked

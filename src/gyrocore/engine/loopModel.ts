@@ -383,12 +383,21 @@ export type MeasurementPath = keyof typeof SUB_SEGMENT_DWELL;
  * count never takes a sample a neighbouring bin may also claim (Codex review 2026-10-28, P1).
  * Exported for its tests and the planner (planner safety repair 2026-10-28).
  */
-export function sweepDwellSamples(fHz: number, binHz: number, sampleRateHz: number, sweep: SweepInfo): number {
+export function sweepDwellSamples(
+    fHz: number,
+    binHz: number,
+    sampleRateHz: number,
+    sweep: SweepInfo,
+    /** Samples the analysed window holds (indices 0 … windowSamples − 1); a sample past it does not count. */
+    windowSamples?: number,
+): number {
     const { f0Hz: f0, f1Hz: f1, durationS: T } = sweep;
     const L = Math.log(f1 / f0);
     const tAt = (f: number) => (T * Math.log(Math.min(Math.max(f, f0), f1) / f0)) / L;
     const a = sampleRateHz * tAt(fHz - binHz / 2);
-    const b = sampleRateHz * tAt(fHz + binHz / 2);
+    const end = sampleRateHz * tAt(fHz + binHz / 2);
+    // windowSamples − 0.5: the last sample in the window, index windowSamples − 1, still counts.
+    const b = windowSamples === undefined ? end : Math.min(end, windowSamples - 0.5);
     if (!(b > a)) return 0;
     const guard = (x: number) => SAMPLE_EDGE_GUARD * Math.max(1, Math.abs(x));
     // Integers k with a < k < b, each edge pulled inward by its rounding guard.
@@ -410,6 +419,11 @@ export function sweepAverages(
     fHz: number,
     analysis: Pick<AnalysisProvenance, "segmentSamples" | "sampleRateHz" | "segments"> | null,
     sweep: SweepInfo | null,
+    /**
+     * The planner's window (samples), when the dwell must lie in it. The engine does not pass it yet:
+     * clipping the analysis's dwell to its own window is an open item (Codex review 2026-10-28, P2).
+     */
+    windowSamples?: number,
 ): number {
     if (!analysis || !sweep) return 0;
     const N = analysis.segmentSamples;
@@ -421,7 +435,7 @@ export function sweepAverages(
         return 0;
     }
     const cap = Math.max(0, Math.floor((analysis.segments + 1) / 2));
-    return Math.min(cap, Math.floor(sweepDwellSamples(fHz, fs / N, fs, sweep) / N));
+    return Math.min(cap, Math.floor(sweepDwellSamples(fHz, fs / N, fs, sweep, windowSamples) / N));
 }
 
 /**
@@ -1459,7 +1473,9 @@ export function uncertaintyBudgetOf(loop: AxisLoop, evidence: MarginEvidence, fc
             known:
                 relErr !== null &&
                 !loop.uncertainty.reasons.length &&
-                candidateLoop(loop, { cfg: loop.cfg }).every((p) => Number.isFinite(p.err)),
+                ((pts) => pts.length > 0 && pts.every((p) => Number.isFinite(p.err)))(
+                    candidateLoop(loop, { cfg: loop.cfg }),
+                ),
             includedInBounds: !!evidence.uncertainty,
             coverage: UNCERTAINTY.coverage,
             maxRelErr: evidence.uncertainty?.maxRelErr ?? maxRelErr,

@@ -241,7 +241,12 @@ describe("Codex review 2026-10-28: the count against an independent oracle", () 
             const counted = sweepDwellSamples(hz, df, fs, sweep);
             expect(counted).toBeLessThanOrEqual(n);
             expect(oracleAverages(sweep, N, fs, hz)).toBeGreaterThanOrEqual(
-                sweepAverages(hz, { segmentSamples: N, sampleRateHz: fs, segments: 10_000_000 }, sweep),
+                sweepAverages(
+                    hz,
+                    { segmentSamples: N, sampleRateHz: fs, segments: 10_000_000 },
+                    sweep,
+                    Math.floor(fs * sweep.durationS) - 1,
+                ),
             );
             // Inside the sweep the two agree except where rounding puts a sample on an edge (the guard
             // leaves it out); at the sweep's ends the edge samples are left out by design.

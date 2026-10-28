@@ -102,8 +102,11 @@ export function selectQualificationRung(
     // longer than the contract's segment (the planner's, qualificationSegmentSamples): a ladder without
     // an adequate rung up to that length leaves the qualification out, it does not fall through to a
     // longer rung (Codex review 2026-10-28, P2). A production ladder holds every power of two from the
-    // standard segment up to the finest, so this is exactly the contract's segment; a shorter adequate
-    // rung (not a power of two) gets more averages from the planned dwell, never fewer.
+    // standard segment up to the finest, so this is exactly the contract's segment. A shorter adequate
+    // rung (not a power of two, as in analytic fixtures) is read with its own count: where its bins
+    // lie differently it can get fewer averages than the plan (at a clipped band edge, none), and such a
+    // bin's error is then unknown on the qualification path, which leaves the qualification without a
+    // PASS (fail-closed), never with an optimistic bound.
     const target = (primaryStep / RESOLVED_FEATURE_BINS) * (1 + 1e-9);
     const rung =
         ladder
