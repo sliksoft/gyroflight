@@ -377,19 +377,26 @@ export type MeasurementPath = keyof typeof SUB_SEGMENT_DWELL;
 
 /**
  * Samples the exponential sweep f(t) = f0 · (f1 / f0)^(t / T) (chirp.c) spends inside the bin
- * [fHz − binHz / 2, fHz + binHz / 2), counted on the sample grid of `sampleRateHz`: the integer
- * difference of the first sample indices at the bin's two edges (edges clipped to the sweep).
+ * (fHz − binHz / 2, fHz + binHz / 2), counted on the sample grid of `sampleRateHz`: the sample
+ * indices k strictly between the bin's two edges a < k < b (edges clipped to the sweep). A sample
+ * on an edge, or within floating-point rounding of one (SAMPLE_EDGE_GUARD), belongs to no bin, so the
+ * count never takes a sample a neighbouring bin may also claim (Codex review 2026-10-28, P1).
  * Exported for its tests and the planner (planner safety repair 2026-10-28).
  */
 export function sweepDwellSamples(fHz: number, binHz: number, sampleRateHz: number, sweep: SweepInfo): number {
     const { f0Hz: f0, f1Hz: f1, durationS: T } = sweep;
     const L = Math.log(f1 / f0);
     const tAt = (f: number) => (T * Math.log(Math.min(Math.max(f, f0), f1) / f0)) / L;
-    return Math.max(
-        0,
-        Math.floor(sampleRateHz * tAt(fHz + binHz / 2)) - Math.floor(sampleRateHz * tAt(fHz - binHz / 2)),
-    );
+    const a = sampleRateHz * tAt(fHz - binHz / 2);
+    const b = sampleRateHz * tAt(fHz + binHz / 2);
+    if (!(b > a)) return 0;
+    const guard = (x: number) => SAMPLE_EDGE_GUARD * Math.max(1, Math.abs(x));
+    // Integers k with a < k < b, each edge pulled inward by its rounding guard.
+    return Math.max(0, Math.ceil(b - guard(b)) - Math.floor(a + guard(a)) - 1);
 }
+
+/** Relative distance from a bin edge within which a sample index counts as on the edge (rounding). */
+const SAMPLE_EDGE_GUARD = 1e-9;
 
 /**
  * Independent averages at `fHz` in a Welch estimate of an exponential sweep, counted in whole samples
@@ -467,7 +474,14 @@ export function loopUncertainty(
     for (let k = 0; k < tf.frequencies.length; k++) {
         const f = tf.frequencies[k];
         const g2 = tf.coherence[k];
-        if (!(g2 > 0 && g2 <= 1) || !(f > 0)) continue;
+        if (!(f > 0)) continue;
+        if (!(g2 > 0 && g2 <= 1)) {
+            // No usable coherence: the bin stays on the grid with no averages and no error, so the
+            // nearest-bin readers (phaseMarginSigmaDegAt, the planner) see it as unknown and never
+            // borrow a neighbour's error (Codex review 2026-10-28, P1).
+            averagesByHz.set(f, 0);
+            continue;
+        }
         const counted = sweepAverages(f, analysis, measurement.sweep ?? null);
         let n = counted;
         if (counted < 1) {
@@ -1440,7 +1454,12 @@ export function uncertaintyBudgetOf(loop: AxisLoop, evidence: MarginEvidence, fc
             deltaPhaseMarginDeg: conv?.deltaPhaseMarginDeg ?? null,
         },
         statistical: {
-            known: relErr !== null,
+            // Known only when every bin the margins are read on has its error (Codex review
+            // 2026-10-28, P1): a map with holes there is not a known statistical error.
+            known:
+                relErr !== null &&
+                !loop.uncertainty.reasons.length &&
+                candidateLoop(loop, { cfg: loop.cfg }).every((p) => Number.isFinite(p.err)),
             includedInBounds: !!evidence.uncertainty,
             coverage: UNCERTAINTY.coverage,
             maxRelErr: evidence.uncertainty?.maxRelErr ?? maxRelErr,

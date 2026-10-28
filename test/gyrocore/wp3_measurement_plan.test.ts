@@ -164,14 +164,19 @@ describe("the plan follows the evidence rules", () => {
         // crossing, |S| peak) its averages on the planned segment, counted in whole samples, and no
         // longer (planner safety repair 2026-10-28); the analysis does not combine repeated sweeps,
         // so the plan never asks for repeats.
-        expect(p.sweep!.f0Hz).toBeCloseTo(p.bandHz.primary![0], 9);
-        expect(p.sweep!.f1Hz).toBeCloseTo(p.bandHz.primary![1], 9);
+        // The executable sweep (0.1 Hz edges, whole seconds) contains the planned band, widened by
+        // less than one 0.1 Hz step at each end.
+        expect(p.sweep!.f0Hz).toBeLessThanOrEqual(p.bandHz.primary![0]);
+        expect(p.sweep!.f0Hz).toBeGreaterThan(p.bandHz.primary![0] - 0.1);
+        expect(p.sweep!.f1Hz).toBeGreaterThanOrEqual(p.bandHz.primary![1]);
+        expect(p.sweep!.f1Hz).toBeLessThan(p.bandHz.primary![1] + 0.1);
         expect(p.averagesAt.find((a) => a.purpose === "gain_crossover")!.needed).toBe(p.averages.needed);
         expect(p.averagesAt.some((a) => a.purpose === "phase_crossover")).toBe(true);
         expect(p.averagesAt.some((a) => a.purpose === "sensitivity_peak")).toBe(true);
         expectPrimaryPlanDelivers(p, 4000);
         expect("repeats" in p.sweep!).toBe(false);
-        expect(p.qualificationSweep!.f1Hz).toBeCloseTo(p.bandHz.qualification![1], 9);
+        expect(p.qualificationSweep!.f1Hz).toBeGreaterThanOrEqual(p.bandHz.qualification![1]);
+        expect(p.qualificationSweep!.f1Hz).toBeLessThan(p.bandHz.qualification![1] + 0.1);
         expectQualificationPlanDelivers(p, 4000);
     });
 

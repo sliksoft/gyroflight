@@ -33,10 +33,10 @@
  *   qualificationSegmentSamples   the smallest power-of-two segment whose bin spacing is at most
  *                                 the primary's bin spacing / RESOLVED_FEATURE_BINS (in Hz, so the
  *                                 two flights may log at different rates);
- *   selectQualificationRung       the shortest rung of the qualification log's own resolution ladder
- *                                 that meets it (logInput: every power of two up to the finest that
- *                                 still averages UNCERTAINTY.minWelchSegments segments, so in
- *                                 production exactly that segment); never a longer one. A
+ *   selectQualificationRung       the shortest adequate rung of the qualification log's own ladder,
+ *                                 never longer than that segment (logInput: every power of two up to
+ *                                 the finest that still averages UNCERTAINTY.minWelchSegments
+ *                                 segments, so in production exactly that segment). A
  *                                 rung that is not there, or whose bins are not coherent over the
  *                                 sweep (QUALIFICATION_COHERENT_SHARE), is named and leaves the
  *                                 qualification out (fail-closed). Its averages, support and
@@ -98,20 +98,23 @@ export function selectQualificationRung(
     const primaryStep = primary.sampleRateHz / primary.segmentSamples;
     const n = qualificationSegmentSamples(primaryStep, fs);
     if (n === null) return { rung: null, segmentSamples: null, reasons: ["qualification_segment_undefined"] };
-    // The shortest rung of the ladder that resolves RESOLVED_FEATURE_BINS × finer than the primary. A
-    // production ladder holds every power of two from the standard segment up to the finest, so this
-    // is exactly the planner's segment (qualificationSegmentSamples); a longer rung is never taken.
+    // The shortest rung that resolves RESOLVED_FEATURE_BINS × finer than the primary, and never one
+    // longer than the contract's segment (the planner's, qualificationSegmentSamples): a ladder without
+    // an adequate rung up to that length leaves the qualification out, it does not fall through to a
+    // longer rung (Codex review 2026-10-28, P2). A production ladder holds every power of two from the
+    // standard segment up to the finest, so this is exactly the contract's segment; a shorter adequate
+    // rung (not a power of two) gets more averages from the planned dwell, never fewer.
     const target = (primaryStep / RESOLVED_FEATURE_BINS) * (1 + 1e-9);
-    const adequate = ladder
-        .filter((r) => r.analysis.sampleRateHz / r.analysis.segmentSamples <= target)
-        .sort((a, b) => a.analysis.segmentSamples - b.analysis.segmentSamples);
-    const rung = adequate[0] ?? null;
-    if (!rung) {
-        const finest = Math.max(...ladder.map((r) => r.analysis.segmentSamples));
+    const rung =
+        ladder
+            .filter((r) => r.analysis.sampleRateHz / r.analysis.segmentSamples <= target)
+            .sort((a, b) => a.analysis.segmentSamples - b.analysis.segmentSamples)[0] ?? null;
+    if (!rung || rung.analysis.segmentSamples > n) {
+        const have = [...new Set(ladder.map((r) => r.analysis.segmentSamples))].sort((a, b) => a - b);
         return {
             rung: null,
             segmentSamples: n,
-            reasons: [`qualification_segment_not_available:needs:${n}:finest:${finest}`],
+            reasons: [`qualification_segment_not_available:needs:${n}:finest:${have[have.length - 1]}`],
         };
     }
     const share = coherentShare(rung.tf, sweep);

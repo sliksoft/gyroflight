@@ -35,7 +35,7 @@
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
-import { expectPrimaryPlanDelivers, expectQualificationPlanDelivers } from "./harness/planContract";
+import { expectPrimaryPlanDelivers, expectQualificationPlanDelivers, oracleAverages } from "./harness/planContract";
 import {
     air65RollConfig,
     evaluateControllerFrf,
@@ -51,8 +51,10 @@ import {
     loopErrorGain,
     loopMargins,
     loopUncertainty,
+    phaseMarginSigmaDegAt,
     SUB_SEGMENT_DWELL,
     sweepAverages,
+    sweepDwellSamples,
 } from "../../src/gyrocore/engine/loopModel";
 import { PLAN, planMeasurement } from "../../src/gyrocore/engine/measurementPlan";
 import type { EffectiveChain } from "../../src/gyrocore/engine/gyroChain";
@@ -204,5 +206,133 @@ describe("the planner counts at every decision, not at the crossover only", () =
         expect(p.qualificationSweep).toBeNull();
         expect(p.windowSamples.qualification).toBeNull();
         expect(p.diagnostics).toContain("qualification_not_planned:averages_unknown");
+    });
+});
+
+describe("Codex review 2026-10-28: the count against an independent oracle", () => {
+    it("a sample exactly on a bin edge belongs to no bin: Codex's example gives 0, not 1", () => {
+        // N = 8, fs = 8 Hz, bin 2 Hz (1.5 … 2.5 Hz), sweep 1.49 → 4 Hz whose upper bin edge falls on
+        // sample index 8: only indices 1 … 7 lie strictly inside the bin.
+        const T = Math.log(4 / 1.49) / Math.log(2.5 / 1.49);
+        const sweep = { f0Hz: 1.49, f1Hz: 4, durationS: T };
+        expect(sweepDwellSamples(2, 1, 8, sweep)).toBe(7);
+        expect(sweepAverages(2, { segmentSamples: 8, sampleRateHz: 8, segments: 1000 }, sweep)).toBe(0);
+    });
+
+    it("never more than the samples strictly inside the bin, over random sweeps (brute force)", () => {
+        let seed = 7;
+        const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+        let exact = 0;
+        let inside = 0;
+        for (let i = 0; i < 400; i++) {
+            const fs = [500, 1000, 2000, 4000, 4032.258][i % 5];
+            const N = [64, 128, 256, 512][(i >> 2) % 4];
+            const f0 = 0.5 + 5 * rnd();
+            const f1 = f0 * (2 + 50 * rnd());
+            const sweep = { f0Hz: f0, f1Hz: f1, durationS: 2 + 60 * rnd() };
+            const df = fs / N;
+            const hz = Math.max(1, Math.round((f0 + (f1 - f0) * rnd()) / df)) * df;
+            const L = Math.log(f1 / f0);
+            let n = 0;
+            for (let k = 0; k <= Math.floor(fs * sweep.durationS); k++) {
+                const fk = f0 * Math.exp((L * k) / (fs * sweep.durationS));
+                if (fk > hz - df / 2 && fk < hz + df / 2) n++;
+            }
+            const counted = sweepDwellSamples(hz, df, fs, sweep);
+            expect(counted).toBeLessThanOrEqual(n);
+            expect(oracleAverages(sweep, N, fs, hz)).toBeGreaterThanOrEqual(
+                sweepAverages(hz, { segmentSamples: N, sampleRateHz: fs, segments: 10_000_000 }, sweep),
+            );
+            // Inside the sweep the two agree except where rounding puts a sample on an edge (the guard
+            // leaves it out); at the sweep's ends the edge samples are left out by design.
+            if (hz - df / 2 > f0 && hz + df / 2 < f1) {
+                inside++;
+                if (counted === n) exact++;
+                else expect(counted).toBeGreaterThanOrEqual(n - 2);
+            }
+        }
+        expect(inside).toBeGreaterThan(250);
+        expect(exact).toBeGreaterThanOrEqual(inside - 2);
+    });
+
+    it("σ_PM is unknown when the crossover's own bin has no usable coherence (never a neighbour's)", () => {
+        const freqs = uniform(200, 0.5);
+        const tfOk = syntheticTransferFunctionWithCoherence(freqs, T(smooth), () => 0.995);
+        tfOk.numSegments = 18;
+        const loopOk = buildAxisLoop(0, tfOk, cfg, UNITY_CHAIN, true, true, null, {
+            sweep: SWEEP,
+            analysis: ANALYSIS,
+            support: declaredSupport(tfOk),
+            ...declaredResolution(),
+        });
+        const fc = loopMargins(loopOk).crossoverHz!;
+        const own = freqs.reduce((b, f) => (Math.abs(f - fc) < Math.abs(b - fc) ? f : b));
+        expect(phaseMarginSigmaDegAt(loopOk, fc)).not.toBeNull();
+        const tf = syntheticTransferFunctionWithCoherence(freqs, T(smooth), (f) => (f === own ? 0 : 0.995));
+        tf.numSegments = 18;
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+            sweep: SWEEP,
+            analysis: ANALYSIS,
+            support: declaredSupport(tf),
+            ...declaredResolution(),
+        });
+        expect(loop.uncertainty.averagesByHz!.get(own)).toBe(0);
+        expect(phaseMarginSigmaDegAt(loop, own)).toBeNull();
+    });
+});
+
+describe("Codex review 2026-10-28: the planner on the analysis's rate, and decisions away from the crossover", () => {
+    const planAt = (coherence: (f: number) => number, logRate: number, analysisRate: number) => {
+        const analysis = { ...ANALYSIS, sampleRateHz: analysisRate };
+        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), coherence);
+        tf.numSegments = 18;
+        const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
+            sweep: SWEEP,
+            analysis,
+            support: declaredSupport(tf),
+            ...declaredResolution(),
+        });
+        return planMeasurement("roll", loop, loopMargins(loop), logRate, SWEEP, analysis);
+    };
+
+    it("plans at the analysis's sample rate when the log's timestamps say otherwise, and names it", () => {
+        const p = planAt(() => 0.995, 4000, 4032.258);
+        expect(p.diagnostics).toContain("planned_at_analysis_rate:4032.258Hz:log_timestamps:4000.000Hz");
+        expectPrimaryPlanDelivers(p, 4032.258);
+        expectQualificationPlanDelivers(p, 4032.258);
+        expect(planAt(() => 0.995, 4000, 4000).diagnostics.some((d) => d.startsWith("planned_at_analysis_rate"))).toBe(
+            false,
+        );
+    });
+
+    it("a poorly measured |S| peak drives the duration (an independently derived decision set)", () => {
+        // The analytic loop's |S| peak, from the plant itself, not from the planner.
+        let peak = 0;
+        let best = Infinity;
+        for (let f = 1; f < 200; f += 0.01) {
+            const L = (() => {
+                const c = evaluateControllerFrf(cfg, f).cFeedback;
+                const g = smooth(f);
+                return { re: g.re * c.re - g.im * c.im, im: g.re * c.im + g.im * c.re };
+            })();
+            const d = Math.hypot(1 + L.re, L.im);
+            if (d < best) {
+                best = d;
+                peak = f;
+            }
+        }
+        const fine = planAt(() => 0.995, 4000, 4000);
+        const noisy = planAt((f) => (Math.abs(f - peak) < 3 ? 0.93 : 0.995), 4000, 4000);
+        const sp = noisy.averagesAt.find((a) => a.purpose === "sensitivity_peak")!;
+        expect(Math.abs(sp.hz - peak)).toBeLessThanOrEqual(0.5);
+        expect(sp.needed!).toBeGreaterThan(fine.averagesAt.find((a) => a.purpose === "sensitivity_peak")!.needed!);
+        expect(noisy.averagesAt.find((a) => a.purpose === "gain_crossover")!.needed).toBe(
+            fine.averagesAt.find((a) => a.purpose === "gain_crossover")!.needed,
+        );
+        expect(noisy.sweep!.durationS).toBeGreaterThan(fine.sweep!.durationS);
+        // The sweep delivers the |S| peak's averages by the independent count, and one second less does not.
+        const N = noisy.segmentSamples.primary!;
+        expect(oracleAverages(noisy.sweep!, N, 4000, sp.hz)).toBeGreaterThanOrEqual(sp.needed!);
+        expectPrimaryPlanDelivers(noisy, 4000);
     });
 });

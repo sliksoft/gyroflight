@@ -292,6 +292,14 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
  * counts averages in whole segments and leaves a bin with less than one segment of dwell unknown, so
  * a 0.1 Hz grid to 160 Hz takes an exponential sweep of about a day (declaredQualificationSweep). The
  * samples behind it are not simulated; the analytic bins are, as before.
+ *
+ * OPEN (Codex review 2026-10-28, P2): this is not a realizable flight. A day of sweep cannot lie in
+ * the 45 s window the analysis claims; the engine counts dwell from the sweep header and does not
+ * clip it to the analysed window, so this fixture passes. It stands in for the qualified evidence the
+ * write-authority and release suites need. Before this repair the same tests reached PASS on
+ * sub-segment bins rounded up to one average; the repair made the fiction visible, it did not create
+ * it. Follow-up: clip dwell to the analysed window in the engine, and give those suites a VALIDATED
+ * source that needs no fictitious flight.
  */
 export const SIMULATED_QUALIFICATION_SWEEP = declaredQualificationSweep({
     segmentSamples: Math.round(FS / 0.1),

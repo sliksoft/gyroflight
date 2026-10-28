@@ -175,6 +175,10 @@ export function planMeasurement(
      */
     analysis: AnalysisProvenance | null,
 ): AxisMeasurementPlan {
+    // The analysis's own sample rate (its Welch ladder's effective rate), not the log's timestamp
+    // median: the plan's grid, dwell and segment counts are the analysis's (Codex review 2026-10-28, P1).
+    const logRateHz = sampleRateHz;
+    sampleRateHz = analysis?.sampleRateHz ?? sampleRateHz;
     const pts = candidateLoop(loop, { cfg: loop.cfg });
     const fc = margins.crossoverHz;
     const diagnostics = coherenceDips(loop);
@@ -193,6 +197,11 @@ export function planMeasurement(
         averagesAt: [],
         windowSamples: { primary: null, qualification: null },
     };
+    if (analysis && Math.abs(analysis.sampleRateHz - logRateHz) > 1e-6 * logRateHz) {
+        diagnostics.push(
+            `planned_at_analysis_rate:${analysis.sampleRateHz.toFixed(3)}Hz:log_timestamps:${logRateHz.toFixed(3)}Hz`,
+        );
+    }
     if (pts.length < 4 || !fc) {
         diagnostics.push(pts.length < 4 ? "too_few_identified_bins" : "crossover_not_found_in_band");
         required.add("required_measurement:chirp_covering_the_crossover");
@@ -361,33 +370,67 @@ export function planMeasurement(
     // finer rung with UNCERTAINTY.minWelchSegments segments (2N · (K + 1) / 2 samples: the resolution
     // convergence check needs it); the qualification's its own rung's.
     const known = targets.filter((t): t is (typeof targets)[number] & { needed: number } => t.needed !== null);
-    const solve = (band: [number, number], N: number, minSamples: number, extra: { hz: number; n: number }[]) => {
+    // The sweep as the firmware takes it: chirp_frequency_start / end in 0.1 Hz (the band widened to
+    // that grid), chirp_time_seconds in whole seconds. Every count is made on that sweep.
+    const firmwareSweep = (band: [number, number], T: number) => ({
+        f0Hz: Math.max(0.1, Math.floor(band[0] * 10 + 1e-9) / 10),
+        f1Hz: Math.ceil(band[1] * 10 - 1e-9) / 10,
+        durationS: T,
+    });
+    const solve = (
+        band: [number, number],
+        N: number,
+        minSamples: number,
+        extra: { hz: number; n: number; purpose: string }[],
+        label: string,
+    ) => {
         const fs = sampleRateHz;
         const df = fs / N;
         const grid = (hz: number) => Math.max(1, Math.round(hz / df)) * df;
-        const all = [
-            ...known.map((t) => ({ hz: grid(t.hz), n: t.needed })),
-            ...extra.map((e) => ({ hz: grid(e.hz), n: e.n })),
-        ].filter((t) => t.hz >= band[0] && t.hz <= band[1]);
-        const L = Math.log(band[1] / band[0]);
-        const sweepOf = (T: number) => ({ f0Hz: band[0], f1Hz: band[1], durationS: T });
-        const segmentsOf = (T: number) => Math.max(1, Math.floor((Math.floor(T * fs) - N) / (N / 2)) + 1);
-        const count = (hz: number, T: number) =>
-            sweepAverages(hz, { segmentSamples: N, sampleRateHz: fs, segments: segmentsOf(T) }, sweepOf(T));
-        let T = minSamples / fs;
-        for (const t of all) {
-            const lo = Math.max(t.hz - df / 2, band[0]);
-            const hi = Math.min(t.hz + df / 2, band[1]);
-            if (hi > lo) T = Math.max(T, ((t.n * N + 2) / fs) * (L / Math.log(hi / lo)));
+        const all: { hz: number; n: number; purpose: string }[] = [];
+        for (const t of [...known.map((k) => ({ hz: k.hz, n: k.needed, purpose: k.purpose })), ...extra]) {
+            const g = grid(t.hz);
+            // A decision outside the band this sweep covers is not planned by it: named, not dropped.
+            if (g < band[0] || g > band[1]) {
+                diagnostics.push(`decision_outside_planned_band:${label}:${t.purpose}:${t.hz.toFixed(1)}Hz`);
+                continue;
+            }
+            all.push({ hz: g, n: t.n, purpose: t.purpose });
         }
-        for (let i = 0; i < 200 && !all.every((t) => count(t.hz, T) >= t.n); i++) T = T * 1.002 + 1 / fs;
-        return { durationS: T, windowSamples: Math.ceil(T * fs), count: (hz: number) => count(grid(hz), T) };
+        // The analysed window can be one sample short of the sweep (the real AIR65 logs: 79 999 of 80 000).
+        const segmentsOf = (T: number) => Math.max(1, Math.floor((Math.floor(T * fs) - 1 - N) / (N / 2)) + 1);
+        const count = (hz: number, T: number) =>
+            sweepAverages(hz, { segmentSamples: N, sampleRateHz: fs, segments: segmentsOf(T) }, firmwareSweep(band, T));
+        const ok = (T: number) => T * fs >= minSamples && all.every((t) => count(t.hz, T) >= t.n);
+        // Whole seconds: grow until every target is met (bounded), then the shortest such length.
+        let hi = Math.max(1, Math.ceil(minSamples / fs));
+        const LIMIT_S = 1e9;
+        while (!ok(hi) && hi < LIMIT_S) hi = Math.max(hi + 1, Math.ceil(hi * 1.5));
+        if (!ok(hi)) {
+            diagnostics.push(`${label}_not_planned:targets_unreachable`);
+            return null;
+        }
+        let lo = 0;
+        while (hi - lo > 1) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (ok(mid)) hi = mid;
+            else lo = mid;
+        }
+        return {
+            sweep: firmwareSweep(band, hi),
+            windowSamples: Math.ceil(hi * fs),
+            count: (hz: number) => count(grid(hz), hi),
+        };
     };
     const Np = plan.segmentSamples.primary;
     const Nq = plan.segmentSamples.qualification;
+    let lastPrimary: ReturnType<typeof solve> = null;
     if (plan.bandHz.primary && Np !== null && known.length) {
-        const primary = solve(plan.bandHz.primary, Np, (2 * Np * (UNCERTAINTY.minWelchSegments + 1)) / 2, []);
-        plan.sweep = { f0Hz: plan.bandHz.primary[0], f1Hz: plan.bandHz.primary[1], durationS: primary.durationS };
+        lastPrimary = solve(plan.bandHz.primary, Np, (2 * Np * (UNCERTAINTY.minWelchSegments + 1)) / 2, [], "primary");
+    }
+    const primary = lastPrimary;
+    if (primary && plan.bandHz.primary && Np !== null) {
+        plan.sweep = primary.sweep;
         plan.windowSamples.primary = primary.windowSamples;
         // The primary path counts a bin with less than one segment of dwell as one average
         // (loopModel SUB_SEGMENT_DWELL.primary): said, not planned away.
@@ -405,35 +448,37 @@ export function planMeasurement(
             } else {
                 const qdf = sampleRateHz / Nq;
                 const top = Math.floor(plan.bandHz.qualification[1] / qdf) * qdf;
-                const qual = solve(plan.bandHz.qualification, Nq, (Nq * (UNCERTAINTY.minWelchSegments + 1)) / 2, [
-                    { hz: top, n: 1 },
-                ]);
-                plan.qualificationSweep = {
-                    f0Hz: plan.bandHz.qualification[0],
-                    f1Hz: plan.bandHz.qualification[1],
-                    durationS: qual.durationS,
-                };
-                plan.windowSamples.qualification = qual.windowSamples;
-                plan.averagesAt = targets.map((t) => ({
-                    purpose: t.purpose,
-                    hz: t.hz,
-                    needed: t.needed,
-                    now: loop.uncertainty.averagesByHz?.get(t.binHz) ?? null,
-                    primary: t.needed === null ? null : primary.count(t.hz),
-                    qualification: t.needed === null ? null : qual.count(t.hz),
-                }));
+                const qual = solve(
+                    plan.bandHz.qualification,
+                    Nq,
+                    (Nq * (UNCERTAINTY.minWelchSegments + 1)) / 2,
+                    [{ hz: top, n: 1, purpose: "band_top" }],
+                    "qualification",
+                );
+                if (qual) {
+                    plan.qualificationSweep = qual.sweep;
+                    plan.windowSamples.qualification = qual.windowSamples;
+                    plan.averagesAt = targets.map((t) => ({
+                        purpose: t.purpose,
+                        hz: t.hz,
+                        needed: t.needed,
+                        now: loop.uncertainty.averagesByHz?.get(t.binHz) ?? null,
+                        primary: t.needed === null ? null : primary.count(t.hz),
+                        qualification: t.needed === null ? null : qual.count(t.hz),
+                    }));
+                }
             }
         }
-        if (!plan.averagesAt.length) {
-            plan.averagesAt = targets.map((t) => ({
-                purpose: t.purpose,
-                hz: t.hz,
-                needed: t.needed,
-                now: loop.uncertainty.averagesByHz?.get(t.binHz) ?? null,
-                primary: t.needed === null ? null : primary.count(t.hz),
-                qualification: null,
-            }));
-        }
+    }
+    if (!plan.averagesAt.length && targets.length) {
+        plan.averagesAt = targets.map((t) => ({
+            purpose: t.purpose,
+            hz: t.hz,
+            needed: t.needed,
+            now: loop.uncertainty.averagesByHz?.get(t.binHz) ?? null,
+            primary: t.needed === null || !primary ? null : primary.count(t.hz),
+            qualification: null,
+        }));
     }
     const octave = pts.filter((p) => p.f >= fc / Math.SQRT2 && p.f <= fc * Math.SQRT2).length;
     if (octave < PHASE_CHECKS.octaveBins)

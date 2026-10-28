@@ -97,6 +97,15 @@ describe("one rule for planner and engine", () => {
         );
         expect(short.rung).toBeNull();
         expect(short.reasons).toEqual(["qualification_segment_not_available:needs:8192:finest:4096"]);
+        // A ladder with a longer rung but not the contract's: refused, never the longer rung in its
+        // place (Codex review 2026-10-28, P2).
+        const sparse = selectQualificationRung(
+            [4096, 16384].map((n) => rung(n, 1000)),
+            primary,
+            SWEEP,
+        );
+        expect(sparse.rung).toBeNull();
+        expect(sparse.reasons).toEqual(["qualification_segment_not_available:needs:8192:finest:16384"]);
         const incoherent = selectQualificationRung([rung(8192, 1000, 0.5)], primary, SWEEP);
         expect(incoherent.rung).toBeNull();
         expect(incoherent.reasons[0]).toBe("qualification_rung_not_coherent:8192:0pct");
