@@ -51,6 +51,7 @@ import {
     type AnalysisProvenance,
 } from "../../src/gyrocore/engine/loopModel";
 import { PLAN, planMeasurement } from "../../src/gyrocore/engine/measurementPlan";
+import { qualificationSegmentSamples } from "../../src/gyrocore/engine/qualificationRung";
 import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import type { EffectiveChain } from "../../src/gyrocore/engine/gyroChain";
 import { syntheticLogInput } from "./harness/syntheticLog";
@@ -122,15 +123,16 @@ describe("the plan follows the evidence rules", () => {
     it("resolution: the steepest phase step within the step limit; a qualification RESOLVED_FEATURE_BINS × finer", () => {
         expect(p.resolutionHz.now).toBeCloseTo(0.5, 9);
         expect(p.resolutionHz.primary!).toBeLessThanOrEqual(LOOP_RESOLUTION.maxRelativeSpacing * (m.crossoverHz! / 2));
-        expect(p.resolutionHz.qualification!).toBeCloseTo(
-            Math.min(p.resolutionHz.primary!, 0.5) / RESOLVED_FEATURE_BINS,
-            9,
-        );
-        // The qualification: the power-of-two Welch segment at 4 kHz that gives at least its resolution.
+        // The qualification (segment contract, qualificationRung.ts): the smallest power-of-two segment
+        // at 4 kHz that resolves RESOLVED_FEATURE_BINS × finer than the primary rung actually used
+        // (8192 samples, 0.488 Hz); the plan reports that segment's own resolution.
         const nq = p.segmentSamples.qualification!;
+        const primaryStep = 4000 / ANALYSIS.segmentSamples;
+        expect(nq).toBe(qualificationSegmentSamples(primaryStep, 4000));
         expect(Math.log2(nq) % 1).toBe(0);
-        expect(4000 / nq).toBeLessThanOrEqual(p.resolutionHz.qualification! + 1e-9);
-        expect(4000 / (nq / 2)).toBeGreaterThan(p.resolutionHz.qualification!);
+        expect(4000 / nq).toBeLessThanOrEqual(primaryStep / RESOLVED_FEATURE_BINS + 1e-12);
+        expect(4000 / (nq / 2)).toBeGreaterThan(primaryStep / RESOLVED_FEATURE_BINS);
+        expect(p.resolutionHz.qualification!).toBeCloseTo(4000 / nq, 12);
         // The primary: the standard analysis's own segment (finer than needed here), never a shorter one
         // the import would not use (its dwell would be planned 16× too short at 512 against 2048).
         expect(p.segmentSamples.primary).toBe(ANALYSIS.segmentSamples);

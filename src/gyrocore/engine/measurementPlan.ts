@@ -60,6 +60,7 @@ import {
     type SweepInfo,
 } from "./loopModel";
 import type { AxisName } from "./safetyEvidence";
+import { qualificationSegmentSamples } from "./qualificationRung";
 
 /**
  * Planner design parameters (not calibrated):
@@ -256,7 +257,13 @@ export function planMeasurement(
     // The next flight is analysed at this rung (adaptiveResolution picks it from the crossover): its
     // dwell is planned at that one. A finer rung than the window supports stays a diagnostic.
     plan.segmentSamples.primary = executable;
-    plan.segmentSamples.qualification = pow2(sampleRateHz / plan.resolutionHz.qualification);
+    // The qualification's segment is the one the engine will read it on (qualificationRung.ts, the
+    // segment contract): RESOLVED_FEATURE_BINS × finer than the primary rung actually used, the rung
+    // qualifyModelClass judges it against, not the primary's wanted resolution.
+    const qualificationSegment =
+        executable !== null ? qualificationSegmentSamples(sampleRateHz / executable, sampleRateHz) : null;
+    plan.segmentSamples.qualification = qualificationSegment ?? pow2(sampleRateHz / plan.resolutionHz.qualification);
+    if (qualificationSegment !== null) plan.resolutionHz.qualification = sampleRateHz / qualificationSegment;
     if (executable === null) diagnostics.push("primary_analysis_segment_unknown");
     else if (wanted > executable) {
         // The rung used is still coarser than the loop's steps ask for: a longer window gives a finer rung.

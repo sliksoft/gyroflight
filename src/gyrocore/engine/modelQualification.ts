@@ -38,45 +38,25 @@
  * report statuses PASS / FAIL / NOT_VALIDATED.
  */
 
-import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
-import {
-    runAutotuneV2,
-    sweepFromHeaders,
-    type AutotuneLogInput,
-    type AutotuneV2Input,
-    type AutotuneV2Result,
-} from "./autotuneV2";
+import { runAutotuneV2, type AutotuneLogInput, type AutotuneV2Input, type AutotuneV2Result } from "./autotuneV2";
 import { crossLogReferenceIssues, flightRelation } from "./logInput";
+import { QUALIFICATION_COHERENT_SHARE } from "./qualificationRung";
 import {
-    LOOP_MIN_COHERENCE,
     QUALIFICATION_BAND_EXTENSION,
     RESOLVED_FEATURE_BINS,
     type LoopMargins,
     type MarginEvidenceLevel,
     type ModelClassQualification,
-    type SweepInfo,
 } from "./loopModel";
 import type { AxisName } from "./safetyEvidence";
 
 const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 
 /**
- * Share of the finer analysis's bins inside the sweep's band that must reach LOOP_MIN_COHERENCE:
- * 0.8, the share the Verified Tune comparison also asks of its bins (MIN_WITHIN_SHARE). Not calibrated.
+ * Kept for its former importers: the coherence share is now judged on the qualification rung the
+ * segment contract picks (qualificationRung.ts QUALIFICATION_COHERENT_SHARE), not on the finest analysis.
  */
-export const FINE_COHERENT_SHARE = 0.8;
-
-function coherentShare(tf: TransferFunction, sweep: SweepInfo | null): number {
-    let n = 0;
-    let ok = 0;
-    for (let k = 0; k < tf.frequencies.length; k++) {
-        const f = tf.frequencies[k];
-        if (!(f >= (sweep?.f0Hz ?? 1)) || !(f <= (sweep?.f1Hz ?? Infinity))) continue;
-        n++;
-        if (tf.coherence[k] >= LOOP_MIN_COHERENCE) ok++;
-    }
-    return n ? ok / n : 0;
-}
+export const FINE_COHERENT_SHARE = QUALIFICATION_COHERENT_SHARE;
 
 export type CriterionStatus = "PASS" | "FAIL" | "NOT_VALIDATED";
 
@@ -130,19 +110,15 @@ function candidate(
             rejected.push(`qualification_axis_not_qualified:${a}:${c.state}`);
             continue;
         }
-        if (!c.fine) {
+        // The rung the qualification is read on depends on the primary rung the engine uses, so it is
+        // chosen there (autotuneV2 → qualificationRung.ts selectQualificationRung, which also checks its
+        // coherence); here the log must carry a resolution ladder finer than its standard analysis.
+        const finest = c.analyses?.length ? Math.max(...c.analyses.map((r) => r.analysis.segmentSamples)) : 0;
+        if (!c.analyses?.length || !(finest > (c.analysis?.segmentSamples ?? Infinity))) {
             rejected.push(`qualification_axis_without_finer_analysis:${a}`);
             continue;
         }
-        // The qualification state was judged on the standard analysis: the finer one must itself be
-        // coherent over the sweep's band (FINE_COHERENT_SHARE of its bins at LOOP_MIN_COHERENCE).
-        const share = coherentShare(c.fine.tf, sweepFromHeaders(Object.fromEntries(other.headerPairs)));
-        if (!(share >= FINE_COHERENT_SHARE)) {
-            rejected.push(`qualification_axis_fine_analysis_not_coherent:${a}:${(share * 100).toFixed(0)}pct`);
-            continue;
-        }
-        // The fine identification stands in for this log's measurement, with where it comes from.
-        chirp[a] = { ...c, tf: c.fine.tf, analysis: c.fine.analysis, support: c.fine.support, fine: undefined };
+        chirp[a] = { ...c, fine: undefined };
     }
     if (!Object.keys(chirp).length) rejected.push("qualification_no_usable_axis_with_finer_analysis");
     return { log: rejected.length ? null : { ...other, chirp }, rejected };
@@ -152,7 +128,11 @@ function candidate(
 export function qualificationCandidates(input: Pick<AutotuneV2Input, "primary" | "others">) {
     const all = input.others.map((o) => ({ other: o, ...candidate(input.primary, o, input.others) }));
     const finest = (l: AutotuneLogInput) =>
-        Math.min(...Object.values(l.chirp).map((c) => c!.analysis!.sampleRateHz / c!.analysis!.segmentSamples));
+        Math.min(
+            ...Object.values(l.chirp).flatMap((c) =>
+                (c!.analyses ?? []).map((r) => r.analysis.sampleRateHz / r.analysis.segmentSamples),
+            ),
+        );
     const usable = all
         .filter((c) => c.log)
         .sort(
@@ -193,6 +173,32 @@ export function assessModelQualification(input: AutotuneV2Input): {
     if (!best) return { result: null, report: empty };
     const result = runAutotuneV2({ ...input, modelClassQualification: best });
     const margins = Object.entries(result.margins) as [AxisName, { current: LoopMargins; proposed: LoopMargins }][];
+    // The engine picks the qualification rung from the primary rung it uses (qualificationRung.ts) and
+    // may refuse it there (rung missing, not coherent, …). When it refused it on every axis, this flight
+    // served nowhere: no source, and its candidate entry says why.
+    const engineRejected = (result.parts.find((p) => p.part === "phase_margin_robustness")?.reasons ?? [])
+        .filter((r) => r.startsWith("model_class_qualification_rejected:"))
+        .map((r) => r.slice("model_class_qualification_rejected:".length));
+    if (engineRejected.length && !margins.some(([, m]) => m.current.evidence.qualification)) {
+        const rejectedCandidates = candidates.map((c) =>
+            c.sha256 === best.sha256 && c.logIndex === best.logIndex
+                ? { ...c, rejected: [...c.rejected, ...engineRejected] }
+                : c,
+        );
+        return {
+            result,
+            report: {
+                ...empty,
+                candidates: rejectedCandidates,
+                criteria: [
+                    criterion("independent_evidence", "FAIL", [
+                        "required_measurement:chirp_finer_resolution_model_class_qualification",
+                        ...new Set(rejectedCandidates.flatMap((c) => c.rejected)),
+                    ]),
+                ],
+            },
+        };
+    }
     const axes = margins.map(([axis, m]) => ({
         axis,
         level: m.current.evidence.level,

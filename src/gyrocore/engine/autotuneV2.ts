@@ -86,6 +86,7 @@ import {
     withRepeatability,
 } from "./loopModel";
 import { chooseAnalysis, resolutionConvergence, type AnalysisOption } from "./adaptiveResolution";
+import { selectQualificationRung } from "./qualificationRung";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
@@ -411,10 +412,21 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         ? crossLogReferenceIssues(log, qLog, input.others).map((r) => `model_class_qualification_rejected:${r}`)
         : [];
     const qualificationAxisRejected: string[] = [];
-    const qualificationFor = (name: AxisName, ai: 0 | 1 | 2) => {
+    const qualificationFor = (name: AxisName, ai: 0 | 1 | 2, primaryAnalysis: AnalysisProvenance | null) => {
         const qc = qLog && !qualificationRejected.length ? qLog.chirp[name] : undefined;
         if (!qLog || !qc || qc.state !== "usable") return null;
         const qh = headerMap(qLog.headerPairs);
+        // The segment contract (qualificationRung.ts): the qualification is read on the rung of its own
+        // ladder that resolves RESOLVED_FEATURE_BINS × finer than the primary rung used here, the rung
+        // the planner sized its sweep for; never another one. Missing or incoherent: named, left out.
+        const sel = selectQualificationRung(qc.analyses, primaryAnalysis, sweepFromHeaders(qh));
+        if (!sel.rung) {
+            qualificationAxisRejected.push(
+                ...sel.reasons.map((r) => `model_class_qualification_rejected:${r}:${name}`),
+            );
+            return null;
+        }
+        const rung = sel.rung;
         const qctl = analyzeAxisController(qLog, qh, ai, qc, flightMask(qLog.channels.rcThrottle));
         // Its plant rests on the controller reconstructed for that flight: with D > 0, only when the
         // D path was reconstructed and the logged D term validated it (as the primary's model
@@ -425,13 +437,13 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         }
         return qctl
             ? {
-                  tf: qc.tf,
+                  tf: rung.tf,
                   cfg: qctl.cfg,
                   source: { sha256: qLog.sha256, logIndex: qLog.logIndex },
                   sweep: sweepFromHeaders(qh),
                   // The window the analysis claims must lie in the qualification's own samples.
-                  analysis: qc.analysis && qc.analysis.windowSamples <= qc.end - qc.start ? qc.analysis : null,
-                  support: qc.support ?? null,
+                  analysis: rung.analysis.windowSamples <= qc.end - qc.start ? rung.analysis : null,
+                  support: rung.support ?? null,
               }
             : null;
     };
@@ -490,13 +502,22 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             resolutionFor = (cand) => resolutionConvergence(ladder, pick.index, probeWith(cand), pick.reasons);
         }
         axes[name] = {
-            loop: buildAxisLoop(axis, chosen.tf, ctl.cfg, eff, chainOk(axis), attested, qualificationFor(name, axis), {
-                sweep,
-                analysis: chosen.analysis,
-                support: chosen.support,
-                resolution,
-                resolutionFor,
-            }),
+            loop: buildAxisLoop(
+                axis,
+                chosen.tf,
+                ctl.cfg,
+                eff,
+                chainOk(axis),
+                attested,
+                qualificationFor(name, axis, chosen.analysis),
+                {
+                    sweep,
+                    analysis: chosen.analysis,
+                    support: chosen.support,
+                    resolution,
+                    resolutionFor,
+                },
+            ),
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,
             window: [c.start, c.end],

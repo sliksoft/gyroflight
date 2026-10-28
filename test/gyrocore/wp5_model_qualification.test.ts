@@ -92,7 +92,18 @@ describe("the producer picks an independent flight and lets the engine decide", 
     }, 600_000);
 
     it("without the finer analysis nothing qualifies (the standard bins are never finer)", () => {
-        const plain = simulatedQualificationLog();
+        // The finer analyses are the rungs of its resolution ladder (qualificationRung.ts): a log that
+        // carries only its standard rung has none.
+        const full = simulatedQualificationLog();
+        const plain = {
+            ...full,
+            chirp: Object.fromEntries(
+                Object.entries(full.chirp).map(([a, c]) => [
+                    a,
+                    { ...c!, fine: undefined, analyses: c!.analyses!.slice(0, 1) },
+                ]),
+            ),
+        };
         const { report } = assessModelQualification({ primary, others: [plain], verifiedTune: null });
         expect(report.source).toBeNull();
         expect(report.candidates[0].rejected).toContain("qualification_no_usable_axis_with_finer_analysis");
@@ -165,21 +176,35 @@ describe("WP8 review: what a qualification flight must itself show", () => {
     }, 600_000);
 
     it("its finer analysis must itself be coherent over the sweep (not only the standard one)", () => {
+        // The rung the segment contract picks (qualificationRung.ts: the shortest rung of the ladder
+        // that resolves RESOLVED_FEATURE_BINS × finer than the primary) is judged for coherence, not
+        // the log's qualification state: every rung of the ladder at coherence 0.5, while the standard
+        // transfer function and its state stay as qualified, is refused on every axis.
         const incoherent = {
             ...QUAL,
             sha256: "a7".repeat(32),
             chirp: Object.fromEntries(
-                Object.entries(QUAL.chirp).map(([a, c]) => {
-                    const tf = { ...c!.fine!.tf, coherence: c!.fine!.tf.coherence.map(() => 0.5) };
-                    return [a, { ...c!, fine: { tf, analysis: c!.fine!.analysis, support: c!.fine!.support } }];
-                }),
+                Object.entries(QUAL.chirp).map(([a, c]) => [
+                    a,
+                    {
+                        ...c!,
+                        analyses: c!.analyses!.map((r) => ({
+                            ...r,
+                            tf: { ...r.tf, coherence: r.tf.coherence.map(() => 0.5) },
+                        })),
+                    },
+                ]),
             ),
         };
-        const { all } = qualificationCandidates({ primary, others: [incoherent as AutotuneLogInput] });
-        expect(all[0].rejected.some((r) => r.startsWith("qualification_axis_fine_analysis_not_coherent:roll:"))).toBe(
-            true,
-        );
-    });
+        const { result, report } = assessModelQualification({
+            primary,
+            others: [incoherent as AutotuneLogInput],
+            verifiedTune: null,
+        });
+        expect(report.source).toBeNull();
+        expect(report.candidates[0].rejected.some((r) => r.startsWith("qualification_rung_not_coherent:"))).toBe(true);
+        expect(Object.values(result!.margins).every((m) => m!.current.evidence.qualification === null)).toBe(true);
+    }, 600_000);
 
     it("the whole configuration the models read must match (e.g. rpm_filter_lpf_hz, gyro_lpf1_dyn_expo)", () => {
         for (const [key, value] of [

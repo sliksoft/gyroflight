@@ -258,9 +258,10 @@ describe("1. from Blackbox bytes through every stage: each failing condition blo
     }, 600_000);
 
     it("the producer on decoded flights: one 20 s sweep analysed finer is not coherent enough, so no qualification", () => {
-        // An independent second flight of the same tune. Its finer analysis (8× the resolution, the
-        // same samples) leaves most fine bins too briefly excited by the exponential sweep: the
-        // producer refuses it, and the plan asks for a longer sweep (measurementPlan.ts).
+        // An independent second flight of the same tune. The rung its qualification would be read on
+        // (8× the primary's resolution, the same samples) leaves most of those bins too briefly excited
+        // by the exponential sweep: the engine refuses it, the producer reports no source, and the plan
+        // asks for a longer sweep (measurementPlan.ts).
         const second = decoded(
             { plants: [AIR65_LIKE, AIR65_LIKE, AIR65_LIKE], noise: 0.3, seed: 21, startTimeUs: 6_000_000 },
             "qualification.bbl",
@@ -269,9 +270,14 @@ describe("1. from Blackbox bytes through every stage: each failing condition blo
         const { report } = assessModelQualification({ primary: stable, others: [second], verifiedTune: null });
         expect(report.source).toBeNull();
         expect(report.connectedToApply).toBe(false);
-        expect(
-            report.candidates[0].rejected.some((r) => r.startsWith("qualification_axis_fine_analysis_not_coherent:")),
-        ).toBe(true);
+        // The rung the segment contract picks (qualificationRung.ts: 8× the primary's 512-sample rung)
+        // is judged; it is not coherent enough over the sweep, or not available in a 20 s window.
+        expect(report.candidates[0].rejected.some((r) => r.startsWith("qualification_rung_not_coherent:4096:"))).toBe(
+            true,
+        );
+        expect(report.candidates[0].rejected).toContain(
+            "qualification_segment_not_available:needs:8192:finest:4096:yaw",
+        );
         expect(stableR.parts.flatMap((p) => p.requiredMeasurements)).toContain(
             "required_measurement:chirp_longer_sweep_for_averages",
         );
