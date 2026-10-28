@@ -118,6 +118,12 @@ export interface AxisMeasurementPlan {
     }[];
     /** Samples the planned sweep windows must hold at the sample rate (whole segments; null: not planned). */
     windowSamples: { primary: number | null; qualification: number | null };
+    /**
+     * Sample rate the planner used for dwell and segment counts (the analysis ladder's rate when
+     * known, else the log rate). The measurement strategy must reuse this rate, not a separate log
+     * median, so narrow-band sessions match production `sweepAverages` (Codex release-gate P2).
+     */
+    sampleRateHz: number;
 }
 
 const pow2 = (x: number) => 2 ** Math.ceil(Math.log2(Math.max(2, x)));
@@ -196,6 +202,7 @@ export function planMeasurement(
         requiredMeasurements: [],
         averagesAt: [],
         windowSamples: { primary: null, qualification: null },
+        sampleRateHz,
     };
     if (analysis && Math.abs(analysis.sampleRateHz - logRateHz) > 1e-6 * logRateHz) {
         diagnostics.push(

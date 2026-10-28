@@ -51,6 +51,7 @@ function stubPlan(over: Partial<AxisMeasurementPlan> = {}): AxisMeasurementPlan 
             { purpose: "sensitivity_peak", hz: 40, needed: 6, now: 1, primary: 6, qualification: 1 },
         ],
         windowSamples: { primary: 1_600_000, qualification: 120_000_000 },
+        sampleRateHz: 4000,
         ...over,
     };
 }
@@ -66,6 +67,49 @@ describe("narrow-band helpers", () => {
         const narrow = narrowSweepDurationS(26, 9, 512, 4000, [18, 37])!;
         expect(narrow).toBeLessThan(full);
         expect(narrow).toBeGreaterThan(0);
+    });
+
+    it("narrow duration satisfies production sweepAverages at exact boundaries", async () => {
+        const { sweepAverages } = await import("../../src/gyrocore/engine/loopModel");
+        const hz = 5;
+        const N = 512;
+        const fs = 4000;
+        const needed = 125;
+        const band = narrowBandAround(hz, [1, 200]);
+        const dur = narrowSweepDurationS(hz, needed, N, fs, band)!;
+        const got = sweepAverages(
+            hz,
+            { segmentSamples: N, sampleRateHz: fs, segments: needed * 2 },
+            { f0Hz: band[0], f1Hz: band[1], durationS: dur },
+            Math.ceil(dur * fs),
+        );
+        expect(got).toBeGreaterThanOrEqual(needed);
+        // One second less must fail the production counter (boundary contract).
+        if (dur > 1) {
+            const short = sweepAverages(
+                hz,
+                { segmentSamples: N, sampleRateHz: fs, segments: needed * 2 },
+                { f0Hz: band[0], f1Hz: band[1], durationS: dur - 1 },
+                Math.ceil((dur - 1) * fs),
+            );
+            expect(short).toBeLessThan(needed);
+        }
+    });
+
+    it("uses the plan analysis sample rate, not a mismatched log rate", () => {
+        const s = buildMeasurementStrategy(
+            stubPlan({
+                sampleRateHz: 1000,
+                sweep: { f0Hz: 8, f1Hz: 80, durationS: 400 },
+                averagesAt: [{ purpose: "gain_crossover", hz: 40, needed: 100, now: 0, primary: 0, qualification: 0 }],
+                segmentSamples: { primary: 512, qualification: null, executable: 512 },
+            }),
+            // Deliberately omit opts.sampleRateHz so the plan rate wins.
+        );
+        const narrow = s.sessions.find((x) => x.kind === "narrow_band_followup");
+        expect(narrow).toBeTruthy();
+        // At 1 kHz analysis rate the session must be far longer than the 46 s a 4 kHz log rate would give.
+        expect(narrow!.sweep.durationS).toBeGreaterThan(200);
     });
 });
 

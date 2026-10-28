@@ -839,7 +839,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     // Informative only: how to collect the plan under practical flight budgets (narrow-band split,
     // multi-session qualification blockers). Never invents averages or changes release status.
     const measurementStrategy = measurementPlan.map((p) =>
-        buildMeasurementStrategy(p, { sampleRateHz: log.sampleRateHz }),
+        // plan.sampleRateHz is the analysis ladder rate the planner already used.
+        buildMeasurementStrategy(p, { sampleRateHz: p.sampleRateHz }),
     );
 
     // Part summary for the interface and the report.

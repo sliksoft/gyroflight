@@ -38,6 +38,7 @@
 
 import type { AxisMeasurementPlan } from "./measurementPlan";
 import { PLAN } from "./measurementPlan";
+import { sweepAverages } from "./loopModel";
 
 /** Practical session budget used when splitting a long plan into flights (not calibrated). */
 export const SESSION = Object.freeze({
@@ -108,7 +109,9 @@ export function narrowBandAround(
 
 /**
  * Duration of an exponential sweep that puts `needed` whole segments of length N at `hz`, using the
- * same dwell law as loopModel (1/f per hertz). Returns null when inputs are invalid.
+ * same dwell law as loopModel (1/f per hertz). The continuous estimate is only a start: the returned
+ * duration must satisfy production `sweepAverages` (≥ needed) with the observed window clipped to the
+ * sweep (Codex release-gate P2, 2026-10-28). Returns null when inputs are invalid or unsatisfiable.
  */
 export function narrowSweepDurationS(
     hz: number,
@@ -125,7 +128,17 @@ export function narrowSweepDurationS(
     const L = Math.log(band[1] / band[0]);
     const binL = Math.log(hi / lo);
     if (!(binL > 0 && L > 0)) return null;
-    return Math.ceil(((needed * segmentSamples) / sampleRateHz) * (L / binL));
+    let durationS = Math.ceil(((needed * segmentSamples) / sampleRateHz) * (L / binL));
+    if (!(durationS >= 1)) return null;
+    // Cap must not bind below `needed` while we solve for dwell.
+    const analysis = { segmentSamples, sampleRateHz, segments: Math.max(needed * 2, 1) };
+    const limit = durationS + Math.max(needed * segmentSamples, 10_000);
+    for (; durationS <= limit; durationS++) {
+        const sweep = { f0Hz: band[0], f1Hz: band[1], durationS };
+        const windowSamples = Math.ceil(durationS * sampleRateHz);
+        if (sweepAverages(hz, analysis, sweep, windowSamples) >= needed) return durationS;
+    }
+    return null;
 }
 
 /**
@@ -134,9 +147,11 @@ export function narrowSweepDurationS(
  */
 export function buildMeasurementStrategy(
     plan: AxisMeasurementPlan,
-    opts: { sampleRateHz: number } = { sampleRateHz: 4000 },
+    opts: { sampleRateHz?: number } = {},
 ): AxisMeasurementStrategy {
-    const fs = opts.sampleRateHz;
+    // Prefer the analysis rate the planner already used (plan.sampleRateHz); never the raw log
+    // timestamp median when they differ (Codex release-gate P2, 2026-10-28).
+    const fs = opts.sampleRateHz ?? plan.sampleRateHz ?? 4000;
     const decisions: DecisionCoverage[] = plan.averagesAt.map((a) => {
         const have = a.now;
         const needed = a.needed;
@@ -197,8 +212,9 @@ export function buildMeasurementStrategy(
             });
         }
         designNotes.push(
-            `design_B_narrow_followups_total:${narrowTotal}s_vs_full_primary:${plan.sweep.durationS}s${ 
-                narrowTotal > 0 && narrowTotal < plan.sweep.durationS ? ":narrow_shorter" : ":narrow_not_shorter"}`,
+            `design_B_narrow_followups_total:${narrowTotal}s_vs_full_primary:${plan.sweep.durationS}s${
+                narrowTotal > 0 && narrowTotal < plan.sweep.durationS ? ":narrow_shorter" : ":narrow_not_shorter"
+            }`,
         );
     }
 
