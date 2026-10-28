@@ -89,7 +89,8 @@ import MSPCodes from "../../src/js/msp/MSPCodes";
 import { closedLoopChirpLog, ratePlant, type ClosedLoopLogOptions } from "./harness/closedLoopBbl";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
 import { FAULT_FREE_FIRMWARE, previewedHash } from "./harness/previewConfirmation";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 /** The decoded engine input of one simulated flight, through the app's own decode and qualification. */
@@ -286,29 +287,15 @@ describe("1. from Blackbox bytes through every stage: each failing condition blo
 
 describe("2. the strongest software evidence: only Safety refuses; released, the write and its failure modes", () => {
     const record = () => verifiedTuneAllAxesFixture(0.9, 0.7);
-    const QUAL = (() => {
-        const q = simulatedQualificationLog();
-        return {
-            ...q,
-            chirp: Object.fromEntries(
-                Object.entries(q.chirp).map(([a, c]) => [
-                    a,
-                    { ...c!, fine: { tf: c!.tf, analysis: c!.analysis!, support: c!.support } },
-                ]),
-            ),
-        };
-    })();
     let qualified: AutotuneV2Result;
     beforeAll(() => {
-        // SIMULATION: the producer itself makes the qualification from an independent synthetic flight.
-        qualified = assessModelQualification({
+        // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+        qualified = runSoftwareQualifiedAutotuneV2({
             primary: syntheticLogInput("e".repeat(64)),
-            // An independent repeat for the plant's reproducibility, and the qualification flight
-            // (which is not also that reference: one flight, one piece of evidence).
-            others: [syntheticLogInput("f".repeat(64)), QUAL as AutotuneLogInput],
+            others: [syntheticLogInput("f".repeat(64))],
             verifiedTune: record(),
             createdAt: "2026-10-24T00:00:00Z",
-        }).result!;
+        });
     }, 600_000);
 
     beforeEach(() => {

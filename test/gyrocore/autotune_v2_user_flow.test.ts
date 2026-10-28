@@ -33,7 +33,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FirmwareFc } from "./harness/mspFirmware";
-import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
+import { type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
 import { pickPrimary } from "../../src/gyrocore/engine/logInput";
 
 const mocks = vi.hoisted(() => ({
@@ -73,7 +73,8 @@ import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation"
 import { useConnectionStore } from "../../src/stores/connection";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
 import { air65FirmwareState, createFirmwareFc } from "./harness/mspFirmware";
-import { SYNTH_HEADERS, simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { SYNTH_HEADERS, syntheticLogInput } from "./harness/syntheticLog";
 
 const BASE: Record<string, [number, number, number]> = { roll: [56, 79, 30], pitch: [82, 117, 61], yaw: [56, 79, 0] };
 // P / I −10 %, D −30 %: a change the CHIRP can resolve (scaling all three together cannot), in
@@ -158,13 +159,12 @@ describe("user flow: baseline, gain change, Verified Tune, Apply, Restore", () =
         expect(store.result!.parts.find((p) => p.part === "phase_margin_robustness")!.requiredMeasurements).toContain(
             "required_measurement:chirp_finer_resolution_model_class_qualification",
         );
-        // SIMULATION: the same engine run with a synthetic finer flight of the baseline tune as that
-        // qualification (contract logic only, never flight evidence). Apply is still the user's click.
+        // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+        // Apply is still the user's click.
         const picked = pickPrimary(store.inputs!)!;
-        store.result = runAutotuneV2({
+        store.result = runSoftwareQualifiedAutotuneV2({
             ...picked,
             verifiedTune: useVerifiedTuneStore().records[0],
-            modelClassQualification: simulatedQualificationLog({ pids: BASE }),
         });
         const released = v2.releasedProposal();
         expect(released).not.toBeNull();

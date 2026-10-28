@@ -124,8 +124,20 @@ describe("one integer count, two policies for less than one segment", () => {
     it("a long enough sweep needs no policy: every bin has its whole segments (positive control)", () => {
         // From 0.1 Hz: the 0.5 Hz bin lies below a 1 Hz start and would have no dwell at all (unknown).
         // 200 Hz, 0.5 Hz bins: dwell = T · ln(200.25 / 199.75) / ln 4000 ≥ 2.048 s takes T ≳ 6.8 ks.
+        // The analysed window must hold that sweep (Codex review 2026-10-28, P2): claiming 8000 s of
+        // dwell inside ANALYSIS's 20 s window would be unobserved.
         const long = { f0Hz: 0.1, f1Hz: 400, durationS: 8000 };
-        const u = loopUncertainty(tf, cfg, { sweep: long, analysis: ANALYSIS }, "qualification");
+        const windowSamples = Math.floor(long.durationS * FS);
+        const analysis = {
+            segmentSamples: ANALYSIS.segmentSamples,
+            sampleRateHz: FS,
+            windowSamples,
+            segments: Math.max(
+                1,
+                Math.floor((windowSamples - ANALYSIS.segmentSamples) / (ANALYSIS.segmentSamples / 2)) + 1,
+            ),
+        };
+        const u = loopUncertainty(tf, cfg, { sweep: long, analysis }, "qualification");
         expect(u.reasons).toEqual([]);
         expect(u.subSegmentBinsCountedAsOne).toBe(0);
         expect(u.averages![0]).toBeGreaterThanOrEqual(1);

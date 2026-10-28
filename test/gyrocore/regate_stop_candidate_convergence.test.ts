@@ -79,7 +79,7 @@ import { closedLoopChirpLog, ratePlant, type Plant } from "./harness/closedLoopB
 import { BETAFLIGHT_TUNE_HEADERS, SIM_IDENTITY_HEADERS } from "./harness/chirpSim";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredConvergence, declaredResolution } from "./harness/resolutionConvergence";
-import { declaredQualificationSweep } from "./harness/qualificationSweep";
+import { analysisForDeclaredSweep, declaredQualificationSweep } from "./harness/qualificationSweep";
 
 const HEADERS = Object.fromEntries([
     ...[...SIM_IDENTITY_HEADERS, ...BETAFLIGHT_TUNE_HEADERS].map((l) => [
@@ -171,9 +171,9 @@ describe("P2-1: a generator stop inside the tail blocks the bounds, not only the
     const G = ratePlant({ K: 60, motorHz: 40, delayS: 0.002 });
     const N = 512;
     const PRIMARY = { segmentSamples: N, sampleRateHz: FS, windowSamples: WINDOW20, segments: 77 };
-    const FINE = { segmentSamples: 4096, sampleRateHz: FS, windowSamples: WINDOW20, segments: 8 };
     const fine = anaTF(G, cohTo(225), 4096, 8);
-    // SIMULATION: the sweep its 0.244 Hz bins up to 225 Hz need (SUB_SEGMENT_DWELL.qualification).
+    // SIMULATION: the sweep its 0.244 Hz bins up to 225 Hz need (SUB_SEGMENT_DWELL.qualification),
+    // with a matching analysed window (Codex review 2026-10-28, P2).
     const QSWEEP = declaredQualificationSweep({
         segmentSamples: 4096,
         sampleRateHz: FS,
@@ -181,6 +181,7 @@ describe("P2-1: a generator stop inside the tail blocks the bounds, not only the
         f1Hz: 400,
         topHz: 225,
     });
+    const FINE = analysisForDeclaredSweep(QSWEEP, { segmentSamples: 4096, sampleRateHz: FS });
     const build = (bandTopHz: number, observedStopHz: number) => {
         const tf = anaTF(G, cohTo(bandTopHz), N, 77);
         return buildAxisLoop(

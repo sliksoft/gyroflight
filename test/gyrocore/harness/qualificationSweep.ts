@@ -29,11 +29,12 @@
  * (sweepAverages); it is a declaration about a simulated flight, never flight evidence.
  */
 
-import { sweepAverages, type SweepInfo } from "../../../src/gyrocore/engine/loopModel";
+import { sweepAverages, type AnalysisProvenance, type SweepInfo } from "../../../src/gyrocore/engine/loopModel";
 
 /**
  * The shortest exponential sweep f0Hz → f1Hz (whole seconds) whose dwell gives at least `averages`
- * whole segments of `segmentSamples` at `sampleRateHz` in every bin of the grid up to `topHz`.
+ * whole segments of `segmentSamples` at `sampleRateHz` in every bin of the grid up to `topHz`,
+ * counted inside a window that holds the whole sweep (Codex review 2026-10-28, P2).
  */
 export function declaredQualificationSweep(
     o: { segmentSamples: number; sampleRateHz: number; f0Hz: number; f1Hz: number; topHz: number },
@@ -45,8 +46,9 @@ export function declaredQualificationSweep(
     for (let k = Math.ceil(o.f0Hz / df); k * df <= o.topHz; k++) if (k * df >= o.f0Hz) bins.push(k * df);
     const enough = (T: number) => {
         const sweep = { f0Hz: o.f0Hz, f1Hz: o.f1Hz, durationS: T };
+        const windowSamples = Math.floor(T * o.sampleRateHz);
         const a = { segmentSamples: N, sampleRateHz: o.sampleRateHz, segments: Number.MAX_SAFE_INTEGER };
-        return bins.every((f) => sweepAverages(f, a, sweep) >= averages);
+        return bins.every((f) => sweepAverages(f, a, sweep, windowSamples) >= averages);
     };
     // The highest bin binds (the dwell per bin falls as 1/f); start there and grow until every bin has it.
     const f = bins[bins.length - 1];
@@ -54,4 +56,22 @@ export function declaredQualificationSweep(
     let T = Math.ceil(((averages * N + 2) / o.sampleRateHz) * (L / Math.log((f + df / 2) / (f - df / 2))));
     while (!enough(T)) T = Math.ceil(T * 1.01) + 1;
     return { f0Hz: o.f0Hz, f1Hz: o.f1Hz, durationS: T };
+}
+
+/**
+ * Welch provenance whose window holds `sweep` (so dwell claims are observed) and whose segment
+ * count matches the transfer function it will be paired with (`tf.numSegments` / `segments`).
+ * Analytic fixtures that declare a long qualification sweep must use this (or equivalent) so the
+ * engine's window clip sees the same samples the dwell claim needs — never a short window with a
+ * long header. The window may be longer than the minimum for `segments` (provenance allows that).
+ */
+export function analysisForDeclaredSweep(
+    sweep: SweepInfo,
+    o: { segmentSamples: number; sampleRateHz: number; segments?: number },
+): AnalysisProvenance {
+    const N = o.segmentSamples;
+    const segments = o.segments ?? 8;
+    const minWindow = (N * (segments + 1)) / 2;
+    const windowSamples = Math.max(minWindow, Math.floor(sweep.durationS * o.sampleRateHz));
+    return { segmentSamples: N, sampleRateHz: o.sampleRateHz, windowSamples, segments };
 }

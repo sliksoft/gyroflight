@@ -117,6 +117,40 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         expect(sweepAverages(40, null, sweep)).toBe(0);
         // At most the window's non-overlapping segments.
         expect(sweepAverages(1.5, { ...a, segments: 3 }, { ...sweep, durationS: 2000 })).toBe(2);
+        // Observed window only: a day-long header's first 20 s barely leave 1 Hz, so the 2 Hz and
+        // 40 Hz bins have no dwell in that window — never invent averages from unobserved time
+        // (Codex review 2026-10-28, P2).
+        const longHeader = { f0Hz: 1, f1Hz: 400, durationS: 86_400 };
+        expect(sweepAverages(2, a, longHeader)).toBeGreaterThan(0);
+        expect(sweepAverages(2, a, longHeader, 20_000)).toBe(0);
+        expect(sweepAverages(40, a, longHeader, 20_000)).toBe(0);
+        // A matching 20 s sweep does observe 2 Hz.
+        expect(sweepAverages(2, a, { f0Hz: 1, f1Hz: 400, durationS: 20 }, 20_000)).toBeGreaterThan(0);
+    });
+
+    it("loopUncertainty clips dwell to the analysis window and rejects a header with no observed window", () => {
+        const sweep = { f0Hz: 1, f1Hz: 400, durationS: 86_400 };
+        const tf = syntheticTransferFunctionWithCoherence([2, 40], T(smooth), () => 0.995);
+        tf.numSegments = 18;
+        // Ambiguous: sweep header without an analysed window → no averages on either path.
+        const noWindow = loopUncertainty(tf, cfg, {
+            sweep,
+            analysis: { segmentSamples: 512, sampleRateHz: 1000, windowSamples: 0, segments: 18 },
+        });
+        expect(noWindow.averagesByHz!.get(2)).toBe(0);
+        expect(noWindow.averagesByHz!.get(40)).toBe(0);
+        expect(noWindow.reasons).toContain("uncertainty_unknown:sweep_without_observed_window");
+        expect(noWindow.subSegmentBinsCountedAsOne).toBe(0);
+        // Observed 20 s of a day-long exponential: still below 2 Hz → both bins unknown.
+        const clipped = loopUncertainty(
+            tf,
+            cfg,
+            { sweep, analysis: { segmentSamples: 512, sampleRateHz: 1000, windowSamples: 20_000, segments: 18 } },
+            "qualification",
+        );
+        expect(clipped.averagesByHz!.get(2)).toBe(0);
+        expect(clipped.averagesByHz!.get(40)).toBe(0);
+        expect(clipped.reasons.some((r) => r.startsWith("uncertainty_unknown:dwell_below_one_segment:"))).toBe(true);
     });
 
     it("the count never exceeds what the continuous dwell allows (property)", () => {

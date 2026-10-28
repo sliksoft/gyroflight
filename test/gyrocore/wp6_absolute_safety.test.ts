@@ -27,7 +27,7 @@
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
+import { type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import {
     ABSOLUTE_SAFETY_NOT_HARDWARE_VALIDATED,
     ABSOLUTE_SAFETY_POLICY,
@@ -35,18 +35,19 @@ import {
 } from "../../src/gyrocore/safety/absoluteEvaluate";
 import { absoluteSafetyAuthorization } from "../../src/gyrocore/safety/authorize";
 import type { AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const record = () => verifiedTuneAllAxesFixture(0.9, 0.7);
 let qualified: AutotuneV2Result;
 
 beforeAll(() => {
-    qualified = runAutotuneV2({
+    // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+    qualified = runSoftwareQualifiedAutotuneV2({
         primary: syntheticLogInput("e".repeat(64)),
         others: [syntheticLogInput("f".repeat(64))],
         verifiedTune: record(),
-        modelClassQualification: simulatedQualificationLog(),
         createdAt: "2026-10-24T00:00:00Z",
     });
 }, 600_000);

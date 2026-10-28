@@ -70,7 +70,8 @@ import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/
 import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 let blocked: AutotuneV2Result;
@@ -80,13 +81,12 @@ beforeAll(() => {
     const primary = syntheticLogInput("e".repeat(64));
     const repeat = syntheticLogInput("f".repeat(64));
     blocked = runAutotuneV2({ primary, others: [repeat], verifiedTune: null, createdAt: "2026-10-22T00:00:00Z" });
-    released = runAutotuneV2({
+    // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+    released = runSoftwareQualifiedAutotuneV2({
         primary,
         others: [repeat],
         // A measured gain reduction from the logged tune: its segment carries the released proposal.
         verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
-        // SIMULATION: a synthetic finer second flight qualifies the margins' model class.
-        modelClassQualification: simulatedQualificationLog(),
         createdAt: "2026-10-22T00:00:00Z",
     });
 }, 600_000);

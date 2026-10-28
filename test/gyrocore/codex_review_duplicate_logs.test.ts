@@ -40,7 +40,6 @@ vi.mock("@/gyrocore/engine/logInput", async (importOriginal) => ({
     ],
 }));
 
-import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
 import { buildVerifiedTune, verifiedTuneIssues } from "../../src/gyrocore/releaseGate/verifiedTune";
 import { verifiedTuneFromLogs } from "../../src/gyrocore/engine/verifiedTuneFromLogs";
@@ -48,15 +47,15 @@ import { flightFingerprint } from "../../src/gyrocore/engine/logInput";
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { FIXTURE_FIRMWARE, FIXTURE_UID, verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const record = () => verifiedTuneAllAxesFixture(0.9, 0.7);
 const AT = "2026-10-22T00:00:00Z";
-// SIMULATION: a synthetic finer second flight qualifies the margins' model class (contract logic only).
-const QUALIFICATION = simulatedQualificationLog();
+// SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
 const run = (primary: AutotuneLogInput, others: AutotuneLogInput[]) =>
-    runAutotuneV2({ primary, others, verifiedTune: record(), modelClassQualification: QUALIFICATION, createdAt: AT });
+    runSoftwareQualifiedAutotuneV2({ primary, others, verifiedTune: record(), createdAt: AT });
 const released = (r: AutotuneV2Result) => !!r.releasableProposal && evaluateRelease(r.releasableProposal).released;
 
 function withHeader(log: AutotuneLogInput, key: string, value: string): AutotuneLogInput {

@@ -64,7 +64,8 @@ const UNREAD_PREVIEW = "test:preview-not-read";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
 import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 let withoutVt: AutotuneV2Result;
@@ -78,12 +79,11 @@ beforeAll(() => {
     const primary = syntheticLogInput("e".repeat(64));
     const repeat = syntheticLogInput("f".repeat(64));
     withoutVt = runAutotuneV2({ primary, others: [repeat], verifiedTune: null, createdAt: "2026-10-22T00:00:00Z" });
-    withVt = runAutotuneV2({
+    // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+    withVt = runSoftwareQualifiedAutotuneV2({
         primary,
         others: [repeat],
         verifiedTune: record(),
-        // SIMULATION: a synthetic finer second flight qualifies the margins' model class (contract logic only).
-        modelClassQualification: simulatedQualificationLog(),
         createdAt: "2026-10-22T00:00:00Z",
     });
     // The same record against a log flown with its candidate tune: a new starting point.
@@ -93,11 +93,10 @@ beforeAll(() => {
         pitch: [c.pitch.p, c.pitch.i, c.pitch.d] as [number, number, number],
         yaw: [c.yaw.p, c.yaw.i, c.yaw.d] as [number, number, number],
     };
-    fromCandidate = runAutotuneV2({
+    fromCandidate = runSoftwareQualifiedAutotuneV2({
         primary: syntheticLogInput("a".repeat(64), { pids }),
         others: [syntheticLogInput("9".repeat(64), { pids })],
         verifiedTune: record(),
-        modelClassQualification: simulatedQualificationLog({ pids }),
         createdAt: "2026-10-22T00:00:00Z",
     });
 }, 600_000);

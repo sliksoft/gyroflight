@@ -34,7 +34,7 @@
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
-import { declaredQualificationSweep } from "./harness/qualificationSweep";
+import { analysisForDeclaredSweep, declaredQualificationSweep } from "./harness/qualificationSweep";
 import {
     air65RollConfig,
     cdiv,
@@ -61,6 +61,7 @@ import {
     type AbsoluteProposal,
     type AxisMargins,
 } from "../../src/gyrocore/releaseGate/releaseContract";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
 import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 import { simulatedQualifiedEvidence, SIMULATED_QUALIFICATION_SHA } from "./harness/marginEvidenceFixture";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
@@ -95,21 +96,28 @@ const PRIMARY_LOG = { sha256: "d".repeat(64), logIndex: 0, headerPairs: [] as [s
 function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null = null): LoopMargins {
     const qtf = fine ? tfOf(fine.freqs, fine.g) : null;
     const q = fine
-        ? {
-              tf: qtf!,
-              source: SOURCE,
-              analysis: welchOf(fine.freqs),
-              support: declaredSupport(qtf!),
-              // SIMULATION: the sweep these fine bins need (one whole segment of dwell per bin,
-              // SUB_SEGMENT_DWELL.qualification), declared like their support.
-              sweep: declaredQualificationSweep({
-                  segmentSamples: welchOf(fine.freqs).segmentSamples,
-                  sampleRateHz: welchOf(fine.freqs).sampleRateHz,
+        ? (() => {
+              const base = welchOf(fine.freqs);
+              // SIMULATION: sweep + matching analysed window (Codex 2026-10-28 P2).
+              const sweep = declaredQualificationSweep({
+                  segmentSamples: base.segmentSamples,
+                  sampleRateHz: base.sampleRateHz,
                   f0Hz: 1,
                   f1Hz: 400,
                   topHz: Math.max(...fine.freqs),
-              }),
-          }
+              });
+              return {
+                  tf: qtf!,
+                  source: SOURCE,
+                  analysis: analysisForDeclaredSweep(sweep, {
+                      segmentSamples: base.segmentSamples,
+                      sampleRateHz: base.sampleRateHz,
+                      segments: base.segments,
+                  }),
+                  support: declaredSupport(qtf!),
+                  sweep,
+              };
+          })()
         : null;
     const tf = tfOf(freqs, g);
     return loopMargins(
@@ -502,18 +510,19 @@ describe("F-02 evidence: the engine route loopMargins → autotuneV2 → AxisMar
         expect(bare.filters.every((f) => f.status !== "VALIDATED")).toBe(true);
     }, 600_000);
 
-    it("SIMULATION: with a finer independent flight of the same craft and tune the proposal releases", () => {
-        qualified = runAutotuneV2({
+    it("SIMULATION: software-only VALIDATED evidence releases the proposal (no fictitious qualification flight)", () => {
+        // A fine 0.1 Hz qualification log in a 45 s window cannot supply whole-segment dwell after the
+        // window clip (Codex 2026-10-28 P2); write suites use simulatedQualifiedEvidence instead.
+        qualified = runSoftwareQualifiedAutotuneV2({
             primary,
             others: [other],
             verifiedTune: vt,
-            modelClassQualification: simulatedQualificationLog(),
             createdAt: AT,
         });
         expect(released(qualified)).toBe(true);
         for (const am of qualified.releasableProposal!.release.margins) {
             expect(am.evidence.level).toBe("VALIDATED");
-            expect(am.evidence.qualification!.source.sha256).toBe(simulatedQualificationLog().sha256);
+            expect(am.evidence.qualification!.source.sha256).toBe(SIMULATED_QUALIFICATION_SHA);
             expect(am.evidence.qualification!.resolutionHz!).toBeCloseTo(0.1, 6);
         }
         // The search is unchanged: the same values as without the qualification.

@@ -420,8 +420,10 @@ export function sweepAverages(
     analysis: Pick<AnalysisProvenance, "segmentSamples" | "sampleRateHz" | "segments"> | null,
     sweep: SweepInfo | null,
     /**
-     * The planner's window (samples), when the dwell must lie in it. The engine does not pass it yet:
-     * clipping the analysis's dwell to its own window is an open item (Codex review 2026-10-28, P2).
+     * Samples of the analysed window. The planner always passes its window. The engine passes the
+     * analysis's own `windowSamples` (loopUncertainty): dwell past that window was never observed
+     * and must not count (Codex review 2026-10-28, P2). Omit only in unit tests of the unclipped
+     * formula; production callers must clip.
      */
     windowSamples?: number,
 ): number {
@@ -477,8 +479,18 @@ export function loopUncertainty(
         return { relErr: null, averages: null, reasons: [`uncertainty_unknown:welch_segments:${K}`] };
     }
     // Averages are counted on the analysis's own segment and sample grid (whole samples, whole
-    // segments); without the analysis or the sweep they are unknown (sweepAverages 0).
-    const analysis = measurement.analysis ? { ...measurement.analysis, segments: K } : null;
+    // segments), clipped to the analysed window when the analysis declares one (Codex review
+    // 2026-10-28, P2). An analysis that is present but whose windowSamples is missing or not
+    // positive, together with a sweep header, is ambiguous provenance: averages unknown, never
+    // COUNTED_AS_ONE. No analysis at all: legacy count without a window clip (tests); production
+    // always supplies AnalysisProvenance with a positive window.
+    const raw = measurement.analysis;
+    const sweep = measurement.sweep ?? null;
+    const hasAnalysis = !!raw;
+    const windowOk = hasAnalysis && Number.isFinite(raw!.windowSamples) && raw!.windowSamples > 0;
+    const ambiguous = !!(sweep && hasAnalysis && !windowOk);
+    const analysis = hasAnalysis ? { ...raw!, segments: K } : null;
+    const windowSamples = windowOk ? raw!.windowSamples : undefined;
     const relErr = new Map<number, number>();
     const averagesByHz = new Map<number, number>();
     let lo = Infinity;
@@ -490,13 +502,19 @@ export function loopUncertainty(
         const g2 = tf.coherence[k];
         if (!(f > 0)) continue;
         if (!(g2 > 0 && g2 <= 1)) {
-            // No usable coherence: the bin stays on the grid with no averages and no error, so the
+            // No usable coherence: the bin stays on the graph with no averages and no error, so the
             // nearest-bin readers (phaseMarginSigmaDegAt, the planner) see it as unknown and never
             // borrow a neighbour's error (Codex review 2026-10-28, P1).
             averagesByHz.set(f, 0);
             continue;
         }
-        const counted = sweepAverages(f, analysis, measurement.sweep ?? null);
+        if (ambiguous) {
+            averagesByHz.set(f, 0);
+            lo = Math.min(lo, 0);
+            unknown++;
+            continue;
+        }
+        const counted = sweepAverages(f, analysis, sweep, windowSamples);
         let n = counted;
         if (counted < 1) {
             // Less than one whole segment of dwell (SUB_SEGMENT_DWELL): unknown on the qualification
@@ -521,7 +539,11 @@ export function loopUncertainty(
         averages: Number.isFinite(lo) ? [lo, hi] : null,
         averagesByHz,
         subSegmentBinsCountedAsOne: countedAsOne,
-        reasons: unknown ? [`uncertainty_unknown:dwell_below_one_segment:${unknown}_bins`] : [],
+        reasons: ambiguous
+            ? [`uncertainty_unknown:sweep_without_observed_window`]
+            : unknown
+              ? [`uncertainty_unknown:dwell_below_one_segment:${unknown}_bins`]
+              : [],
     };
 }
 

@@ -31,7 +31,6 @@
 
 import { describe, expect, it } from "vitest";
 import type { AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
-import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
 import { verifiedTuneFromLogs } from "../../src/gyrocore/engine/verifiedTuneFromLogs";
 import {
@@ -45,23 +44,22 @@ import {
     sharedWindows,
     uniqueFlights,
 } from "../../src/gyrocore/engine/logInput";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const AT = "2026-10-22T00:00:00Z";
-// SIMULATION: a synthetic finer second flight qualifies the margins' model class (contract logic only).
-const QUALIFICATION = simulatedQualificationLog();
+// SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
 const run = (primary: AutotuneLogInput, others: AutotuneLogInput[]) =>
-    runAutotuneV2({
+    runSoftwareQualifiedAutotuneV2({
         primary,
         others,
         verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
-        modelClassQualification: QUALIFICATION,
         createdAt: AT,
     });
-const released = (r: ReturnType<typeof runAutotuneV2>) =>
+const released = (r: ReturnType<typeof run>) =>
     !!r.releasableProposal && evaluateRelease(r.releasableProposal).released;
-const duplicate = (r: ReturnType<typeof runAutotuneV2>, sha: string) =>
+const duplicate = (r: ReturnType<typeof run>, sha: string) =>
     r.crossLogRejected.includes(`cross_log_duplicate_of_primary:${sha}:0`);
 
 type Ch = AutotuneLogInput["channels"];

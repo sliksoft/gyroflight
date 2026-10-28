@@ -41,18 +41,17 @@ import {
 } from "../../src/gyrocore/engine/logInput";
 import { verifiedTuneFromLogs } from "../../src/gyrocore/engine/verifiedTuneFromLogs";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const AT = "2026-10-23T00:00:00Z";
-// SIMULATION: a synthetic finer second flight qualifies the margins' model class (contract logic only).
-const QUALIFICATION = simulatedQualificationLog();
+// SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
 const released = (logs: AutotuneLogInput[]) => {
     const picked = pickPrimary(logs)!;
-    const r = runAutotuneV2({
+    const r = runSoftwareQualifiedAutotuneV2({
         ...picked,
         verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
-        modelClassQualification: QUALIFICATION,
         createdAt: AT,
     });
     return { picked, r, released: !!r.releasableProposal && evaluateRelease(r.releasableProposal).released };

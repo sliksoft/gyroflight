@@ -281,27 +281,21 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
 }
 
 /**
- * SIMULATION ONLY: a synthetic second flight of the same craft and tune, identified on 0.1 Hz bins,
- * standing in for the model-class qualification log (autotuneV2 modelClassQualification) in
- * software-contract tests. It is no real measurement and never AIR65 or any other flight evidence.
- * Its band reaches 160 Hz (QUALIFICATION_BAND_EXTENSION × the primary's 100 Hz, and more), and
- * its bins claim the Welch analysis that 0.1 Hz takes: 40 000-sample segments, 8 of them at 50 %
- * overlap, so a 45 s sweep window, which the log holds.
+ * SIMULATION ONLY: a synthetic second flight of the same craft and tune, identified on 0.1 Hz bins
+ * over a 45 s window that the log actually holds. Sweep header and analysed window match (45 s):
+ * no unobserved dwell is claimed (Codex review 2026-10-28, P2).
  *
- * Its headers declare the sweep those bins need (planner safety repair 2026-10-28): the qualification
- * counts averages in whole segments and leaves a bin with less than one segment of dwell unknown, so
- * a 0.1 Hz grid to 160 Hz takes an exponential sweep of about a day (declaredQualificationSweep). The
- * samples behind it are not simulated; the analytic bins are, as before.
+ * On the qualification path those fine bins have less than one whole Welch segment of dwell, so
+ * averages are UNKNOWN and this log cannot produce VALIDATED evidence through the production
+ * pipeline — a negative control for fixture realism. Write-authority / Safety suites that need a
+ * VALIDATED proposal use `runSoftwareQualifiedAutotuneV2` (simulatedQualifiedEvidence), not this log.
  *
- * OPEN (Codex review 2026-10-28, P2): this is not a realizable flight. A day of sweep cannot lie in
- * the 45 s window the analysis claims; the engine counts dwell from the sweep header and does not
- * clip it to the analysed window, so this fixture passes. It stands in for the qualified evidence the
- * write-authority and release suites need. Before this repair the same tests reached PASS on
- * sub-segment bins rounded up to one average; the repair made the fiction visible, it did not create
- * it. Follow-up: clip dwell to the analysed window in the engine, and give those suites a VALIDATED
- * source that needs no fictitious flight.
+ * For a deliberate mismatch (long header, short window) see `mismatchedQualificationLog`.
  */
-export const SIMULATED_QUALIFICATION_SWEEP = declaredQualificationSweep({
+export const SIMULATED_QUALIFICATION_SWEEP = { f0Hz: 1, f1Hz: 200, durationS: 45 };
+
+/** Day-long header in a 45 s window: the engine must not count dwell past the analysed window. */
+export const MISMATCHED_QUALIFICATION_SWEEP = declaredQualificationSweep({
     segmentSamples: Math.round(FS / 0.1),
     sampleRateHz: FS,
     f0Hz: 1,
@@ -319,5 +313,19 @@ export function simulatedQualificationLog(
         maxHz: 160,
         welch: { segments: 8, windowS: 45 },
         sweep: SIMULATED_QUALIFICATION_SWEEP,
+    });
+}
+
+/** Negative control: declares the long sweep 0.1 Hz→160 Hz needs, inside a 45 s window. */
+export function mismatchedQualificationLog(
+    opts: Omit<SyntheticLogOptions, "binStepHz" | "maxHz" | "welch" | "sweep"> = {},
+): AutotuneLogInput {
+    return syntheticLogInput("5b".repeat(32), {
+        seconds: 46,
+        ...opts,
+        binStepHz: 0.1,
+        maxHz: 160,
+        welch: { segments: 8, windowS: 45 },
+        sweep: MISMATCHED_QUALIFICATION_SWEEP,
     });
 }

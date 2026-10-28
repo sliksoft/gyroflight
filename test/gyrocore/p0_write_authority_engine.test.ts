@@ -60,7 +60,7 @@ vi.mock("@/gyrocore/productLock/productApply", async () =>
 
 import { applyAbsoluteTune, previewAbsoluteTune } from "../../src/composables/useTuneApply";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
-import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
+import { type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import { evaluateRelease, type AbsoluteProposal } from "../../src/gyrocore/releaseGate/releaseContract";
 import { analysisBindingIssues, currentAnalysisInput } from "../../src/gyrocore/releaseGate/analysisBinding";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
@@ -70,7 +70,8 @@ import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning
 
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
 import { FAULT_FREE_FIRMWARE, previewedHash } from "./harness/previewConfirmation";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const AT = "2026-10-22T00:00:00Z";
@@ -80,12 +81,11 @@ const repeat = syntheticLogInput("f".repeat(64));
 let qualified: AutotuneV2Result;
 
 beforeAll(() => {
-    qualified = runAutotuneV2({
+    // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+    qualified = runSoftwareQualifiedAutotuneV2({
         primary,
         others: [repeat],
         verifiedTune: record(),
-        // SIMULATION: a synthetic finer second flight qualifies the margins' model class.
-        modelClassQualification: simulatedQualificationLog(),
         createdAt: AT,
     });
 }, 600_000);

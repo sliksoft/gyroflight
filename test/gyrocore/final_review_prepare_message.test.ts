@@ -81,23 +81,23 @@ import AutotuneV2Panel from "../../src/gyrocore/components/AutotuneV2Panel.vue";
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store, type AutotuneV2Outcome } from "../../src/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
-import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
+import { type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES, selectPidProfile } from "./harness/mspFirmware";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
+import { syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const messages = en as Record<string, { message: string }>;
 
 let released: AutotuneV2Result;
 beforeAll(() => {
-    released = runAutotuneV2({
+    // SIMULATION: software-only VALIDATED evidence (no fictitious qualification flight).
+    released = runSoftwareQualifiedAutotuneV2({
         primary: syntheticLogInput("e".repeat(64)),
         others: [syntheticLogInput("f".repeat(64))],
         verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7),
-        // SIMULATION: a synthetic finer second flight qualifies the margins' model class.
-        modelClassQualification: simulatedQualificationLog(),
         createdAt: "2026-10-23T00:00:00Z",
     });
 }, 600_000);

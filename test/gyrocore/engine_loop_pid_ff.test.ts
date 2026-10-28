@@ -28,7 +28,7 @@
 import { describe, expect, it } from "vitest";
 import { declaredSupport } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
-import { declaredQualificationSweep } from "./harness/qualificationSweep";
+import { analysisForDeclaredSweep, declaredQualificationSweep } from "./harness/qualificationSweep";
 import {
     air65RollConfig,
     cadd,
@@ -47,17 +47,20 @@ import type { ChainSimulation, EffectiveChain } from "../../src/gyrocore/engine/
 
 const FREQS = Array.from({ length: 199 }, (_, i) => 1 + i * 0.5);
 
-// SIMULATION: 0.1 Hz to 160 Hz (QUALIFICATION_BAND_EXTENSION × the 100 Hz primary band and more),
-// with the Welch analysis such bins take at 4 kHz (40 000-sample segments, 32 of them).
+// SIMULATION: 0.1 Hz to 160 Hz (QUALIFICATION_BAND_EXTENSION × the 100 Hz primary band and more);
+// the sweep and its Welch window match (Codex review 2026-10-28, P2).
 const FINE_FREQS = Array.from({ length: 1591 }, (_, i) => 1 + i * 0.1);
-const FINE_WELCH = { segmentSamples: 40000, sampleRateHz: 4000, windowSamples: 40000 * 16.5, segments: 32 };
-// SIMULATION: the sweep the 0.1 Hz qualification bins up to 160 Hz need (SUB_SEGMENT_DWELL.qualification).
 const FINE_SWEEP = declaredQualificationSweep({
     segmentSamples: 40000,
     sampleRateHz: 4000,
     f0Hz: 1,
     f1Hz: 400,
     topHz: 160,
+});
+const FINE_WELCH = analysisForDeclaredSweep(FINE_SWEEP, {
+    segmentSamples: 40000,
+    sampleRateHz: 4000,
+    segments: 32,
 });
 
 function tfFor(cfg: DigitalControllerConfig, K: number, freqs = FREQS) {
