@@ -92,6 +92,7 @@ import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
+import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, sameFlight } from "./logInput";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
@@ -229,6 +230,11 @@ export interface AutotuneV2Result {
     releasableProposal: AbsoluteProposal | null;
     /** What the next CHIRP flight must measure per axis (measurementPlan.ts; informative only). */
     measurementPlan: AxisMeasurementPlan[];
+    /**
+     * Practical session ledger from each axis plan (measurementStrategy.ts; informative only).
+     * Does not change margins, proposal selection or write authority.
+     */
+    measurementStrategy: AxisMeasurementStrategy[];
 }
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
@@ -830,6 +836,11 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             axes[name]!.analysis,
         ),
     );
+    // Informative only: how to collect the plan under practical flight budgets (narrow-band split,
+    // multi-session qualification blockers). Never invents averages or changes release status.
+    const measurementStrategy = measurementPlan.map((p) =>
+        buildMeasurementStrategy(p, { sampleRateHz: log.sampleRateHz }),
+    );
 
     // Part summary for the interface and the report.
     const part = (p: PartReport["part"], status: PartReport["status"], reasons: string[]): PartReport => ({
@@ -935,5 +946,6 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         proposal,
         releasableProposal: releasable,
         measurementPlan,
+        measurementStrategy,
     };
 }
