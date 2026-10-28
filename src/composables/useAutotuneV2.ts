@@ -39,10 +39,10 @@ import {
     type AbsoluteWriteResult,
 } from "@/composables/useTuneApply";
 import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
-import { runAutotuneV2, type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
+import { type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
+import { runAutotuneV2Cancellable } from "@/gyrocore/engine/autotuneV2WorkerClient";
 import { buildLogInputs, uniqueFlights } from "@/gyrocore/engine/logInput";
 import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
-import { assessModelQualification } from "@/gyrocore/engine/modelQualification";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { currentAnalysisInput } from "@/gyrocore/releaseGate/analysisBinding";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
@@ -185,19 +185,27 @@ export function useAutotuneV2() {
         const revision = store.revision;
         store.state = "calculating";
         store.errorMessage = "";
+        const abort = new AbortController();
         try {
             await buildInputs();
             // The same input the write authority recomputes at Apply (analysisBinding.ts).
             const input = currentAnalysisInput();
             if (!input) throw new Error(i18n.getMessage("gyroflightV2NoChirp"));
-            store.result = runAutotuneV2(input);
+            // Off the UI thread when Worker is available; same numerical path. Abort on stale revision.
+            if (store.revision !== revision) throw new StaleRun();
+            const { result, qualification } = await runAutotuneV2Cancellable(input, abort.signal);
+            // A newer import must not be overwritten by this run's result (fail closed on stale).
+            if (store.revision !== revision) throw new StaleRun();
+            store.result = result;
             // Informative: what a model-class qualification from the imported logs would show. Its run
             // is not the published result, so it never reaches the write authority (modelQualification.ts).
-            store.qualification = assessModelQualification(input).report;
+            store.qualification = qualification;
             store.state = "done";
         } catch (err) {
+            abort.abort();
             // A stale run leaves the newer files' state alone (addSource reset it to idle).
             if (err instanceof StaleRun || store.revision !== revision) return;
+            if (err instanceof DOMException && err.name === "AbortError") return;
             store.state = "error";
             store.errorMessage = reasonsOf(err).join(", ");
         } finally {

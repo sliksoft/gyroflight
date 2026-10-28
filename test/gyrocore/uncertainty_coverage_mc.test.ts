@@ -197,3 +197,34 @@ describe("coverage of the uncertainty bounds over random errors of the assumed s
         for (const m of runs) expect(m.evidence.level).not.toBe("VALIDATED");
     });
 });
+
+describe("coverage under weaker excitation and higher plant noise (SIMULATION)", () => {
+    // Same Bendat–Piersol propagation check at lower coherence (weaker excitation / more noise).
+    // Unknown support must fail closed: bounds absent, never VALIDATED.
+    it("coherence 0.9: when bounds exist they still cover the truth ≥ 90 %; otherwise MEASURED", () => {
+        const t = truth(PLANT);
+        const seeds = Array.from({ length: 30 }, (_, i) => 2000 + i);
+        const runs = seeds.map((seed) => {
+            const tf = perturbedTF(PLANT, seed);
+            for (let i = 0; i < tf.coherence.length; i++) tf.coherence[i] = 0.9;
+            return margins(tf);
+        });
+        const bounded = runs.filter((m) => m.evidence.level === "MODEL_CONDITIONAL");
+        for (const m of runs) expect(m.evidence.level).not.toBe("VALIDATED");
+        if (bounded.length === 0) {
+            for (const m of runs) {
+                expect(["MEASURED", "INSUFFICIENT"]).toContain(m.evidence.level);
+                expect(m.gainMarginDb).toBeNull();
+            }
+            return;
+        }
+        const pmOk = bounded.filter((m) => m.phaseMarginDeg! <= t.pm + 1e-9).length;
+        expect(pmOk / bounded.length).toBeGreaterThanOrEqual(0.9);
+    });
+
+    it("a different plant (higher delay) still never VALIDATEs without qualification", () => {
+        const heavy = ratePlant({ K: 60, motorHz: 40, delayS: 0.006 });
+        const runs = Array.from({ length: 10 }, (_, i) => margins(perturbedTF(heavy, 3000 + i)));
+        for (const m of runs) expect(m.evidence.level).not.toBe("VALIDATED");
+    });
+});
