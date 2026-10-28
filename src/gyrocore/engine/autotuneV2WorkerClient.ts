@@ -64,10 +64,28 @@ function computeSync(input: AutotuneV2Input): AutotuneV2ComputeOutcome {
     };
 }
 
+function resolveSyncOrReject(
+    input: AutotuneV2Input,
+    signal: AbortSignal | null | undefined,
+    resolve: (v: AutotuneV2ComputeOutcome) => void,
+    reject: (e: unknown) => void,
+): void {
+    if (signal?.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+        return;
+    }
+    try {
+        resolve(computeSync(input));
+    } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+    }
+}
+
 /**
  * Run the engine (and informative model-class assessment) for `input`. When `signal` aborts, the
- * worker is cancelled and the promise rejects with AbortError; main-thread fallback ignores late
- * abort only after the sync work finishes (caller must still discard stale store writes).
+ * worker is cancelled and terminated so a blocking compute cannot keep running after the UI moved
+ * on; the promise rejects with AbortError. Crash / construction failure falls back once to the
+ * main-thread engine (same numerical path). Callers must still discard stale store writes after abort.
  */
 export function runAutotuneV2Cancellable(
     input: AutotuneV2Input,
@@ -76,25 +94,49 @@ export function runAutotuneV2Cancellable(
     if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
     const w = getWorker();
     if (!w) {
-        return Promise.resolve(computeSync(input));
+        try {
+            return Promise.resolve(computeSync(input));
+        } catch (err) {
+            return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+        }
     }
     const id = nextId++;
     return new Promise((resolve, reject) => {
-        const onAbort = () => {
-            const cancel: AutotuneWorkerRequest = { type: "cancel", id };
-            w.postMessage(cancel);
+        let settled = false;
+        const settle = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
             cleanup();
-            reject(new DOMException("Aborted", "AbortError"));
+            fn();
+        };
+        const onAbort = () => {
+            try {
+                const cancel: AutotuneWorkerRequest = { type: "cancel", id };
+                w.postMessage(cancel);
+            } catch {
+                /* worker may already be gone */
+            }
+            // Cancel alone cannot interrupt a synchronous runAutotuneV2 inside the worker.
+            try {
+                w.terminate();
+            } catch {
+                /* ignore */
+            }
+            worker = null;
+            settle(() => reject(new DOMException("Aborted", "AbortError")));
         };
         const onMessage = (ev: MessageEvent<AutotuneWorkerResponse>) => {
             const msg = ev.data;
-            if (msg.id !== id) return;
-            cleanup();
-            if (msg.type === "result") resolve({ result: msg.result, qualification: msg.qualification });
-            else reject(new Error(msg.message || "autotune_worker_error"));
+            if (!msg || typeof msg !== "object" || msg.id !== id) return;
+            if (msg.type === "result") {
+                settle(() => resolve({ result: msg.result, qualification: msg.qualification }));
+            } else if (msg.type === "error") {
+                settle(() => reject(new Error(msg.message || "autotune_worker_error")));
+            } else {
+                settle(() => reject(new Error("autotune_worker_invalid_message")));
+            }
         };
         const onError = (ev: ErrorEvent) => {
-            cleanup();
             workerFailed = true;
             try {
                 w.terminate();
@@ -102,28 +144,36 @@ export function runAutotuneV2Cancellable(
                 /* ignore */
             }
             worker = null;
-            // Fail closed on the worker path: retry once on the main thread so Calculate still works.
-            if (signal?.aborted) reject(new DOMException("Aborted", "AbortError"));
-            else resolve(computeSync(input));
+            settle(() => resolveSyncOrReject(input, signal, resolve, reject));
             void ev;
+        };
+        const onMessageError = () => {
+            workerFailed = true;
+            try {
+                w.terminate();
+            } catch {
+                /* ignore */
+            }
+            worker = null;
+            settle(() => reject(new Error("autotune_worker_message_error")));
         };
         const cleanup = () => {
             signal?.removeEventListener("abort", onAbort);
             w.removeEventListener("message", onMessage);
             w.removeEventListener("error", onError);
+            w.removeEventListener("messageerror", onMessageError);
         };
         signal?.addEventListener("abort", onAbort, { once: true });
         w.addEventListener("message", onMessage);
         w.addEventListener("error", onError);
+        w.addEventListener("messageerror", onMessageError);
         const req: AutotuneWorkerRequest = { type: "run", id, input };
         try {
             w.postMessage(req);
         } catch (err) {
-            cleanup();
             workerFailed = true;
             worker = null;
-            if (signal?.aborted) reject(new DOMException("Aborted", "AbortError"));
-            else resolve(computeSync(input));
+            settle(() => resolveSyncOrReject(input, signal, resolve, reject));
             void err;
         }
     });
