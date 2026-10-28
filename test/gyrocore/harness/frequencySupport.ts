@@ -35,6 +35,36 @@ import type { SupportClass } from "../../../src/gyrocore/chirp/qualityV2/contrac
 export const SIM_SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
 
 /**
+ * SIMULATION: sweep plus a matching analysed window (Codex Gate 1 2026-10-28). A sweep header
+ * without a positive window is ambiguous in the engine; contract tests that need averages must
+ * declare both.
+ */
+export function declaredMeasurement(
+    o: {
+        sweep?: { f0Hz: number; f1Hz: number; durationS: number };
+        sampleRateHz?: number;
+        segmentSamples?: number;
+        segments?: number;
+    } = {},
+): {
+    sweep: { f0Hz: number; f1Hz: number; durationS: number };
+    analysis: { segmentSamples: number; sampleRateHz: number; windowSamples: number; segments: number };
+} {
+    const sweep = o.sweep ?? SIM_SWEEP;
+    const sampleRateHz = o.sampleRateHz ?? 4000;
+    const segmentSamples = o.segmentSamples ?? Math.round(sampleRateHz / 0.5);
+    return {
+        sweep,
+        analysis: {
+            segmentSamples,
+            sampleRateHz,
+            windowSamples: Math.max(1, Math.floor(sweep.durationS * sampleRateHz)),
+            segments: o.segments ?? 32,
+        },
+    };
+}
+
+/**
  * Every bin of `tf` supported (COHERENT, γ²(excitation → setpoint) 0.999), the observed generator
  * range the whole grid above 0 Hz unless given. `except` overrides single bins (by frequency, to
  * 1e-6 Hz) with another verdict.

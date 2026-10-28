@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { declaredSupport } from "./harness/frequencySupport";
+import { declaredSupport, declaredMeasurement } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
 import { analysisForDeclaredSweep, declaredQualificationSweep } from "./harness/qualificationSweep";
 import {
@@ -101,7 +101,7 @@ describe("loop margins on a synthetic loop", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true, null, {
             support: declaredSupport(tfFor(cfg, 80)),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         });
         const m = loopMargins(loop);
         const t = truth(cfg, 80);
@@ -121,7 +121,7 @@ describe("loop margins on a synthetic loop", () => {
                 buildAxisLoop(0, tf, cfg, steadyChain, false, true, null, {
                     support: declaredSupport(tf),
                     ...declaredResolution(),
-                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                    ...declaredMeasurement(),
                 }),
             ).reasons,
         ).toContain("chain_model_not_validated_on_this_log");
@@ -130,7 +130,7 @@ describe("loop margins on a synthetic loop", () => {
                 buildAxisLoop(0, tf, cfg, steadyChain, true, false, null, {
                     support: declaredSupport(tf),
                     ...declaredResolution(),
-                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                    ...declaredMeasurement(),
                 }),
             ).reasons,
         ).toContain("independent_validation_missing");
@@ -140,7 +140,7 @@ describe("loop margins on a synthetic loop", () => {
                 buildAxisLoop(0, tf, cfg, moving, true, true, null, {
                     support: declaredSupport(tf),
                     ...declaredResolution(),
-                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                    ...declaredMeasurement(),
                 }),
             ).reasons,
         ).toContain("chain_moves_at_crossover:9.0deg");
@@ -149,7 +149,7 @@ describe("loop margins on a synthetic loop", () => {
                 buildAxisLoop(0, tf, cfg, null, true, true, null, {
                     support: declaredSupport(tf),
                     ...declaredResolution(),
-                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                    ...declaredMeasurement(),
                 }),
             ).reasons,
         ).toContain("chain_spread_unknown");
@@ -171,7 +171,7 @@ describe("loop margins on a synthetic loop", () => {
             buildAxisLoop(0, short, cfg, steadyChain, true, true, null, {
                 support: declaredSupport(short),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
         );
         expect(m.phaseMarginDeg).toBeNull();
@@ -204,7 +204,7 @@ describe("PID search", () => {
             {
                 support: declaredSupport(tfFor(cfg, 40)),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             },
         );
         const r = optimizeAxisPid(loop, current);
@@ -221,7 +221,7 @@ describe("PID search", () => {
             buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, true, null, {
                 support: declaredSupport(tfFor(cfg, 40)),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
             current,
         );
@@ -234,7 +234,7 @@ describe("PID search", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 160), cfg, steadyChain, true, true, null, {
             support: declaredSupport(tfFor(cfg, 160)),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         });
         const before = loopMargins(loop);
         expect(before.phaseMarginDeg!).toBeLessThan(PID_TARGETS.minPhaseMarginDeg);
@@ -249,7 +249,7 @@ describe("PID search", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 40), cfg, steadyChain, true, false, null, {
             support: declaredSupport(tfFor(cfg, 40)),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         });
         const r = optimizeAxisPid(loop, current);
         expect(r.changed).toBe(true);
@@ -263,7 +263,7 @@ describe("feedforward", () => {
     const loop = buildAxisLoop(0, tfFor(cfg, 80), cfg, steadyChain, true, true, null, {
         support: declaredSupport(tfFor(cfg, 80)),
         ...declaredResolution(),
-        sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+        ...declaredMeasurement(),
     });
     it("is BLOCKED without acro stick data, naming the flight it needs", () => {
         const r = optimizeFeedforward(0, {

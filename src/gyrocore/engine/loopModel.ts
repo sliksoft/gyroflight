@@ -480,15 +480,14 @@ export function loopUncertainty(
     }
     // Averages are counted on the analysis's own segment and sample grid (whole samples, whole
     // segments), clipped to the analysed window when the analysis declares one (Codex review
-    // 2026-10-28, P2). An analysis that is present but whose windowSamples is missing or not
-    // positive, together with a sweep header, is ambiguous provenance: averages unknown, never
-    // COUNTED_AS_ONE. No analysis at all: legacy count without a window clip (tests); production
-    // always supplies AnalysisProvenance with a positive window.
+    // 2026-10-28, P2). A sweep header without a positive observed window (analysis absent, null,
+    // or windowSamples not positive) is ambiguous provenance: averages unknown, never
+    // COUNTED_AS_ONE (Codex Gate 1 follow-up 2026-10-28, P2).
     const raw = measurement.analysis;
     const sweep = measurement.sweep ?? null;
     const hasAnalysis = !!raw;
     const windowOk = hasAnalysis && Number.isFinite(raw!.windowSamples) && raw!.windowSamples > 0;
-    const ambiguous = !!(sweep && hasAnalysis && !windowOk);
+    const ambiguous = !!(sweep && !windowOk);
     const analysis = hasAnalysis ? { ...raw!, segments: K } : null;
     const windowSamples = windowOk ? raw!.windowSamples : undefined;
     const relErr = new Map<number, number>();
@@ -1167,7 +1166,7 @@ export function buildAxisLoop(
         sweep: measurement.sweep ?? null,
         resolution: measurement.resolution ?? null,
         resolutionFor: measurement.resolutionFor ?? null,
-        analysisStepHz: analysisStep(measurement.analysis),
+        analysisStepHz: analysisStep(measurement.analysis, tf),
         qualification: qualification
             ? {
                   plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
@@ -1181,17 +1180,27 @@ export function buildAxisLoop(
                   provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
                   support: qualification.support ?? null,
                   sweep: qualification.sweep ?? null,
-                  analysisStepHz: analysisStep(qualification.analysis),
+                  analysisStepHz: analysisStep(qualification.analysis, qualification.tf),
               }
             : null,
     };
 }
 
-/** Bin spacing (Hz) of an analysis, or null when it is not known or not valid. */
-function analysisStep(a: AnalysisProvenance | null | undefined): number | null {
-    return a && finite(a.sampleRateHz) && finite(a.segmentSamples) && a.sampleRateHz > 0 && a.segmentSamples > 0
-        ? a.sampleRateHz / a.segmentSamples
-        : null;
+/**
+ * Bin spacing (Hz) of an analysis, or null when it is not known, not valid, or the transfer
+ * function is not on that Welch lattice (analytic log/jittered grids must not claim a step they
+ * were not measured on — otherwise the gap rule rejects them as foreign steps).
+ */
+function analysisStep(a: AnalysisProvenance | null | undefined, tf?: TransferFunction | null): number | null {
+    if (!(a && finite(a.sampleRateHz) && finite(a.segmentSamples) && a.sampleRateHz > 0 && a.segmentSamples > 0)) {
+        return null;
+    }
+    const step = a.sampleRateHz / a.segmentSamples;
+    if (tf) {
+        const g = gridNonUniformity(Array.from(tf.frequencies), step);
+        if (g && g.includes("steps_not_from_its_analysis")) return null;
+    }
+    return step;
 }
 
 /**

@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { declaredSupport } from "./harness/frequencySupport";
+import { declaredSupport, declaredMeasurement } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
@@ -65,7 +65,7 @@ function margins(resonance: { hz: number; zeta: number } | null) {
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         }),
     );
 }

@@ -35,7 +35,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { declaredSupport } from "./harness/frequencySupport";
+import { declaredSupport, declaredMeasurement } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
@@ -93,11 +93,20 @@ function margins(freqs: number[], G: G) {
         const c = evaluateControllerFrf(cfg, f);
         return closedLoopFromPlant(G(f), c.cReference, c.cFeedback);
     });
+    const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
+    const minStep = Math.min(...steps);
+    const sampleRateHz = 4000;
+    // Matching analysed window for the sweep (Codex Gate 1). Convergence remains the declared
+    // 0.5 Hz SIMULATION verdict (declaredResolution); analysis segment matches the TF grid for dwell.
     return loopMargins(
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement({
+                sampleRateHz,
+                segmentSamples: Math.round(sampleRateHz / minStep),
+                segments: Math.max(tf.numSegments, 8),
+            }),
         }),
     );
 }
@@ -321,7 +330,7 @@ describe("F-02: the PID search names the measurement an unresolved band needs", 
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         });
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);
         expect(r.reasons).toContain("required_measurement:chirp_with_finer_frequency_resolution");

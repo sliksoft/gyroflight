@@ -32,7 +32,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { declaredSupport } from "./harness/frequencySupport";
+import { declaredSupport, declaredMeasurement } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
 import { analysisForDeclaredSweep, declaredQualificationSweep } from "./harness/qualificationSweep";
 import {
@@ -124,7 +124,7 @@ function margins(freqs: number[], g: G, fine: { freqs: number[]; g: G } | null =
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, q, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         }),
     );
 }
@@ -402,7 +402,7 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
         const sup = {
             support: declaredSupport(coarseTf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         };
         const q = {
             tf: fineTf,
@@ -427,7 +427,7 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
                     tf: fineTf,
                     source: SOURCE,
                     support: declaredSupport(fineTf),
-                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                    // Deliberately no analysis: provenance must be missing (not a sweep/window pair).
                 },
                 sup,
             ),
@@ -463,12 +463,12 @@ describe("F-02 evidence: the smooth plant and a qualified model (4, 5)", () => {
                 tf: heavierTf,
                 source: SOURCE,
                 support: declaredSupport(heavierTf),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             },
             {
                 support: declaredSupport(coarseTf),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             },
         );
         const r = optimizeAxisPid(loop, { p: cfg.axis.p, i: cfg.axis.i, d: cfg.axis.d, dMax: 0 }, null);

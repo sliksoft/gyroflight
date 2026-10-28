@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { declaredSupport } from "./harness/frequencySupport";
+import { declaredSupport, declaredMeasurement } from "./harness/frequencySupport";
 import { declaredResolution } from "./harness/resolutionConvergence";
 import {
     air65RollConfig,
@@ -77,7 +77,7 @@ const marginsAt = (coherence: number, segments = 32) => {
         buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         }),
     );
 };
@@ -141,6 +141,14 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         expect(noWindow.averagesByHz!.get(40)).toBe(0);
         expect(noWindow.reasons).toContain("uncertainty_unknown:sweep_without_observed_window");
         expect(noWindow.subSegmentBinsCountedAsOne).toBe(0);
+        // Same when analysis is omitted or null: never invent COUNTED_AS_ONE averages (Codex Gate 1).
+        for (const m of [{ sweep }, { sweep, analysis: null }] as const) {
+            const u = loopUncertainty(tf, cfg, m);
+            expect(u.averagesByHz!.get(2)).toBe(0);
+            expect(u.averagesByHz!.get(40)).toBe(0);
+            expect(u.reasons).toContain("uncertainty_unknown:sweep_without_observed_window");
+            expect(u.subSegmentBinsCountedAsOne).toBe(0);
+        }
         // Observed 20 s of a day-long exponential: still below 2 Hz → both bins unknown.
         const clipped = loopUncertainty(
             tf,
@@ -182,7 +190,7 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
             buildAxisLoop(0, one, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(one),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
         );
         expect(m.evidence.level).toBe("MEASURED");
@@ -216,7 +224,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+            ...declaredMeasurement(),
         });
         const m = loopMargins(loop);
         expect(binsDroppedForUncertainty(loop).length).toBeGreaterThan(0);
@@ -233,7 +241,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
         );
         expect(m.reasons).toContain("unidentified_bins_inside_band:1");
@@ -248,7 +256,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
             { cfg: hot },
         );
@@ -280,7 +288,7 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
                 buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                     support: declaredSupport(tf),
                     ...declaredResolution(),
-                    sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                    ...declaredMeasurement(),
                 }),
                 { cfg: hot },
             );
@@ -355,7 +363,7 @@ describe("the phase the margins are read on", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
         );
         expect(m.reasons.some((r) => r.startsWith("phase_branch_unverified:"))).toBe(true);
@@ -371,7 +379,7 @@ describe("the phase the margins are read on", () => {
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 ...declaredResolution(),
-                sweep: { f0Hz: 1, f1Hz: 400, durationS: 20 },
+                ...declaredMeasurement(),
             }),
         );
         expect(m.reasons.some((r) => r.startsWith("crossover_insufficiently_resolved:"))).toBe(true);
