@@ -203,16 +203,11 @@ describe("R-1: the engine does not release on a copy of its own flight", () => {
         channels.timeUs = Float64Array.from(channels.timeUs, (v) => v + 3_000_000);
         const copy = { ...primary, sha256: "3".repeat(64), channels };
         expect(flightRelation(primary, copy).relation).toBe("INDEPENDENT"); // windows and session miss it ...
-        const r = run(primary, [copy]); // ... the plant comparison does: no two flights agree to the bit
-        // (roll's controller model is fitted on the gyro itself, so its extracted plant differs a
-        // little; pitch and yaw use the headers alone and come out bit-identical.)
-        // Bit-identical pitch/yaw plants reject the copy; if the plant path does not fire (e.g. axis
-        // MEASURED without a closed-loop plant compare), release still stays blocked.
-        const identical = r.crossLogRejected.includes(`cross_log_identical_measurement:${copy.sha256}:0`);
-        if (identical) {
-            expect(r.crossLogPlant.pitch).toBeUndefined();
-            expect(r.crossLogPlant.yaw).toBeUndefined();
-        }
+        const r = run(primary, [copy]); // ... the shared/bit-identical closed-loop FRF does: same measurement
+        expect(r.crossLogRejected).toContain(`cross_log_identical_measurement:${copy.sha256}:0`);
+        expect(r.crossLogPlant.roll).toBeUndefined();
+        expect(r.crossLogPlant.pitch).toBeUndefined();
+        expect(r.crossLogPlant.yaw).toBeUndefined();
         expect(released(r)).toBe(false);
     }, 600_000);
 

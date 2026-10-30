@@ -104,19 +104,17 @@ describe.each(Object.entries(CLASSES))(
             const { current, proposed } = second.margins.roll!;
             const pid = second.pid.find((p) => p.axis === "roll")!;
 
-            // Bounds when whole-segment dwell holds (F2); short planned chirps may stay MEASURED.
+            // Bounds when whole-segment dwell holds (F2); short planned chirps may stay MEASURED
+            // under F2 and leave the search with no move — do not require a candidate then.
             expect(["MODEL_CONDITIONAL", "MEASURED"]).toContain(current.evidence.level);
-            if (current.evidence.level === "MODEL_CONDITIONAL") {
-                expect(current.gainMarginDb).not.toBeNull();
-            }
-            // Short planned chirps may stay MEASURED under F2 and leave the search with no move.
-            if (current.evidence.level === "MODEL_CONDITIONAL") {
-                expect(pid.changed).toBe(true);
-                expect(["improved", "restores_margins"]).toContain(pid.outcome);
-                expect(pid.proposed).not.toEqual(pid.current);
-            } else {
+            if (current.evidence.level !== "MODEL_CONDITIONAL") {
                 expect(pid.status).toBe("BLOCKED");
+                return;
             }
+            expect(current.gainMarginDb).not.toBeNull();
+            expect(pid.changed).toBe(true);
+            expect(["improved", "restores_margins"]).toContain(pid.outcome);
+            expect(pid.proposed).not.toEqual(pid.current);
 
             // The candidate is a real move of the tune: some gain by more than 5 %, its own crossover
             // (not the current tune's copied over), and that crossover is recomputed for the candidate

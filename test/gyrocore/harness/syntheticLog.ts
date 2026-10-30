@@ -138,9 +138,10 @@ export interface SyntheticLogOptions {
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
     const o = typeof opts === "number" ? { seconds: opts } : opts;
     // Channel length is only for chain/D validation / flight-identity windows. Declared Welch
-    // window (welch.windowS) may be longer: the TF is synthetic (SIMULATION / F2). Default 12 s
-    // covers overlapping-fragment identity suites and multi-segment CHIRP exports.
-    const seconds = o.seconds ?? 20;
+    // window (welch.windowS) may be longer: the TF is synthetic (SIMULATION / F2). Default 11 s
+    // keeps identity-suite arithmetic (non-overlapping 0–4 / 5–11 sub-ranges; staggered CHIRP
+    // slices; < minShared windows from a 600-sample splice).
+    const seconds = o.seconds ?? 11;
     const n = Math.round(seconds * FS);
     const sweepHeader: Record<string, string> = o.sweep
         ? {
@@ -201,10 +202,11 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
     // analysis window is the declared provenance for dwell (synthetic TF, Grokbot F2).
     const welch = o.welch ?? { segments: 32, windowS: 120 };
     const declaredWindowSamples = Math.round(welch.windowS * FS);
-    // Chirp slice indices stay inside the short channel buffer (chain/D path only).
-    const sweep = (_k: number) => ({
-        start: Math.round(0.5 * FS),
-        end: Math.min(n, Math.round((0.5 + Math.min(welch.windowS, seconds - 0.5)) * FS)),
+    // Chirp slice indices stay inside the short channel buffer and stay staggered per axis so
+    // multi-segment export identity tests still see one axis per excerpt (roll 1–4 s, …).
+    const sweep = (k: number) => ({
+        start: Math.round((1 + 3.3 * k) * FS),
+        end: Math.min(n, Math.round((4 + 3.3 * k) * FS)),
     });
     const log: AutotuneLogInput = {
         sha256,

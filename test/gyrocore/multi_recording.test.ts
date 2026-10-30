@@ -28,7 +28,9 @@ import { describe, expect, it } from "vitest";
 import {
     aggregateAverageClaims,
     averageClaimAt,
+    collectMultiRecordingAverages,
     multiRecordingIssues,
+    transferFunctionValuesIdentical,
     type RecordingAverageClaim,
 } from "../../src/gyrocore/engine/multiRecording";
 import { syntheticLogInput } from "./harness/syntheticLog";
@@ -77,5 +79,34 @@ describe("multiRecordingIssues", () => {
         expect(multiRecordingIssues(a, a)).toContain("multi_recording_same_log");
         // Distinct hashes and sessions: the synthetic logs are independent under flightRelation.
         expect(multiRecordingIssues(a, b)).toEqual([]);
+    });
+});
+
+describe("identical closed-loop measurement", () => {
+    it("bit-identical FRF values are detected; a shared TF does not add multi-recording averages", () => {
+        const primary = syntheticLogInput("a1".repeat(32), {
+            welch: { segments: 32, windowS: 120 },
+            sweep: { f0Hz: 2, f1Hz: 200, durationS: 120 },
+        });
+        const channels = structuredClone(primary.channels);
+        for (const g of channels.gyroAdc as unknown as Float64Array[]) {
+            for (let k = 0; k < g.length; k++) g[k] *= 1.37;
+        }
+        channels.timeUs = Float64Array.from(channels.timeUs, (v) => v + 3_000_000);
+        // Same chirp TF by reference (re-identified export); different hash / clock.
+        const copy = { ...primary, sha256: "b2".repeat(32), channels };
+        expect(transferFunctionValuesIdentical(primary.chirp.roll!.tf, copy.chirp.roll!.tf)).toBe(true);
+        expect(multiRecordingIssues(primary, copy)).toEqual([]);
+        const ledger = collectMultiRecordingAverages(
+            primary,
+            [copy],
+            "roll",
+            primary.chirp.roll!.tf.frequencies,
+            primary.chirp.roll!.analysis!,
+            { f0Hz: 2, f1Hz: 200, durationS: 120 },
+        );
+        expect(ledger.contributors).toEqual([]);
+        expect(ledger.rejected.some((r) => r.startsWith("multi_recording_identical_measurement:"))).toBe(true);
+        expect(ledger.extraAveragesByHz.size).toBe(0);
     });
 });
