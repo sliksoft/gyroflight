@@ -82,12 +82,37 @@ describe("multiRecordingIssues", () => {
     });
 });
 
+const DWELL = { welch: { segments: 32, windowS: 120 }, sweep: { f0Hz: 2, f1Hz: 200, durationS: 120 } } as const;
+const SW = DWELL.sweep;
+const sumExtra = (m: Map<number, number>) => [...m.values()].reduce((a, b) => a + b, 0);
+const ledgerOf = (p: ReturnType<typeof syntheticLogInput>, others: ReturnType<typeof syntheticLogInput>[]) =>
+    collectMultiRecordingAverages(p, others, "roll", p.chirp.roll!.tf.frequencies, p.chirp.roll!.analysis!, SW);
+
+/** Re-export of `src` under another hash; optional closed-loop FRF scale (1 = bit-identical). */
+function reexport(
+    src: ReturnType<typeof syntheticLogInput>,
+    sha: string,
+    scale = 1,
+): ReturnType<typeof syntheticLogInput> {
+    const tf = src.chirp.roll!.tf;
+    const tf2 =
+        scale === 1
+            ? tf
+            : {
+                  ...tf,
+                  hReal: Float64Array.from(tf.hReal, (v) => v * scale),
+                  hImag: Float64Array.from(tf.hImag, (v) => v * scale),
+              };
+    return {
+        ...src,
+        sha256: sha,
+        chirp: { ...src.chirp, roll: { ...src.chirp.roll!, tf: tf2 } },
+    };
+}
+
 describe("identical closed-loop measurement", () => {
     it("bit-identical FRF values are detected; a shared TF does not add multi-recording averages", () => {
-        const primary = syntheticLogInput("a1".repeat(32), {
-            welch: { segments: 32, windowS: 120 },
-            sweep: { f0Hz: 2, f1Hz: 200, durationS: 120 },
-        });
+        const primary = syntheticLogInput("a1".repeat(32), DWELL);
         const channels = structuredClone(primary.channels);
         for (const g of channels.gyroAdc as unknown as Float64Array[]) {
             for (let k = 0; k < g.length; k++) g[k] *= 1.37;
@@ -97,16 +122,67 @@ describe("identical closed-loop measurement", () => {
         const copy = { ...primary, sha256: "b2".repeat(32), channels };
         expect(transferFunctionValuesIdentical(primary.chirp.roll!.tf, copy.chirp.roll!.tf)).toBe(true);
         expect(multiRecordingIssues(primary, copy)).toEqual([]);
-        const ledger = collectMultiRecordingAverages(
-            primary,
-            [copy],
-            "roll",
-            primary.chirp.roll!.tf.frequencies,
-            primary.chirp.roll!.analysis!,
-            { f0Hz: 2, f1Hz: 200, durationS: 120 },
-        );
+        const ledger = ledgerOf(primary, [copy]);
         expect(ledger.contributors).toEqual([]);
         expect(ledger.rejected.some((r) => r.startsWith("multi_recording_identical_measurement:"))).toBe(true);
         expect(ledger.extraAveragesByHz.size).toBe(0);
+    });
+});
+
+describe("P1 peer duplicates among others (Grokbot local review)", () => {
+    it("A+B stacks once; A+B+B′ (same flight as B, other hash) does not double extras", () => {
+        const A = syntheticLogInput("a1".repeat(32), DWELL);
+        const B = syntheticLogInput("b1".repeat(32), DWELL);
+        const Bp = reexport(B, "b2".repeat(32), 1);
+        expect(multiRecordingIssues(A, B)).toEqual([]);
+        expect(multiRecordingIssues(A, Bp)).toEqual([]);
+        const onlyB = ledgerOf(A, [B]);
+        const both = ledgerOf(A, [B, Bp]);
+        const reversed = ledgerOf(A, [Bp, B]);
+        expect(sumExtra(onlyB.extraAveragesByHz)).toBeGreaterThan(0);
+        // Pre-fix defect: 229 → 458; same support must count once.
+        expect(sumExtra(both.extraAveragesByHz)).toBe(sumExtra(onlyB.extraAveragesByHz));
+        expect(sumExtra(reversed.extraAveragesByHz)).toBe(sumExtra(onlyB.extraAveragesByHz));
+        expect(both.contributors).toHaveLength(1);
+        expect(reversed.contributors).toHaveLength(1);
+        expect(
+            both.rejected.some(
+                (r) =>
+                    r.startsWith("multi_recording_duplicate_peer:") ||
+                    r.startsWith("multi_recording_identical_peer_measurement:"),
+            ),
+        ).toBe(true);
+    });
+
+    it("two truly independent others both contribute; order does not change the extra total", () => {
+        const A = syntheticLogInput("a1".repeat(32), DWELL);
+        const B = syntheticLogInput("b1".repeat(32), DWELL);
+        const C = syntheticLogInput("c1".repeat(32), DWELL);
+        const bc = ledgerOf(A, [B, C]);
+        const cb = ledgerOf(A, [C, B]);
+        expect(bc.contributors).toHaveLength(2);
+        expect(cb.contributors).toHaveLength(2);
+        expect(sumExtra(bc.extraAveragesByHz)).toBe(sumExtra(cb.extraAveragesByHz));
+        expect(sumExtra(bc.extraAveragesByHz)).toBe(2 * sumExtra(ledgerOf(A, [B]).extraAveragesByHz));
+    });
+
+    it("bit-identical peer FRFs under different hashes do not stack even when windows diverge", () => {
+        const A = syntheticLogInput("a1".repeat(32), DWELL);
+        const B = syntheticLogInput("b1".repeat(32), DWELL);
+        const channels = structuredClone(A.channels);
+        for (const g of channels.gyroAdc as unknown as Float64Array[]) {
+            for (let k = 0; k < g.length; k++) g[k] *= 1.11;
+        }
+        channels.timeUs = Float64Array.from(channels.timeUs, (v) => v + 9_000_000);
+        // Reuses B's TF bytes on another gyro stream / hash — not sameFlight with B.
+        const BtfClone = {
+            ...A,
+            sha256: "d4".repeat(32),
+            channels,
+            chirp: { ...A.chirp, roll: { ...A.chirp.roll!, tf: B.chirp.roll!.tf } },
+        };
+        const led = ledgerOf(A, [B, BtfClone]);
+        expect(led.contributors).toHaveLength(1);
+        expect(led.rejected.some((r) => r.startsWith("multi_recording_identical_peer_measurement:"))).toBe(true);
     });
 });

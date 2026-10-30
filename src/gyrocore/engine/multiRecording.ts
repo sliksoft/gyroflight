@@ -31,7 +31,7 @@
 
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 import type { AutotuneLogInput } from "./autotuneV2";
-import { crossLogReferenceIssues, flightRelation } from "./logInput";
+import { crossLogReferenceIssues, flightRelation, sameFlight } from "./logInput";
 import { sweepAverages, type AnalysisProvenance, type SweepInfo } from "./loopModel";
 
 /**
@@ -131,8 +131,14 @@ export function aggregateAverageClaims(hz: number, claims: RecordingAverageClaim
 /**
  * Whether `other` may contribute averages toward the same craft measurement as `primary`.
  * Uses the production cross-log identity rules; returns reasons when not.
+ * `pool` is the full set of candidate others so peer duplicates linked through overlapping
+ * fragments are visible to `crossLogReferenceIssues` (Grokbot local review P1, 2026-10-30).
  */
-export function multiRecordingIssues(primary: AutotuneLogInput, other: AutotuneLogInput): string[] {
+export function multiRecordingIssues(
+    primary: AutotuneLogInput,
+    other: AutotuneLogInput,
+    pool: readonly AutotuneLogInput[] = [],
+): string[] {
     if (primary.sha256 === other.sha256 && primary.logIndex === other.logIndex) {
         return ["multi_recording_same_log"];
     }
@@ -140,7 +146,12 @@ export function multiRecordingIssues(primary: AutotuneLogInput, other: AutotuneL
     if (rel.relation !== "INDEPENDENT") {
         return rel.reasons.map((r) => `multi_recording_not_independent:${r}`);
     }
-    return crossLogReferenceIssues(primary, other, []).map((r) => `multi_recording_rejected:${r}`);
+    return crossLogReferenceIssues(primary, other, pool).map((r) => `multi_recording_rejected:${r}`);
+}
+
+/** Stable order so contributor selection does not depend on import order. */
+function byRecordingId(a: AutotuneLogInput, b: AutotuneLogInput): number {
+    return a.sha256 < b.sha256 ? -1 : a.sha256 > b.sha256 ? 1 : a.logIndex - b.logIndex;
 }
 
 export interface MultiRecordingLedger {
@@ -170,9 +181,12 @@ export function collectMultiRecordingAverages(
     if (!primaryAnalysis || !primarySweep || !frequenciesHz.length) {
         return { extraAveragesByHz, contributors, rejected };
     }
+    // Same underlying measurement support counts at most once: peer sameFlight / bit-identical FRF
+    // against primary or an already-kept peer (Grokbot P1: B + B′ must not double averages).
     const eligible: AutotuneLogInput[] = [];
-    for (const other of others) {
-        const issues = multiRecordingIssues(primary, other);
+    const pool = others;
+    for (const other of [...others].sort(byRecordingId)) {
+        const issues = multiRecordingIssues(primary, other, pool);
         if (issues.length) {
             rejected.push(...issues.map((r) => `${r}:${other.sha256}:${other.logIndex}`));
             continue;
@@ -185,6 +199,23 @@ export function collectMultiRecordingAverages(
         const primaryChirp = primary.chirp[axis];
         if (primaryChirp && transferFunctionValuesIdentical(primaryChirp.tf, chirp.tf)) {
             rejected.push(`multi_recording_identical_measurement:${other.sha256}:${other.logIndex}`);
+            continue;
+        }
+        const peerFlight = eligible.find((kept) => sameFlight(kept, other));
+        if (peerFlight) {
+            rejected.push(
+                `multi_recording_duplicate_peer:${other.sha256}:${other.logIndex}:of:${peerFlight.sha256}:${peerFlight.logIndex}`,
+            );
+            continue;
+        }
+        const peerTf = eligible.find((kept) => {
+            const kc = kept.chirp[axis];
+            return !!kc && transferFunctionValuesIdentical(kc.tf, chirp.tf);
+        });
+        if (peerTf) {
+            rejected.push(
+                `multi_recording_identical_peer_measurement:${other.sha256}:${other.logIndex}:of:${peerTf.sha256}:${peerTf.logIndex}`,
+            );
             continue;
         }
         eligible.push(other);
