@@ -94,7 +94,7 @@ import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, sameFlight } from "./logInput";
-import { collectMultiRecordingAverages } from "./multiRecording";
+import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 /** rcCommand[3] below this: on the ground / idle; the PID terms are not representative. */
@@ -673,6 +673,15 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                 crossLogRejected.push(
                     `cross_log_reference_not_qualified:${oc.state}:${other.sha256}:${other.logIndex}`,
                 );
+                continue;
+            }
+            // Same closed-loop FRF bytes = the same measurement again (window identity may miss a
+            // re-scaled / time-shifted copy). Check the declared TFs before plant compare so a
+            // shared or bit-identical chirp cannot count as an independent plant reference —
+            // including when ladder/chain paths leave meanAbsGRel slightly above zero.
+            const primaryTf = log.chirp[name]?.tf;
+            if (primaryTf && transferFunctionValuesIdentical(primaryTf, oc.tf)) {
+                crossLogRejected.push(`cross_log_identical_measurement:${other.sha256}:${other.logIndex}`);
                 continue;
             }
             const ctl = analyzeAxisController(other, oh, ai, oc, flightMask(other.channels.rcThrottle));

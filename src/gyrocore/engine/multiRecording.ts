@@ -29,9 +29,25 @@
  * count. Mismatched identity or configuration fails closed and improves nothing.
  */
 
+import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
 import type { AutotuneLogInput } from "./autotuneV2";
 import { crossLogReferenceIssues, flightRelation } from "./logInput";
 import { sweepAverages, type AnalysisProvenance, type SweepInfo } from "./loopModel";
+
+/**
+ * Bit-identical closed-loop FRF values (same object or equal frequency / H bins). Used to refuse
+ * a duplicated measurement that flight-window identity missed (re-scaled gyro, restarted clock).
+ */
+export function transferFunctionValuesIdentical(a: TransferFunction, b: TransferFunction): boolean {
+    if (a === b) return true;
+    const n = a.frequencies.length;
+    if (b.frequencies.length !== n) return false;
+    for (let i = 0; i < n; i++) {
+        if (a.frequencies[i] !== b.frequencies[i]) return false;
+        if (a.hReal[i] !== b.hReal[i] || a.hImag[i] !== b.hImag[i]) return false;
+    }
+    return true;
+}
 
 export interface RecordingAverageClaim {
     /** Stable id for this recording (sha256 + logIndex). */
@@ -164,6 +180,11 @@ export function collectMultiRecordingAverages(
         const chirp = other.chirp[axis];
         if (!chirp || chirp.state === "rejected" || !chirp.analysis) {
             rejected.push(`multi_recording_axis_unusable:${axis}:${other.sha256}:${other.logIndex}`);
+            continue;
+        }
+        const primaryChirp = primary.chirp[axis];
+        if (primaryChirp && transferFunctionValuesIdentical(primaryChirp.tf, chirp.tf)) {
+            rejected.push(`multi_recording_identical_measurement:${other.sha256}:${other.logIndex}`);
             continue;
         }
         eligible.push(other);
