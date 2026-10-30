@@ -35,8 +35,12 @@ import { crossLogReferenceIssues, flightRelation, sameFlight } from "./logInput"
 import { sweepAverages, type AnalysisProvenance, type SweepInfo } from "./loopModel";
 
 /**
- * Bit-identical closed-loop FRF values (same object or equal frequency / H bins). Used to refuse
- * a duplicated measurement that flight-window identity missed (re-scaled gyro, restarted clock).
+ * Same published closed-loop FRF (same object, bit-equal bins, or equal after float32 round-trip).
+ * Used to refuse a duplicated measurement that flight-window identity missed (re-scaled gyro,
+ * restarted clock, or a sub-ulp H rescale that is not a new identification).
+ *
+ * Float32 equality is serialization / round-trip identity — not a scientific plant-similarity
+ * tolerance and not proof of flight independence (flightRelation / sameFlight remain primary).
  */
 export function transferFunctionValuesIdentical(a: TransferFunction, b: TransferFunction): boolean {
     if (a === b) return true;
@@ -44,7 +48,14 @@ export function transferFunctionValuesIdentical(a: TransferFunction, b: Transfer
     if (b.frequencies.length !== n) return false;
     for (let i = 0; i < n; i++) {
         if (a.frequencies[i] !== b.frequencies[i]) return false;
-        if (a.hReal[i] !== b.hReal[i] || a.hImag[i] !== b.hImag[i]) return false;
+        const ar = a.hReal[i]!;
+        const br = b.hReal[i]!;
+        const ai = a.hImag[i]!;
+        const bi = b.hImag[i]!;
+        if (ar === br && ai === bi) continue;
+        // Sub-ulp / re-export noise: IEEE float32 collapses 1+1e-12 rescales of typical H bins.
+        if (Math.fround(ar) === Math.fround(br) && Math.fround(ai) === Math.fround(bi)) continue;
+        return false;
     }
     return true;
 }

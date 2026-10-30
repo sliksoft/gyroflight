@@ -133,6 +133,40 @@ describe("identical closed-loop measurement", () => {
         expect(ledger.rejected.some((r) => r.startsWith("multi_recording_identical_measurement:"))).toBe(true);
         expect(ledger.extraAveragesByHz.size).toBe(0);
     });
+
+    it("sub-ulp H rescale of the primary TF still adds no extras (Grokbot P1b)", () => {
+        // External harness: gyro ×1.37, time +3 s, TF ×(1+1e-12) under a new hash — not a new flight.
+        const primary = syntheticLogInput("a1".repeat(32), DWELL);
+        const channels = structuredClone(primary.channels);
+        for (const g of channels.gyroAdc as unknown as Float64Array[]) {
+            for (let k = 0; k < g.length; k++) g[k] *= 1.37;
+        }
+        channels.timeUs = Float64Array.from(channels.timeUs, (v) => v + 3_000_000);
+        const tf = primary.chirp.roll!.tf;
+        const scaled = {
+            ...tf,
+            hReal: Float64Array.from(tf.hReal, (v) => v * (1 + 1e-12)),
+            hImag: Float64Array.from(tf.hImag, (v) => v * (1 + 1e-12)),
+        };
+        const copy = {
+            ...primary,
+            sha256: "c3".repeat(32),
+            channels,
+            chirp: { ...primary.chirp, roll: { ...primary.chirp.roll!, tf: scaled } },
+        };
+        expect(transferFunctionValuesIdentical(tf, scaled)).toBe(true);
+        expect(multiRecordingIssues(primary, copy)).toEqual([]);
+        const ledger = ledgerOf(primary, [copy]);
+        expect(sumExtra(ledger.extraAveragesByHz)).toBe(0);
+        expect(ledger.rejected.some((r) => r.startsWith("multi_recording_identical_measurement:"))).toBe(true);
+        // A real plant change (1 %) is not float round-trip identity and may still contribute.
+        const changed = {
+            ...tf,
+            hReal: Float64Array.from(tf.hReal, (v) => v * 1.01),
+            hImag: Float64Array.from(tf.hImag, (v) => v * 1.01),
+        };
+        expect(transferFunctionValuesIdentical(tf, changed)).toBe(false);
+    });
 });
 
 describe("P1 peer duplicates among others (Grokbot local review)", () => {
