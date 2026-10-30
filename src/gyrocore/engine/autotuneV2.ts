@@ -94,6 +94,7 @@ import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, sameFlight } from "./logInput";
+import { collectMultiRecordingAverages } from "./multiRecording";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 /** rcCommand[3] below this: on the ground / idle; the PID terms are not representative. */
@@ -222,6 +223,12 @@ export interface AutotuneV2Result {
     crossLogPlant: Partial<Record<AxisName, { status: string; meanAbsGRel: number; n: number }>>;
     /** Why other logs were not used as independent repeats (duplicate flight, other craft / firmware / config). */
     crossLogRejected: string[];
+    /**
+     * Multi-recording average ledger (multiRecording.ts): which independent flights contributed
+     * whole-segment averages and which were rejected. Informative for the UI; uncertainty already
+     * applied the extras when present.
+     */
+    multiRecording: { contributors: string[]; rejected: string[] };
     safety: { analysisEvidence: string; reasons: string[] };
     parts: PartReport[];
     /** Every recommended change, with its status: what Compare shows. */
@@ -457,6 +464,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     // 2-3. Controller in force, D path, plant per axis with a CHIRP measurement.
     const axes: Partial<Record<AxisName, AxisAnalysis>> = {};
     const dtermReport: AutotuneV2Result["dterm"] = [];
+    const multiRecordingContributors: string[] = [];
+    const multiRecordingRejected: string[] = [];
     AXES.forEach((name, ai) => {
         const axis = ai as 0 | 1 | 2;
         const c = log.chirp[name];
@@ -476,7 +485,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
               : null;
         // One loop per rung (the plant of a rung does not depend on the candidate), read with the
         // controller in force or with a candidate: the same probe serves the current tune's verdict
-        // and every candidate's (loopModel.resolutionVerdictFor, P2-2).
+        // and every candidate's (loopModel.resolutionVerdictFor, P2-2). Multi-recording extras attach
+        // only to the chosen analysis (below), never to discontinuous concatenation of logs.
         const rungLoops = new Map<AnalysisOption, AxisLoop>();
         const rungLoop = (r: AnalysisOption) => {
             let loop = rungLoops.get(r);
@@ -507,6 +517,16 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             // rungs with that candidate, never copied from the current tune.
             resolutionFor = (cand) => resolutionConvergence(ladder, pick.index, probeWith(cand), pick.reasons);
         }
+        const multiRec = collectMultiRecordingAverages(
+            log,
+            input.others,
+            name,
+            chosen.tf.frequencies,
+            chosen.analysis,
+            sweep,
+        );
+        multiRecordingContributors.push(...multiRec.contributors);
+        multiRecordingRejected.push(...multiRec.rejected);
         axes[name] = {
             loop: buildAxisLoop(
                 axis,
@@ -522,6 +542,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                     support: chosen.support,
                     resolution,
                     resolutionFor,
+                    multiRecordingExtraByHz: multiRec.extraAveragesByHz,
                 },
             ),
             dterm: ctl.dterm,
@@ -942,6 +963,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         feedforward,
         crossLogPlant,
         crossLogRejected: [...new Set(crossLogRejected)],
+        multiRecording: {
+            contributors: [...new Set(multiRecordingContributors)],
+            rejected: [...new Set(multiRecordingRejected)],
+        },
         safety,
         parts,
         proposal,

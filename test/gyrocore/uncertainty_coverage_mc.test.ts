@@ -68,9 +68,15 @@ const UNITY_CHAIN: EffectiveChain = {
 };
 const FS = 1000;
 const N = 512;
-const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 60 };
+// Duration must leave whole-segment dwell on the decision band (Grokbot F2).
+const SWEEP = { f0Hz: 0.5, f1Hz: 400, durationS: 8000 };
 const SEGMENTS = 233;
-const PRIMARY = { segmentSamples: N, sampleRateHz: FS, windowSamples: 60000, segments: SEGMENTS };
+const PRIMARY = {
+    segmentSamples: N,
+    sampleRateHz: FS,
+    windowSamples: Math.floor(SWEEP.durationS * FS),
+    segments: SEGMENTS,
+};
 const COHERENCE = 0.995;
 const PLANT = ratePlant({ K: 60, motorHz: 40, delayS: 0.002 });
 
@@ -99,8 +105,8 @@ function perturbedTF(G: Plant, seed: number | null): TransferFunction {
         const plant = G(ff);
         let T = cdiv(cmul(plant, c.cReference), cadd({ re: 1, im: 0 }, cmul(plant, c.cFeedback)));
         if (g) {
-            // The primary path's policy (loopModel SUB_SEGMENT_DWELL.primary): less than one whole
-            // segment of dwell is counted as one average, as loopUncertainty does.
+            // Both paths (loopModel SUB_SEGMENT_DWELL): less than one whole segment of dwell leaves
+            // the bin's averages unknown — never invent n=1 (Grokbot F2).
             const n = Math.max(
                 1,
                 sweepAverages(ff, { segmentSamples: N, sampleRateHz: FS, segments: SEGMENTS }, SWEEP),

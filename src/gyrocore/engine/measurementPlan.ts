@@ -452,14 +452,14 @@ export function planMeasurement(
     if (primary && plan.bandHz.primary && Np !== null) {
         plan.sweep = primary.sweep;
         plan.windowSamples.primary = primary.windowSamples;
-        // The primary path counts a bin with less than one segment of dwell as one average
-        // (loopModel SUB_SEGMENT_DWELL.primary): said, not planned away.
+        // Bins with less than one segment of dwell have unknown averages (loopModel SUB_SEGMENT_DWELL):
+        // named here so the plan shows how many bins the current sweep cannot quantify.
         const df = sampleRateHz / Np;
         let sub = 0;
         for (let k = Math.ceil(plan.bandHz.primary[0] / df); k * df <= plan.bandHz.primary[1]; k++) {
             if (primary.count(k * df) < 1) sub++;
         }
-        if (sub) diagnostics.push(`primary_sub_segment_bins_counted_as_one:${sub}`);
+        if (sub) diagnostics.push(`primary_sub_segment_bins_unknown:${sub}`);
         // The qualification needs every bin of its band known (SUB_SEGMENT_DWELL.qualification): at
         // least one whole segment of dwell at its highest bin, where the dwell is shortest.
         if (plan.bandHz.qualification && Nq !== null) {

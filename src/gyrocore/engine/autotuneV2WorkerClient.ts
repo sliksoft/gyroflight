@@ -125,8 +125,27 @@ function isDataCloneError(err: unknown): boolean {
 }
 
 /**
- * Terminate the shared worker and settle every in-flight request so none is left hanging.
- * The aborted id (if any) rejects with AbortError; others fall back to the sync engine.
+ * Detach a pending run from the dead shared worker and continue it on a fresh worker asynchronously.
+ * Never runs the engine on the UI thread (Grokbot F4): peers of an aborted/crashed request must not
+ * silently fall back to synchronous computeSync.
+ */
+function requeueOnFreshWorker(p: PendingRun): void {
+    if (p.settled) return;
+    pending.delete(p.id);
+    p.cleanup();
+    // Keep the caller's promise pending until the restarted run settles it.
+    queueMicrotask(() => {
+        if (p.signal?.aborted) {
+            p.reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        runAutotuneV2Cancellable(p.input, p.signal).then(p.resolve, p.reject);
+    });
+}
+
+/**
+ * Terminate the shared worker. The aborted id (if any) rejects with AbortError; every other
+ * in-flight request is re-queued on a new worker off the UI thread (never sync computeSync).
  */
 function terminateSharedWorker(abortedId?: number): void {
     const w = worker;
@@ -143,7 +162,7 @@ function terminateSharedWorker(abortedId?: number): void {
         if (abortedId !== undefined && p.id === abortedId) {
             settlePending(p, () => p.reject(new DOMException("Aborted", "AbortError")));
         } else {
-            settlePending(p, () => resolveSyncOrReject(p.input, p.signal, p.resolve, p.reject));
+            requeueOnFreshWorker(p);
         }
     }
 }
@@ -151,10 +170,9 @@ function terminateSharedWorker(abortedId?: number): void {
 /**
  * Run the engine (and informative model-class assessment) for `input`. When `signal` aborts, the
  * worker is cancelled and terminated so a blocking compute cannot keep running after the UI moved
- * on; the promise rejects with AbortError. Concurrent in-flight requests on the shared worker are
- * settled (sync fallback), never left pending. Crash / construction / clone failure falls back to
- * the main-thread engine (same numerical path) without stranding siblings. Callers must still
- * discard stale store writes after abort.
+ * on; the promise rejects with AbortError. Concurrent peers are re-queued on a fresh worker (not
+ * sync on the UI thread). Construction failure without a Worker falls back to sync. Callers must
+ * still discard stale store writes after abort.
  */
 export function runAutotuneV2Cancellable(
     input: AutotuneV2Input,
@@ -209,8 +227,8 @@ export function runAutotuneV2Cancellable(
             }
         };
         const onError = (ev: ErrorEvent) => {
-            workerFailed = true;
-            // Settle every pending (including this one via sync fallback) — do not leave siblings hanging.
+            // Crash: fail closed for every in-flight request. Never sync-compute peers on the UI
+            // thread (Grokbot F4). A later request may construct a fresh Worker.
             const stranded = [...pending.values()];
             try {
                 w.terminate();
@@ -219,12 +237,14 @@ export function runAutotuneV2Cancellable(
             }
             worker = null;
             for (const p of stranded) {
-                settlePending(p, () => resolveSyncOrReject(p.input, p.signal, p.resolve, p.reject));
+                settlePending(p, () =>
+                    p.reject(
+                        new Error(ev.message ? `autotune_worker_crashed:${ev.message}` : "autotune_worker_crashed"),
+                    ),
+                );
             }
-            void ev;
         };
         const onMessageError = () => {
-            workerFailed = true;
             const stranded = [...pending.values()];
             try {
                 w.terminate();
@@ -260,11 +280,16 @@ export function runAutotuneV2Cancellable(
                 // Do not permanently disable the worker for a one-off non-cloneable payload.
                 settlePending(pendingRun, () => resolveSyncOrReject(input, signal, resolve, reject));
             } else {
-                workerFailed = true;
                 worker = null;
                 const stranded = [...pending.values()];
                 for (const p of stranded) {
-                    settlePending(p, () => resolveSyncOrReject(p.input, p.signal, p.resolve, p.reject));
+                    if (p.id === id) {
+                        settlePending(p, () =>
+                            p.reject(err instanceof Error ? err : new Error("autotune_worker_post_failed")),
+                        );
+                    } else {
+                        requeueOnFreshWorker(p);
+                    }
                 }
             }
             void err;

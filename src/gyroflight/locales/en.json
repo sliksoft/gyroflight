@@ -1008,6 +1008,12 @@
         "message": "An independent flight of this craft and configuration, analysed with the finest resolution its own samples give, checked against the margins above. Shown only: it is not part of the analysis Apply uses, and an absolute Apply stays blocked by GyroCore Safety."
     },
     "gyroflightV2QualSource": { "message": "Qualification flight: file $1…, log $2" },
+    "gyroflightV2MultiRecordingTitle": { "message": "Multi-recording averages" },
+    "gyroflightV2MultiRecordingHelp": {
+        "message": "Independent flights of the same craft, firmware and configuration may add whole-segment Welch averages at shared frequencies. Duplicates and mismatched identity or configuration are rejected; logs are never concatenated as one continuous record."
+    },
+    "gyroflightV2MultiRecordingContributors": { "message": "Contributed" },
+    "gyroflightV2MultiRecordingRejected": { "message": "Rejected" },
     "gyroflightV2QualNoSource": {
         "message": "No imported flight can serve as the qualification (see the reasons below)."
     },

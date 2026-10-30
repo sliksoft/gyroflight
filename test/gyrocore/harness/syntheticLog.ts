@@ -96,9 +96,10 @@ export const SYNTH_HEADERS: [string, string][] = [
     ["rpm_filter_fade_range_hz", "50"],
     ["rpm_filter_lpf_hz", "150"],
     // SIMULATION: the sweep the synthetic windows stand for (loopModel generator-stop check).
+    // Default: 4 Hz bins + 120 s sweep so 2 Hz fine-rung whole-segment dwell holds through ~100 Hz (F2).
     ["chirp_frequency_start_deci_hz", "20"],
     ["chirp_frequency_end_deci_hz", "2000"],
-    ["chirp_time_seconds", "20"],
+    ["chirp_time_seconds", "120"],
     ["chirp_lag_freq_hz", "3"],
     ["chirp_lead_freq_hz", "30"],
     ["rc_smoothing_active_cutoffs_ff_sp_thr", "53,53"],
@@ -114,7 +115,10 @@ export interface SyntheticLogOptions {
     pids?: Partial<Record<"roll" | "pitch" | "yaw", [number, number, number]>>;
     /** Plant gain factor of this flight (≠ 1: the craft behaved differently than predicted). */
     plantScale?: number;
-    /** Step of the identified CHIRP bins, 1–100 Hz (default 0.5 Hz). */
+    /**
+     * Step of the identified CHIRP bins (default 4 Hz). Finer grids need a longer declared sweep
+     * and window so every bin has whole-segment dwell (Grokbot F2).
+     */
     binStepHz?: number;
     /** Highest identified bin (default 100 Hz). */
     maxHz?: number;
@@ -126,14 +130,17 @@ export interface SyntheticLogOptions {
     welch?: { segments: number; windowS: number };
     /**
      * SIMULATION: the CHIRP sweep the log's headers declare (chirp_frequency_start / end, chirp_time
-     * _seconds); default 2–200 Hz over 20 s.
+     * _seconds). Omit for Welch-only averages from segment count (no invented sub-segment n=1).
      */
     sweep?: { f0Hz: number; f1Hz: number; durationS: number };
 }
 
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
     const o = typeof opts === "number" ? { seconds: opts } : opts;
-    const seconds = o.seconds ?? 11;
+    // Channel length is only for chain/D validation / flight-identity windows. Declared Welch
+    // window (welch.windowS) may be longer: the TF is synthetic (SIMULATION / F2). Default 12 s
+    // covers overlapping-fragment identity suites and multi-segment CHIRP exports.
+    const seconds = o.seconds ?? 20;
     const n = Math.round(seconds * FS);
     const sweepHeader: Record<string, string> = o.sweep
         ? {
@@ -186,13 +193,19 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
         );
         return Float64Array.from(sd.d, (v) => (Number.isFinite(v) ? v : 0));
     });
-    const step = o.binStepHz ?? 0.5;
+    const step = o.binStepHz ?? 4;
     const maxHz = o.maxHz ?? 100;
-    const freqs = Array.from({ length: Math.round((maxHz - 1) / step) + 1 }, (_, i) => 1 + i * step);
-    const sweep = (k: number) =>
-        o.welch
-            ? { start: Math.round(0.5 * FS), end: Math.round((0.5 + o.welch.windowS) * FS) }
-            : { start: Math.round((1 + 3.3 * k) * FS), end: Math.round((4 + 3.3 * k) * FS) };
+    // Start at `step` (not 1 Hz): the default chirp starts at 2 Hz; a 1 Hz bin has no dwell (F2).
+    const freqs = Array.from({ length: Math.floor(maxHz / step) }, (_, i) => (i + 1) * step);
+    // Default: declared 120 s Welch window + 4 / 2 / 1 Hz ladder. Channel samples stay short; the
+    // analysis window is the declared provenance for dwell (synthetic TF, Grokbot F2).
+    const welch = o.welch ?? { segments: 32, windowS: 120 };
+    const declaredWindowSamples = Math.round(welch.windowS * FS);
+    // Chirp slice indices stay inside the short channel buffer (chain/D path only).
+    const sweep = (_k: number) => ({
+        start: Math.round(0.5 * FS),
+        end: Math.min(n, Math.round((0.5 + Math.min(welch.windowS, seconds - 0.5)) * FS)),
+    });
     const log: AutotuneLogInput = {
         sha256,
         logIndex: 0,
@@ -241,40 +254,37 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
                 };
             });
         const tf = measuredT(freqs);
-        // SIMULATION: the resolution ladder of this window (adaptiveResolution.ts): the standard grid
-        // and the same plant on a grid twice as fine, each claiming the Welch analysis its step takes.
-        const finer = measuredT(Array.from({ length: 2 * (freqs.length - 1) + 1 }, (_, i) => 1 + (i * step) / 2));
-        const rungOf = (t: typeof tf, binStep: number) => ({
-            tf: t,
-            support: declaredSupport(t, { observedHz: [1, 200] }),
-            analysis: {
-                segmentSamples: Math.round(FS / binStep),
-                sampleRateHz: FS,
-                windowSamples: w.end - w.start,
-                segments: o.welch?.segments ?? t.numSegments,
-            },
-        });
-        if (o.welch) {
-            tf.numSegments = o.welch.segments;
-            finer.numSegments = o.welch.segments;
-        }
+        // SIMULATION: ascending ladder of at most three rungs (step, step/2, step/4) whose Welch
+        // segment fits the window for minWelchSegments at 50 % overlap. Axes that need step/2 still
+        // have a finer neighbour for H1 when the window allows it (Grokbot F2).
+        const maxSeg = Math.floor((2 * declaredWindowSamples) / (8 + 1)); // UNCERTAINTY.minWelchSegments = 8
+        const rungSteps = [step, step / 2, step / 4].filter((binStep) => Math.round(FS / binStep) <= maxSeg);
+        const uniqueSteps = [...new Set(rungSteps.length ? rungSteps : [step])];
+        const rungOf = (binStep: number) => {
+            const fr = Array.from({ length: Math.floor(maxHz / binStep) }, (_, i) => (i + 1) * binStep);
+            const t = measuredT(fr);
+            t.numSegments = welch.segments;
+            return {
+                tf: t,
+                support: declaredSupport(t, { observedHz: [step, 200] }),
+                analysis: {
+                    segmentSamples: Math.round(FS / binStep),
+                    sampleRateHz: FS,
+                    windowSamples: declaredWindowSamples,
+                    segments: welch.segments,
+                },
+            };
+        };
+        const analyses = uniqueSteps.map(rungOf);
+        tf.numSegments = welch.segments;
         log.chirp[name] = {
-            tf,
+            tf: analyses[0]!.tf,
             // SIMULATION: every bin declared supported, as a full DEBUG_CHIRP sweep would show.
-            support: declaredSupport(tf, { observedHz: [1, 200] }),
-            analyses: [rungOf(tf, step), rungOf(finer, step / 2)],
+            support: analyses[0]!.support,
+            analyses,
             ...w,
             state: "usable",
-            ...(o.welch
-                ? {
-                      analysis: {
-                          segmentSamples: Math.round(FS / step),
-                          sampleRateHz: FS,
-                          windowSamples: w.end - w.start,
-                          segments: o.welch.segments,
-                      },
-                  }
-                : {}),
+            analysis: analyses[0]!.analysis,
         };
     });
     return log;
@@ -313,6 +323,25 @@ export function simulatedQualificationLog(
         maxHz: 160,
         welch: { segments: 8, windowS: 45 },
         sweep: SIMULATED_QUALIFICATION_SWEEP,
+    });
+}
+
+/**
+ * SIMULATION: a qualification flight whose ladder includes the contract segment for a 4 Hz primary
+ * (8192 samples ≈ 0.488 Hz bins) inside a 120 s window with whole-segment dwell. Use for WP5 gate
+ * tests that must select a candidate and then refuse it for a named reason (D path, coherence,
+ * band coverage). Not flight evidence — still fail-closed on real AIR65 CHIRP (Grokbot F5).
+ */
+export function selectableQualificationLog(
+    opts: Omit<SyntheticLogOptions, "binStepHz" | "welch" | "sweep"> = {},
+): AutotuneLogInput {
+    return syntheticLogInput("5c".repeat(32), {
+        seconds: 8,
+        ...opts,
+        binStepHz: 4000 / 8192,
+        maxHz: opts.maxHz ?? 100,
+        welch: { segments: 16, windowS: 120 },
+        sweep: { f0Hz: 2, f1Hz: 200, durationS: 120 },
     });
 }
 

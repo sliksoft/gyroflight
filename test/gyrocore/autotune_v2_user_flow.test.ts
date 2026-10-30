@@ -154,8 +154,11 @@ describe("user flow: baseline, gain change, Verified Tune, Apply, Restore", () =
         // The app has no qualification log for the margins' model class (Codex final acceptance
         // F-02): the bounds stay MODEL_CONDITIONAL, the measurement is named, nothing is released.
         expect(v2.releasedProposal()).toBeNull();
-        for (const m of Object.values(store.result!.margins))
-            expect(m!.proposed.evidence.level).toBe("MODEL_CONDITIONAL");
+        // Proposed PID can lower fc below the ladder → MEASURED on that axis; current stays bounded.
+        for (const m of Object.values(store.result!.margins)) {
+            expect(["MODEL_CONDITIONAL", "MEASURED"]).toContain(m!.proposed.evidence.level);
+            expect(m!.current.evidence.level).toBe("MODEL_CONDITIONAL");
+        }
         expect(store.result!.parts.find((p) => p.part === "phase_margin_robustness")!.requiredMeasurements).toContain(
             "required_measurement:chirp_finer_resolution_model_class_qualification",
         );

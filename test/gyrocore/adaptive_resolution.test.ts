@@ -177,11 +177,21 @@ describe("bin spacing, effective resolution and the rung a crossover needs", () 
 describe("the convergence verdict (H1)", () => {
     const G: Plant = (f) => plantFrf(f, AIR65_LIKE);
     const ladder = [512, 1024, 2048].map((n) => rung(G, n));
+    // f1 at the Welch Nyquist of these rungs (fs/2 = 500 Hz): every bin has dwell, no generator-stop (F2).
+    const probeSweep = { f0Hz: 0.5, f1Hz: 500, durationS: 8000 };
     const probe = (r: AnalysisOption) => {
+        // Window must match the declared sweep or dwell is clipped to 20 s (Grokbot F2).
+        const analysis = {
+            ...r.analysis,
+            windowSamples: Math.max(
+                r.analysis.windowSamples,
+                Math.floor(probeSweep.durationS * r.analysis.sampleRateHz),
+            ),
+        };
         const loop = buildAxisLoop(0, r.tf, cfg, UNITY_CHAIN, true, true, null, {
-            analysis: r.analysis,
+            analysis,
             support: r.support,
-            sweep: { f0Hz: 2, f1Hz: 200, durationS: 20 },
+            sweep: probeSweep,
         });
         return { loop, margins: loopMargins(loop) };
     };
@@ -230,13 +240,21 @@ describe("the convergence verdict (H1)", () => {
 
     it("the margins are MEASURED, never bounds, unless the verdict is CONVERGED", () => {
         const base = rung(G, 512);
+        const sweep = { f0Hz: 0.5, f1Hz: 500, durationS: 8000 };
+        const analysis = {
+            ...base.analysis,
+            windowSamples: Math.max(
+                base.analysis.windowSamples,
+                Math.floor(sweep.durationS * base.analysis.sampleRateHz),
+            ),
+        };
         const at = (resolution: ReturnType<typeof declaredConvergence> | null) =>
             loopMargins(
                 buildAxisLoop(0, base.tf, cfg, UNITY_CHAIN, true, true, null, {
-                    analysis: base.analysis,
+                    analysis,
                     support: base.support,
                     resolution,
-                    sweep: { f0Hz: 2, f1Hz: 200, durationS: 20 },
+                    sweep,
                 }),
             );
         const none = at(null);

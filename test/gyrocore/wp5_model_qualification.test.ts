@@ -36,7 +36,7 @@ import { crossLogReferenceIssues, finestWelchSegment } from "../../src/gyrocore/
 import { dtermConfigFromHeaders } from "../../src/js/blackbox/betaflight_dterm_dynamic";
 import { assessModelQualification, qualificationCandidates } from "../../src/gyrocore/engine/modelQualification";
 import { UNCERTAINTY } from "../../src/gyrocore/engine/loopModel";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { selectableQualificationLog, simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const primary = syntheticLogInput("1".repeat(64));
@@ -50,7 +50,10 @@ const withFine = (l: AutotuneLogInput): AutotuneLogInput => ({
         ]),
     ),
 });
+/** Negative-control QUAL (0.1 Hz / 45 s): cannot PASS under F2 dwell. */
 const QUAL = withFine(simulatedQualificationLog());
+/** Selectable QUAL with the contract segment for a 4 Hz primary (WP5 named-rejection gates). */
+const SELECTABLE = withFine(selectableQualificationLog());
 
 describe("the finest Welch segment a window supports", () => {
     it("the longest power of two with at least the minimum segments at 50 % overlap", () => {
@@ -143,25 +146,33 @@ describe("the producer picks an independent flight and lets the engine decide", 
     });
 
     it("a finer flight over the same band only (P1-2) is INSUFFICIENT: the bounds stay MODEL_CONDITIONAL", () => {
-        const narrow = withFine(
-            syntheticLogInput("e5".repeat(32), { seconds: 46, binStepHz: 0.1, welch: { segments: 8, windowS: 45 } }),
-        );
-        const { report } = assessModelQualification({ primary, others: [narrow], verifiedTune: null });
-        expect(report.source?.sha256).toBe(narrow.sha256);
+        // Contract segment selectable, but identified only through 40 Hz — coverage fails closed.
+        const narrow = withFine(selectableQualificationLog({ maxHz: 40 }));
+        const { report } = assessModelQualification({
+            primary,
+            others: [{ ...narrow, sha256: "e5".repeat(32) }],
+            verifiedTune: null,
+        });
+        expect(report.source?.sha256).toBe("e5".repeat(32));
         expect(report.axes.every((a) => a.verdict === "INSUFFICIENT" && a.level === "MODEL_CONDITIONAL")).toBe(true);
         expect(report.criteria.find((c) => c.name === "frequency_coverage")!.status).toBe("FAIL");
     }, 600_000);
 
-    it("the engine without the producer: the same inputs stay MODEL_CONDITIONAL (what the app publishes)", () => {
+    it("the engine without the producer: never VALIDATED without the producer (what the app publishes)", () => {
+        // Grokbot F2: whole-segment dwell replaces inventing n=1. Axes whose resolution ladder is
+        // exhausted stay MEASURED; none become VALIDATED without the model-class producer.
         const r = runAutotuneV2({ primary, others: [QUAL], verifiedTune: verifiedTuneAllAxesFixture(0.9, 0.7) });
-        for (const m of Object.values(r.margins)) expect(m!.current.evidence.level).toBe("MODEL_CONDITIONAL");
+        for (const m of Object.values(r.margins)) {
+            expect(m!.current.evidence.level).not.toBe("VALIDATED");
+            expect(["MEASURED", "MODEL_CONDITIONAL"]).toContain(m!.current.evidence.level);
+        }
         expect(r.releasableProposal).toBeNull();
     }, 600_000);
 });
 
 describe("WP8 review: what a qualification flight must itself show", () => {
     it("its controller must be reconstructed with a validated D path (no logged D term: not used)", () => {
-        const noD = { ...QUAL, sha256: "f6".repeat(32), channels: { ...QUAL.channels, axisD: null } };
+        const noD = { ...SELECTABLE, sha256: "f6".repeat(32), channels: { ...SELECTABLE.channels, axisD: null } };
         const r = runAutotuneV2({ primary, others: [], verifiedTune: null, modelClassQualification: noD });
         const part = r.parts.find((p) => p.part === "phase_margin_robustness")!;
         expect(part.reasons).toContain("model_class_qualification_rejected:dterm_path_not_validated:roll");
@@ -174,10 +185,10 @@ describe("WP8 review: what a qualification flight must itself show", () => {
         // the log's qualification state: every rung of the ladder at coherence 0.5, while the standard
         // transfer function and its state stay as qualified, is refused on every axis.
         const incoherent = {
-            ...QUAL,
+            ...SELECTABLE,
             sha256: "a7".repeat(32),
             chirp: Object.fromEntries(
-                Object.entries(QUAL.chirp).map(([a, c]) => [
+                Object.entries(SELECTABLE.chirp).map(([a, c]) => [
                     a,
                     {
                         ...c!,
@@ -245,9 +256,9 @@ describe("WP8 review: what a qualification flight must itself show", () => {
 
     it("a missing D header leaves no D path, and no D path is no validated one (tpa_low_always removed)", () => {
         const noTpaLow = {
-            ...QUAL,
+            ...SELECTABLE,
             sha256: "e5".repeat(32),
-            headerPairs: QUAL.headerPairs.filter(([k]) => k !== "tpa_low_always"),
+            headerPairs: SELECTABLE.headerPairs.filter(([k]) => k !== "tpa_low_always"),
         };
         const h = Object.fromEntries(noTpaLow.headerPairs);
         const base = controllerConfigFromHeaders(h, 0)!;

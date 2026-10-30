@@ -92,7 +92,9 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
         const c = evaluateControllerFrf(cfg, f);
         const den = { re: c.cReference.re - cmul(t, c.cFeedback).re, im: c.cReference.im - cmul(t, c.cFeedback).im };
         const kappa = Math.hypot(c.cReference.re, c.cReference.im) / Math.hypot(den.re, den.im);
-        const expected = (Math.sqrt(1 - g2) / (Math.sqrt(g2) * Math.sqrt(2 * 1))) * kappa;
+        // No sweep declared: classical Welch n = floor((numSegments+1)/2) (not invent n=1).
+        const n = Math.floor((tf.numSegments + 1) / 2);
+        const expected = (Math.sqrt(1 - g2) / (Math.sqrt(g2) * Math.sqrt(2 * n))) * kappa;
         expect(u.relErr!.get(f)).toBeCloseTo(expected, 12);
     });
 
@@ -201,6 +203,9 @@ describe("the random error of the identified loop (Bendat & Piersol 9.90 / 9.91)
 });
 
 describe("the uncertainty widens the bounds, never the measured values", () => {
+    /** Long sweep (whole-segment dwell) but few Welch segments so ε stays large enough for adversarial cases. */
+    const fewAverages = () => declaredMeasurement({ segments: UNCERTAINTY.minWelchSegments });
+
     it("lower coherence: lower PM and GM bounds, higher |S| bound; the bins' own values unchanged", () => {
         const exact = marginsAt(1);
         const noisy = marginsAt(0.999);
@@ -219,12 +224,12 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     });
 
     it("a bin whose ±2ε reaches half its value is not identified: left out, counted", () => {
-        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.99);
-        tf.numSegments = 32;
+        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.97);
+        tf.numSegments = UNCERTAINTY.minWelchSegments;
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             support: declaredSupport(tf),
             ...declaredResolution(),
-            ...declaredMeasurement(),
+            ...fewAverages(),
         });
         const m = loopMargins(loop);
         expect(binsDroppedForUncertainty(loop).length).toBeGreaterThan(0);
@@ -235,13 +240,15 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     });
 
     it("an unidentified bin inside the band (a poorly measured resonance would vanish there) leaves no bounds", () => {
-        // One bin at 40 Hz just above the coherence limit: used, but its ±2ε is too large: left out.
-        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), (f) => (f === 40 ? 0.81 : 1));
+        // One bin at 40 Hz with low coherence: used, but its ±2ε is too large: left out.
+        // (F2: with whole-segment dwell + min Welch averages, γ²=0.81 no longer drops; 0.7 does.)
+        const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), (f) => (f === 40 ? 0.7 : 1));
+        tf.numSegments = UNCERTAINTY.minWelchSegments;
         const m = loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 ...declaredResolution(),
-                ...declaredMeasurement(),
+                ...fewAverages(),
             }),
         );
         expect(m.reasons).toContain("unidentified_bins_inside_band:1");
@@ -252,11 +259,12 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     it("an error that changes what the bins show (the crossings) leaves no bounds, named", () => {
         const hot = { ...cfg, axis: { ...cfg.axis, p: cfg.axis.p * 3.5 } };
         const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => 0.9);
+        tf.numSegments = UNCERTAINTY.minWelchSegments;
         const m = loopMargins(
             buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                 support: declaredSupport(tf),
                 ...declaredResolution(),
-                ...declaredMeasurement(),
+                ...fewAverages(),
             }),
             { cfg: hot },
         );
@@ -280,21 +288,23 @@ describe("the uncertainty widens the bounds, never the measured values", () => {
     });
 
     it("release flips on the uncertainty: a PM just above target is not released once its error is counted", () => {
-        // The smooth loop with P × 3.5: nominal PM ≈ 45.5°; a single sweep at γ² = 0.998 widens it below 40°.
+        // The smooth loop with P × 3.5: nominal PM ≈ 45.5°; few averages at γ² = 0.95 widens it below 40°.
+        // (F2: long chirp dwell gives whole segments; cap from minWelchSegments — never invent n=1.)
         const hot = { ...cfg, axis: { ...cfg.axis, p: cfg.axis.p * 3.5 } };
         const at = (g2: number) => {
             const tf = syntheticTransferFunctionWithCoherence(uniform(200, 0.5), T(smooth), () => g2);
+            tf.numSegments = UNCERTAINTY.minWelchSegments;
             return loopMargins(
                 buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
                     support: declaredSupport(tf),
                     ...declaredResolution(),
-                    ...declaredMeasurement(),
+                    ...fewAverages(),
                 }),
                 { cfg: hot },
             );
         };
         const exact = at(1);
-        const noisy = at(0.998);
+        const noisy = at(0.995);
         expect(exact.phaseMarginDeg!).toBeGreaterThan(40);
         expect(noisy.phaseMarginDeg!).toBeLessThan(40);
         expect(noisy.evidence.level).toBe("MODEL_CONDITIONAL");

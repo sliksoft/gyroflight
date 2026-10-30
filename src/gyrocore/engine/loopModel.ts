@@ -360,18 +360,14 @@ export interface AnalysisProvenance {
 
 /**
  * What a bin with less than one whole Welch segment of sweep dwell (sweepAverages 0) counts as, per
- * measurement path (planner safety repair 2026-10-28). The count itself is the same integer count on
- * both paths; only this policy differs, and the planner reads the same constant.
+ * measurement path. The count itself is the same integer count on both paths.
  *
- *   qualification  UNKNOWN: the bin's error is unknown and bounds nothing, so a qualification that
- *                  leans on it is no PASS. The model-class qualification is where the planned and
- *                  the delivered averages must agree (the segment contract, qualificationRung.ts).
- *   primary        COUNTED_AS_ONE: the legacy count of one average, now named on every margin
- *                  (`sub_segment_dwell_counted_as_one:<n>_bins` in the uncertainty budget's
- *                  systematic.notQuantified). Changing it is a change of the error model, a separate
- *                  research question; the primary alone never reaches VALIDATED evidence.
+ * Both paths use UNKNOWN (Grokbot F2, 2026-10-30): inventing one independent average for a fractional
+ * segment understates uncertainty (`1/√(2n)` with n=1) and creates false confidence. The TF estimate
+ * may still be computable; quantified error and VALIDATED bounds require whole-segment dwell. Named on
+ * the uncertainty reasons as `uncertainty_unknown:dwell_below_one_segment:<n>_bins`.
  */
-export const SUB_SEGMENT_DWELL = Object.freeze({ primary: "COUNTED_AS_ONE", qualification: "UNKNOWN" } as const);
+export const SUB_SEGMENT_DWELL = Object.freeze({ primary: "UNKNOWN", qualification: "UNKNOWN" } as const);
 
 export type MeasurementPath = keyof typeof SUB_SEGMENT_DWELL;
 
@@ -461,7 +457,10 @@ export interface LoopUncertainty {
     averages: [number, number] | null;
     /** Independent averages used at each bin. */
     averagesByHz?: Map<number, number>;
-    /** Bins with less than one whole segment of dwell that SUB_SEGMENT_DWELL counted as one average. */
+    /**
+     * Bins with less than one whole segment of dwell (averages left unknown; field name retained for
+     * stable diagnostics — no longer invents n=1).
+     */
     subSegmentBinsCountedAsOne?: number;
     reasons: string[];
 }
@@ -470,7 +469,12 @@ export interface LoopUncertainty {
 export function loopUncertainty(
     tf: TransferFunction,
     cfg: DigitalControllerConfig,
-    measurement: { sweep?: SweepInfo | null; analysis?: AnalysisProvenance | null } = {},
+    measurement: {
+        sweep?: SweepInfo | null;
+        analysis?: AnalysisProvenance | null;
+        /** Extra whole-segment averages from independent recordings (multiRecording.ts); never invents primary support. */
+        multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
+    } = {},
     /** Which SUB_SEGMENT_DWELL policy applies (the primary measurement or the model-class qualification). */
     path: MeasurementPath = "primary",
 ): LoopUncertainty {
@@ -513,20 +517,20 @@ export function loopUncertainty(
             unknown++;
             continue;
         }
-        const counted = sweepAverages(f, analysis, sweep, windowSamples);
-        let n = counted;
+        // With a declared sweep: whole-segment dwell only. Without a sweep: classical Welch averages
+        // from the TF's segment count (stationary record). Never invent n=1 for fractional chirp dwell
+        // (Grokbot F2); SUB_SEGMENT_DWELL[path] stays UNKNOWN on every path.
+        void SUB_SEGMENT_DWELL[path];
+        const counted = sweep ? sweepAverages(f, analysis, sweep, windowSamples) : Math.max(0, Math.floor((K + 1) / 2));
         if (counted < 1) {
-            // Less than one whole segment of dwell (SUB_SEGMENT_DWELL): unknown on the qualification
-            // path; counted as one, and named, on the primary path.
-            if (SUB_SEGMENT_DWELL[path] === "UNKNOWN") {
-                averagesByHz.set(f, 0);
-                lo = Math.min(lo, 0);
-                unknown++;
-                continue;
-            }
-            n = 1;
+            averagesByHz.set(f, 0);
+            lo = Math.min(lo, 0);
+            unknown++;
             countedAsOne++;
+            continue;
         }
+        const extra = measurement.multiRecordingExtraByHz?.get(f) ?? 0;
+        const n = counted + (Number.isFinite(extra) && extra > 0 ? Math.floor(extra) : 0);
         averagesByHz.set(f, n);
         lo = Math.min(lo, n);
         hi = Math.max(hi, n);
@@ -537,6 +541,7 @@ export function loopUncertainty(
         relErr,
         averages: Number.isFinite(lo) ? [lo, hi] : null,
         averagesByHz,
+        // Retained field name: count of bins whose dwell was below one segment (no longer "counted as one").
         subSegmentBinsCountedAsOne: countedAsOne,
         reasons: ambiguous
             ? [`uncertainty_unknown:sweep_without_observed_window`]
@@ -1149,6 +1154,7 @@ export function buildAxisLoop(
         resolution?: ResolutionConvergence | null;
         /** The verdict for another candidate (AxisLoop.resolutionFor); absent: unknown for candidates. */
         resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
+        multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
     } = {},
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
@@ -1527,7 +1533,7 @@ export function uncertaintyBudgetOf(loop: AxisLoop, evidence: MarginEvidence, fc
                 ...NOT_QUANTIFIED,
                 ...(loop.chainValidated ? [] : ["gyro_chain_model"]),
                 ...(loop.uncertainty?.subSegmentBinsCountedAsOne
-                    ? [`sub_segment_dwell_counted_as_one:${loop.uncertainty.subSegmentBinsCountedAsOne}_bins`]
+                    ? [`sub_segment_dwell_unknown:${loop.uncertainty.subSegmentBinsCountedAsOne}_bins`]
                     : []),
             ],
         },

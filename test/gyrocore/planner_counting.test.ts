@@ -25,9 +25,9 @@
  * Before: the planner targeted the averages at the crossover only, read κ back from the bin's error,
  * and the analysis rounded a bin with less than one segment of dwell up to one average (1.99995 → 1
  * in the planner's own arithmetic). Now one integer count serves planner and analysis; a bin below
- * one segment is UNKNOWN on the qualification path and counted as one, named, on the primary path
- * (loopModel SUB_SEGMENT_DWELL); the planner sizes the sweeps for every gain crossing, phase crossing
- * and the |S| peak, with κ taken from T and the controller.
+ * one segment is UNKNOWN on both paths (loopModel SUB_SEGMENT_DWELL; Grokbot F2 — never invent n=1);
+ * the planner sizes the sweeps for every gain crossing, phase crossing and the |S| peak, with κ
+ * taken from T and the controller.
  *
  * SIMULATION: analytic plants; software-contract evidence only.
  */
@@ -86,8 +86,8 @@ describe("one integer count, two policies for less than one segment", () => {
     const m = { sweep: SWEEP, analysis: ANALYSIS };
     const sub = uniform(200, 0.5).filter((f) => sweepAverages(f, ANALYSIS, SWEEP) < 1);
 
-    it("the policies are fixed per path", () => {
-        expect(SUB_SEGMENT_DWELL).toEqual({ primary: "COUNTED_AS_ONE", qualification: "UNKNOWN" });
+    it("the policies are fixed per path (both UNKNOWN — Grokbot F2)", () => {
+        expect(SUB_SEGMENT_DWELL).toEqual({ primary: "UNKNOWN", qualification: "UNKNOWN" });
         expect(Object.isFrozen(SUB_SEGMENT_DWELL)).toBe(true);
         expect(sub.length).toBeGreaterThan(300);
     });
@@ -101,24 +101,24 @@ describe("one integer count, two policies for less than one segment", () => {
         }
         expect(u.averages![0]).toBe(0);
         expect(u.reasons).toContain(`uncertainty_unknown:dwell_below_one_segment:${sub.length}_bins`);
-        expect(u.subSegmentBinsCountedAsOne).toBe(0);
+        expect(u.subSegmentBinsCountedAsOne).toBe(sub.length);
     });
 
-    it("primary: counted as one average, and said on every margin's budget", () => {
+    it("primary: never invents n=1 for sub-segment dwell (Grokbot F2)", () => {
         const u = loopUncertainty(tf, cfg, m, "primary");
         for (const f of sub) {
-            expect(u.relErr!.has(f)).toBe(true);
-            expect(u.averagesByHz!.get(f)).toBe(1);
+            expect(u.relErr!.has(f)).toBe(false);
+            expect(u.averagesByHz!.get(f)).toBe(0);
         }
         expect(u.subSegmentBinsCountedAsOne).toBe(sub.length);
-        expect(u.reasons).toEqual([]);
+        expect(u.reasons).toContain(`uncertainty_unknown:dwell_below_one_segment:${sub.length}_bins`);
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             ...m,
             support: declaredSupport(tf),
             ...declaredResolution(),
         });
         const budget = loopMargins(loop).evidence.uncertaintyBudget;
-        expect(budget?.systematic.notQuantified).toContain(`sub_segment_dwell_counted_as_one:${sub.length}_bins`);
+        expect(budget?.systematic.notQuantified).toContain(`sub_segment_dwell_unknown:${sub.length}_bins`);
     });
 
     it("a long enough sweep needs no policy: every bin has its whole segments (positive control)", () => {
@@ -145,11 +145,10 @@ describe("one integer count, two policies for less than one segment", () => {
 
     it("κ is one expression for analysis and planner", () => {
         const f = 30;
-        const u = loopUncertainty(
-            syntheticTransferFunctionWithCoherence([f, f + 0.5], T(smooth), () => 0.99),
-            cfg,
-        );
-        const eT = Math.sqrt(1 - 0.99) / (Math.sqrt(0.99) * Math.sqrt(2));
+        const tf = syntheticTransferFunctionWithCoherence([f, f + 0.5], T(smooth), () => 0.99);
+        const u = loopUncertainty(tf, cfg);
+        const n = Math.floor((tf.numSegments + 1) / 2);
+        const eT = Math.sqrt(1 - 0.99) / (Math.sqrt(0.99) * Math.sqrt(2 * n));
         expect(u.relErr!.get(f)).toBeCloseTo(eT * loopErrorGain(T(smooth)(f), cfg, f), 12);
     });
 });
@@ -274,11 +273,14 @@ describe("Codex review 2026-10-28: the count against an independent oracle", () 
 
     it("σ_PM is unknown when the crossover's own bin has no usable coherence (never a neighbour's)", () => {
         const freqs = uniform(200, 0.5);
+        // Long sweep so the ok case has whole-segment dwell (F2: short dwell → unknown σ, not n=1).
+        const long = { ...SWEEP, durationS: 8000 };
+        const longAnalysis = { ...ANALYSIS, windowSamples: Math.floor(long.durationS * FS) };
         const tfOk = syntheticTransferFunctionWithCoherence(freqs, T(smooth), () => 0.995);
         tfOk.numSegments = 18;
         const loopOk = buildAxisLoop(0, tfOk, cfg, UNITY_CHAIN, true, true, null, {
-            sweep: SWEEP,
-            analysis: ANALYSIS,
+            sweep: long,
+            analysis: longAnalysis,
             support: declaredSupport(tfOk),
             ...declaredResolution(),
         });
@@ -288,8 +290,8 @@ describe("Codex review 2026-10-28: the count against an independent oracle", () 
         const tf = syntheticTransferFunctionWithCoherence(freqs, T(smooth), (f) => (f === own ? 0 : 0.995));
         tf.numSegments = 18;
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
-            sweep: SWEEP,
-            analysis: ANALYSIS,
+            sweep: long,
+            analysis: longAnalysis,
             support: declaredSupport(tf),
             ...declaredResolution(),
         });

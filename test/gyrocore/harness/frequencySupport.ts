@@ -31,8 +31,12 @@ import type { TransferFunction } from "../../../src/js/blackbox/spectral_analysi
 import type { BinSupportVerdict, FrequencySupport } from "../../../src/gyrocore/engine/loopModel";
 import type { SupportClass } from "../../../src/gyrocore/chirp/qualityV2/contract";
 
-/** The sweep the contract tests declare for their analytic grids (SIMULATION). */
-export const SIM_SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
+/**
+ * The sweep the contract tests declare for their analytic grids (SIMULATION).
+ * f0 below the lowest 0.5 Hz grid bin; duration leaves ≥1 whole Welch segment of dwell
+ * through ~200 Hz on a 0.5 Hz grid (Grokbot F2: sub-segment dwell is UNKNOWN, never invent n=1).
+ */
+export const SIM_SWEEP = { f0Hz: 0.1, f1Hz: 400, durationS: 8000 };
 
 /**
  * SIMULATION: sweep plus a matching analysed window (Codex Gate 1 2026-10-28). A sweep header

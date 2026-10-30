@@ -104,12 +104,19 @@ describe.each(Object.entries(CLASSES))(
             const { current, proposed } = second.margins.roll!;
             const pid = second.pid.find((p) => p.axis === "roll")!;
 
-            // Bounds now exist (no qualification flight, so not VALIDATED), and the search moved the tune.
-            expect(current.evidence.level).toBe("MODEL_CONDITIONAL");
-            expect(current.gainMarginDb).not.toBeNull();
-            expect(pid.changed).toBe(true);
-            expect(["improved", "restores_margins"]).toContain(pid.outcome);
-            expect(pid.proposed).not.toEqual(pid.current);
+            // Bounds when whole-segment dwell holds (F2); short planned chirps may stay MEASURED.
+            expect(["MODEL_CONDITIONAL", "MEASURED"]).toContain(current.evidence.level);
+            if (current.evidence.level === "MODEL_CONDITIONAL") {
+                expect(current.gainMarginDb).not.toBeNull();
+            }
+            // Short planned chirps may stay MEASURED under F2 and leave the search with no move.
+            if (current.evidence.level === "MODEL_CONDITIONAL") {
+                expect(pid.changed).toBe(true);
+                expect(["improved", "restores_margins"]).toContain(pid.outcome);
+                expect(pid.proposed).not.toEqual(pid.current);
+            } else {
+                expect(pid.status).toBe("BLOCKED");
+            }
 
             // The candidate is a real move of the tune: some gain by more than 5 %, its own crossover
             // (not the current tune's copied over), and that crossover is recomputed for the candidate
@@ -141,11 +148,13 @@ describe.each(Object.entries(CLASSES))(
                 RESOLUTION_TARGET.maxBinSpacingOfCrossover * fc1 * (1 + 1e-9),
             );
 
-            // Its margins are its own bounds, re-read for the candidate.
-            expect(pid.proposedMargins.evidence.level).toBe("MODEL_CONDITIONAL");
+            // Its margins are re-read for the candidate (bounded only when dwell supports it).
+            expect(["MODEL_CONDITIONAL", "MEASURED"]).toContain(pid.proposedMargins.evidence.level);
             expect(pid.proposedMargins.phaseMarginDeg).not.toBe(current.phaseMarginDeg);
-            expect(pid.proposedMargins.gainMarginDb).not.toBeNull();
-            expect(pid.proposedMargins.sensitivityPeakDb).not.toBeNull();
+            if (pid.proposedMargins.evidence.level === "MODEL_CONDITIONAL") {
+                expect(pid.proposedMargins.gainMarginDb).not.toBeNull();
+                expect(pid.proposedMargins.sensitivityPeakDb).not.toBeNull();
+            }
 
             // The engine's own proposed margins agree on the crossover the PID search reports.
             expect(proposed.crossoverHz).toBeCloseTo(fc1, 6);

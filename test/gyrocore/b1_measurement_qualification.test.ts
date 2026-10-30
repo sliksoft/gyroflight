@@ -80,7 +80,8 @@ const UNITY_CHAIN: EffectiveChain = {
     dynNotchHz: [],
 };
 const FS = 1000;
-const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 20 };
+// Whole-segment dwell through the 512-sample grid (Grokbot F2).
+const SWEEP = { f0Hz: 0.5, f1Hz: 500, durationS: 8000 };
 // SIMULATION: the sweep the qualification's 0.244 Hz bins up to 225 Hz need (SUB_SEGMENT_DWELL.qualification).
 const QSWEEP = declaredQualificationSweep({ segmentSamples: 4096, sampleRateHz: FS, f0Hz: 1, f1Hz: 400, topHz: 225 });
 
@@ -132,7 +133,12 @@ const build = (tf: TransferFunction, fine: TransferFunction) =>
         },
         {
             sweep: SWEEP,
-            analysis: { segmentSamples: 512, sampleRateHz: FS, windowSamples: 20000, segments: 77 },
+            analysis: {
+                segmentSamples: 512,
+                sampleRateHz: FS,
+                windowSamples: Math.floor(SWEEP.durationS * FS),
+                segments: 77,
+            },
             support: declaredSupport(tf, { observedHz: [2, 400] }),
             ...declaredResolution(FS / 512, FS),
         },
@@ -243,7 +249,12 @@ describe("decision-band drops are classified, never acted on", () => {
         const bin = 16 * (FS / 512);
         const loop = buildAxisLoop(0, tf, cfg, UNITY_CHAIN, true, true, null, {
             sweep: SWEEP,
-            analysis: { segmentSamples: 512, sampleRateHz: FS, windowSamples: 20000, segments: 77 },
+            analysis: {
+                segmentSamples: 512,
+                sampleRateHz: FS,
+                windowSamples: Math.floor(SWEEP.durationS * FS),
+                segments: 77,
+            },
             support: declaredSupport(tf, { observedHz: [2, 400], except: [{ hz: bin, verdict: "UNSUPPORTED" }] }),
             ...declaredResolution(FS / 512, FS),
         });

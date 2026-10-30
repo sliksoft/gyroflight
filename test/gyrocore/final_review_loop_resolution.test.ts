@@ -94,7 +94,11 @@ function margins(freqs: number[], G: G) {
         return closedLoopFromPlant(G(f), c.cReference, c.cFeedback);
     });
     const steps = freqs.slice(1).map((f, i) => f - freqs[i]);
-    const minStep = Math.min(...steps);
+    // Nominal spacing: median of positive steps. minStep on jittered/log grids invents an
+    // ultra-long Welch segment that no sweep can dwell (Grokbot F2); the grid's typical step is
+    // what the analysis claims.
+    const sorted = [...steps].filter((s) => s > 0).sort((a, b) => a - b);
+    const nomStep = sorted[Math.floor(sorted.length / 2)] ?? 0.5;
     const sampleRateHz = 4000;
     // Matching analysed window for the sweep (Codex Gate 1). Convergence remains the declared
     // 0.5 Hz SIMULATION verdict (declaredResolution); analysis segment matches the TF grid for dwell.
@@ -104,7 +108,7 @@ function margins(freqs: number[], G: G) {
             ...declaredResolution(),
             ...declaredMeasurement({
                 sampleRateHz,
-                segmentSamples: Math.round(sampleRateHz / minStep),
+                segmentSamples: Math.round(sampleRateHz / nomStep),
                 segments: Math.max(tf.numSegments, 8),
             }),
         }),

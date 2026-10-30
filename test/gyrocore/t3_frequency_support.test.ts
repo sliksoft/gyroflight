@@ -95,15 +95,19 @@ const FS = 1000;
 // it there. The peak stays at 39.0625 Hz, on this grid too.
 const N = 1024;
 const BIN = FS / N;
-const SWEEP = { f0Hz: 1, f1Hz: 400, durationS: 40 };
-const WINDOW = 40000;
-const PRIMARY = { segmentSamples: N, sampleRateHz: FS, windowSamples: WINDOW, segments: 77 };
 const FINE_N = 8192;
 /**
- * SIMULATION: the sweep the qualification's 0.122 Hz bins up to 225 Hz need (at least one whole segment
- * of dwell per bin; loopModel SUB_SEGMENT_DWELL.qualification), with an analysed window that holds
- * that sweep (Codex review 2026-10-28, P2) — analytic provenance only, never a decoded flight.
+ * SIMULATION: primary and qualification sweeps with whole-segment dwell on every claimed bin
+ * (Grokbot F2: never invent n=1 for fractional dwell). Analytic provenance only.
  */
+const SWEEP = declaredQualificationSweep({
+    segmentSamples: N,
+    sampleRateHz: FS,
+    f0Hz: 1,
+    f1Hz: 400,
+    topHz: 138,
+});
+const PRIMARY = analysisForDeclaredSweep(SWEEP, { segmentSamples: N, sampleRateHz: FS, segments: 77 });
 const QUAL_SWEEP = declaredQualificationSweep({
     segmentSamples: FINE_N,
     sampleRateHz: FS,

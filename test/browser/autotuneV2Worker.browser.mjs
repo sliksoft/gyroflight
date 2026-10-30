@@ -259,6 +259,43 @@ try {
         JSON.stringify(abortSibling),
     );
 
+    // 5c. Aborting one concurrent request must not force the sibling onto the UI-thread sync path (Grokbot F4).
+    const abortPeerAsync = await page.evaluate(async () => {
+        const mk = (h) => ({
+            primary: window.gfAt.synth.syntheticLogInput(h),
+            others: [],
+            verifiedTune: null,
+            createdAt: "2026-10-28T00:00:00Z",
+        });
+        const ac = new AbortController();
+        let uiTicks = 0;
+        const tick = window.setInterval(() => {
+            uiTicks++;
+        }, 16);
+        const a = window.gfAt.client.runAutotuneV2Cancellable(mk("3".repeat(64)), ac.signal);
+        const b = window.gfAt.client.runAutotuneV2Cancellable(mk("4".repeat(64)));
+        await new Promise((r) => window.setTimeout(r, 0));
+        ac.abort();
+        const t0 = performance.now();
+        const settled = await Promise.allSettled([a, b]);
+        window.clearInterval(tick);
+        return {
+            aStatus: settled[0].status,
+            bStatus: settled[1].status,
+            ms: performance.now() - t0,
+            uiTicks,
+            bConnected: settled[1].status === "fulfilled" ? settled[1].value.qualification.connectedToApply : null,
+        };
+    });
+    check(
+        "abort peer settles asynchronously without blocking the UI thread",
+        abortPeerAsync.aStatus === "rejected" &&
+            abortPeerAsync.bStatus === "fulfilled" &&
+            abortPeerAsync.bConnected === false &&
+            (abortPeerAsync.uiTicks >= 1 || abortPeerAsync.ms < 50),
+        JSON.stringify(abortPeerAsync),
+    );
+
     await page.close();
 
     // 6. Worker crash on a fresh module instance (cached worker from prior tests must not hide BoomWorker).

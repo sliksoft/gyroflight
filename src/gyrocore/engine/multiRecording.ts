@@ -126,3 +126,84 @@ export function multiRecordingIssues(primary: AutotuneLogInput, other: AutotuneL
     }
     return crossLogReferenceIssues(primary, other, []).map((r) => `multi_recording_rejected:${r}`);
 }
+
+export interface MultiRecordingLedger {
+    /** Extra whole-segment averages at each Hz (beyond the primary's own count). */
+    extraAveragesByHz: Map<number, number>;
+    contributors: string[];
+    rejected: string[];
+}
+
+/**
+ * Collect independent recordings' whole-segment averages at the primary's decision frequencies.
+ * Does not concatenate time series. Only adds counts when `multiRecordingIssues` is empty and the
+ * other log has a usable chirp + analysis on `axis`. Primary bins with no whole-segment dwell stay
+ * at zero extras (never invent support).
+ */
+export function collectMultiRecordingAverages(
+    primary: AutotuneLogInput,
+    others: readonly AutotuneLogInput[],
+    axis: "roll" | "pitch" | "yaw",
+    frequenciesHz: ArrayLike<number>,
+    primaryAnalysis: AnalysisProvenance | null,
+    primarySweep: SweepInfo | null,
+): MultiRecordingLedger {
+    const extraAveragesByHz = new Map<number, number>();
+    const contributors: string[] = [];
+    const rejected: string[] = [];
+    if (!primaryAnalysis || !primarySweep || !frequenciesHz.length) {
+        return { extraAveragesByHz, contributors, rejected };
+    }
+    const eligible: AutotuneLogInput[] = [];
+    for (const other of others) {
+        const issues = multiRecordingIssues(primary, other);
+        if (issues.length) {
+            rejected.push(...issues.map((r) => `${r}:${other.sha256}:${other.logIndex}`));
+            continue;
+        }
+        const chirp = other.chirp[axis];
+        if (!chirp || chirp.state === "rejected" || !chirp.analysis) {
+            rejected.push(`multi_recording_axis_unusable:${axis}:${other.sha256}:${other.logIndex}`);
+            continue;
+        }
+        eligible.push(other);
+    }
+    for (let i = 0; i < frequenciesHz.length; i++) {
+        const hz = frequenciesHz[i]!;
+        if (!(hz > 0)) continue;
+        const primaryClaim = averageClaimAt(primary, hz, primaryAnalysis, primarySweep);
+        if (!primaryClaim) continue; // no whole-segment primary dwell: do not invent extras alone
+        const claims: RecordingAverageClaim[] = [primaryClaim];
+        for (const other of eligible) {
+            const chirp = other.chirp[axis]!;
+            const sweep = otherSweep(other);
+            if (!sweep) {
+                rejected.push(`multi_recording_sweep_unknown:${other.sha256}:${other.logIndex}`);
+                continue;
+            }
+            const claim = averageClaimAt(other, hz, chirp.analysis!, sweep);
+            if (claim) claims.push(claim);
+        }
+        const agg = aggregateAverageClaims(hz, claims);
+        rejected.push(...agg.rejected);
+        const extra = Math.max(0, agg.averages - primaryClaim.averages);
+        if (extra > 0) {
+            extraAveragesByHz.set(hz, extra);
+            for (const id of agg.contributors) {
+                if (id !== primaryClaim.id && !contributors.includes(id)) contributors.push(id);
+            }
+        }
+    }
+    return { extraAveragesByHz, contributors, rejected: [...new Set(rejected)] };
+}
+
+/** Sweep from Betaflight chirp headers (deci-Hz start/end + duration), same contract as the engine. */
+function otherSweep(log: AutotuneLogInput): SweepInfo | null {
+    const h = new Map(log.headerPairs);
+    const f0 = Number(h.get("chirp_frequency_start_deci_hz"));
+    const f1 = Number(h.get("chirp_frequency_end_deci_hz"));
+    const durationS = Number(h.get("chirp_time_seconds"));
+    if (!(Number.isFinite(f0) && Number.isFinite(f1) && Number.isFinite(durationS))) return null;
+    if (!(f1 > f0 && f0 > 0 && durationS > 0)) return null;
+    return { f0Hz: f0 / 10, f1Hz: f1 / 10, durationS };
+}

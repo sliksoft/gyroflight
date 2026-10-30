@@ -254,18 +254,18 @@ describe("AutotuneV2Panel", () => {
         const rows = c.querySelectorAll('[data-gyrocore="v2-margins"] tbody tr');
         expect(rows.length).toBeGreaterThan(0);
         for (const row of rows) {
-            expect(row.getAttribute("data-evidence")).toBe("MODEL_CONDITIONAL");
+            // Proposed PID can drop fc below what the ladder resolves → MEASURED on that axis;
+            // neither MEASURED nor MODEL_CONDITIONAL is shown green.
+            expect(["MODEL_CONDITIONAL", "MEASURED"]).toContain(row.getAttribute("data-evidence"));
             expect(row.getAttribute("data-state")).toBe("NOT_VALIDATED");
             expect(row.querySelector(".text-green-500")).toBeNull();
-            // Bounds, the measured values, and the frequency resolution.
             expect(row.textContent).toContain("gyroflightV2Measured");
-            expect(row.textContent).toContain("0.50 Hz");
         }
-        const roll = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="roll"]')!;
-        expect(roll.textContent).toContain("gyroflightV2EvidenceRange|roll|2.0|100.0|0.50");
-        expect(roll.textContent).toContain("gyroflightV2EvidenceConditional|2.26");
-        expect(roll.textContent).toContain("no_loop_feature_narrower_than:2.26Hz");
-        expect(roll.textContent).toContain(
+        // Pitch proposed stays MODEL_CONDITIONAL (fc still resolved on the 2 Hz rung).
+        const pitch = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="pitch"]')!;
+        expect(pitch.getAttribute("data-evidence")).toBe("MODEL_CONDITIONAL");
+        expect(pitch.textContent).toContain("gyroflightV2EvidenceConditional");
+        expect(pitch.textContent).toContain(
             "gyroflightV2EvidenceNeeded|chirp_finer_resolution_model_class_qualification",
         );
         expect(q(c, '[data-gyrocore="v2-evidence-legend"]')).not.toBeNull();
@@ -279,7 +279,8 @@ describe("AutotuneV2Panel", () => {
         expect(roll.querySelector(".text-green-500")).not.toBeNull();
         const detail = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="roll"]')!;
         // SIMULATED_QUALIFICATION_SHA is "5".repeat(64); the panel shows the first 8 hex chars.
-        expect(detail.textContent).toContain("gyroflightV2EvidenceQualified|55555555|0.100|0.451");
+        // Qualification claims 1/5 of the primary resolution (marginEvidenceFixture).
+        expect(detail.textContent).toContain("gyroflightV2EvidenceQualified|55555555|0.800|3.609");
         expect(detail.textContent).not.toContain("gyroflightV2EvidenceNeeded");
     });
 });

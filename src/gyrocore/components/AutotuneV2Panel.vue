@@ -133,6 +133,22 @@
                     <span v-for="(line, k) in row.details" :key="k" class="block">{{ line }}</span>
                 </li>
             </ul>
+            <template v-if="result.multiRecording">
+                <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2MultiRecordingTitle") }}</p>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2MultiRecordingHelp") }}</p>
+                <p class="text-sm" data-gyrocore="v2-multi-recording-contributors">
+                    {{ $t("gyroflightV2MultiRecordingContributors") }}:
+                    {{ result.multiRecording.contributors.map(shortId).join(", ") || "--" }}
+                </p>
+                <p
+                    v-if="result.multiRecording.rejected.length"
+                    class="text-sm text-dimmed"
+                    data-gyrocore="v2-multi-recording-rejected"
+                >
+                    {{ $t("gyroflightV2MultiRecordingRejected") }}:
+                    {{ result.multiRecording.rejected.slice(0, 8).join("; ") }}
+                </p>
+            </template>
 
             <template v-if="result.measurementPlan?.length">
                 <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2PlanTitle") }}</p>
@@ -526,7 +542,15 @@ function summary(s: AutotuneV2Source) {
     ]);
 }
 
+/** Display rounding: full 1-digit only when evidence is VALIDATED; otherwise coarse / status (Grokbot F6). */
 const fmt = (v: number | null | undefined, d = 1) => (v === null || v === undefined ? "?" : v.toFixed(d));
+const fmtMargin = (v: number | null | undefined, qualified: boolean, unit: string) => {
+    if (v === null || v === undefined || !Number.isFinite(v)) return "?";
+    if (qualified) return `${v.toFixed(1)}${unit}`;
+    // Unqualified: whole degrees / dB so the UI does not imply measurement precision it lacks.
+    return `~${Math.round(v)}${unit}`;
+};
+const shortId = (id: string) => (id.includes(":") ? `${id.slice(0, 8)}…:${id.split(":").pop()}` : id.slice(0, 12));
 
 const marginRows = computed(() => {
     const r = v2.result;
@@ -537,6 +561,8 @@ const marginRows = computed(() => {
         const chain = r.chain.validation[i];
         const band = chain?.fit?.bands.find((b) => b.loHz === 20);
         const ev = m.proposed.evidence;
+        const q = ev?.level === "VALIDATED" && m.proposed.status === "VALIDATED";
+        const qCur = m.current.evidence?.level === "VALIDATED" && m.current.status === "VALIDATED";
         return [
             {
                 axis,
@@ -544,12 +570,12 @@ const marginRows = computed(() => {
                     ? `${chain.controlBand}${band?.phaseDeg !== null && band ? ` (${band.phaseDeg.toFixed(1)}°)` : ""}`
                     : "--",
                 fc: `${fmt(m.current.crossoverHz)} → ${fmt(m.proposed.crossoverHz)} Hz`,
-                pm: `${fmt(m.current.phaseMarginDeg)} → ${fmt(m.proposed.phaseMarginDeg)}°`,
-                gm: `${fmt(m.current.gainMarginDb)} → ${fmt(m.proposed.gainMarginDb)} dB`,
-                s: `${fmt(m.current.sensitivityPeakDb)} → ${fmt(m.proposed.sensitivityPeakDb)} dB`,
-                pmMeasured: `${fmt(m.current.measured?.phaseMarginDeg)} → ${fmt(m.proposed.measured?.phaseMarginDeg)}°`,
-                gmMeasured: `${fmt(m.current.measured?.gainMarginDb)} → ${fmt(m.proposed.measured?.gainMarginDb)} dB`,
-                sMeasured: `${fmt(m.current.measured?.sensitivityPeakDb)} → ${fmt(m.proposed.measured?.sensitivityPeakDb)} dB`,
+                pm: `${fmtMargin(m.current.phaseMarginDeg, qCur, "°")} → ${fmtMargin(m.proposed.phaseMarginDeg, q, "°")}`,
+                gm: `${fmtMargin(m.current.gainMarginDb, qCur, " dB")} → ${fmtMargin(m.proposed.gainMarginDb, q, " dB")}`,
+                s: `${fmtMargin(m.current.sensitivityPeakDb, qCur, " dB")} → ${fmtMargin(m.proposed.sensitivityPeakDb, q, " dB")}`,
+                pmMeasured: `${fmtMargin(m.current.measured?.phaseMarginDeg, false, "°")} → ${fmtMargin(m.proposed.measured?.phaseMarginDeg, false, "°")}`,
+                gmMeasured: `${fmtMargin(m.current.measured?.gainMarginDb, false, " dB")} → ${fmtMargin(m.proposed.measured?.gainMarginDb, false, " dB")}`,
+                sMeasured: `${fmtMargin(m.current.measured?.sensitivityPeakDb, false, " dB")} → ${fmtMargin(m.proposed.measured?.sensitivityPeakDb, false, " dB")}`,
                 resolution: `${fmt(ev?.resolutionHz, 2)} Hz`,
                 evidence: ev?.level ?? "INSUFFICIENT",
                 status: m.proposed.status,
