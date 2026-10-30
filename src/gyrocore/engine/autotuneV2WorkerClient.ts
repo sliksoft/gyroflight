@@ -23,8 +23,9 @@
  * Cancellable Autotune v2 worker client (completion program 2026-10-28, phase 6).
  *
  * Keeps the UI thread free during calculate. Generation tokens drop stale results. Worker
- * construction failure falls back to the main-thread engine (same numerical path). Partial or
- * failed worker runs never replace a newer analysis.
+ * construction / DataClone failure falls back to the main-thread engine for *this* request only
+ * (`execution: "sync_fallback"`). Crash peers are rejected or requeued — never sync-computed on
+ * the UI thread. Partial or failed worker runs never replace a newer analysis.
  */
 
 import { toRaw } from "vue";
@@ -32,9 +33,13 @@ import { runAutotuneV2, type AutotuneV2Input, type AutotuneV2Result } from "./au
 import { assessModelQualification, type ModelQualificationReport } from "./modelQualification";
 import type { AutotuneWorkerRequest, AutotuneWorkerResponse } from "./autotuneV2.worker";
 
+/** Where calculate ran. `sync_fallback` is only for *this* request (no Worker / DataClone); peers never sync-fall-back on crash (Grokbot P3). */
+export type AutotuneV2ExecutionPath = "worker" | "sync_fallback";
+
 export interface AutotuneV2ComputeOutcome {
     result: AutotuneV2Result;
     qualification: ModelQualificationReport;
+    execution: AutotuneV2ExecutionPath;
 }
 
 type PendingRun = {
@@ -73,6 +78,7 @@ function computeSync(input: AutotuneV2Input): AutotuneV2ComputeOutcome {
     return {
         result: runAutotuneV2(input),
         qualification: assessModelQualification(input).report,
+        execution: "sync_fallback",
     };
 }
 
@@ -219,7 +225,9 @@ export function runAutotuneV2Cancellable(
             const msg = ev.data;
             if (!msg || typeof msg !== "object" || msg.id !== id) return;
             if (msg.type === "result") {
-                settlePending(pendingRun, () => resolve({ result: msg.result, qualification: msg.qualification }));
+                settlePending(pendingRun, () =>
+                    resolve({ result: msg.result, qualification: msg.qualification, execution: "worker" }),
+                );
             } else if (msg.type === "error") {
                 settlePending(pendingRun, () => reject(new Error(msg.message || "autotune_worker_error")));
             } else {

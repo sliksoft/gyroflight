@@ -120,9 +120,23 @@ try {
         window.clearInterval(tick);
         const elapsed = performance.now() - t0;
         const sync = window.gfAt.eng.runAutotuneV2(payload);
+        const marginSnap = (r) =>
+            Object.fromEntries(
+                Object.entries(r.margins || {}).map(([axis, slot]) => [
+                    axis,
+                    slot && {
+                        level: slot.current.evidence.level,
+                        pm: slot.current.phaseMarginDeg,
+                        gm: slot.current.gainMarginDb,
+                        sens: slot.current.sensitivityPeakDb,
+                        status: slot.current.status,
+                    },
+                ]),
+            );
         return {
             uiTicks,
             elapsed,
+            execution: out.execution,
             workerSafety: out.result.safety,
             syncSafety: sync.safety,
             workerPid: out.result.pid.map((p) => ({ axis: p.axis, status: p.status })),
@@ -132,6 +146,8 @@ try {
             qualConnected: out.qualification.connectedToApply,
             workerEvidence: out.result.safety.analysisEvidence,
             syncEvidence: sync.safety.analysisEvidence,
+            workerMargins: marginSnap(out.result),
+            syncMargins: marginSnap(sync),
         };
     });
 
@@ -139,6 +155,11 @@ try {
         "UI event loop kept ticking during analysis (responsiveness)",
         workerMode.uiTicks >= 1 || workerMode.elapsed < 50,
         `ticks=${workerMode.uiTicks} elapsedMs=${workerMode.elapsed.toFixed(0)}`,
+    );
+    check(
+        "worker path reports execution=worker (not silent sync)",
+        workerMode.execution === "worker",
+        `execution=${workerMode.execution}`,
     );
     check(
         "worker and sync safety reasons match",
@@ -153,6 +174,10 @@ try {
         "worker and sync analysisEvidence match",
         workerMode.workerEvidence === workerMode.syncEvidence,
         `w=${workerMode.workerEvidence} s=${workerMode.syncEvidence}`,
+    );
+    check(
+        "worker and sync numerical margins match (pm/gm/sens/level)",
+        JSON.stringify(workerMode.workerMargins) === JSON.stringify(workerMode.syncMargins),
     );
     check("qualification remains disconnected from Apply", workerMode.qualConnected === false);
 
