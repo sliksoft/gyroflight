@@ -30,7 +30,7 @@ import { selectableQualificationLog, syntheticIdentityLog, syntheticLogInput } f
 describe("synthetic fixture window contract (P2)", () => {
     it("default full-chain log: analysis window equals chirp end−start and fits channels", () => {
         const log = syntheticLogInput("f1".repeat(32));
-        expect(log.channels.timeUs.length).toBeGreaterThanOrEqual(30 * 4000);
+        expect(log.channels.timeUs.length).toBeGreaterThanOrEqual(120 * 4000);
         for (const axis of ["roll", "pitch", "yaw"] as const) {
             const c = log.chirp[axis]!;
             const held = c.end - c.start;

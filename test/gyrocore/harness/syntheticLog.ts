@@ -99,7 +99,7 @@ export const SYNTH_HEADERS: [string, string][] = [
     // Default: 4 Hz bins + 120 s sweep so 2 Hz fine-rung whole-segment dwell holds through ~100 Hz (F2).
     ["chirp_frequency_start_deci_hz", "20"],
     ["chirp_frequency_end_deci_hz", "2000"],
-    ["chirp_time_seconds", "30"],
+    ["chirp_time_seconds", "120"],
     ["chirp_lag_freq_hz", "3"],
     ["chirp_lead_freq_hz", "30"],
     ["rc_smoothing_active_cutoffs_ff_sp_thr", "53,53"],
@@ -160,9 +160,9 @@ export function syntheticIdentityLog(
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
     const o = typeof opts === "number" ? { seconds: opts } : opts;
     // Full-chain honesty (Grokbot P2): channel length covers the Welch window unless the caller
-    // passes an explicit short `seconds` (identity helpers). Default 30 s covers the 4/2/1 Hz ladder
-    // with MODEL_CONDITIONAL bounds; finer grids pass a longer welch (selectableQualificationLog).
-    const welch = o.welch ?? { segments: 16, windowS: 30 };
+    // passes an explicit short `seconds` (identity helpers). Default 120 s matches the historical
+    // declared dwell so pitch/yaw keep MODEL_CONDITIONAL bounds; channels actually hold that window.
+    const welch = o.welch ?? { segments: 32, windowS: 120 };
     const seconds = o.seconds ?? welch.windowS + 1;
     const n = Math.round(seconds * FS);
     const sweepHeader: Record<string, string> = o.sweep
