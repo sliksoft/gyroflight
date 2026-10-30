@@ -33,7 +33,7 @@ import {
     transferFunctionValuesIdentical,
     type RecordingAverageClaim,
 } from "../../src/gyrocore/engine/multiRecording";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { syntheticIdentityLog, syntheticLogInput } from "./harness/syntheticLog";
 
 const ANALYSIS = { segmentSamples: 512, sampleRateHz: 4000, windowSamples: 80_000, segments: 18 };
 const SWEEP = { f0Hz: 1, f1Hz: 200, durationS: 20 };
@@ -65,7 +65,8 @@ describe("aggregateAverageClaims", () => {
     });
 
     it("averageClaimAt returns null when the window holds no whole segment at hz", () => {
-        const log = syntheticLogInput("d".repeat(64));
+        // Identity fixture: only the claim window matters; no full-chain dwell needed.
+        const log = syntheticIdentityLog("d".repeat(64));
         // Short window on a long header: high-frequency dwell never observed.
         const short = { ...ANALYSIS, windowSamples: 2_000 };
         expect(averageClaimAt(log, 100, short, { f0Hz: 1, f1Hz: 200, durationS: 86_400 })).toBeNull();
@@ -74,8 +75,9 @@ describe("aggregateAverageClaims", () => {
 
 describe("multiRecordingIssues", () => {
     it("the same log cannot contribute twice; an independent synthetic flight is accepted by identity rules", () => {
-        const a = syntheticLogInput("e".repeat(64));
-        const b = syntheticLogInput("f".repeat(64));
+        // Identity helpers: flightRelation / same-log rules, not Welch dwell.
+        const a = syntheticIdentityLog("e".repeat(64));
+        const b = syntheticIdentityLog("f".repeat(64));
         expect(multiRecordingIssues(a, a)).toContain("multi_recording_same_log");
         // Distinct hashes and sessions: the synthetic logs are independent under flightRelation.
         expect(multiRecordingIssues(a, b)).toEqual([]);

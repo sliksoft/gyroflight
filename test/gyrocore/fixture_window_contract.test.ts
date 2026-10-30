@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import { selectableQualificationLog, syntheticIdentityLog, syntheticLogInput } from "./harness/syntheticLog";
 
 describe("synthetic fixture window contract (P2)", () => {
+    // Honest 120 s channel generation is CPU-heavy (~2 s idle; longer under suite load).
     it("default full-chain log: analysis window equals chirp end−start and fits channels", () => {
         const log = syntheticLogInput("f1".repeat(32));
         expect(log.channels.timeUs.length).toBeGreaterThanOrEqual(120 * 4000);
@@ -38,7 +39,7 @@ describe("synthetic fixture window contract (P2)", () => {
             expect(c.analysis!.windowSamples).toBeLessThanOrEqual(log.channels.timeUs.length);
             expect(c.end).toBeLessThanOrEqual(log.channels.timeUs.length);
         }
-    });
+    }, 60_000);
 
     it("identity helper keeps staggered short slices with window ≤ end−start", () => {
         const log = syntheticIdentityLog("i1".repeat(32));
@@ -55,5 +56,5 @@ describe("synthetic fixture window contract (P2)", () => {
         const c = log.chirp.roll!;
         expect(c.analysis!.windowSamples).toBe(c.end - c.start);
         expect(c.analysis!.windowSamples).toBeGreaterThanOrEqual(120 * 4000 - 4000);
-    });
+    }, 60_000);
 });

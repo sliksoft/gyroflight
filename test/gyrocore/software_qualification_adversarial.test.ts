@@ -30,7 +30,7 @@ import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
 import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
 import { ABSOLUTE_SAFETY_POLICY } from "../../src/gyrocore/safety/absoluteEvaluate";
 import { averageClaimAt, aggregateAverageClaims, multiRecordingIssues } from "../../src/gyrocore/engine/multiRecording";
-import { mismatchedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { mismatchedQualificationLog, syntheticIdentityLog, syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const AT = "2026-10-28T00:00:00Z";
@@ -60,7 +60,8 @@ describe("adversarial software qualification (SIMULATION)", () => {
     }, 120_000);
 
     it("duplicate sha256 does not stack; distinct hashes with the same settings do", () => {
-        const log = syntheticLogInput("b".repeat(64));
+        // Aggregation-only: short identity buffer; claim windows are synthetic.
+        const log = syntheticIdentityLog("b".repeat(64));
         const analysis = { segmentSamples: 512, sampleRateHz: 4000, windowSamples: 80_000, segments: 18 };
         const sweep = { f0Hz: 1, f1Hz: 200, durationS: 20 };
         const a = averageClaimAt(log, 5, analysis, sweep);
@@ -72,8 +73,9 @@ describe("adversarial software qualification (SIMULATION)", () => {
     });
 
     it("incompatible configuration cannot improve multi-recording qualification", () => {
-        const a = syntheticLogInput("d".repeat(64));
-        const b = syntheticLogInput("e".repeat(64), {
+        // PID mismatch: flight-identity helpers suffice (no full-chain dwell).
+        const a = syntheticIdentityLog("d".repeat(64));
+        const b = syntheticIdentityLog("e".repeat(64), {
             pids: { roll: [80, 80, 40], pitch: [80, 80, 40], yaw: [80, 80, 0] },
         });
         const issues = multiRecordingIssues(a, b);
@@ -81,7 +83,8 @@ describe("adversarial software qualification (SIMULATION)", () => {
     });
 
     it("realistic short primary without qualification never releases", () => {
-        const primary = syntheticLogInput("f".repeat(64));
+        // Named short: identity buffer, not the 120 s full-chain default.
+        const primary = syntheticIdentityLog("f".repeat(64));
         const r = runAutotuneV2({
             primary,
             others: [],

@@ -28,11 +28,12 @@
 import { describe, expect, it } from "vitest";
 import { runAutotuneV2Cancellable } from "../../src/gyrocore/engine/autotuneV2WorkerClient";
 import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { syntheticIdentityLog } from "./harness/syntheticLog";
 
 describe("runAutotuneV2Cancellable", () => {
     it("matches the synchronous engine on the sync fallback path", async () => {
-        const primary = syntheticLogInput("1".repeat(64));
+        // Node/Vitest has no Worker: short identity log exercises sync_fallback without 120 s CPU.
+        const primary = syntheticIdentityLog("1".repeat(64));
         const input = {
             primary,
             others: [] as AutotuneLogInput[],
@@ -41,6 +42,7 @@ describe("runAutotuneV2Cancellable", () => {
         };
         const sync = runAutotuneV2(input);
         const async = await runAutotuneV2Cancellable(input);
+        expect(async.execution).toBe("sync_fallback");
         expect(async.result.safety).toEqual(sync.safety);
         expect(async.result.pid.map((p) => p.status)).toEqual(sync.pid.map((p) => p.status));
         expect(async.result.releasableProposal).toEqual(sync.releasableProposal);
@@ -48,7 +50,7 @@ describe("runAutotuneV2Cancellable", () => {
     }, 120_000);
 
     it("rejects when already aborted", async () => {
-        const primary = syntheticLogInput("2".repeat(64));
+        const primary = syntheticIdentityLog("2".repeat(64));
         const input = { primary, others: [] as AutotuneLogInput[], verifiedTune: null };
         const abort = new AbortController();
         abort.abort();
