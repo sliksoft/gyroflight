@@ -48,7 +48,7 @@ import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
 import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { syntheticIdentityLog, syntheticLogInput } from "./harness/syntheticLog";
 import { FIXTURE_FIRMWARE, FIXTURE_UID, verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const record = () => verifiedTuneAllAxesFixture(0.9, 0.7);
@@ -197,18 +197,19 @@ describe("P1-02: import path", () => {
     it("the same bytes under a second file name are not added as a second source", () => {
         const store = useAutotuneV2Store();
         const bytes = new Uint8Array([1, 2, 3, 4]);
-        store.addSource(bytes, "flight.bbl", report("flight.bbl", syntheticLogInput("1".repeat(64))));
+        // Import dedupe is by bytes; identity logs only supply headers for the report mock.
+        store.addSource(bytes, "flight.bbl", report("flight.bbl", syntheticIdentityLog("1".repeat(64))));
         store.addSource(
             bytes.slice(),
             "flight (copy).bbl",
-            report("flight (copy).bbl", syntheticLogInput("1".repeat(64))),
+            report("flight (copy).bbl", syntheticIdentityLog("1".repeat(64))),
         );
         expect(store.sources.map((s) => s.filename)).toEqual(["flight (copy).bbl"]);
     });
 
     it("two files carrying the same flight: Calculate finds no independent repeat and releases nothing", async () => {
         const store = useAutotuneV2Store();
-        const log = syntheticLogInput("1".repeat(64));
+        const log = syntheticIdentityLog("1".repeat(64));
         store.addSource(new Uint8Array([1]), "a.bbl", report("a.bbl", log));
         // Another file (other bytes, other hash) that decodes to the same flight in fresh arrays.
         store.addSource(new Uint8Array([2]), "b.bbl", report("b.bbl", copyOf(log, "6".repeat(64))));

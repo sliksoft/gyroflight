@@ -53,7 +53,7 @@ import {
 import { useAutotuneV2 } from "../../src/composables/useAutotuneV2";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import type { ChirpQualificationReport } from "../../src/gyrocore/chirp/qualification";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { syntheticIdentityLog, syntheticLogInput } from "./harness/syntheticLog";
 
 const BASE: Record<string, [number, number, number]> = { roll: [56, 79, 30], pitch: [82, 117, 61], yaw: [56, 79, 0] };
 const CAND = { roll: [50, 71, 21], pitch: [74, 105, 43], yaw: [50, 71, 0] } as Record<string, [number, number, number]>;
@@ -176,10 +176,11 @@ describe("P1-7: a calculation still running when the files change never publishe
     }, 120_000);
 
     it("a file added while Calculate awaits: no result, no inputs from the old list", async () => {
-        importLog("a.bbl", syntheticLogInput("1".repeat(64), { pids: BASE }));
+        // Identity fixtures: race/supersede behaviour, not Welch dwell (P2 load honesty).
+        importLog("a.bbl", syntheticIdentityLog("1".repeat(64), { pids: BASE }));
         const v2 = useAutotuneV2();
         const running = v2.calculate();
-        importLog("second.bbl", syntheticLogInput("2".repeat(64), { pids: BASE }));
+        importLog("second.bbl", syntheticIdentityLog("2".repeat(64), { pids: BASE }));
         await running;
         const store = useAutotuneV2Store();
         expect(store.result).toBeNull();
@@ -192,7 +193,7 @@ describe("P1-7: a calculation still running when the files change never publishe
     }, 120_000);
 
     it("reset while Calculate awaits: nothing is published", async () => {
-        importLog("a.bbl", syntheticLogInput("1".repeat(64), { pids: BASE }));
+        importLog("a.bbl", syntheticIdentityLog("1".repeat(64), { pids: BASE }));
         const running = useAutotuneV2().calculate();
         useAutotuneV2Store().reset();
         await running;
