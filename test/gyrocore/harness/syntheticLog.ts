@@ -99,7 +99,7 @@ export const SYNTH_HEADERS: [string, string][] = [
     // Default: 4 Hz bins + 120 s sweep so 2 Hz fine-rung whole-segment dwell holds through ~100 Hz (F2).
     ["chirp_frequency_start_deci_hz", "20"],
     ["chirp_frequency_end_deci_hz", "2000"],
-    ["chirp_time_seconds", "120"],
+    ["chirp_time_seconds", "30"],
     ["chirp_lag_freq_hz", "3"],
     ["chirp_lead_freq_hz", "30"],
     ["rc_smoothing_active_cutoffs_ff_sp_thr", "53,53"],
@@ -133,15 +133,37 @@ export interface SyntheticLogOptions {
      * _seconds). Omit for Welch-only averages from segment count (no invented sub-segment n=1).
      */
     sweep?: { f0Hz: number; f1Hz: number; durationS: number };
+    /**
+     * Stagger per-axis chirp slices inside a short buffer (identity / multi-segment export tests).
+     * Full-chain dwell logs keep one window that matches `welch.windowS`.
+     */
+    staggerAxes?: boolean;
+}
+
+/**
+ * Short-buffer identity / fragment tests: 11 s channels, staggered CHIRP slices, Welch window that
+ * fits the buffer. Does not claim long observed dwell (Grokbot P2).
+ */
+export function syntheticIdentityLog(
+    sha256: string,
+    opts: Omit<SyntheticLogOptions, "welch" | "sweep" | "staggerAxes"> = {},
+): AutotuneLogInput {
+    return syntheticLogInput(sha256, {
+        ...opts,
+        seconds: opts.seconds ?? 11,
+        welch: { segments: 8, windowS: 9 },
+        sweep: { f0Hz: 2, f1Hz: 200, durationS: 9 },
+        staggerAxes: true,
+    });
 }
 
 export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | number = {}): AutotuneLogInput {
     const o = typeof opts === "number" ? { seconds: opts } : opts;
-    // Channel length is only for chain/D validation / flight-identity windows. Declared Welch
-    // window (welch.windowS) may be longer: the TF is synthetic (SIMULATION / F2). Default 11 s
-    // keeps identity-suite arithmetic (non-overlapping 0–4 / 5–11 sub-ranges; staggered CHIRP
-    // slices; < minShared windows from a 600-sample splice).
-    const seconds = o.seconds ?? 11;
+    // Full-chain honesty (Grokbot P2): channel length covers the Welch window unless the caller
+    // passes an explicit short `seconds` (identity helpers). Default 30 s covers the 4/2/1 Hz ladder
+    // with MODEL_CONDITIONAL bounds; finer grids pass a longer welch (selectableQualificationLog).
+    const welch = o.welch ?? { segments: 16, windowS: 30 };
+    const seconds = o.seconds ?? welch.windowS + 1;
     const n = Math.round(seconds * FS);
     const sweepHeader: Record<string, string> = o.sweep
         ? {
@@ -149,7 +171,10 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
               chirp_frequency_end_deci_hz: String(Math.round(o.sweep.f1Hz * 10)),
               chirp_time_seconds: String(o.sweep.durationS),
           }
-        : {};
+        : {
+              // Match the analysed window when the caller did not override sweep headers.
+              chirp_time_seconds: String(welch.windowS),
+          };
     const headerPairs: [string, string][] = SYNTH_HEADERS.map(([k, v]) => {
         const axis = k.replace("PID", "") as "roll" | "pitch" | "yaw";
         if (k in sweepHeader) return [k, sweepHeader[k]];
@@ -198,16 +223,18 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
     const maxHz = o.maxHz ?? 100;
     // Start at `step` (not 1 Hz): the default chirp starts at 2 Hz; a 1 Hz bin has no dwell (F2).
     const freqs = Array.from({ length: Math.floor(maxHz / step) }, (_, i) => (i + 1) * step);
-    // Default: declared 120 s Welch window + 4 / 2 / 1 Hz ladder. Channel samples stay short; the
-    // analysis window is the declared provenance for dwell (synthetic TF, Grokbot F2).
-    const welch = o.welch ?? { segments: 32, windowS: 120 };
     const declaredWindowSamples = Math.round(welch.windowS * FS);
-    // Chirp slice indices stay inside the short channel buffer and stay staggered per axis so
-    // multi-segment export identity tests still see one axis per excerpt (roll 1–4 s, …).
-    const sweep = (k: number) => ({
-        start: Math.round((1 + 3.3 * k) * FS),
-        end: Math.min(n, Math.round((4 + 3.3 * k) * FS)),
-    });
+    // Identity helpers set staggerAxes; full-chain logs use one window matching welch.windowS.
+    const sweep = (k: number) =>
+        o.staggerAxes
+            ? {
+                  start: Math.round((1 + 3.3 * k) * FS),
+                  end: Math.min(n, Math.round((4 + 3.3 * k) * FS)),
+              }
+            : {
+                  start: Math.round(0.5 * FS),
+                  end: Math.min(n, Math.round((0.5 + welch.windowS) * FS)),
+              };
     const log: AutotuneLogInput = {
         sha256,
         logIndex: 0,
@@ -256,10 +283,13 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
                 };
             });
         const tf = measuredT(freqs);
+        // Analysis window = chirp end−start (production contract). Never claim more than held.
+        const availableWindowSamples = Math.max(0, w.end - w.start);
+        const windowSamples = Math.min(declaredWindowSamples, availableWindowSamples);
         // SIMULATION: ascending ladder of at most three rungs (step, step/2, step/4) whose Welch
         // segment fits the window for minWelchSegments at 50 % overlap. Axes that need step/2 still
         // have a finer neighbour for H1 when the window allows it (Grokbot F2).
-        const maxSeg = Math.floor((2 * declaredWindowSamples) / (8 + 1)); // UNCERTAINTY.minWelchSegments = 8
+        const maxSeg = Math.floor((2 * windowSamples) / (8 + 1)); // UNCERTAINTY.minWelchSegments = 8
         const rungSteps = [step, step / 2, step / 4].filter((binStep) => Math.round(FS / binStep) <= maxSeg);
         const uniqueSteps = [...new Set(rungSteps.length ? rungSteps : [step])];
         const rungOf = (binStep: number) => {
@@ -272,7 +302,7 @@ export function syntheticLogInput(sha256: string, opts: SyntheticLogOptions | nu
                 analysis: {
                     segmentSamples: Math.round(FS / binStep),
                     sampleRateHz: FS,
-                    windowSamples: declaredWindowSamples,
+                    windowSamples,
                     segments: welch.segments,
                 },
             };
@@ -338,7 +368,7 @@ export function selectableQualificationLog(
     opts: Omit<SyntheticLogOptions, "binStepHz" | "welch" | "sweep"> = {},
 ): AutotuneLogInput {
     return syntheticLogInput("5c".repeat(32), {
-        seconds: 8,
+        seconds: 121,
         ...opts,
         binStepHz: 4000 / 8192,
         maxHz: opts.maxHz ?? 100,

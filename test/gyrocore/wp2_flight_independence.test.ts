@@ -37,11 +37,11 @@ import {
     uniqueFlights,
 } from "../../src/gyrocore/engine/logInput";
 import { verifiedTuneFromLogs } from "../../src/gyrocore/engine/verifiedTuneFromLogs";
-import { simulatedQualificationLog, syntheticLogInput } from "./harness/syntheticLog";
+import { simulatedQualificationLog, syntheticIdentityLog } from "./harness/syntheticLog";
 
 const FS = 4000;
-const A = syntheticLogInput("1".repeat(64));
-const D = syntheticLogInput("2".repeat(64));
+const A = syntheticIdentityLog("1".repeat(64));
+const D = syntheticIdentityLog("2".repeat(64));
 const id = (l: AutotuneLogInput) => `${l.sha256}:${l.logIndex}`;
 
 type Ch = AutotuneLogInput["channels"];
@@ -219,7 +219,7 @@ describe("UNKNOWN is never independent evidence anywhere", () => {
         const base = { ...A, order: 1 };
         const repeat = { ...tail, order: 2 };
         const cand = {
-            ...syntheticLogInput("f".repeat(64), { pids: { roll: [50, 71, 21], pitch: [74, 105, 43] } }),
+            ...syntheticIdentityLog("f".repeat(64), { pids: { roll: [50, 71, 21], pitch: [74, 105, 43] } }),
             order: 3,
         };
         const attempt = verifiedTuneFromLogs([base, repeat, cand]);

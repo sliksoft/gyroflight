@@ -45,7 +45,7 @@ import {
     uniqueFlights,
 } from "../../src/gyrocore/engine/logInput";
 import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
-import { syntheticLogInput } from "./harness/syntheticLog";
+import { syntheticIdentityLog, syntheticLogInput } from "./harness/syntheticLog";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const AT = "2026-10-22T00:00:00Z";
@@ -101,63 +101,70 @@ function withStandstill(log: AutotuneLogInput, seconds: number): AutotuneLogInpu
 }
 
 const FS = 4000;
+/** Identity-arithmetic cases (short staggered buffer). */
+const idPrimary = syntheticIdentityLog("1".repeat(64));
+const idOther = syntheticIdentityLog("2".repeat(64));
+/** Engine / release cases need a full-chain consistent dwell window. */
 const primary = syntheticLogInput("1".repeat(64));
 const other = syntheticLogInput("2".repeat(64));
 
 describe("R-1: flight identity by gyro windows", () => {
     it("an exact copy under another hash shares every window; an independent flight shares none", () => {
-        const copy = { ...primary, sha256: "9".repeat(64), channels: structuredClone(primary.channels) };
-        expect(flightWindows(primary).size).toBeGreaterThan(100);
-        expect(sharedWindows(primary, copy)).toBe(flightWindows(primary).size);
-        expect(sharedWindows(primary, other)).toBe(0);
-        expect(sameFlight(primary, copy)).toBe(true);
-        expect(sameFlight(primary, other)).toBe(false);
+        const copy = { ...idPrimary, sha256: "9".repeat(64), channels: structuredClone(idPrimary.channels) };
+        expect(flightWindows(idPrimary).size).toBeGreaterThan(100);
+        expect(sharedWindows(idPrimary, copy)).toBe(flightWindows(idPrimary).size);
+        expect(sharedWindows(idPrimary, idOther)).toBe(0);
+        expect(sameFlight(idPrimary, copy)).toBe(true);
+        expect(sameFlight(idPrimary, idOther)).toBe(false);
     });
 
     it("trimmed at the start, at the end, by one sample, and a middle sub-range: the same flight", () => {
         const cases = [
-            ["end-1", subRange(primary, "8".repeat(64), 0, 1)],
-            ["start-2000", subRange(primary, "7".repeat(64), 2000, 0)],
-            ["end-4000", subRange(primary, "6".repeat(64), 0, 4000)],
-            ["middle-half", subRange(primary, "5".repeat(64), Math.round(2.5 * FS), Math.round(2.5 * FS))],
+            ["end-1", subRange(idPrimary, "8".repeat(64), 0, 1)],
+            ["start-2000", subRange(idPrimary, "7".repeat(64), 2000, 0)],
+            ["end-4000", subRange(idPrimary, "6".repeat(64), 0, 4000)],
+            ["middle-half", subRange(idPrimary, "5".repeat(64), Math.round(2.5 * FS), Math.round(2.5 * FS))],
         ] as const;
         for (const [name, copy] of cases) {
-            expect(flightFingerprint(copy), name).not.toBe(flightFingerprint(primary));
-            expect(sharedWindows(primary, copy), name).toBeGreaterThanOrEqual(FLIGHT_WINDOW.minShared * 10);
-            expect(sameFlight(primary, copy), name).toBe(true);
-            expect(crossLogReferenceIssues(primary, copy)[0], name).toMatch(/^cross_log_duplicate_of_primary:/);
+            expect(flightFingerprint(copy), name).not.toBe(flightFingerprint(idPrimary));
+            expect(sharedWindows(idPrimary, copy), name).toBeGreaterThanOrEqual(FLIGHT_WINDOW.minShared * 10);
+            expect(sameFlight(idPrimary, copy), name).toBe(true);
+            expect(crossLogReferenceIssues(idPrimary, copy)[0], name).toMatch(/^cross_log_duplicate_of_primary:/);
         }
     });
 
     it("a time-shifted copy (same gyro, clock restarted) is the same flight", () => {
-        const copy = timeShifted(primary, "4".repeat(64), 1_000_000);
-        expect(flightFingerprint(copy)).not.toBe(flightFingerprint(primary));
-        expect(sameFlight(primary, copy)).toBe(true);
+        const copy = timeShifted(idPrimary, "4".repeat(64), 1_000_000);
+        expect(flightFingerprint(copy)).not.toBe(flightFingerprint(idPrimary));
+        expect(sameFlight(idPrimary, copy)).toBe(true);
     });
 
     it("overlapping windows: two sub-ranges of one flight that overlap only in the middle are the same flight", () => {
-        const a = subRange(primary, "a".repeat(64), 0, Math.round(5 * FS)); // seconds 0–6
-        const b = subRange(primary, "b".repeat(64), Math.round(4 * FS), 0); // seconds 4–11
+        const a = subRange(idPrimary, "a".repeat(64), 0, Math.round(5 * FS)); // seconds 0–6
+        const b = subRange(idPrimary, "b".repeat(64), Math.round(4 * FS), 0); // seconds 4–11
         expect(sameFlight(a, b)).toBe(true);
         // and two sub-ranges that do not overlap are not told to be the same by the windows alone
-        const c = subRange(primary, "c".repeat(64), 0, Math.round(7 * FS)); // seconds 0–4
-        const d = subRange(primary, "d".repeat(64), Math.round(5 * FS), 0); // seconds 5–11
+        const c = subRange(idPrimary, "c".repeat(64), 0, Math.round(7 * FS)); // seconds 0–4
+        const d = subRange(idPrimary, "d".repeat(64), Math.round(5 * FS), 0); // seconds 5–11
         expect(sharedWindows(c, d)).toBe(0);
     });
 
     it("no false positive: two independent flights that both start with 2 s of standstill", () => {
-        const a = withStandstill(primary, 2);
-        const b = withStandstill(other, 2);
+        const a = withStandstill(idPrimary, 2);
+        const b = withStandstill(idOther, 2);
         expect(sharedWindows(a, b)).toBe(0);
         expect(sameFlight(a, b)).toBe(false);
         expect(crossLogReferenceIssues(a, b)).toEqual([]);
     });
 
     it("uniqueFlights keeps one file per flight, the longest; pickPrimary sees no repeat in a copy", () => {
-        const trimmed = subRange(primary, "8".repeat(64), 0, 4000);
-        expect(uniqueFlights([trimmed, primary]).map((l) => l.sha256)).toEqual([primary.sha256]);
-        expect(uniqueFlights([primary, trimmed, other]).map((l) => l.sha256)).toEqual([primary.sha256, other.sha256]);
-        expect(pickPrimary([primary, trimmed])!.others).toEqual([]);
+        const trimmed = subRange(idPrimary, "8".repeat(64), 0, 4000);
+        expect(uniqueFlights([trimmed, idPrimary]).map((l) => l.sha256)).toEqual([idPrimary.sha256]);
+        expect(uniqueFlights([idPrimary, trimmed, idOther]).map((l) => l.sha256)).toEqual([
+            idPrimary.sha256,
+            idOther.sha256,
+        ]);
+        expect(pickPrimary([idPrimary, trimmed])!.others).toEqual([]);
     });
 });
 
@@ -223,15 +230,15 @@ describe("R-1: the engine does not release on a copy of its own flight", () => {
 describe("R-1: the Verified Tune producer", () => {
     it("a trimmed copy of the baseline is not its baseline repeat", () => {
         const candidate = {
-            ...syntheticLogInput("c".repeat(64), { pids: { roll: [50, 71, 21], pitch: [74, 105, 43] } }),
+            ...syntheticIdentityLog("c".repeat(64), { pids: { roll: [50, 71, 21], pitch: [74, 105, 43] } }),
             order: 2,
         };
-        const baseline = { ...syntheticLogInput("b".repeat(64)), order: 1 };
+        const baseline = { ...syntheticIdentityLog("b".repeat(64)), order: 1 };
         const trimmedBaseline = { ...subRange(baseline, "e".repeat(64), 0, 4000), order: 1 };
         const att = verifiedTuneFromLogs([candidate, baseline, trimmedBaseline], AT);
         expect(att.record?.baselineRepeat ?? null).toBeNull();
         // the same logs plus a real repeat flight: that one is taken
-        const repeat = { ...syntheticLogInput("f".repeat(64)), order: 1 };
+        const repeat = { ...syntheticIdentityLog("f".repeat(64)), order: 1 };
         const att2 = verifiedTuneFromLogs([candidate, baseline, trimmedBaseline, repeat], AT);
         expect(att2.record?.baselineRepeat?.sha256).toBe(repeat.sha256);
     }, 600_000);

@@ -82,7 +82,11 @@ describe("multiRecordingIssues", () => {
     });
 });
 
-const DWELL = { welch: { segments: 32, windowS: 120 }, sweep: { f0Hz: 2, f1Hz: 200, durationS: 120 } } as const;
+const DWELL = {
+    seconds: 31,
+    welch: { segments: 16, windowS: 30 },
+    sweep: { f0Hz: 2, f1Hz: 200, durationS: 30 },
+} as const;
 const SW = DWELL.sweep;
 const sumExtra = (m: Map<number, number>) => [...m.values()].reduce((a, b) => a + b, 0);
 const ledgerOf = (p: ReturnType<typeof syntheticLogInput>, others: ReturnType<typeof syntheticLogInput>[]) =>
