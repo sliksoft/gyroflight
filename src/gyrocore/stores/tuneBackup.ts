@@ -31,31 +31,74 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import type { TuneSnapshot } from "@/gyrocore/tuning/tuneSnapshot";
+import type { AbsoluteSnapshot } from "@/gyrocore/tuning/absoluteTune";
+import { readTransactionRecords } from "@/gyrocore/stores/transactionRecords";
 
 export const BACKUP_STORAGE_KEY = "gyroflight.tuneBackups.v1";
-/** Newest backups kept per craft. */
+/** Newest backups kept per craft, of each kind: Restore targets (stateKnown) and the others. */
 export const BACKUPS_PER_CRAFT = 20;
+/** The common prefix of fcTransactionState's keys (both formats; see transactionRecords.ts). */
+export const TRANSACTION_KEYS_PREFIX = "gyroflight.fcTransactionState.";
 
 export interface TuneBackup {
     id: string;
     createdAt: string;
     /** Why it was taken: right before an Apply, or before a Restore (so a Restore can be undone). */
-    reason: "before_apply" | "before_restore";
+    reason: "before_apply" | "before_absolute_apply" | "before_restore";
     uid: [number, number, number];
     board: string;
     firmware: string;
     compositeId: string | null;
     snapshot: TuneSnapshot;
+    /** Absolute route: every firmware-held PID / PID_ADVANCED / FILTER_CONFIG value and the slider modes. */
+    absolute?: AbsoluteSnapshot;
+    /**
+     * Whether the craft's state was known when it was taken: false for the backup a Restore takes
+     * while the craft holds the result of a write nobody verified (kept to show what was there).
+     * Missing on backups taken before this was recorded: those are never a Restore target.
+     */
+    stateKnown?: boolean;
 }
 
-function readStorage(): TuneBackup[] {
+/**
+ * Why `b` must not be written back by a Restore; null when it may. An unverified state never, and
+ * no backup without its provenance recorded, whatever its reason: one stored before stateKnown
+ * existed may have been taken after a failed write left a partial result on the craft (audit WP8).
+ * There is no migration that could prove an older backup sound.
+ */
+export function restoreTargetIssue(b: TuneBackup): string | null {
+    if (b.stateKnown === false) return "restore:backup_unverified";
+    if (b.stateKnown !== true) return "restore:backup_provenance_unknown";
+    return null;
+}
+
+/**
+ * The stored backups; null when the list cannot be read (Gyroflight audit WP8-F08: then nothing may
+ * overwrite it, since that would delete every backup in it).
+ */
+function readList(): TuneBackup[] | null {
     try {
         const raw = globalThis.localStorage?.getItem(BACKUP_STORAGE_KEY);
-        const list = raw ? (JSON.parse(raw) as unknown) : [];
-        return Array.isArray(list) ? (list as TuneBackup[]) : [];
+        if (raw === null || raw === undefined) return [];
+        const list = JSON.parse(raw) as unknown;
+        const backups = (b: unknown) => !!b && typeof b === "object" && typeof (b as TuneBackup).id === "string";
+        return Array.isArray(list) && list.every(backups) ? (list as TuneBackup[]) : null;
     } catch {
-        return [];
+        return null;
     }
+}
+
+const readStorage = (): TuneBackup[] => readList() ?? [];
+
+/**
+ * The backup ids open transaction entries name (their evidence: what the craft held before); null
+ * when an entry cannot be read by the transaction store's own definition (transactionRecords.ts),
+ * and then no backup may be dropped.
+ */
+function backupIdsInUse(): Set<string> | null {
+    const read = readTransactionRecords(globalThis.localStorage);
+    if (!read.ok) return null;
+    return new Set([...read.entries, ...(read.legacy ?? [])].map((e) => e.backupId));
 }
 
 export function sameUid(a: readonly number[] | null | undefined, b: readonly number[] | null | undefined): boolean {
@@ -65,10 +108,24 @@ export function sameUid(a: readonly number[] | null | undefined, b: readonly num
 export const useTuneBackupStore = defineStore("gyroflightTuneBackup", () => {
     const backups = ref<TuneBackup[]>(readStorage());
 
-    /** Stores `backup` and reads it back; false when the browser did not keep it exactly. */
+    /**
+     * Stores `backup` and reads it back; false when the browser did not keep it exactly. Starts from
+     * the storage, not this page's copy, so a backup another tab stored meanwhile is kept. Of a
+     * craft's backups the newest BACKUPS_PER_CRAFT Restore targets and the newest as many others
+     * stay, and every one an open transaction entry names (audit WP8: repeated recovery snapshots
+     * must not push out the evidence or the trusted targets).
+     */
     function save(backup: TuneBackup): boolean {
-        const others = backups.value.filter((b) => b.id !== backup.id);
-        const sameCraft = [backup, ...others.filter((b) => sameUid(b.uid, backup.uid))].slice(0, BACKUPS_PER_CRAFT);
+        const list = readList();
+        if (!list) return false;
+        const others = list.filter((b) => b.id !== backup.id);
+        const inUse = backupIdsInUse();
+        const kept = { trusted: 0, other: 0 };
+        const sameCraft = [backup, ...others.filter((b) => sameUid(b.uid, backup.uid))].filter((b) => {
+            if (!inUse || inUse.has(b.id)) return true;
+            const kind = b.stateKnown === true ? "trusted" : "other";
+            return ++kept[kind] <= BACKUPS_PER_CRAFT;
+        });
         const next = [...sameCraft, ...others.filter((b) => !sameUid(b.uid, backup.uid))];
         try {
             globalThis.localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(next));

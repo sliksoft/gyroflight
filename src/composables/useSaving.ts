@@ -23,6 +23,7 @@ import { ref, type Ref } from "vue";
 import { isMspCancelled } from "../js/msp/mspErrors";
 import { gui_log } from "../js/gui_log";
 import { i18n } from "../js/localization";
+import { writeLease } from "./fcWriteLease";
 
 /** An error carrying the message runSave shows in place of the generic one. */
 export interface SaveFailureTagged {
@@ -87,6 +88,9 @@ export function useSaving(): Saving {
             return;
         }
         isSaving.value = true;
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F02): this page does not yield the
+        // write lease to another page's transaction in the middle of a save.
+        writeLease.noteSave(1);
         try {
             await fn();
         } catch (e) {
@@ -104,6 +108,7 @@ export function useSaving(): Saving {
             gui_log(saveFailureMessageOf(e) ?? i18n.getMessage("configurationSaveFailed"));
             onError?.(e);
         } finally {
+            writeLease.noteSave(-1);
             isSaving.value = false;
         }
     }

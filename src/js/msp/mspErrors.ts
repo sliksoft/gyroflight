@@ -52,6 +52,38 @@ export class MspCancelledError extends MspError {
     }
 }
 
+/**
+ * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 review round 2): the firmware answered a
+ * write with its error frame ('!', MSP_RESULT_ERROR): it refused the values, nothing of this
+ * request was applied. `response` is that answer (its `attempts` says whether an earlier attempt,
+ * whose answer was lost, may have been applied).
+ */
+export class MspFirmwareRefusedError extends MspError {
+    readonly response: unknown;
+
+    constructor(message?: string, code?: number, response?: unknown) {
+        super(message, code);
+        this.name = "MspFirmwareRefusedError";
+        this.response = response;
+    }
+}
+
+/**
+ * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 integration review): an answer to a write
+ * that cannot be told apart from the answer to an earlier transmission of the same code (MSP
+ * carries no request id, and an earlier one was still unanswered): it proves nothing for this
+ * write, which may or may not have run.
+ */
+export class MspAmbiguousAnswerError extends MspError {
+    readonly response: unknown;
+
+    constructor(message?: string, code?: number, response?: unknown) {
+        super(message, code);
+        this.name = "MspAmbiguousAnswerError";
+        this.response = response;
+    }
+}
+
 export class MspCrcError extends MspError {
     constructor(message?: string, code?: number) {
         super(message, code);

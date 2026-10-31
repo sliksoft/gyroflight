@@ -1,0 +1,3 @@
+     × a late AutoBackup exit callback from an old connection does not disconnect the new one
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 32 passed (33)

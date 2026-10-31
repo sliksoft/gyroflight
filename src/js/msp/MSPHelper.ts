@@ -27,7 +27,7 @@ import semver from "semver";
 import vtxDeviceStatusFactory from "../utils/VtxDeviceStatus/VtxDeviceStatusFactory";
 import MSP from "../msp";
 import MSPCodes, { MSP2TextType } from "./MSPCodes";
-import { MspCrcError } from "./mspErrors";
+import { MspAmbiguousAnswerError, MspCrcError, MspFirmwareRefusedError } from "./mspErrors";
 import { MspBuffer, MspDataView } from "./mspBytes";
 import {
     API_VERSION_1_45,
@@ -43,11 +43,13 @@ import { updateTabList } from "../utils/updateTabList";
 import { showErrorDialog } from "../utils/showErrorDialog";
 import { OSD } from "../../components/tabs/osd/osd";
 import { reinitializeConnection } from "../serial_backend";
-import type { MspCallback, MspFrame, MspResponse } from "../msp";
+import type { MspCallback, MspFrame, MspPayload, MspResponse } from "../msp";
 import type { CurrentMeterConfig, LedStripEntry } from "../../stores/fc.types";
 import type Features from "../Features";
 import type Beepers from "../Beepers";
 import { TABS, tabSwitchCleanup } from "../tab_adapters";
+import { assertNoUncertainWriteOnConnectedCraft } from "../../gyrocore/stores/fcTransactionState";
+import { saveEeprom } from "./eepromSave";
 
 // serial_backend's initFeaturesOnConnect (or VirtualFC) replaces the reset value null with these
 // instances before any feature or beeper MSP is exchanged.
@@ -194,7 +196,14 @@ function decodeLedMask(mask: number, layout: LedMaskLayout): LedStripEntry {
 }
 
 // Settles one pending request with the frame that answers it.
-function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspFrame) {
+function deliverResponse(
+    callback: MspCallback,
+    errorAware: boolean,
+    frame: MspFrame,
+    attempts?: number,
+    write?: boolean,
+    ambiguous?: boolean,
+) {
     const { code, dataView: data, crcError } = frame;
     const response: MspResponse = {
         command: code,
@@ -202,6 +211,8 @@ function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspF
         length: data ? data.byteLength : 0,
         crcError,
         unsupported: frame.unsupported,
+        attempts,
+        ...(write && ambiguous ? { ambiguous: true } : {}),
     };
     // Legacy callbacks receive the original DataView with the crcError flag so they can choose
     // how to handle CRC errors; errorAware callbacks reject on crcError and otherwise receive the
@@ -211,6 +222,21 @@ function deliverResponse(callback: MspCallback, errorAware: boolean, frame: MspF
             callback(response);
         } else if (crcError) {
             callback(null, new MspCrcError(`CRC error for MSP code ${code}`, code));
+        } else if (write && ambiguous) {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 integration review): may be the
+            // answer to an earlier transmission of this code; it proves nothing for this write.
+            callback(
+                null,
+                new MspAmbiguousAnswerError(`MSP code ${code}: answer cannot be told apart`, code, response),
+            );
+        } else if (write && frame.unsupported) {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 review round 2): a write the
+            // firmware refused is no success for an awaiter (it resolved before, and tabs took it
+            // for saved).
+            callback(
+                null,
+                new MspFirmwareRefusedError(`MSP code ${code} refused by the flight controller`, code, response),
+            );
         } else {
             callback(response, undefined);
         }
@@ -425,9 +451,28 @@ class MspHelper {
     // Removes and settles every pending request for the frame's code. Iterates in reverse because
     // it splices, and re-reads the queue each step because a callback may queue new requests.
     private settleCallbacks(dataHandler: MspFrame) {
+        // Gyroflight (audit WP8 transport closure review): a frame whose CRC failed is no answer to
+        // any transmission (its code may be wrong too); it must not use up one that is unanswered.
+        if (!dataHandler.crcError) {
+            (dataHandler as { _note_answer?: (code: number) => void })._note_answer?.(dataHandler.code);
+        }
+        // Gyroflight (audit WP8 review round 2): one answer settles every waiter of this code; each
+        // learns how often the request went out, counted over all of them (one may have attached
+        // to another's retried request).
+        const attempts = Math.max(
+            1,
+            ...dataHandler.callbacks
+                .filter((e) => e?.code === dataHandler.code)
+                .map((e) => (e.attempts ?? 1) + (e.priorAttempts ?? 0)),
+        );
         for (let i = dataHandler.callbacks.length - 1; i >= 0; i--) {
             const entry = dataHandler.callbacks[i];
             if (entry?.code !== dataHandler.code) {
+                continue;
+            }
+            // Gyroflight (audit WP8 integration review): a write still waiting for the transport
+            // has not been answered: this answer belongs to an earlier transmission.
+            if (entry.awaitingWire) {
                 continue;
             }
 
@@ -435,7 +480,7 @@ class MspHelper {
             dataHandler.callbacks.splice(i, 1);
 
             if (typeof entry.callback === "function") {
-                deliverResponse(entry.callback, entry.errorAware, dataHandler);
+                deliverResponse(entry.callback, entry.errorAware, dataHandler, attempts, entry.write, entry.ambiguous);
             }
         }
     }
@@ -715,31 +760,31 @@ class MspHelper {
         return mask;
     }
 
-    sendRxFailConfig(onCompleteCallback: () => void) {
-        const fcStore = useFlightControllerStore();
-        let nextFunction = send_next_rxfail_config;
-
-        let rxFailIndex = 0;
-
-        if (fcStore.rxFailConfig.length == 0) {
-            onCompleteCallback();
-        } else {
-            send_next_rxfail_config();
-        }
-
-        function send_next_rxfail_config() {
-            const rxFail = fcStore.rxFailConfig[rxFailIndex];
-
-            const buffer = new MspBuffer();
-            buffer.push8(rxFailIndex).push8(rxFail.mode).push16(rxFail.value);
-
-            // prepare for next iteration
-            rxFailIndex++;
-            if (rxFailIndex == fcStore.rxFailConfig.length) {
-                nextFunction = onCompleteCallback;
+    /**
+     * Sends every RXFAIL channel, one after the other. Gyroflight hook (docs/gyrocore/UPSTREAM.md,
+     * audit WP8-F05): over the error-aware MSP.promise, so a write the check refuses, one never
+     * answered, a refused retry (the first attempt may have run) or a cleared queue calls `onRefused`
+     * and ends the chain; `onCompleteCallback` only after the firmware acknowledged every channel.
+     */
+    sendRxFailConfig(
+        onCompleteCallback: () => void,
+        onRefused?: (reason: Error) => void,
+        channels: readonly { mode: number; value: number }[] = useFlightControllerStore().rxFailConfig,
+    ) {
+        const send = async () => {
+            for (let rxFailIndex = 0; rxFailIndex < channels.length; rxFailIndex++) {
+                const rxFail = channels[rxFailIndex];
+                const buffer = new MspBuffer();
+                buffer.push8(rxFailIndex).push8(rxFail.mode).push16(rxFail.value);
+                // One channel at a time, in order, as the legacy chain did.
+                await confirmedWrite(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer); // NOSONAR: sequential by design
             }
-            MSP.send_message(MSPCodes.MSP_SET_RXFAIL_CONFIG, buffer, false, nextFunction);
-        }
+        };
+        send().then(onCompleteCallback, (err: unknown) => {
+            const reason = err instanceof Error ? err : new Error(String(err));
+            if (onRefused) onRefused(reason);
+            else console.error("MSP_SET_RXFAIL_CONFIG failed:", reason);
+        });
     }
 
     /** Stops the FC from arming, with runaway takeoff prevention on. */
@@ -794,12 +839,12 @@ class MspHelper {
         MSP.send_message(mspCode, false, false, callback);
     }
 
-    sendSerialConfig(callback?: () => void) {
+    sendSerialConfig(callback?: MspCallback) {
         const mspCode = MSPCodes.MSP2_COMMON_SET_SERIAL_CONFIG;
         MSP.send_message(mspCode, mspHelper.crunch(mspCode), false, callback);
     }
 
-    writeConfiguration(reboot: boolean, callback?: () => void) {
+    writeConfiguration(reboot: boolean, callback?: () => void, onRefused?: (err: unknown) => void) {
         const fcStore = useFlightControllerStore();
         // We need some protection when testing motors on motors tab
         if (!fcStore.config.armingDisabled) {
@@ -807,19 +852,48 @@ class MspHelper {
         }
 
         setTimeout(function () {
-            MSP.send_message(MSPCodes.MSP_EEPROM_WRITE, false, false, function () {
-                gui_log(i18n.getMessage("configurationEepromSaved"));
-                console.log("Configuration saved to EEPROM");
-                if (reboot) {
-                    tabSwitchCleanup(function () {
-                        return reinitializeConnection();
-                    });
-                }
-                if (callback) {
-                    callback();
-                }
-            });
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): checked again when the save goes out, since
+            // a Gyroflight write may have ended unverified during the delay.
+            try {
+                assertNoUncertainWriteOnConnectedCraft();
+            } catch (err) {
+                onRefused?.(err);
+                return;
+            }
+            // Gyroflight hook (audit WP8-F04): saved only on the firmware's ACK (eepromSave.ts). A
+            // link lost before it went out, the firmware's refusal or a lost answer reaches
+            // onRefused (the legacy callback used to run on a disconnect as if it had saved).
+            saveEeprom().then(
+                () => {
+                    gui_log(i18n.getMessage("configurationEepromSaved"));
+                    console.log("Configuration saved to EEPROM");
+                    if (reboot) {
+                        tabSwitchCleanup(function () {
+                            return reinitializeConnection();
+                        });
+                    }
+                    if (callback) {
+                        callback();
+                    }
+                },
+                (err: unknown) => {
+                    console.error("EEPROM save not confirmed:", err);
+                    if (onRefused) onRefused(err);
+                    else gui_log(i18n.getMessage("gyroflightEepromNotConfirmed"));
+                },
+            );
         }, 100); // 100ms delay before sending MSP_EEPROM_WRITE to ensure that all settings have been received
+    }
+}
+
+/**
+ * Gyroflight (audit WP8-F05 review): a SET the firmware acknowledged. Its error answer ('!': the
+ * firmware refused the values) rejects; MSP.promise alone resolves with it.
+ */
+export async function confirmedWrite(code: number, data?: MspPayload): Promise<void> {
+    const reply = await MSP.promise(code, data);
+    if (reply?.unsupported) {
+        throw new Error(`${getMSPCodeName(code)} refused by the flight controller`);
     }
 }
 
@@ -1432,7 +1506,8 @@ const DECODERS: Partial<Record<number, Decoder>> = {
     },
 
     [MSPCodes.MSP_EEPROM_WRITE]() {
-        console.log("Settings Saved in EEPROM");
+        // Gyroflight (audit WP8-F04): what the answer proves is judged by eepromSave.ts.
+        console.log("MSP_EEPROM_WRITE answered");
     },
 
     [MSPCodes.MSP_SET_CURRENT_METER_CONFIG]() {

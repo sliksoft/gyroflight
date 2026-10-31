@@ -76,7 +76,10 @@ function makeFakeDevice(id = "abc123", name = "Speedybee", services: unknown[] =
                     getPrimaryServices: vi.fn(async () => services),
                 };
             }),
-            disconnect: vi.fn(),
+            // As the specification has it: disconnect() takes this page's GATT connection down.
+            disconnect: vi.fn(() => {
+                fake.gatt.connected = false;
+            }),
         },
         addEventListener: vi.fn((t: string, h: unknown) => {
             listeners[t] = h;

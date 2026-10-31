@@ -31,6 +31,8 @@ import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification
 import { authorizeCompositeApply } from "@/gyrocore/tuning/authorize";
 import { productApplyBlocks } from "@/gyrocore/productLock/productApply";
 import { safetyForComposite } from "@/gyrocore/safety/authorize";
+import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
+import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 
 export function useApplyGate() {
     const gate = useChirpQualificationStore();
@@ -48,11 +50,20 @@ export function useApplyGate() {
         return safetyForComposite(gate.gateState(), composite.value);
     });
 
-    // Not a verdict on the tune: the release procedure's named conditions (productApply.ts).
-    // Nothing produces an independent PID validation yet, so that one stays open.
-    const productLock = computed(() =>
-        productApplyBlocks({ safetyAnalysisEvidence: safety.value.analysisEvidence, independentPidValidation: null }),
-    );
+    // Not a verdict on the tune: the release procedure's named conditions (productApply.ts),
+    // with a Verified Tune for the logged craft when this browser holds one.
+    const verified = useVerifiedTuneStore();
+    const productLock = computed(() => {
+        void gate.revision;
+        const log = gate.gateState().report?.logs.find((l) => l.logIndex === composite.value?.logIndex);
+        const id = logIdentity(log?.headerPairs ?? []);
+        const firmware = id.firmwareRevision?.split(/\s+/)[1] ?? null;
+        return productApplyBlocks({
+            safetyAnalysisEvidence: safety.value.analysisEvidence,
+            independentPidValidation: verified.forCraft(id.uid, firmware),
+            craft: { uid: id.uid, firmware },
+        });
+    });
 
     const applyAllowed = computed(
         () => authorization.value.allowed && safety.value.authorized && productLock.value.length === 0,

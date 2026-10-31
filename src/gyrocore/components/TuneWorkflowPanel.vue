@@ -77,6 +77,7 @@
             </li>
         </ul>
         <p class="text-sm text-dimmed">{{ $t("gyroflightApplyOnClick") }}</p>
+        <UncertainStateNotice />
         <UButton
             size="xs"
             variant="outline"
@@ -96,6 +97,9 @@
         >
             {{ $t("gyroflightApplyReview") }}
         </UButton>
+        <p v-if="!canPreview" class="text-sm text-dimmed" data-gyrocore="workflow-preview-needs-release">
+            {{ $t("gyroflightPreviewNeedsRelease") }}
+        </p>
 
         <div
             v-if="workflow.preview"
@@ -211,7 +215,9 @@ import { useTuneWorkflow } from "@/composables/useTuneWorkflow";
 import { useApplyGate } from "@/gyrocore/composables/useApplyGate";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { useM4FlightMetricsStore } from "@/gyrocore/stores/m4FlightMetrics";
-import { useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { restoreTargetIssue, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
+import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
+import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { useTuneWorkflowStore } from "@/gyrocore/stores/tuneWorkflow";
 import { describeCompositeReasons } from "@/gyrocore/tuning/reasons";
 import {
@@ -267,10 +273,18 @@ const checklist = computed(() =>
         virtualMode: !!connection.virtualMode,
     }),
 );
-const canApply = computed(() => !!composite.value?.final && checklist.value.every((c) => c.ok));
+// An earlier write on this craft whose outcome nobody verified refuses every Apply (fcTransactionState).
+const transactionStates = useFcTransactionStore();
+const canApply = computed(
+    () =>
+        !!composite.value?.final &&
+        checklist.value.every((c) => c.ok) &&
+        !transactionStates.blocks(fc.config.uid).length,
+);
 const outcome = computed(() => workflow.outcome);
-// Read-only, so it is offered whenever a real FC is connected, even while Apply is blocked.
-const canPreview = computed(() => !!composite.value?.final && connected.value && !connection.virtualMode);
+// The firmware calculation of the preview goes through the shared FC store (useTuneApply
+// previewTune): it needs the same write authority as Apply, so it is offered exactly when Apply is.
+const canPreview = computed(() => canApply.value);
 const previewRows = computed(() => {
     const p = workflow.preview;
     return p?.status === "ok" && p.before && p.expected ? snapshotDiff(p.before, p.expected) : [];
@@ -287,7 +301,11 @@ async function onPreview() {
     }
 }
 
-const backups = computed(() => (connected.value ? backupStore.forUid(fc.config.uid) : []));
+// Backups of the absolute route are restored from the autotune v2 panel (they include the filter block).
+// Only backups a Restore may write back (tuneBackup.ts restoreTargetIssue).
+const backups = computed(() =>
+    connected.value ? backupStore.forUid(fc.config.uid).filter((b) => !b.absolute && !restoreTargetIssue(b)) : [],
+);
 
 function measurementById(id: string) {
     return gate.report?.measurements.find((m) => m.id === id) ?? null;

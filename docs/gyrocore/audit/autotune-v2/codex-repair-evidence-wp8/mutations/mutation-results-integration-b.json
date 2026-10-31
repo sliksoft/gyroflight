@@ -1,0 +1,22 @@
+[
+ {
+  "id": "M153",
+  "finding": "INT R2 run check",
+  "file": "src/js/utils/AutoRestore.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  1 failed | 7 passed (8)"
+ },
+ {
+  "id": "M155",
+  "finding": "RECHECK finally",
+  "file": "src/js/utils/AutoRestore.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  1 failed | 7 passed (8)"
+ }
+]

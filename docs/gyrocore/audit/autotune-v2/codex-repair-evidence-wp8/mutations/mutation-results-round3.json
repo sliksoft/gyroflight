@@ -1,0 +1,52 @@
+[
+ {
+  "id": "M144",
+  "finding": "R3 Ports chain",
+  "file": "src/composables/ports/usePortsConfiguration.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_round3.test.ts"
+  ],
+  "summary": "Tests  3 failed | 3 passed (6)"
+ },
+ {
+  "id": "M145",
+  "finding": "R3 prior attempts",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_round3.test.ts"
+  ],
+  "summary": "Tests  1 failed | 5 passed (6)"
+ },
+ {
+  "id": "M146",
+  "finding": "R3 WebSocket buffered",
+  "file": "src/js/serial.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_round3.test.ts"
+  ],
+  "summary": "Tests  1 failed | 5 passed (6)"
+ },
+ {
+  "id": "M147",
+  "finding": "R3 F06 inert",
+  "file": "src/components/tabs/FailsafeTab.vue",
+  "status": "KILLED",
+  "tests": [
+   "test/components/FailsafeTab.test.ts"
+  ],
+  "summary": "Tests  1 failed | 4 passed (5)"
+ },
+ {
+  "id": "M148",
+  "finding": "R3 F07 latch",
+  "file": "src/gyrocore/components/UncertainStateNotice.vue",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  1 failed | 24 passed (25)"
+ }
+]

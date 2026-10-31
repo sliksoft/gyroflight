@@ -1682,6 +1682,12 @@ export default defineComponent({
                             } else {
                                 gui_log($t("firmwareFlasherRestoreBackupSuccess"));
                             }
+                        } else if (result.persistence === "not_verified") {
+                            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): sent, but the
+                            // FC never confirmed the save: neither success nor a failed restore.
+                            const text = result.errors || $t("gyroflightRestoreSaveNotVerified");
+                            gui_log(text);
+                            dialog.openInfo($t("warningTitle"), text, () => {});
                         } else {
                             const errorMsg = result.errors || "Unknown error";
                             gui_log($t("firmwareFlasherRestoreBackupFailed", { 1: errorMsg }));

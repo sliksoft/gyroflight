@@ -26,6 +26,8 @@ import { generateFilename } from "./generate_filename";
 import { gui_log } from "../gui_log";
 import { i18n } from "../localization";
 import { serial } from "../serial";
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md): this backup reads the CLI over the raw serial line.
+import { interactiveCliStillAllowed, interactiveCliText, reportRefusedWrite } from "../../composables/fcWriteGuard";
 
 /**
  *
@@ -368,7 +370,7 @@ class AutoBackup {
         });
     }
 
-    private sendSerial(line: string, callback?: () => void) {
+    private sendSerial(line: string, callback?: () => void, stillWanted?: () => boolean) {
         const bufferOut = new ArrayBuffer(line.length);
         const bufView = new Uint8Array(bufferOut);
 
@@ -377,11 +379,23 @@ class AutoBackup {
             bufView[cKey] = line.codePointAt(cKey) ?? 0;
         }
 
-        void serial.send(bufferOut, callback);
+        void serial.send(bufferOut, callback, { stillWanted });
     }
 
     private sendCommand(line: string, callback?: () => void) {
-        this.sendSerial(`${line}\n`, callback);
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): it sends only `diff all` and `exit` (reads),
+        // checked like the CLI tab's lines (interactive CLI).
+        const out = interactiveCliText(`${line}\n`);
+        if (out.refused) {
+            reportRefusedWrite(`CLI "${line}"`, out.refused);
+            return;
+        }
+        // Checked again right before its bytes go out (audit WP8-F03). Its callback belongs to this
+        // connection (audit WP8 transport closure review): a send that finished only after the link
+        // closed and another opened must not act on that one (`exit` would disconnect it).
+        const connection = serial.connectionGeneration;
+        const onSent = callback && (() => serial.connectionGeneration === connection && callback());
+        this.sendSerial(out.text, onSent, () => interactiveCliStillAllowed(`${line}\n`, out.text));
     }
 
     execute(callback: (result: boolean) => void) {

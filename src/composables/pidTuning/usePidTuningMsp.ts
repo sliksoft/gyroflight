@@ -25,6 +25,7 @@ import MSPCodes, { MSP2TextType } from "@/js/msp/MSPCodes";
 import { mspHelper } from "@/js/msp/MSPHelper";
 import { API_VERSION_1_45, API_VERSION_1_47, API_VERSION_1_49 } from "@/js/data_storage";
 import { useFlightControllerStore } from "@/stores/fc";
+import { assertNoUncertainWriteOnConnectedCraft } from "@/gyrocore/stores/fcTransactionState";
 
 /** `fcStore.copyProfile.type`: which kind of profile MSP_COPY_PROFILE copies. */
 export enum CopyProfileType {
@@ -90,6 +91,9 @@ export function usePidTuningMsp() {
      * sent from fcStore.config, so the caller mirrors its inputs there first.
      */
     const writePidTuningConfig = async () => {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): no save on a craft whose last Gyroflight write
+        // ended unverified; it would write or persist those values.
+        assertNoUncertainWriteOnConnectedCraft();
         // Save PIDs
         await MSP.promise(MSPCodes.MSP_SET_PID, mspHelper.crunch(MSPCodes.MSP_SET_PID));
 

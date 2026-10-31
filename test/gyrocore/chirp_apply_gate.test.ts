@@ -131,16 +131,29 @@ import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { readFixtureBytes } from "./harness/fixtures";
 import { clearPhaseMarginForGate } from "./harness/clearPhaseMarginBlock";
 import { APPLY_IDENTITY_READS, APPLY_SUCCESS_SEQUENCE, createCraft, WRITE_CODES, type Craft } from "./harness/mspCraft";
+import { FAULT_FREE_CRAFT, previewedHash } from "./harness/previewConfirmation";
+import { previewTune } from "../../src/composables/useTuneApply";
+import type { ProposedSliders } from "../../src/composables/useAutotune";
 import { issueConfirmation, resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 
 const WRITES = WRITE_CODES;
 
-/** The token the interface issues once the user confirmed exactly this change. */
-function confirm(compositeId: string | null | undefined, sliders: object | null | undefined) {
+/**
+ * The token the interface issues once the user confirmed exactly this change, bound to the
+ * read-only preview of the craft as it is now (with the read-back faults a test arranged paused:
+ * they are meant for the Apply).
+ */
+async function confirmToken(compositeId: string | null | undefined, sliders: object | null | undefined) {
+    const preview = await previewedHash(msp, { readback: "ok" as const }, async () => ({
+        hash: await previewedHash(msp.craft, FAULT_FREE_CRAFT(), () =>
+            previewTune(sliders as ProposedSliders, compositeId === null ? null : String(compositeId)),
+        ),
+    }));
     return issueConfirmation({
         kind: "apply",
         compositeId: String(compositeId),
         sliders: { ...(sliders as Record<string, number>) },
+        preview,
     });
 }
 const GOOD = { crossoverHz: 40, delaySamples: 2, seconds: 8 };
@@ -240,7 +253,11 @@ describe("safe positive fixture: three agreeing axes -> one global tune -> exact
         expect(composite.final).toEqual(EXPECTED_FINAL);
 
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "phase_margin_not_validated",
         );
         noWrites();
@@ -256,7 +273,11 @@ describe("safe positive fixture: three agreeing axes -> one global tune -> exact
         expect(composite.authorized).toBe(false);
         expect(composite.blocked).toContain("phase_margin_not_validated");
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "phase_margin_not_validated",
         );
         noWrites();
@@ -273,7 +294,7 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
             useAutotune().applyGains(
                 m.recommendation!.result.proposed,
                 m.id,
-                confirm(m.id, m.recommendation!.result.proposed),
+                await confirmToken(m.id, m.recommendation!.result.proposed),
             ),
             "apply:single_measurement_apply_not_allowed",
         );
@@ -290,13 +311,21 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
         const { composite } = await load(MERGE_E2E_CASES.three_axis_agree());
         useAutotune().recomputeGains(PHASE_MARGIN_PRESETS.CONSERVATIVE);
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "apply:stale_composite",
         );
         const again = await load(MERGE_E2E_CASES.three_axis_agree());
         expect(again.composite.id).not.toBe(composite.id);
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "apply:stale_composite",
         );
         expect(msp.calls).toEqual([]);
@@ -308,7 +337,11 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
         rec.result.proposed.slider_i_gain += 1;
         gate.touch();
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "apply:stale_composite",
         );
         expect(msp.calls).toEqual([]);
@@ -320,7 +353,7 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
         const composite = gate.composite!;
         const tampered = { ...composite.final!, slider_pi_gain: composite.final!.slider_pi_gain + 1 };
         await expectBlocked(
-            useAutotune().applyGains(tampered, composite.id, confirm(composite.id, tampered)),
+            useAutotune().applyGains(tampered, composite.id, await confirmToken(composite.id, tampered)),
             "apply:sliders_differ_from_composite",
         );
         expect(msp.calls).toEqual([]);
@@ -335,7 +368,11 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
             expect.arrayContaining(["system_id_unusable", "system_id_unusable:log1-seg2", "measurement:low_coherence"]),
         );
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "system_id_unusable",
         );
         expect(msp.calls).toEqual([]);
@@ -356,7 +393,11 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
         });
         expect(composite.blocked).toEqual(expect.arrayContaining(["missing_axis_evidence:yaw"]));
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "missing_axis_evidence:yaw",
         );
         expect(msp.calls).toEqual([]);
@@ -372,7 +413,7 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
             useAutotune().applyGains(
                 composite.sources[0].proposed!,
                 composite.id,
-                confirm(composite.id, composite.sources[0].proposed!),
+                await confirmToken(composite.id, composite.sources[0].proposed!),
             ),
             "simplified_pids_mode_off",
         );
@@ -397,7 +438,11 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
             ]),
         );
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "composite_clamp_changes_direction:slider_feedforward_gain",
         );
         expect(msp.calls).toEqual([]);
@@ -423,7 +468,11 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
             ]),
         );
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "composite_clamp_changes_direction:slider_feedforward_gain",
         );
         expect(msp.calls).toEqual([]);
@@ -453,7 +502,7 @@ describe("Apply hard gate v2 rejects (no MSP write)", () => {
                 slider_dterm_filter_multiplier: 100,
             };
             await expectBlocked(
-                useAutotune().applyGains(sliders, composite.id, confirm(composite.id, sliders)),
+                useAutotune().applyGains(sliders, composite.id, await confirmToken(composite.id, sliders)),
                 reason,
             );
         }
@@ -490,7 +539,11 @@ describe("live flight-controller recheck (one read, then no write)", () => {
             expect(composite.authorized).toBe(true);
             msp.live = { ...LOGGED_LIVE, ...live };
             await expectBlocked(
-                useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+                useAutotune().applyGains(
+                    composite.final!,
+                    composite.id,
+                    await confirmToken(composite.id, composite.final!),
+                ),
                 reason,
             );
             expect(codes()).toEqual([...APPLY_IDENTITY_READS, MSPCodes.MSP_SIMPLIFIED_TUNING]);
@@ -517,7 +570,11 @@ describe("live read-back that cannot be trusted never reaches a write", () => {
             Object.assign(useFlightControllerStore().tuningSliders, LOGGED_LIVE);
             msp.readback = readback;
             await expectBlocked(
-                useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+                useAutotune().applyGains(
+                    composite.final!,
+                    composite.id,
+                    await confirmToken(composite.id, composite.final!),
+                ),
                 "fc:live_readback_missing",
             );
             expect(codes()).toEqual([...APPLY_IDENTITY_READS, MSPCodes.MSP_SIMPLIFIED_TUNING]);
@@ -533,7 +590,11 @@ describe("live read-back that cannot be trusted never reaches a write", () => {
         Object.assign(useFlightControllerStore().tuningSliders, LOGGED_LIVE);
         msp.readback = "timeout";
         await expect(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
         ).rejects.toThrow("MSP timeout");
         expect(codes()).toEqual([...APPLY_IDENTITY_READS, MSPCodes.MSP_SIMPLIFIED_TUNING]);
         noWrites();
@@ -544,7 +605,11 @@ describe("live read-back that cannot be trusted never reaches a write", () => {
         clearPhaseMarginForGate(gate);
         const composite = gate.composite!;
         expect(composite.authorized).toBe(true);
-        await useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!));
+        await useAutotune().applyGains(
+            composite.final!,
+            composite.id,
+            await confirmToken(composite.id, composite.final!),
+        );
         // validateTuningSliders is mocked in this file, so its MSP_VALIDATE_SIMPLIFIED_TUNING read is absent.
         expect(codes()).toEqual(APPLY_SUCCESS_SEQUENCE.filter((c) => c !== MSPCodes.MSP_VALIDATE_SIMPLIFIED_TUNING));
     });
@@ -576,7 +641,7 @@ describe("repeated sweeps on one axis", () => {
             useAutotune().applyGains(
                 composite.sources[0].proposed!,
                 composite.id,
-                confirm(composite.id, composite.sources[0].proposed!),
+                await confirmToken(composite.id, composite.sources[0].proposed!),
             ),
             "repeated_axis_requires_selection:roll",
         );
@@ -593,7 +658,7 @@ describe("repeated sweeps on one axis", () => {
         // The selected repeat covers roll.
         expect(chosen.coverage.sourceByAxis).toEqual({ roll: "log1-seg2", pitch: "log1-seg3", yaw: "log1-seg4" });
         expect(chosen.authorized).toBe(true);
-        await useAutotune().applyGains(chosen.final!, chosen.id, confirm(chosen.id, chosen.final!));
+        await useAutotune().applyGains(chosen.final!, chosen.id, await confirmToken(chosen.id, chosen.final!));
         expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
     });
 
@@ -682,7 +747,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
                     useAutotune().applyGains(
                         composite.final ?? composite.sources[0].proposed!,
                         composite.id,
-                        confirm(composite.id, composite.final ?? composite.sources[0].proposed!),
+                        await confirmToken(composite.id, composite.final ?? composite.sources[0].proposed!),
                     ),
                     ...coverageCodes,
                 );
@@ -693,7 +758,11 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
                 const cleared = gate.composite!;
                 expect(cleared.blocked).toEqual([]);
                 expect(cleared.authorized).toBe(true);
-                await useAutotune().applyGains(cleared.final!, cleared.id, confirm(cleared.id, cleared.final!));
+                await useAutotune().applyGains(
+                    cleared.final!,
+                    cleared.id,
+                    await confirmToken(cleared.id, cleared.final!),
+                );
                 expect(codes()).toContain(MSPCodes.MSP_SET_SIMPLIFIED_TUNING);
             }
         });
@@ -715,7 +784,11 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
             expect.arrayContaining(["missing_axis_evidence:pitch", "system_id_unusable"]),
         );
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "missing_axis_evidence:pitch",
         );
         expect(msp.calls).toEqual([]);
@@ -730,7 +803,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
             useAutotune().applyGains(
                 composite.sources[0].proposed!,
                 composite.id,
-                confirm(composite.id, composite.sources[0].proposed!),
+                await confirmToken(composite.id, composite.sources[0].proposed!),
             ),
             "axis_coverage_mode_off",
         );
@@ -746,7 +819,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
             useAutotune().applyGains(
                 composite.sources[0].proposed!,
                 composite.id,
-                confirm(composite.id, composite.sources[0].proposed!),
+                await confirmToken(composite.id, composite.sources[0].proposed!),
             ),
             "axis_coverage_mode_unknown",
         );
@@ -760,7 +833,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
         const cleared = gate.composite!;
         const tampered = { ...cleared.final!, slider_d_gain: cleared.final!.slider_d_gain + 5 };
         await expectBlocked(
-            useAutotune().applyGains(tampered, cleared.id, confirm(cleared.id, tampered)),
+            useAutotune().applyGains(tampered, cleared.id, await confirmToken(cleared.id, tampered)),
             "apply:sliders_differ_from_composite",
         );
         expect(msp.calls).toEqual([]);
@@ -771,7 +844,11 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
         expect(composite.coverage.missingAxes).toEqual([]);
         expect(composite.blocked).toContain("composite_clamp_changes_direction:slider_feedforward_gain");
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "composite_clamp_changes_direction:slider_feedforward_gain",
         );
         expect(msp.calls).toEqual([]);
@@ -784,7 +861,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
         expect(cleared.authorized).toBe(true);
         msp.live = { ...LOGGED_LIVE, slider_pids_mode: 2 };
         await expectBlocked(
-            useAutotune().applyGains(cleared.final!, cleared.id, confirm(cleared.id, cleared.final!)),
+            useAutotune().applyGains(cleared.final!, cleared.id, await confirmToken(cleared.id, cleared.final!)),
             "fc:missing_axis_evidence:yaw",
             "fc:simplified_pids_mode_changed",
         );
@@ -798,7 +875,7 @@ describe("axis coverage: every axis the slider mode drives needs its own qualifi
         const cleared = gate.composite!;
         msp.live = { ...LOGGED_LIVE, slider_pids_mode: 1 };
         const err = await useAutotune()
-            .applyGains(cleared.final!, cleared.id, confirm(cleared.id, cleared.final!))
+            .applyGains(cleared.final!, cleared.id, await confirmToken(cleared.id, cleared.final!))
             .catch((e: ApplyBlockedError) => e);
         expect(err).toBeInstanceOf(ApplyBlockedError);
         // RP needs only roll+pitch, which are covered; the mode change itself still blocks.
@@ -828,7 +905,11 @@ describe("GF-1: phase_margin_not_validated blocks Apply even when proposals equa
         expect(composite.blocked).toContain("phase_margin_not_validated");
         expect(composite.authorized).toBe(false);
         await expectBlocked(
-            useAutotune().applyGains(composite.final!, composite.id, confirm(composite.id, composite.final!)),
+            useAutotune().applyGains(
+                composite.final!,
+                composite.id,
+                await confirmToken(composite.id, composite.final!),
+            ),
             "phase_margin_not_validated",
         );
         expect(msp.calls).toEqual([]);

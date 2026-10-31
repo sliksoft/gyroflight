@@ -1,0 +1,3 @@
+Re-run after adding the two tests in the follow-up commit (wp8_transport_closure.test.ts only):
+T03 KILLED by "a transport whose link is not OPEN gets no bytes, whatever its own checks say"
+T14 KILLED by "a write during the connect's setup (GATT up, connection not open yet) is refused"

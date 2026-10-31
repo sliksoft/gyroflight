@@ -54,6 +54,8 @@ const AIR65_FC: FcIdentity = {
     version: "2026.6.2",
     apiVersion: "1.48.0",
     armed: false,
+    pidProfile: 0,
+    pidProfileCount: 4,
 };
 
 describe("FC identity", () => {
@@ -140,11 +142,11 @@ describe("confirmation tokens", () => {
     beforeEach(() => resetConfirmations());
 
     it("bind the exact sliders, regardless of key order", () => {
-        const t = issueConfirmation({ kind: "apply", compositeId: "c", sliders: { a: 1, b: 2 } });
+        const t = issueConfirmation({ kind: "apply", compositeId: "c", sliders: { a: 1, b: 2 }, preview: "h" });
         expect(() =>
             consumeConfirmation(t, { kind: "apply", compositeId: "c", sliders: { b: 2, a: 1 } }),
         ).not.toThrow();
-        const u = issueConfirmation({ kind: "apply", compositeId: "c", sliders: { a: 1 } });
+        const u = issueConfirmation({ kind: "apply", compositeId: "c", sliders: { a: 1 }, preview: "h" });
         expect(() => consumeConfirmation(u, { kind: "apply", compositeId: "c", sliders: { a: 1, b: 2 } })).toThrow(
             /confirmation_mismatch/,
         );

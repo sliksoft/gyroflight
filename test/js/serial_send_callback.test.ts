@@ -174,13 +174,16 @@ describe("WebBluetooth.send return value", () => {
     });
 
     it("returns the byte count written, not undefined", async () => {
-        const { default: WebBluetooth } = await vi.importActual<WebBluetoothModule>(
+        const { default: WebBluetooth, GattLink } = await vi.importActual<WebBluetoothModule>(
             "../../src/js/protocols/WebBluetooth",
         );
         const ble = new WebBluetooth();
         ble.writeCharacteristic = { writeValue: vi.fn().mockResolvedValue(undefined) } as unknown as Characteristic;
         ble.device = { gatt: { connected: true } } as unknown as Device;
         ble.writeQueue = Promise.resolve();
+        // An open connection (audit WP8 transport closure): connected, with its link.
+        ble.connected = true;
+        ble.link = new GattLink(ble.device);
 
         const result = await ble.send(new Uint8Array(20));
 

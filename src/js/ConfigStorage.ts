@@ -115,4 +115,8 @@ declare global {
     }
 }
 
-window.ConfigStorage = ConfigStorage;
+// Module workers (Autotune v2) import this transitively via utils/common → model. They have no
+// `window`; assigning would abort worker startup and force a permanent main-thread fallback.
+if (typeof window !== "undefined") {
+    window.ConfigStorage = ConfigStorage;
+}

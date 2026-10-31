@@ -40,3 +40,24 @@ jobs:
       - run: npx eslint src scripts *.mjs
       - run: npx vitest run
       - run: npm run build
+
+  browser-autotune:
+    name: Autotune browser gates (lease + worker)
+    runs-on: ubuntu-latest
+    # Scoped: Playwright Chromium only when this fork CI runs. No secrets.
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright-core install --with-deps chromium
+      - name: Browser lease + worker gates
+        run: npm run test:browser
