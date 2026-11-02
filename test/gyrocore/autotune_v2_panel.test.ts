@@ -72,6 +72,11 @@ import { useFlightControllerStore } from "../../src/stores/fc";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
 import { runSoftwareQualifiedAutotuneV2 } from "./harness/softwareQualifiedResult";
 import { syntheticLogInput } from "./harness/syntheticLog";
+import { closedLoopChirpLog, ratePlant } from "./harness/closedLoopBbl";
+import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
+import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
+import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
+import { createHash } from "node:crypto";
 import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 let blocked: AutotuneV2Result;
@@ -128,6 +133,47 @@ afterEach(() => {
 });
 
 describe("AutotuneV2Panel", () => {
+    it("shows the experimental CHIRP + JIO route as a diagnostic, blocked without its channels, never as a release path", async () => {
+        // Synthetic engine input without the JIO channels: the route names what is missing.
+        const c = mount(blocked);
+        await flush();
+        expect(q(c, '[data-gyrocore="v2-jio-status"]')!.textContent!.trim()).toBe("BLOCKED");
+        expect(q(c, '[data-gyrocore="v2-jio-blockers"]')!.textContent).toContain("jio_channels_missing");
+        expect(q(c, '[data-gyrocore="v2-jio-method"]')!.textContent).toContain("chirp_jio_sweep_fft_daniell");
+        expect(q(c, '[data-gyrocore="v2-jio-method"]')!.textContent).toContain("no_release_evidence:diagnostic_only");
+        unmount?.();
+        unmount = null;
+        // Simulated closed-loop Blackbox bytes with the controller terms: a DIAGNOSTIC result per axis,
+        // with its band, repeats and the reason tuning is not computed from it. Apply stays as before.
+        const G = ratePlant({ K: 60, motorHz: 40, delayS: 0.002 });
+        const bytes = closedLoopChirpLog({
+            plants: [G, G, null],
+            sweepS: 12,
+            amplitude: 150,
+            seed: 21,
+            jio: { disturbance: { sd: 3, poleHz: 300 } },
+        });
+        const sha = createHash("sha256").update(bytes).digest("hex");
+        const [log] = buildLogInputs(bytes, sha, qualifyChirpFile(bytes, "jio.bbl", 45, AUTOTUNE_MATH), null);
+        const diag = runAutotuneV2({ primary: log, others: [], verifiedTune: null, createdAt: "2026-11-02T00:00:00Z" });
+        expect(diag.jio.status).toBe("DIAGNOSTIC");
+        const d = mount(diag);
+        await flush();
+        expect(q(d, '[data-gyrocore="v2-jio-status"]')!.textContent!.trim()).toBe("DIAGNOSTIC");
+        const rows = d.querySelectorAll('[data-gyrocore="v2-jio"] tbody tr');
+        expect(rows).toHaveLength(2);
+        const roll = q(d, '[data-gyrocore="v2-jio"] tr[data-axis="roll"]')!;
+        expect(roll.getAttribute("data-repeats")).toBe("unknown");
+        expect(roll.getAttribute("data-computable")).toBe("yes");
+        expect(roll.textContent).toContain("MEASURED");
+        expect(roll.textContent).toContain("gyroflightV2JioDiagnosticOnly");
+        expect(roll.textContent).not.toContain("VALIDATED");
+        expect(q(d, '[data-gyrocore="v2-jio-needs"]')!.textContent).toContain("repeated_sweep_for_stationarity");
+        expect(q(d, '[data-gyrocore="v2-jio-mimo"]')).toBeNull();
+        expect((q(d, '[data-gyrocore="v2-apply"]') as HTMLButtonElement).disabled).toBe(true);
+        expect(writes()).toEqual([]);
+    });
+
     it("without an imported CHIRP file: nothing to calculate", async () => {
         const c = mount(null);
         await flush();

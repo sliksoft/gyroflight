@@ -187,6 +187,68 @@
                 </table>
             </template>
 
+            <template v-if="result.jio">
+                <p class="font-bold text-sm mt-2" data-gyrocore="v2-jio-title">
+                    {{ $t("gyroflightV2JioTitle") }}
+                    <span
+                        :class="result.jio.status === 'DIAGNOSTIC' ? 'text-yellow-500' : 'text-red-500'"
+                        data-gyrocore="v2-jio-status"
+                    >
+                        {{ result.jio.status }}
+                    </span>
+                </p>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioHelp") }}</p>
+                <p class="text-sm text-dimmed" data-gyrocore="v2-jio-method">
+                    {{ $t("gyroflightV2JioMethod") }}: {{ result.jio.analysis.method }};
+                    {{ $t("gyroflightV2JioFirmware") }}: {{ result.jio.analysis.firmwareRevision ?? "--" }};
+                    {{ $t("gyroflightV2JioLimitations") }}: {{ result.jio.analysis.limitations.join(", ") }}
+                </p>
+                <p
+                    v-if="result.jio.analysis.blockers.length"
+                    class="text-sm text-red-500"
+                    data-gyrocore="v2-jio-blockers"
+                >
+                    {{ $t("gyroflightV2JioBlocked") }}: {{ result.jio.analysis.blockers.join(", ") }}
+                </p>
+                <table v-if="jioRows.length" class="gyroflight-workflow-table text-sm" data-gyrocore="v2-jio">
+                    <thead>
+                        <tr>
+                            <th>{{ $t("gyroflightV2Axis") }}</th>
+                            <th>{{ $t("gyroflightV2JioRecords") }}</th>
+                            <th>{{ $t("gyroflightV2JioRepeats") }}</th>
+                            <th>{{ $t("gyroflightV2JioBand") }}</th>
+                            <th>{{ $t("gyroflightV2JioMissing") }}</th>
+                            <th>{{ $t("gyroflightV2Crossover") }} / PM</th>
+                            <th>{{ $t("gyroflightV2JioCandidate") }}</th>
+                            <th>{{ $t("gyroflightV2JioTuning") }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="row in jioRows"
+                            :key="row.axis"
+                            :data-axis="row.axis"
+                            :data-computable="row.computable ? 'yes' : 'no'"
+                            :data-repeats="row.consistency"
+                        >
+                            <td>{{ row.axis }}</td>
+                            <td>{{ row.records }}</td>
+                            <td>{{ row.repeats }}</td>
+                            <td>{{ row.band }}</td>
+                            <td class="text-dimmed">{{ row.missing }}</td>
+                            <td>{{ row.margins }}</td>
+                            <td>{{ row.candidate }}</td>
+                            <td :class="row.computable ? 'text-yellow-500' : 'text-red-500'">{{ row.tuning }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="text-sm text-dimmed" data-gyrocore="v2-jio-needs">
+                    {{ $t("gyroflightV2JioNeeds") }}:
+                    {{ result.jio.requiredMeasurements.map(measurementText).join("; ") || "--" }}
+                </p>
+                <p v-if="jioMimoText" class="text-sm text-dimmed" data-gyrocore="v2-jio-mimo">{{ jioMimoText }}</p>
+            </template>
+
             <template v-if="v2.qualification">
                 <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2QualTitle") }}</p>
                 <p class="text-sm text-dimmed">{{ $t("gyroflightV2QualHelp") }}</p>
@@ -466,6 +528,48 @@ const result = computed(() => v2.result);
 const num = (x: number | null | undefined, digits: number) =>
     x == null || !Number.isFinite(x) ? "--" : x.toFixed(digits);
 const band = (b: [number, number] | null) => (b ? `${num(b[0], 1)}–${num(b[1], 1)}` : "--");
+/** The experimental CHIRP + JIO route per axis: what was measured, what is missing, what it says. */
+const jioRows = computed(() => {
+    const jio = result.value?.jio;
+    if (!jio) return [];
+    return (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
+        const a = jio.analysis.axes[axis];
+        if (!a) return [];
+        const c = jio.chain[axis];
+        const used = a.records.filter((r) => r.used).length;
+        const flags = a.records.flatMap((r) => r.flags);
+        const reasons = Object.entries(a.reasons).map(([k, v]) => `${k}:${v}`);
+        const m = c?.margins ?? null;
+        return [
+            {
+                axis,
+                records: `${used}/${a.records.length}${flags.length ? ` (${flags.join(", ")})` : ""}`,
+                consistency: a.repeats.consistency,
+                repeats: `${a.repeats.count}: ${a.repeats.consistency}${a.repeats.z !== null ? ` z=${a.repeats.z.toFixed(2)}` : ""}`,
+                band: a.band
+                    ? `${band(a.band.supportedHz)} Hz (${Math.round(100 * a.band.supportedFraction)} %, ${a.band.gapPoints} ${i18n.getMessage("gyroflightV2JioGapPoints")})`
+                    : "--",
+                missing: reasons.join(", ") || "--",
+                margins: m
+                    ? `${num(m.crossoverHz, 1)} Hz / ${num(m.phaseMarginDeg ?? m.measured.phaseMarginDeg, 0)}° (${m.evidence.level})`
+                    : "--",
+                candidate: c?.candidate ? `${c.candidate.status}: ${c.candidate.outcome}` : "--",
+                computable: !!c?.tuningComputable,
+                tuning: c
+                    ? c.tuningComputable
+                        ? i18n.getMessage("gyroflightV2JioDiagnosticOnly")
+                        : `${i18n.getMessage("gyroflightV2JioNotComputable")}: ${c.reasons.slice(0, 4).join(", ")}`
+                    : a.blockers.join(", "),
+            },
+        ];
+    });
+});
+const jioMimoText = computed(() => {
+    const m = result.value?.jio?.analysis.mimo;
+    return m
+        ? i18n.getMessage("gyroflightV2JioMimo", [String(m.pointsWellConditioned), band(m.bandHz), m.notes.join(", ")])
+        : null;
+});
 const qualSourceText = (s: { sha256: string; logIndex: number }) =>
     i18n.getMessage("gyroflightV2QualSource", [s.sha256.slice(0, 12), String(s.logIndex + 1)]);
 const outcome = computed(() => v2.outcome);
