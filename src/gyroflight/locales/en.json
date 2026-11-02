@@ -1027,6 +1027,18 @@
     "gyroflightV2JioCandidate": { "message": "Candidate" },
     "gyroflightV2JioTuning": { "message": "Tuning from this route" },
     "gyroflightV2JioGapPoints": { "message": "gap points" },
+    "gyroflightV2JioCrossFlight": { "message": "Repeats across flights" },
+    "gyroflightV2JioCrossFlightNone": { "message": "none comparable (see the other flights below)" },
+    "gyroflightV2JioCandidates": {
+        "message": "Other flights offered as repeats (closed-loop z decides; plant z alongside; nothing averaged across flights)"
+    },
+    "gyroflightV2JioPlot": { "message": "|G| dB (dots, filled = supported) and r→y coherence 0–1 (dashed) over Hz" },
+    "gyroflightV2JioAdvice": {
+        "message": "Next $1 sweep (experimental, firmware exponential sweep, same duration and amplitude): current $2 → suggested $3; basis: $4"
+    },
+    "gyroflightV2JioAdviceNone": {
+        "message": "Next $1 sweep: the current sweep $2 already matches the supported band; basis: $3"
+    },
     "gyroflightV2JioDiagnosticOnly": { "message": "diagnostic only (no release evidence)" },
     "gyroflightV2JioNotComputable": { "message": "not computable" },
     "gyroflightV2JioNeeds": { "message": "Measurement this route still needs" },
@@ -1057,6 +1069,15 @@
     },
     "gyroflightV2Need_chirp_yaw_repeated_sweep_consistent": {
         "message": "two consistent yaw sweeps (the repeats differed)"
+    },
+    "gyroflightV2Need_chirp_roll_band_matched_sweep": {
+        "message": "a roll sweep whose end frequency matches the supported band (see the sweep advice; exponential firmware sweep, same duration and amplitude)"
+    },
+    "gyroflightV2Need_chirp_pitch_band_matched_sweep": {
+        "message": "a pitch sweep whose end frequency matches the supported band (see the sweep advice; exponential firmware sweep, same duration and amplitude)"
+    },
+    "gyroflightV2Need_chirp_yaw_band_matched_sweep": {
+        "message": "a yaw sweep whose end frequency matches the supported band (see the sweep advice; exponential firmware sweep, same duration and amplitude)"
     },
     "gyroflightV2Need_chirp_roll_without_saturation": {
         "message": "a roll sweep without pidSum limit or motor saturation"

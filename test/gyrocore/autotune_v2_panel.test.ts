@@ -155,7 +155,23 @@ describe("AutotuneV2Panel", () => {
         });
         const sha = createHash("sha256").update(bytes).digest("hex");
         const [log] = buildLogInputs(bytes, sha, qualifyChirpFile(bytes, "jio.bbl", 45, AUTOTUNE_MATH), null);
-        const diag = runAutotuneV2({ primary: log, others: [], verifiedTune: null, createdAt: "2026-11-02T00:00:00Z" });
+        // A second independent flight of the same craft and settings: a cross-flight repeat.
+        const bytes2 = closedLoopChirpLog({
+            plants: [G, G, null],
+            sweepS: 12,
+            amplitude: 150,
+            seed: 22,
+            startTimeUs: 9_000_000,
+            jio: { disturbance: { sd: 3, poleHz: 300 } },
+        });
+        const sha2 = createHash("sha256").update(bytes2).digest("hex");
+        const [log2] = buildLogInputs(bytes2, sha2, qualifyChirpFile(bytes2, "jio2.bbl", 45, AUTOTUNE_MATH), null);
+        const diag = runAutotuneV2({
+            primary: log,
+            others: [log2],
+            verifiedTune: null,
+            createdAt: "2026-11-02T00:00:00Z",
+        });
         expect(diag.jio.status).toBe("DIAGNOSTIC");
         const d = mount(diag);
         await flush();
@@ -168,7 +184,21 @@ describe("AutotuneV2Panel", () => {
         expect(roll.textContent).toContain("MEASURED");
         expect(roll.textContent).toContain("gyroflightV2JioDiagnosticOnly");
         expect(roll.textContent).not.toContain("VALIDATED");
-        expect(q(d, '[data-gyrocore="v2-jio-needs"]')!.textContent).toContain("repeated_sweep_for_stationarity");
+        // The other flight is a consistent repeat: the row says so and the stationarity need is gone.
+        expect(roll.getAttribute("data-cross-flight")).toBe("consistent");
+        expect(roll.textContent).toMatch(/1: consistent z=\d/);
+        expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain(`${sha2.slice(0, 12)}#1`);
+        expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("plant z=");
+        expect(q(d, '[data-gyrocore="v2-jio-needs"]')!.textContent).not.toContain("repeated_sweep_for_stationarity");
+        // The plot per analysed axis: dots for the evaluation points, and the sweep advice per axis.
+        const plots = d.querySelectorAll('[data-gyrocore="v2-jio-plot"]');
+        expect(plots).toHaveLength(2);
+        expect(Number(plots[0].getAttribute("data-points"))).toBeGreaterThan(50);
+        expect(plots[0].querySelectorAll("circle").length).toBe(Number(plots[0].getAttribute("data-points")));
+        expect(plots[0].querySelector("polyline")!.getAttribute("points")!.length).toBeGreaterThan(100);
+        const advice = d.querySelectorAll('[data-gyrocore="v2-jio-advice"]');
+        expect(advice).toHaveLength(2);
+        expect(advice[0].textContent).toMatch(/gyroflightV2JioAdvice(None)?\|roll\|/);
         expect(q(d, '[data-gyrocore="v2-jio-mimo"]')).toBeNull();
         expect((q(d, '[data-gyrocore="v2-apply"]') as HTMLButtonElement).disabled).toBe(true);
         expect(writes()).toEqual([]);

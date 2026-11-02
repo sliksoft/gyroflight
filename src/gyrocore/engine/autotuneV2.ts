@@ -95,7 +95,14 @@ import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, sameFlight } from "./logInput";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
-import { analyzeJioSweeps, type JioChannels, type JioSweepAnalysis, type JioSweepRecord } from "./jioSweep";
+import {
+    analyzeJioSweeps,
+    crossFlightRepeatabilityZ,
+    JIO_SWEEP,
+    type JioChannels,
+    type JioSweepAnalysis,
+    type JioSweepRecord,
+} from "./jioSweep";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 /** rcCommand[3] below this: on the ground / idle; the PID terms are not representative. */
@@ -275,15 +282,62 @@ export interface JioAxisChain {
     reasons: string[];
 }
 
+/** One further log offered as a cross-flight repeat of the primary's JIO plant. */
+export interface JioCrossFlightCandidate {
+    sha256: string;
+    logIndex: number;
+    /** Why the log is not a comparable independent repeat (empty: it is). */
+    issues: string[];
+    usable: boolean;
+    axes: Partial<
+        Record<
+            AxisName,
+            {
+                /** Repeatability z of the closed-loop response T (the verdict), see crossFlightRepeatabilityZ. */
+                z: number | null;
+                /** The same statistic on the plant G (informative: T may differ by the controller in force). */
+                zPlant: number | null;
+                matchedPoints: number;
+                consistency: "consistent" | "inconsistent" | "unknown";
+                reasons: string[];
+            }
+        >
+    >;
+}
+
 export interface JioRouteResult {
     status: "DIAGNOSTIC" | "BLOCKED";
     analysis: JioSweepAnalysis;
     chain: Partial<Record<AxisName, JioAxisChain>>;
+    /**
+     * Repeats across independent flights of the same craft, firmware, configuration and sweep
+     * settings (the primary route's identity rules, crossLogReferenceIssues): the plant G of the
+     * primary against each other flight's, as a comparison only — nothing is averaged across flights.
+     */
+    crossFlight: {
+        candidates: JioCrossFlightCandidate[];
+        axes: Partial<
+            Record<
+                AxisName,
+                { flights: number; consistency: "consistent" | "inconsistent" | "unknown"; zMax: number | null }
+            >
+        >;
+    };
     /** Measurement the route still needs, as required_measurement:* codes. */
     requiredMeasurements: string[];
     /** Always true: the route is not release evidence (see JIO_LIMITATIONS). */
     diagnosticOnly: true;
 }
+
+/** Sweep settings that a JIO repeat must share with the primary (beyond PLANT_CONFIG_KEYS). */
+const JIO_SWEEP_KEYS = [
+    "chirp_amplitude_roll",
+    "chirp_amplitude_pitch",
+    "chirp_amplitude_yaw",
+    "chirp_frequency_start_deci_hz",
+    "chirp_frequency_end_deci_hz",
+    "chirp_time_seconds",
+];
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
     return Object.fromEntries(pairs.map(([k, v]) => [k, v]));
@@ -595,7 +649,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
 
     // EXPERIMENTAL CHIRP + JIO route (jioSweep.ts): the same loop model, candidate search and planner
     // on a plant measured from the logged pidSum. Kept apart from `items`: it is not release evidence.
-    const jio = runJioRoute(log, h, mask, sim, chainCfg, chainOk, attested, sweepFromHeaders(h));
+    const jio = runJioRoute(log, input.others, h, mask, sim, chainCfg, chainOk, attested, sweepFromHeaders(h));
 
     // 4a. PID per axis.
     const dmax = nums(h, "d_max") ?? [0, 0, 0];
@@ -1032,7 +1086,11 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
 }
 
 /** The required_measurement:* codes of the JIO route's own blockers. */
-function jioRequirements(analysis: JioSweepAnalysis, chain: Partial<Record<AxisName, JioAxisChain>>): string[] {
+function jioRequirements(
+    analysis: JioSweepAnalysis,
+    chain: Partial<Record<AxisName, JioAxisChain>>,
+    crossFlight: JioRouteResult["crossFlight"],
+): string[] {
     const out = new Set<string>();
     for (const b of analysis.blockers) {
         if (b.startsWith("jio_channel_missing") || b.startsWith("jio_debug_mode"))
@@ -1046,9 +1104,14 @@ function jioRequirements(analysis: JioSweepAnalysis, chain: Partial<Record<AxisN
             out.add(`required_measurement:chirp_${name}_sweep`);
             continue;
         }
-        if (a.repeats.count < 2) out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
-        if (a.repeats.consistency === "inconsistent")
+        // A comparable sweep of another independent flight is a repeat too: the need for one
+        // stands only while neither the log nor another flight gives a comparison.
+        const cross = crossFlight.axes[name]?.consistency ?? "unknown";
+        if (a.repeats.count < 2 && cross === "unknown")
+            out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
+        if (a.repeats.consistency === "inconsistent" || cross === "inconsistent")
             out.add(`required_measurement:chirp_${name}_repeated_sweep_consistent`);
+        if (a.sweepAdvice?.suggested) out.add(`required_measurement:chirp_${name}_band_matched_sweep`);
         if (a.blockers.some((b) => b.startsWith("record:") && /pidsum_limit_active|motor_saturation/.test(b)))
             out.add(`required_measurement:chirp_${name}_without_saturation`);
         for (const r of chain[name]?.plan?.requiredMeasurements ?? []) out.add(r);
@@ -1058,6 +1121,7 @@ function jioRequirements(analysis: JioSweepAnalysis, chain: Partial<Record<AxisN
 
 function runJioRoute(
     log: AutotuneLogInput,
+    others: readonly AutotuneLogInput[],
     h: Record<string, string>,
     mask: Uint8Array,
     sim: ChainSimulation | null,
@@ -1085,6 +1149,7 @@ function runJioRoute(
         },
         controllers,
     );
+    const crossFlight = jioCrossFlight(log, others, analysis);
     const chain: Partial<Record<AxisName, JioAxisChain>> = {};
     const dmax = nums(h, "d_max") ?? [0, 0, 0];
     for (const name of AXES) {
@@ -1092,6 +1157,7 @@ function runJioRoute(
         const a = analysis.axes[name];
         if (!a) continue;
         const reasons = [...a.blockers];
+        const cross = crossFlight.axes[name];
         const cfg = controllers[ai];
         const p = nums(h, `${name}PID`);
         if (!a.engineInput || !cfg || !p) {
@@ -1136,6 +1202,16 @@ function runJioRoute(
             };
             reasons.push("jio_experimental_never_validated");
         }
+        // The plant differed between this flight and another comparable one: whichever is right,
+        // no candidate from this plant (the margins stay visible as this flight's reading).
+        if (cross?.consistency === "inconsistent") {
+            candidate = {
+                ...candidate,
+                status: "BLOCKED",
+                reasons: [...candidate.reasons, "jio_cross_flight_inconsistent"],
+            };
+            reasons.push(`jio_cross_flight_inconsistent:z:${cross.zMax!.toFixed(2)}`);
+        }
         const plan = planMeasurement(name, loop, margins, log.sampleRateHz, sweep, null);
         const computable = margins.status !== "UNAVAILABLE" && margins.crossoverHz !== null;
         if (!computable) reasons.push("jio_margins_unavailable", ...margins.reasons);
@@ -1145,6 +1221,11 @@ function runJioRoute(
                     ? "stationarity_unknown:repeats_not_comparable"
                     : "stationarity_unknown:single_sweep",
             );
+        reasons.push(
+            cross && cross.consistency !== "unknown"
+                ? `cross_flight_repeat:${cross.consistency}:flights:${cross.flights}:z:${cross.zMax!.toFixed(2)}`
+                : `cross_flight_repeat:none${others.length ? ":see_crossFlight_candidates" : ""}`,
+        );
         chain[name] = { axis: name, margins, candidate, plan, tuningComputable: computable, reasons };
     }
     const anyChain = Object.values(chain).some((c) => c?.tuningComputable);
@@ -1152,7 +1233,116 @@ function runJioRoute(
         status: anyChain ? "DIAGNOSTIC" : "BLOCKED",
         analysis,
         chain,
-        requiredMeasurements: jioRequirements(analysis, chain),
+        crossFlight,
+        requiredMeasurements: jioRequirements(analysis, chain, crossFlight),
         diagnosticOnly: true,
     };
+}
+
+/**
+ * The JIO plant of the primary against every other log that is an independent flight of the same
+ * craft, firmware, configuration and sweep settings. Each other log gets the same analysis (its own
+ * header controller); the comparison is per axis on the supported points of both (jioSweep.ts
+ * crossFlightRepeatabilityZ). A flight that is the primary's own (any file name or hash), a copy of
+ * its samples, or whose plant equals the primary's to the last bit, is not a repeat.
+ */
+function jioCrossFlight(
+    log: AutotuneLogInput,
+    others: readonly AutotuneLogInput[],
+    analysis: JioSweepAnalysis,
+): JioRouteResult["crossFlight"] {
+    const candidates: JioCrossFlightCandidate[] = [];
+    const ha = new Map(log.headerPairs);
+    const bandOf = (name: AxisName) => analysis.axes[name]?.band?.analysedHz ?? null;
+    for (const other of others) {
+        const issues = crossLogReferenceIssues(log, other, others);
+        const hb = new Map(other.headerPairs);
+        for (const k of JIO_SWEEP_KEYS) if (ha.get(k) !== hb.get(k)) issues.push(`jio_cross_flight_sweep_differs:${k}`);
+        const cand: JioCrossFlightCandidate = {
+            sha256: other.sha256,
+            logIndex: other.logIndex,
+            issues: [...new Set(issues)],
+            usable: false,
+            axes: {},
+        };
+        candidates.push(cand);
+        if (cand.issues.length || analysis.blockers.length) continue;
+        const oh = headerMap(other.headerPairs);
+        const otherAnalysis = analyzeJioSweeps(
+            {
+                headerPairs: other.headerPairs,
+                sampleRateHz: other.sampleRateHz,
+                gyroAdc: other.channels.gyroAdc,
+                axisD: other.channels.axisD,
+                motors: other.channels.motors,
+                jio: other.channels.jio ?? null,
+                sweeps: other.sweeps ?? [],
+            },
+            AXES.map((_, ai) => controllerConfigFromHeaders(oh, ai as 0 | 1 | 2)) as [
+                DigitalControllerConfig | null,
+                DigitalControllerConfig | null,
+                DigitalControllerConfig | null,
+            ],
+        );
+        if (otherAnalysis.blockers.length) {
+            cand.issues.push(...otherAnalysis.blockers.map((b) => `other_log:${b}`));
+            continue;
+        }
+        cand.usable = true;
+        for (const name of AXES) {
+            const a = analysis.axes[name];
+            const b = otherAnalysis.axes[name];
+            const band = bandOf(name);
+            if (!a?.points || !a.engineInput) continue;
+            if (!b?.points || !b.engineInput) {
+                cand.axes[name] = {
+                    z: null,
+                    zPlant: null,
+                    matchedPoints: 0,
+                    consistency: "unknown",
+                    reasons: [`other_flight_axis_unusable:${(b?.blockers ?? ["no_sweep"]).join(",")}`],
+                };
+                continue;
+            }
+            // Two flights never identify the same plant to the last bit: equal values are one measurement.
+            if (
+                a.points.gRe.length === b.points.gRe.length &&
+                a.points.gRe.every((v, i) => v === b.points!.gRe[i]) &&
+                a.points.gIm.every((v, i) => v === b.points!.gIm[i])
+            ) {
+                cand.axes[name] = {
+                    z: null,
+                    zPlant: null,
+                    matchedPoints: 0,
+                    consistency: "unknown",
+                    reasons: ["identical_measurement"],
+                };
+                continue;
+            }
+            const cmp = crossFlightRepeatabilityZ(a.points, b.points, a.grid!.nEff, b.grid!.nEff, band![0], band![1]);
+            cand.axes[name] = {
+                z: cmp.z,
+                zPlant: cmp.zPlant,
+                matchedPoints: cmp.matched,
+                consistency:
+                    cmp.z === null ? "unknown" : cmp.z > JIO_SWEEP.repeatZThreshold ? "inconsistent" : "consistent",
+                reasons: cmp.reasons,
+            };
+        }
+    }
+    const axes: JioRouteResult["crossFlight"]["axes"] = {};
+    for (const name of AXES) {
+        const zs = candidates.flatMap((c) => {
+            const z = c.axes[name]?.z;
+            return typeof z === "number" ? [z] : [];
+        });
+        if (!zs.length) continue;
+        const zMax = Math.max(...zs);
+        axes[name] = {
+            flights: zs.length,
+            consistency: zMax > JIO_SWEEP.repeatZThreshold ? "inconsistent" : "consistent",
+            zMax,
+        };
+    }
+    return { candidates, axes };
 }

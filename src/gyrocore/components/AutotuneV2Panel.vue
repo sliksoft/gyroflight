@@ -216,6 +216,7 @@
                             <th>{{ $t("gyroflightV2Axis") }}</th>
                             <th>{{ $t("gyroflightV2JioRecords") }}</th>
                             <th>{{ $t("gyroflightV2JioRepeats") }}</th>
+                            <th>{{ $t("gyroflightV2JioCrossFlight") }}</th>
                             <th>{{ $t("gyroflightV2JioBand") }}</th>
                             <th>{{ $t("gyroflightV2JioMissing") }}</th>
                             <th>{{ $t("gyroflightV2Crossover") }} / PM</th>
@@ -230,10 +231,12 @@
                             :data-axis="row.axis"
                             :data-computable="row.computable ? 'yes' : 'no'"
                             :data-repeats="row.consistency"
+                            :data-cross-flight="row.crossFlightConsistency"
                         >
                             <td>{{ row.axis }}</td>
                             <td>{{ row.records }}</td>
                             <td>{{ row.repeats }}</td>
+                            <td>{{ row.crossFlight }}</td>
                             <td>{{ row.band }}</td>
                             <td class="text-dimmed">{{ row.missing }}</td>
                             <td>{{ row.margins }}</td>
@@ -242,6 +245,77 @@
                         </tr>
                     </tbody>
                 </table>
+                <div v-if="jioPlots.length" class="flex flex-wrap gap-3">
+                    <figure
+                        v-for="pl in jioPlots"
+                        :key="pl.axis"
+                        class="text-xs text-dimmed"
+                        data-gyrocore="v2-jio-plot"
+                        :data-axis="pl.axis"
+                        :data-points="pl.dots.length"
+                    >
+                        <figcaption>{{ pl.axis }}: {{ $t("gyroflightV2JioPlot") }}</figcaption>
+                        <svg :viewBox="`0 0 ${pl.w} ${pl.h}`" :width="pl.w" :height="pl.h" class="block">
+                            <rect
+                                :x="pl.x0"
+                                :y="pl.y0"
+                                :width="pl.pw"
+                                :height="pl.ph"
+                                fill="none"
+                                stroke="currentColor"
+                                opacity="0.25"
+                            />
+                            <template v-for="t in pl.ticks" :key="t.hz">
+                                <line
+                                    :x1="t.x"
+                                    :x2="t.x"
+                                    :y1="pl.y0"
+                                    :y2="pl.y0 + pl.ph"
+                                    stroke="currentColor"
+                                    opacity="0.12"
+                                />
+                                <text :x="t.x" :y="pl.h - 3" font-size="8" text-anchor="middle" fill="currentColor">
+                                    {{ t.hz }}
+                                </text>
+                            </template>
+                            <text :x="pl.x0 - 2" :y="pl.y0 + 7" font-size="8" text-anchor="end" fill="currentColor">
+                                {{ pl.dbMax }}
+                            </text>
+                            <text :x="pl.x0 - 2" :y="pl.y0 + pl.ph" font-size="8" text-anchor="end" fill="currentColor">
+                                {{ pl.dbMin }}
+                            </text>
+                            <polyline
+                                :points="pl.coherence"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-dasharray="3 2"
+                                opacity="0.5"
+                            />
+                            <circle
+                                v-for="(d, i) in pl.dots"
+                                :key="i"
+                                :cx="d.x"
+                                :cy="d.y"
+                                r="1.6"
+                                :fill="d.sup ? 'currentColor' : 'none'"
+                                stroke="currentColor"
+                                :opacity="d.sup ? 0.9 : 0.3"
+                            />
+                        </svg>
+                    </figure>
+                </div>
+                <p
+                    v-for="adv in jioAdvice"
+                    :key="adv.axis"
+                    class="text-sm text-dimmed"
+                    data-gyrocore="v2-jio-advice"
+                    :data-axis="adv.axis"
+                >
+                    {{ adv.text }}
+                </p>
+                <p v-if="jioCandidates.length" class="text-sm text-dimmed" data-gyrocore="v2-jio-cross">
+                    {{ $t("gyroflightV2JioCandidates") }}: {{ jioCandidates.join(" | ") }}
+                </p>
                 <p class="text-sm text-dimmed" data-gyrocore="v2-jio-needs">
                     {{ $t("gyroflightV2JioNeeds") }}:
                     {{ result.jio.requiredMeasurements.map(measurementText).join("; ") || "--" }}
@@ -540,12 +614,19 @@ const jioRows = computed(() => {
         const flags = a.records.flatMap((r) => r.flags);
         const reasons = Object.entries(a.reasons).map(([k, v]) => `${k}:${v}`);
         const m = c?.margins ?? null;
+        const cf = jio.crossFlight.axes[axis];
         return [
             {
                 axis,
                 records: `${used}/${a.records.length}${flags.length ? ` (${flags.join(", ")})` : ""}`,
                 consistency: a.repeats.consistency,
                 repeats: `${a.repeats.count}: ${a.repeats.consistency}${a.repeats.z !== null ? ` z=${a.repeats.z.toFixed(2)}` : ""}`,
+                crossFlightConsistency: cf?.consistency ?? "none",
+                crossFlight: cf
+                    ? `${cf.flights}: ${cf.consistency} z=${cf.zMax!.toFixed(2)}`
+                    : jio.crossFlight.candidates.length
+                      ? i18n.getMessage("gyroflightV2JioCrossFlightNone")
+                      : "--",
                 band: a.band
                     ? `${band(a.band.supportedHz)} Hz (${Math.round(100 * a.band.supportedFraction)} %, ${a.band.gapPoints} ${i18n.getMessage("gyroflightV2JioGapPoints")})`
                     : "--",
@@ -562,6 +643,91 @@ const jioRows = computed(() => {
                     : a.blockers.join(", "),
             },
         ];
+    });
+});
+/** The next sweep per axis: the firmware's own exponential sweep with a band-matched end frequency. */
+const jioAdvice = computed(() => {
+    const jio = result.value?.jio;
+    if (!jio) return [];
+    return (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
+        const adv = jio.analysis.axes[axis]?.sweepAdvice;
+        if (!adv) return [];
+        const cur = `${num(adv.current.f0Hz, 1)}–${num(adv.current.f1Hz, 0)} Hz / ${num(adv.current.durationS, 0)} s (${num(adv.current.secondsPerOctave, 2)} s/octave, ${num(adv.current.octavesAboveSupport, 1)} octaves above the supported band)`;
+        const sg = adv.suggested;
+        const text = sg
+            ? i18n.getMessage("gyroflightV2JioAdvice", [
+                  axis,
+                  cur,
+                  `chirp_frequency_start_deci_hz=${sg.chirp_frequency_start_deci_hz}, chirp_frequency_end_deci_hz=${sg.chirp_frequency_end_deci_hz}, chirp_time_seconds=${sg.chirp_time_seconds} (${num(sg.secondsPerOctave, 2)} s/octave, +${num(sg.excitationGainDb, 1)} dB per octave)`,
+                  adv.basis.join(", "),
+              ])
+            : i18n.getMessage("gyroflightV2JioAdviceNone", [axis, cur, adv.basis.join(", ")]);
+        return [{ axis, text }];
+    });
+});
+/** Every other log offered as a cross-flight repeat: usable with its per-axis z, or why not. */
+const jioCandidates = computed(() => {
+    const jio = result.value?.jio;
+    if (!jio) return [];
+    return jio.crossFlight.candidates.map((c) => {
+        const id = `${c.sha256.slice(0, 12)}#${c.logIndex + 1}`;
+        if (!c.usable) return `${id}: ${c.issues.join(", ")}`;
+        const axes = (["roll", "pitch", "yaw"] as const).map((axis) => {
+            const a = c.axes[axis];
+            if (!a) return `${axis} --`;
+            return a.z !== null
+                ? `${axis} ${a.consistency} z=${a.z.toFixed(2)} (plant z=${num(a.zPlant, 2)}, ${a.matchedPoints} pts)`
+                : `${axis} ${a.consistency}: ${a.reasons.join(", ")}`;
+        });
+        return `${id}: ${axes.join("; ")}`;
+    });
+});
+/** |G| (dB) over log frequency, filled where supported, with the r→y coherence as a dashed line (0–1 over the plot height). */
+const jioPlots = computed(() => {
+    const jio = result.value?.jio;
+    if (!jio) return [];
+    const w = 320;
+    const h = 110;
+    const x0 = 30;
+    const y0 = 6;
+    const pw = w - x0 - 8;
+    const ph = h - y0 - 16;
+    return (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
+        const a = jio.analysis.axes[axis];
+        const pts = a?.points;
+        const band = a?.band?.analysedHz;
+        if (!pts || !band || !(band[1] > band[0])) return [];
+        const lo = Math.log10(band[0]);
+        const hi = Math.log10(band[1]);
+        const x = (f: number) => x0 + (pw * (Math.log10(f) - lo)) / (hi - lo);
+        const idx: number[] = [];
+        for (let i = 0; i < pts.frequencyHz.length; i++)
+            if (pts.frequencyHz[i] >= band[0] && pts.frequencyHz[i] <= band[1]) idx.push(i);
+        const db = (i: number) => 20 * Math.log10(Math.hypot(pts.gRe[i], pts.gIm[i]));
+        const sup = idx
+            .filter((i) => pts.supported[i])
+            .map(db)
+            .filter(Number.isFinite);
+        const ref = sup.length ? sup : idx.map(db).filter(Number.isFinite);
+        if (!ref.length) return [];
+        const dbMin = Math.floor(Math.min(...ref) - 6);
+        const dbMax = Math.ceil(Math.max(...ref) + 6);
+        const y = (v: number) => y0 + ph * (1 - Math.min(1, Math.max(0, (v - dbMin) / (dbMax - dbMin))));
+        const stride = Math.max(1, Math.ceil(idx.length / 400));
+        const dots: { x: number; y: number; sup: boolean }[] = [];
+        const coh: string[] = [];
+        for (let k = 0; k < idx.length; k += stride) {
+            const i = idx[k];
+            const v = db(i);
+            if (Number.isFinite(v))
+                dots.push({ x: +x(pts.frequencyHz[i]).toFixed(1), y: +y(v).toFixed(1), sup: pts.supported[i] === 1 });
+            const g2 = Math.min(1, Math.max(0, pts.coherenceRy[i]));
+            coh.push(`${x(pts.frequencyHz[i]).toFixed(1)},${(y0 + ph * (1 - g2)).toFixed(1)}`);
+        }
+        const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+            .filter((f) => f >= band[0] && f <= band[1])
+            .map((hz) => ({ hz, x: +x(hz).toFixed(1) }));
+        return [{ axis, w, h, x0, y0, pw, ph, dbMin, dbMax, dots, coherence: coh.join(" "), ticks }];
     });
 });
 const jioMimoText = computed(() => {

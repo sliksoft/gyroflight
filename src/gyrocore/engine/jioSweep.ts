@@ -101,7 +101,51 @@ export const JIO_SWEEP = Object.freeze({
     lowestHz: 2,
     /** Highest analysed frequency as a fraction of the sample rate. */
     nyquistFraction: 0.45,
+    /** Cross-flight comparison: fewer common supported points than this gives no verdict. */
+    crossFlightMinPoints: 5,
+    /** Cross-flight comparison: evaluation grids whose steps differ by more than this are not matched. */
+    crossFlightMaxStepRatio: 2,
 });
+
+/**
+ * The firmware's chirp generator as the log's revision has it: settable ranges from betaflight
+ * `src/main/cli/settings.c` (minmax of chirp_frequency_start_deci_hz 1–1000, chirp_frequency_end_deci_hz
+ * 1–10000, chirp_time_seconds 1–255, chirp_amplitude_* 0–500; checked at 43875a55a, the revision the
+ * AIR65 logs name), and the sweep law from `src/main/common/chirp.c`: f(t) = f0·β^t with
+ * β = (f1/f0)^(1/T) — exponential, so each octave gets the same time T / log2(f1/f0). A linear sweep
+ * is not a setting of this firmware and is never suggested.
+ */
+export const FIRMWARE_CHIRP = Object.freeze({
+    startDeciHz: [1, 1000] as const,
+    endDeciHz: [1, 10000] as const,
+    timeS: [1, 255] as const,
+    amplitudeDegS: [0, 500] as const,
+    /** Suggested end frequency: this many times the top of the supported band (room for the coherence to fall). */
+    endMarginFactor: 1.5,
+    /** The suggested end frequency is rounded up to a multiple of this (Hz). */
+    endRoundHz: 10,
+    sweepLaw: "exponential:chirp.c" as const,
+    settingsSource: "betaflight/src/main/cli/settings.c@43875a55a" as const,
+});
+
+/**
+ * What the next sweep of this axis should look like so that less of its time goes to the band the
+ * coherence does not reach: the same generator (exponential, same duration and amplitude), a lower
+ * end frequency. Experimental: a narrower sweep raises the excitation per octave and may widen
+ * the supported band, so the advice is to be re-evaluated on the new log, not a calibration.
+ */
+export interface JioSweepAdvice {
+    current: { f0Hz: number; f1Hz: number; durationS: number; secondsPerOctave: number; octavesAboveSupport: number };
+    suggested: {
+        chirp_frequency_start_deci_hz: number;
+        chirp_frequency_end_deci_hz: number;
+        chirp_time_seconds: number;
+        secondsPerOctave: number;
+        /** 10·log10 of the excitation-per-octave gain against the current sweep (same T and amplitude). */
+        excitationGainDb: number;
+    } | null;
+    basis: string[];
+}
 
 /** The channels the JIO estimate needs beside gyroADC (logInput.ts). Absent: the route is blocked, named. */
 export interface JioChannels {
@@ -204,6 +248,8 @@ export interface JioAxisResult {
      * points. Large: the controller in force differed from the header model (anti-gravity, I relax, …).
      */
     controllerModelAgreement: { points: number; medianAbsDb: number; medianAbsDeg: number } | null;
+    /** The next sweep this axis would need (null without a supported band). */
+    sweepAdvice: JioSweepAdvice | null;
 }
 
 export interface JioMimoResult {
@@ -462,6 +508,118 @@ export function repeatabilityZ(a: Column, b: Column, axis: number, inBand: Uint8
     if (!zs.length) return null;
     zs.sort((x, y) => x - y);
     return zs[Math.floor(zs.length / 2)];
+}
+
+/**
+ * Repeatability between two flights (two analyses, possibly on different grids), the same statistic
+ * as repeatabilityZ within a log: median over the points supported in both of
+ * |T_a − T_b| / (√(relsd_a² + relsd_b²) · |T_mean|) on the closed-loop response T = H_ry, each
+ * flight's relsd from its own-axis r→y coherence and n_eff (uncalibrated assumption). T is the
+ * sensitive quantity (near crossover |ΔT/T| ≈ |ΔL/L| / |1 + L|) and the logged configuration is the
+ * same by the identity rules, but a controller behaviour that differs per flight (TPA at another
+ * throttle, anti-gravity) shows up in T as well — the plant's own z on G is reported alongside
+ * (`plant_z`). The coarser grid's points are matched to the nearest point of the finer grid within
+ * half a coarse step (the Daniell window already averages over that width). ≈ 1 for the same loop
+ * twice (experimental); null with fewer than crossFlightMinPoints common points or incomparable grids.
+ */
+export function crossFlightRepeatabilityZ(
+    a: JioEvalPoints,
+    b: JioEvalPoints,
+    nEffA: number,
+    nEffB: number,
+    lo: number,
+    hi: number,
+): { z: number | null; zPlant: number | null; matched: number; reasons: string[] } {
+    const reasons: string[] = ["compared:closed_loop_T_and_plant_G"];
+    const step = (p: JioEvalPoints) => (p.frequencyHz.length > 1 ? p.frequencyHz[1] - p.frequencyHz[0] : NaN);
+    const sa = step(a);
+    const sb = step(b);
+    if (!(sa > 0) || !(sb > 0)) return { z: null, zPlant: null, matched: 0, reasons: ["grid_missing"] };
+    const ratio = Math.max(sa, sb) / Math.min(sa, sb);
+    if (ratio > JIO_SWEEP.crossFlightMaxStepRatio)
+        return { z: null, zPlant: null, matched: 0, reasons: [`grids_incomparable:step_ratio:${ratio.toFixed(2)}`] };
+    const [coarse, fine, nC, nF] = sa >= sb ? [a, b, nEffA, nEffB] : [b, a, nEffB, nEffA];
+    const half = Math.max(sa, sb) / 2;
+    if (ratio > 1.0001) reasons.push(`grid_matched_nearest:step_ratio:${ratio.toFixed(2)}`);
+    const zs: number[] = [];
+    const zg: number[] = [];
+    let j = 0;
+    for (let i = 0; i < coarse.frequencyHz.length; i++) {
+        const f = coarse.frequencyHz[i];
+        if (f < lo || f > hi || !coarse.supported[i]) continue;
+        while (j + 1 < fine.frequencyHz.length && fine.frequencyHz[j + 1] <= f) j++;
+        const cand = [j, j + 1].filter((k) => k < fine.frequencyHz.length);
+        let best = -1;
+        for (const k of cand)
+            if (
+                Math.abs(fine.frequencyHz[k] - f) <= half &&
+                (best < 0 || Math.abs(fine.frequencyHz[k] - f) < Math.abs(fine.frequencyHz[best] - f))
+            )
+                best = k;
+        if (best < 0 || !fine.supported[best]) continue;
+        const sdT = Math.hypot(relativeSd(coarse.coherenceRy[i], nC), relativeSd(fine.coherenceRy[best], nF));
+        const sdG = Math.hypot(coarse.relativeSd[i], fine.relativeSd[best]);
+        if (!(sdT > 0) || !Number.isFinite(sdT) || !(sdG > 0) || !Number.isFinite(sdG)) continue;
+        const ratioZ = (aRe: number, aIm: number, bRe: number, bIm: number, sd: number) =>
+            Math.hypot(aRe - bRe, aIm - bIm) / (sd * Math.hypot((aRe + bRe) / 2, (aIm + bIm) / 2) + 1e-12);
+        zs.push(ratioZ(coarse.tRe[i], coarse.tIm[i], fine.tRe[best], fine.tIm[best], sdT));
+        zg.push(ratioZ(coarse.gRe[i], coarse.gIm[i], fine.gRe[best], fine.gIm[best], sdG));
+    }
+    if (zs.length < JIO_SWEEP.crossFlightMinPoints)
+        return {
+            z: null,
+            zPlant: null,
+            matched: zs.length,
+            reasons: [...reasons, `too_few_common_supported_points:${zs.length}`],
+        };
+    const zPlant = median(zg);
+    return { z: median(zs), zPlant, matched: zs.length, reasons: [...reasons, `plant_z:${zPlant.toFixed(2)}`] };
+}
+
+/** The sweep advice of one axis from its supported band (see JioSweepAdvice). */
+export function sweepAdviceFor(sweep: SweepInfo, band: JioAxisResult["band"]): JioSweepAdvice | null {
+    if (!band?.supportedHz) return null;
+    const { f0Hz, f1Hz, durationS } = sweep;
+    const octaves = Math.log2(f1Hz / f0Hz);
+    const [supLo, supHi] = band.supportedHz;
+    const current = {
+        f0Hz,
+        f1Hz,
+        durationS,
+        secondsPerOctave: durationS / octaves,
+        octavesAboveSupport: Math.max(0, Math.log2(f1Hz / supHi)),
+    };
+    const basis = [
+        `supported_band:${supLo.toFixed(1)}-${supHi.toFixed(1)}Hz`,
+        `end_target:${FIRMWARE_CHIRP.endMarginFactor}x_supported_top`,
+        `sweep_law:${FIRMWARE_CHIRP.sweepLaw}`,
+        `settable_ranges:${FIRMWARE_CHIRP.settingsSource}`,
+        "same_duration_and_amplitude",
+        "experimental_not_validated:re_evaluate_on_the_new_log",
+    ];
+    const round = FIRMWARE_CHIRP.endRoundHz;
+    let f0New = Math.max(f0Hz, JIO_SWEEP.lowestHz);
+    if (f0New > f0Hz) basis.push(`start_raised_to_lowest_analysed:${JIO_SWEEP.lowestHz}Hz`);
+    f0New = Math.min(Math.max(f0New, FIRMWARE_CHIRP.startDeciHz[0] / 10), FIRMWARE_CHIRP.startDeciHz[1] / 10);
+    let f1New = Math.ceil((FIRMWARE_CHIRP.endMarginFactor * supHi) / round) * round;
+    f1New = Math.min(Math.max(f1New, 2 * f0New), FIRMWARE_CHIRP.endDeciHz[1] / 10);
+    if (f1New >= f1Hz && f0New <= f0Hz) {
+        basis.push("current_sweep_already_band_matched");
+        return { current, suggested: null, basis };
+    }
+    const T = Math.min(Math.max(Math.round(durationS), FIRMWARE_CHIRP.timeS[0]), FIRMWARE_CHIRP.timeS[1]);
+    const octavesNew = Math.log2(f1New / f0New);
+    return {
+        current,
+        suggested: {
+            chirp_frequency_start_deci_hz: Math.round(10 * f0New),
+            chirp_frequency_end_deci_hz: Math.round(10 * f1New),
+            chirp_time_seconds: T,
+            secondsPerOctave: T / octavesNew,
+            excitationGainDb: 10 * Math.log10((Math.log(f1Hz / f0Hz) * T) / (Math.log(f1New / f0New) * durationS)),
+        },
+        basis,
+    };
 }
 
 /** Median of S_rr (dB re the in-band median) over the in-band points within one octave of point i. */
@@ -782,6 +940,7 @@ export function analyzeJioSweeps(
             limitations: [...JIO_LIMITATIONS],
             engineInput: null,
             controllerModelAgreement: null,
+            sweepAdvice: null,
         };
         // Points and support also for an inconsistent pair (the individual responses stay visible),
         // read on the first usable record; the tuning chain gets nothing then.
@@ -896,6 +1055,7 @@ export function analyzeJioSweeps(
                 largestGapPoints: largest,
                 longestRunHz: longestRun,
             };
+            axisResult.sweepAdvice = sweepAdviceFor(sweep, axisResult.band);
             if (!supIdx.length) axisBlockers.push("jio_no_supported_points");
             const cfg = controllers[ai];
             if (!cfg) axisBlockers.push("jio_controller_headers_missing");

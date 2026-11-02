@@ -95,6 +95,7 @@ function jioSummary(r: AutotuneV2Result) {
             reasons: a.reasons,
             blockers: a.blockers,
             controllerModelAgreement: a.controllerModelAgreement,
+            sweepAdvice: a.sweepAdvice,
             coherenceProfile: a.points
                 ? Array.from({ length: 17 }, (_, k) => {
                       const lo = 10 * k;
@@ -112,6 +113,7 @@ function jioSummary(r: AutotuneV2Result) {
                   })
                 : null,
         })),
+        crossFlight: j.crossFlight,
         chain: Object.values(j.chain).map((c) => ({
             axis: c.axis,
             tuningComputable: c.tuningComputable,
@@ -189,4 +191,49 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
         },
         300_000,
     );
+
+    it("bbl18 with bbl19 as the other flight: the cross-flight verdict is explicit, nothing is averaged", () => {
+        const a = logs18[0];
+        const b = logs19[0];
+        const r = runAutotuneV2({ primary: a, others: [b], verifiedTune: null });
+        const alone = runAutotuneV2({ primary: a, others: [], verifiedTune: null });
+        const out = process.env.GYROFLIGHT_QUAL_OUT;
+        if (out) {
+            mkdirSync(out, { recursive: true });
+            writeFileSync(path.join(out, "air65_jio_bbl18_with_bbl19.json"), JSON.stringify(jioSummary(r), null, 1));
+        }
+        expect(r.jio.crossFlight.candidates).toHaveLength(1);
+        const c = r.jio.crossFlight.candidates[0];
+        expect(c.sha256).toBe(FILES.bbl19.sha256);
+        // Facts of this pair (18 and 19 October 2026): the same craft, firmware, configuration and sweep
+        // settings on two independent flights — a comparable repeat; bbl19's clipped record gives a
+        // coarser grid (step ratio 1.17), matched point by point. The closed-loop z stays below the
+        // experimental threshold on every axis (recorded here as a fact of the data, not a validation).
+        expect(c.issues).toEqual([]);
+        expect(c.usable).toBe(true);
+        for (const axis of ["roll", "pitch", "yaw"] as const) {
+            const ax = c.axes[axis]!;
+            expect(ax.matchedPoints).toBeGreaterThanOrEqual(30);
+            expect(ax.reasons).toContain("grid_matched_nearest:step_ratio:1.17");
+            expect(ax.reasons.some((x) => x.startsWith("plant_z:"))).toBe(true);
+            expect(ax.z).not.toBeNull();
+            expect(ax.consistency).toBe("consistent");
+            expect(
+                r.jio.chain[axis]!.reasons.some((x) => x.startsWith("cross_flight_repeat:consistent:flights:1:z:")),
+            ).toBe(true);
+            // Still one sweep in this log: the within-flight stationarity stays unknown and is said so.
+            expect(r.jio.chain[axis]!.reasons).toContain("stationarity_unknown:single_sweep");
+        }
+        // With the other flight's sweep compared, the stationarity need is met; the band advice remains.
+        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(false);
+        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_band_matched_sweep");
+        // The primary's own JIO estimate and the primary route are unchanged by the other log's presence.
+        for (const axis of ["roll", "pitch", "yaw"] as const) {
+            expect(r.jio.analysis.axes[axis]!.points!.gRe).toEqual(alone.jio.analysis.axes[axis]!.points!.gRe);
+            expect(r.jio.analysis.axes[axis]!.grid).toEqual(alone.jio.analysis.axes[axis]!.grid);
+            expect(r.jio.chain[axis]!.candidate?.status ?? "BLOCKED").not.toBe("VALIDATED");
+            expect(r.jio.analysis.axes[axis]!.sweepAdvice).not.toBeNull();
+        }
+        expect(r.releasableProposal).toBeNull();
+    }, 600_000);
 });

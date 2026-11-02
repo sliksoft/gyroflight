@@ -38,14 +38,18 @@ import {
     type AutotuneLogInput,
 } from "../../src/gyrocore/engine/autotuneV2";
 import {
+    crossFlightRepeatabilityZ,
     estimateSweepColumn,
+    FIRMWARE_CHIRP,
     JIO_SWEEP,
+    sweepAdviceFor,
     reconstructChirpReference,
     relativeSd,
     repeatabilityZ,
     smoothLength,
 } from "../../src/gyrocore/engine/jioSweep";
 import { closedLoopChirpLog, ratePlant, type ClosedLoopLogOptions, type Plant } from "./harness/closedLoopBbl";
+import { BETAFLIGHT_TUNE_HEADERS } from "./harness/chirpSim";
 
 const AIR65_LIKE = { K: 60, motorHz: 40, delayS: 0.002 };
 const G: Plant = ratePlant(AIR65_LIKE);
@@ -60,7 +64,8 @@ function decoded(o: ClosedLoopLogOptions, name: string): AutotuneLogInput {
     return log;
 }
 
-const run = (log: AutotuneLogInput) => runAutotuneV2({ primary: log, others: [], verifiedTune: null });
+const run = (log: AutotuneLogInput, others: AutotuneLogInput[] = []) =>
+    runAutotuneV2({ primary: log, others, verifiedTune: null });
 
 /** |G_est / G_true| in dB and ∠ in degrees at the supported points of one axis within [lo, hi] Hz. */
 function plantError(
@@ -492,5 +497,205 @@ describe("CHIRP + JIO route through the whole software chain", () => {
         expect(clone.analysis.axes.roll!.points!.frequencyHz.length).toBe(
             result.jio.analysis.axes.roll!.points!.frequencyHz.length,
         );
+    });
+});
+
+/**
+ * Repeats across independent flights: the same craft, firmware, configuration and sweep settings
+ * (the primary route's identity rules), a different recording (seed, start time). Nothing is
+ * averaged across flights; the plant of one is compared with the plant of the other.
+ */
+describe("CHIRP + JIO repeats across independent flights", () => {
+    const flight = (
+        seed: number,
+        plants: [Plant | null, Plant | null, Plant | null],
+        extra: Partial<ClosedLoopLogOptions> = {},
+    ) =>
+        decoded(
+            {
+                plants,
+                sweepS: 20,
+                amplitude: AMP,
+                seed,
+                startTimeUs: 2_000_000 + seed * 1_000_000,
+                jio: JIO_FIX,
+                ...extra,
+            },
+            `jio-flight-${seed}.bbl`,
+        );
+    const primary = flight(21, [G, G, G]);
+    const same = flight(22, [G, G, G]);
+    const changed = flight(23, [G_STEP, G, G]);
+
+    it("a comparable second flight of the same plant counts as a consistent repeat, nothing averaged", () => {
+        const r = run(primary, [same]);
+        expect(r.jio.crossFlight.candidates).toHaveLength(1);
+        const c = r.jio.crossFlight.candidates[0];
+        expect(c.issues).toEqual([]);
+        expect(c.usable).toBe(true);
+        for (const axis of ["roll", "pitch", "yaw"] as const) {
+            expect(c.axes[axis]!.consistency).toBe("consistent");
+            expect(c.axes[axis]!.z).toBeLessThan(JIO_SWEEP.repeatZThreshold);
+            expect(c.axes[axis]!.zPlant).toBeLessThan(JIO_SWEEP.repeatZThreshold);
+            expect(c.axes[axis]!.reasons.some((x) => x.startsWith("plant_z:"))).toBe(true);
+            expect(c.axes[axis]!.matchedPoints).toBeGreaterThanOrEqual(JIO_SWEEP.crossFlightMinPoints);
+            expect(r.jio.crossFlight.axes[axis]).toMatchObject({ flights: 1, consistency: "consistent" });
+            // The primary's own estimate is unchanged: one sweep in this log, n_eff of one record.
+            const a = r.jio.analysis.axes[axis]!;
+            expect(a.repeats).toMatchObject({ count: 1, consistency: "unknown" });
+            expect(a.grid!.nEff).toBe(2 * JIO_SWEEP.daniellHalfWidthBins + 1);
+            const ch = r.jio.chain[axis]!;
+            expect(ch.reasons).toContain("stationarity_unknown:single_sweep");
+            expect(ch.reasons.some((x) => x.startsWith("cross_flight_repeat:consistent:flights:1:z:"))).toBe(true);
+            expect(ch.candidate!.status).not.toBe("VALIDATED");
+        }
+        // The stationarity need is met by the other flight's sweep; the route still releases nothing.
+        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(false);
+        expect(r.jio.diagnosticOnly).toBe(true);
+        expect(r.releasableProposal).toBeNull();
+        // The same analysis with no other log says so.
+        const alone = run(primary);
+        expect(alone.jio.crossFlight.candidates).toEqual([]);
+        expect(alone.jio.chain.roll!.reasons).toContain("cross_flight_repeat:none");
+        expect(alone.jio.analysis.axes.roll!.points!.gRe).toEqual(r.jio.analysis.axes.roll!.points!.gRe);
+    });
+
+    it("a plant change between flights is inconsistent on that axis only and blocks its candidate", () => {
+        const r = run(primary, [changed]);
+        const c = r.jio.crossFlight.candidates[0];
+        expect(c.usable).toBe(true);
+        expect(c.axes.roll!.consistency).toBe("inconsistent");
+        expect(c.axes.roll!.z).toBeGreaterThan(JIO_SWEEP.repeatZThreshold);
+        expect(c.axes.pitch!.consistency).toBe("consistent");
+        expect(c.axes.yaw!.consistency).toBe("consistent");
+        expect(r.jio.chain.roll!.candidate!.status).toBe("BLOCKED");
+        expect(r.jio.chain.roll!.candidate!.reasons).toContain("jio_cross_flight_inconsistent");
+        expect(r.jio.chain.roll!.reasons.some((x) => x.startsWith("jio_cross_flight_inconsistent:z:"))).toBe(true);
+        expect(r.jio.chain.pitch!.candidate!.reasons).not.toContain("jio_cross_flight_inconsistent");
+        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_consistent");
+        expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_pitch_repeated_sweep_consistent");
+        // The primary's margins are still this flight's reading, visible, MEASURED at most.
+        expect(r.jio.chain.roll!.margins!.status).not.toBe("VALIDATED");
+    });
+
+    it("rejects the primary's own flight under another hash, a different sweep setting, and a different tune", () => {
+        const bytes = closedLoopChirpLog({
+            plants: [G, G, G],
+            sweepS: 20,
+            amplitude: AMP,
+            seed: 21,
+            startTimeUs: 23_000_000,
+            jio: JIO_FIX,
+        });
+        const [copy] = buildLogInputs(
+            bytes,
+            "0".repeat(64),
+            qualifyChirpFile(bytes, "copy.bbl", 45, AUTOTUNE_MATH),
+            null,
+        );
+        const otherAmp = flight(24, [G, G, G], { amplitude: AMP + 10 });
+        const otherTune = flight(25, [G, G, G], {
+            headers: ["rollPID:50,80,30", ...BETAFLIGHT_TUNE_HEADERS.filter((h) => !h.startsWith("rollPID:"))],
+        });
+        const r = run(primary, [copy, otherAmp, otherTune]);
+        const [c0, c1, c2] = r.jio.crossFlight.candidates;
+        expect(c0.usable).toBe(false);
+        expect(c0.issues.some((i) => i.startsWith("cross_log_duplicate_of_primary:"))).toBe(true);
+        expect(c1.usable).toBe(false);
+        expect(c1.issues).toContain("jio_cross_flight_sweep_differs:chirp_amplitude_roll");
+        expect(c2.usable).toBe(false);
+        expect(c2.issues.some((i) => i.startsWith("cross_log_config_differs:"))).toBe(true);
+        expect(r.jio.crossFlight.axes).toEqual({});
+        expect(r.jio.chain.roll!.reasons).toContain("cross_flight_repeat:none:see_crossFlight_candidates");
+        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_for_stationarity");
+    });
+
+    // Different record lengths (a generator that stopped early on one flight) are exercised on the real
+    // AIR65 pair in air65_jio.local.test.ts (bbl19's clipped record, step ratio 1.17) and below on points.
+    it("crossFlightRepeatabilityZ gives no verdict on incomparable grids or too few common points", () => {
+        const pts = (step: number, n: number, sup: number) => ({
+            frequencyHz: Float64Array.from({ length: n }, (_, i) => (i + 1) * step),
+            gRe: new Float64Array(n).fill(1),
+            gIm: new Float64Array(n),
+            tRe: new Float64Array(n).fill(0.5),
+            tIm: new Float64Array(n),
+            uRe: new Float64Array(n),
+            uIm: new Float64Array(n),
+            coherenceRu: new Float64Array(n).fill(0.9),
+            coherenceRy: new Float64Array(n).fill(0.9),
+            relativeSd: new Float64Array(n).fill(0.1),
+            excitationRelDb: new Float64Array(n),
+            supported: Uint8Array.from({ length: n }, (_, i) => (i < sup ? 1 : 0)),
+            reason: new Array<string>(n).fill(""),
+        });
+        expect(crossFlightRepeatabilityZ(pts(1, 100, 100), pts(3, 30, 30), 25, 25, 2, 90).reasons[0]).toMatch(
+            /grids_incomparable/,
+        );
+        const few = crossFlightRepeatabilityZ(pts(1, 100, 3), pts(1, 100, 100), 25, 25, 2, 90);
+        expect(few.z).toBeNull();
+        expect(few.reasons.some((x) => x.startsWith("too_few_common_supported_points:"))).toBe(true);
+        const ok = crossFlightRepeatabilityZ(pts(1, 100, 100), pts(1.5, 60, 60), 25, 25, 2, 90);
+        expect(ok.z).toBe(0);
+        expect(ok.zPlant).toBe(0);
+        expect(ok.matched).toBeGreaterThan(JIO_SWEEP.crossFlightMinPoints);
+    });
+});
+
+describe("CHIRP + JIO sweep advice (firmware-settable exponential sweep only)", () => {
+    it("suggests a lower end frequency within the firmware's ranges when the coherence is lost early", () => {
+        const sweep = { f0Hz: 0.2, f1Hz: 600, durationS: 20 };
+        const band = {
+            analysedHz: [2, 450] as [number, number],
+            supportedHz: [3.1, 67] as [number, number],
+            supportedFraction: 0.3,
+            gapPoints: 0,
+            largestGapPoints: 0,
+            longestRunHz: [3.1, 67] as [number, number],
+        };
+        const adv = sweepAdviceFor(sweep, band)!;
+        expect(adv.current.secondsPerOctave).toBeCloseTo(20 / Math.log2(3000), 6);
+        expect(adv.suggested).not.toBeNull();
+        const sg = adv.suggested!;
+        expect(sg.chirp_frequency_end_deci_hz).toBe(1100); // ceil(1.5 × 67 / 10) × 10 = 110 Hz
+        expect(sg.chirp_frequency_start_deci_hz).toBe(20);
+        expect(sg.chirp_time_seconds).toBe(20);
+        expect(sg.chirp_frequency_end_deci_hz).toBeGreaterThanOrEqual(FIRMWARE_CHIRP.endDeciHz[0]);
+        expect(sg.chirp_frequency_end_deci_hz).toBeLessThanOrEqual(FIRMWARE_CHIRP.endDeciHz[1]);
+        expect(sg.secondsPerOctave).toBeGreaterThan(adv.current.secondsPerOctave);
+        expect(sg.excitationGainDb).toBeGreaterThan(0);
+        expect(adv.basis).toContain("sweep_law:exponential:chirp.c");
+        expect(adv.basis).toContain("start_raised_to_lowest_analysed:2Hz");
+        expect(adv.basis.some((b) => b.startsWith("experimental_not_validated"))).toBe(true);
+    });
+
+    it("leaves a sweep alone that already ends near the supported band, and gives none without a band", () => {
+        const sweep = { f0Hz: 2, f1Hz: 100, durationS: 20 };
+        const band = {
+            analysedHz: [2, 100] as [number, number],
+            supportedHz: [2.5, 80] as [number, number],
+            supportedFraction: 0.9,
+            gapPoints: 0,
+            largestGapPoints: 0,
+            longestRunHz: [2.5, 80] as [number, number],
+        };
+        const adv = sweepAdviceFor(sweep, band)!;
+        expect(adv.suggested).toBeNull();
+        expect(adv.basis).toContain("current_sweep_already_band_matched");
+        expect(sweepAdviceFor(sweep, { ...band, supportedHz: null })).toBeNull();
+        expect(sweepAdviceFor(sweep, null)).toBeNull();
+    });
+
+    it("the nominal fixture's advice is attached per axis and surfaces as a measurement need", () => {
+        const r = run(
+            decoded({ plants: [G, null, null], sweepS: 12, amplitude: AMP, seed: 31, jio: JIO_FIX }, "jio-adv.bbl"),
+        );
+        const a = r.jio.analysis.axes.roll!;
+        expect(a.sweepAdvice).not.toBeNull();
+        if (a.sweepAdvice!.suggested) {
+            expect(a.sweepAdvice!.suggested.chirp_frequency_end_deci_hz).toBeLessThan(2000);
+            expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_band_matched_sweep");
+        } else {
+            expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_roll_band_matched_sweep");
+        }
     });
 });
