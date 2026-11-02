@@ -652,13 +652,13 @@ const jioAdvice = computed(() => {
     return (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
         const adv = jio.analysis.axes[axis]?.sweepAdvice;
         if (!adv) return [];
-        const cur = `${num(adv.current.f0Hz, 1)}–${num(adv.current.f1Hz, 0)} Hz / ${num(adv.current.durationS, 0)} s (${num(adv.current.secondsPerOctave, 2)} s/octave, ${num(adv.current.octavesAboveSupport, 1)} octaves above the supported band)`;
+        const cur = `${num(adv.current.f0Hz, 1)}–${num(adv.current.f1Hz, 0)} Hz over ${num(adv.current.durationS, 0)} s (${num(adv.current.secondsPerOctave, 2)} s per octave, ${num(adv.current.octavesAboveSupport, 1)} octaves above the supported band)`;
         const sg = adv.suggested;
         const text = sg
             ? i18n.getMessage("gyroflightV2JioAdvice", [
                   axis,
                   cur,
-                  `chirp_frequency_start_deci_hz=${sg.chirp_frequency_start_deci_hz}, chirp_frequency_end_deci_hz=${sg.chirp_frequency_end_deci_hz}, chirp_time_seconds=${sg.chirp_time_seconds} (${num(sg.secondsPerOctave, 2)} s/octave, +${num(sg.excitationGainDb, 1)} dB per octave)`,
+                  `chirp_frequency_start_deci_hz=${sg.chirp_frequency_start_deci_hz}, chirp_frequency_end_deci_hz=${sg.chirp_frequency_end_deci_hz}, chirp_time_seconds=${sg.chirp_time_seconds} (${num(sg.secondsPerOctave, 2)} s per octave, +${num(sg.excitationGainDb, 1)} dB per octave)`,
                   adv.basis.join(", "),
               ])
             : i18n.getMessage("gyroflightV2JioAdviceNone", [axis, cur, adv.basis.join(", ")]);

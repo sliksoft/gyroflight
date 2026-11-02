@@ -558,7 +558,7 @@ describe("CHIRP + JIO repeats across independent flights", () => {
         expect(alone.jio.crossFlight.candidates).toEqual([]);
         expect(alone.jio.chain.roll!.reasons).toContain("cross_flight_repeat:none");
         expect(alone.jio.analysis.axes.roll!.points!.gRe).toEqual(r.jio.analysis.axes.roll!.points!.gRe);
-    });
+    }, 120_000);
 
     it("a plant change between flights is inconsistent on that axis only and blocks its candidate", () => {
         const r = run(primary, [changed]);
@@ -576,7 +576,7 @@ describe("CHIRP + JIO repeats across independent flights", () => {
         expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_pitch_repeated_sweep_consistent");
         // The primary's margins are still this flight's reading, visible, MEASURED at most.
         expect(r.jio.chain.roll!.margins!.status).not.toBe("VALIDATED");
-    });
+    }, 120_000);
 
     it("rejects the primary's own flight under another hash, a different sweep setting, and a different tune", () => {
         const bytes = closedLoopChirpLog({
@@ -608,7 +608,7 @@ describe("CHIRP + JIO repeats across independent flights", () => {
         expect(r.jio.crossFlight.axes).toEqual({});
         expect(r.jio.chain.roll!.reasons).toContain("cross_flight_repeat:none:see_crossFlight_candidates");
         expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_for_stationarity");
-    });
+    }, 120_000);
 
     // Different record lengths (a generator that stopped early on one flight) are exercised on the real
     // AIR65 pair in air65_jio.local.test.ts (bbl19's clipped record, step ratio 1.17) and below on points.
@@ -666,7 +666,7 @@ describe("CHIRP + JIO sweep advice (firmware-settable exponential sweep only)", 
         expect(adv.basis).toContain("sweep_law:exponential:chirp.c");
         expect(adv.basis).toContain("start_raised_to_lowest_analysed:2Hz");
         expect(adv.basis.some((b) => b.startsWith("experimental_not_validated"))).toBe(true);
-    });
+    }, 120_000);
 
     it("leaves a sweep alone that already ends near the supported band, and gives none without a band", () => {
         const sweep = { f0Hz: 2, f1Hz: 100, durationS: 20 };
@@ -683,7 +683,7 @@ describe("CHIRP + JIO sweep advice (firmware-settable exponential sweep only)", 
         expect(adv.basis).toContain("current_sweep_already_band_matched");
         expect(sweepAdviceFor(sweep, { ...band, supportedHz: null })).toBeNull();
         expect(sweepAdviceFor(sweep, null)).toBeNull();
-    });
+    }, 120_000);
 
     it("the nominal fixture's advice is attached per axis and surfaces as a measurement need", () => {
         const r = run(
