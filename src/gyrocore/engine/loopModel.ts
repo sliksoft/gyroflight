@@ -1155,11 +1155,18 @@ export function buildAxisLoop(
         /** The verdict for another candidate (AxisLoop.resolutionFor); absent: unknown for candidates. */
         resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
         multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
+        /**
+         * A plant measured directly (jioSweep.ts: G = H_ry / H_ru from the logged pidSum) instead of
+         * the one inferred from `tf` through the controller model. Its bins must lie on `tf`'s grid.
+         * The margins then rest on that measurement; `tf` still carries the coherence and the
+         * (unknown, numSegments 1) averages, so such a loop never leaves MEASURED.
+         */
+        plant?: IdentifiedPlant | null;
     } = {},
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
     const opts = { missingFilterInfo: missing, coherenceMin: LOOP_MIN_COHERENCE };
-    const plant = extractPlantFromClosedLoop(tf, cfg, opts);
+    const plant = measurement.plant ?? extractPlantFromClosedLoop(tf, cfg, opts);
     return {
         axis,
         plant,

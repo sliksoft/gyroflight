@@ -41,6 +41,7 @@ import type { AnalysisOption } from "./adaptiveResolution";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import type { AutotuneLogInput, ChirpAxisInput, FlightFragment } from "./autotuneV2";
+import type { JioChannels, JioSweepRecord } from "./jioSweep";
 import type { AxisName } from "./safetyEvidence";
 
 const FIELDS = [
@@ -60,6 +61,18 @@ const FIELDS = [
     // of each bin (loopModel FREQUENCY_SUPPORT). Absent when the log was not in that debug mode.
     "debug[2]",
     "debug[3]",
+    // Experimental CHIRP + JIO route (jioSweep.ts): the swept axis and the logged controller terms
+    // (pidSum = P + I + D + F; D comes from the extractor's dTerm). Absent: that route is blocked.
+    "debug[1]",
+    "axisP[0]",
+    "axisP[1]",
+    "axisP[2]",
+    "axisI[0]",
+    "axisI[1]",
+    "axisI[2]",
+    "axisF[0]",
+    "axisF[1]",
+    "axisF[2]",
 ] as const;
 /** Rejected measurements still carry a transfer function: kept as diagnostics only (no proposal). */
 const STATE_RANK: Record<string, number> = { usable: 3, usable_with_warnings: 2, rejected: 1 };
@@ -327,6 +340,32 @@ export function buildLogInputs(
                     : {}),
             };
         }
+        const triple = (prefix: string) => {
+            const cols = [0, 1, 2].map((i) => aligned(ch[`${prefix}[${i}]`]));
+            return cols.every(Boolean) ? (cols as [Float64Array, Float64Array, Float64Array]) : null;
+        };
+        const jio: JioChannels = {
+            setpoint: triple("setpoint"),
+            axisP: triple("axisP"),
+            axisI: triple("axisI"),
+            axisF: triple("axisF"),
+            debugAxis: aligned(ch["debug[1]"]),
+            excitation,
+        };
+        // Every sweep of every axis, in log order, for the JIO route's own grouping of repeats.
+        const sweeps: JioSweepRecord[] = log.measurements
+            .filter((m) => (["roll", "pitch", "yaw"] as const).includes(m.axisName as AxisName))
+            .map((m) => ({
+                id: m.id,
+                axis: m.axisName as AxisName,
+                axisIndex: (["roll", "pitch", "yaw"] as const).indexOf(m.axisName as AxisName) as 0 | 1 | 2,
+                occurrence: m.axisOccurrence,
+                start: firstAtOrAfter(t, m.startTimeUs),
+                end: firstAtOrAfter(t, m.endTimeUs),
+                boundSource: m.boundSource,
+                state: m.state,
+                timestampGapFraction: m.spacing.missingFraction,
+            }));
         const iterations = ch.loopIteration;
         const firstIteration = iterations && Number.isFinite(iterations[0]) ? iterations[0] : null;
         const m4log = m4?.logs.find((l) => l.logIndex === log.logIndex)?.result ?? null;
@@ -353,8 +392,10 @@ export function buildLogInputs(
                       ]
                     : null,
                 motors: ex.motors?.every((c) => c.length === t.length) ? ex.motors : null,
+                jio,
             },
             chirp,
+            sweeps,
             stick: {
                 acroSeconds: m4log?.feedforward.executable ? m4log.feedforward.stickDurationS : 0,
                 latencyMs: { roll: latency("roll"), pitch: latency("pitch"), yaw: latency("yaw") },

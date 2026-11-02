@@ -95,6 +95,7 @@ import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, sameFlight } from "./logInput";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
+import { analyzeJioSweeps, type JioChannels, type JioSweepAnalysis, type JioSweepRecord } from "./jioSweep";
 
 export const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
 /** rcCommand[3] below this: on the ground / idle; the PID terms are not representative. */
@@ -144,8 +145,18 @@ export interface AutotuneLogInput {
         rcThrottle: ArrayLike<number>;
         axisD: [ArrayLike<number> | null, ArrayLike<number> | null, ArrayLike<number> | null] | null;
         motors: ArrayLike<number>[] | null;
+        /**
+         * The channels of the experimental CHIRP + JIO route (jioSweep.ts): setpoint, the logged
+         * P/I/F terms, DEBUG_CHIRP debug[1] and debug[3]. Absent or null: that route is blocked, named.
+         */
+        jio?: JioChannels | null;
     };
     chirp: Partial<Record<AxisName, ChirpAxisInput>>;
+    /**
+     * Every sweep the qualification found in this log, all occurrences of every axis (the JIO route
+     * groups repeats itself; `chirp` holds one measurement per axis). Absent: none known.
+     */
+    sweeps?: readonly JioSweepRecord[];
     /** M4 stick analysis (acro, CHIRP-free). */
     stick: { acroSeconds: number; latencyMs: Partial<Record<AxisName, number | null>> };
     /** M4 noise floor known on every axis. */
@@ -242,6 +253,36 @@ export interface AutotuneV2Result {
      * Does not change margins, proposal selection or write authority.
      */
     measurementStrategy: AxisMeasurementStrategy[];
+    /**
+     * EXPERIMENTAL CHIRP + JIO route (jioSweep.ts): the plant measured from the logged pidSum and the
+     * reconstructed chirp, read through the same loop model, candidate search and planner as the
+     * primary route, per axis. Diagnostic only: nothing in it reaches `proposal`,
+     * `releasableProposal`, the release evidence or the write authority.
+     */
+    jio: JioRouteResult;
+}
+
+export interface JioAxisChain {
+    axis: AxisName;
+    /** Current margins of the loop read on the JIO plant (always MEASURED or INSUFFICIENT evidence). */
+    margins: LoopMargins | null;
+    /** The same candidate search as the primary route on this loop; never VALIDATED here. */
+    candidate: AxisPidProposal | null;
+    /** What the next flight must measure for this loop (planner, informative). */
+    plan: AxisMeasurementPlan | null;
+    /** Whether margins could be read at all, and why not. */
+    tuningComputable: boolean;
+    reasons: string[];
+}
+
+export interface JioRouteResult {
+    status: "DIAGNOSTIC" | "BLOCKED";
+    analysis: JioSweepAnalysis;
+    chain: Partial<Record<AxisName, JioAxisChain>>;
+    /** Measurement the route still needs, as required_measurement:* codes. */
+    requiredMeasurements: string[];
+    /** Always true: the route is not release evidence (see JIO_LIMITATIONS). */
+    diagnosticOnly: true;
 }
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
@@ -551,6 +592,10 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             analysis: chosen.analysis,
         };
     });
+
+    // EXPERIMENTAL CHIRP + JIO route (jioSweep.ts): the same loop model, candidate search and planner
+    // on a plant measured from the logged pidSum. Kept apart from `items`: it is not release evidence.
+    const jio = runJioRoute(log, h, mask, sim, chainCfg, chainOk, attested, sweepFromHeaders(h));
 
     // 4a. PID per axis.
     const dmax = nums(h, "d_max") ?? [0, 0, 0];
@@ -982,5 +1027,127 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         releasableProposal: releasable,
         measurementPlan,
         measurementStrategy,
+        jio,
+    };
+}
+
+/** The required_measurement:* codes of the JIO route's own blockers. */
+function jioRequirements(analysis: JioSweepAnalysis, chain: Partial<Record<AxisName, JioAxisChain>>): string[] {
+    const out = new Set<string>();
+    for (const b of analysis.blockers) {
+        if (b.startsWith("jio_channel_missing") || b.startsWith("jio_debug_mode"))
+            out.add("required_measurement:log_pid_terms_and_debug_chirp");
+        if (b.startsWith("jio_log_rate_not_pid_rate")) out.add("required_measurement:log_at_pid_rate");
+        if (b === "jio_no_sweeps") out.add("required_measurement:chirp_flight");
+    }
+    for (const name of AXES) {
+        const a = analysis.axes[name];
+        if (!a) {
+            out.add(`required_measurement:chirp_${name}_sweep`);
+            continue;
+        }
+        if (a.repeats.count < 2) out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
+        if (a.repeats.consistency === "inconsistent")
+            out.add(`required_measurement:chirp_${name}_repeated_sweep_consistent`);
+        if (a.blockers.some((b) => b.startsWith("record:") && /pidsum_limit_active|motor_saturation/.test(b)))
+            out.add(`required_measurement:chirp_${name}_without_saturation`);
+        for (const r of chain[name]?.plan?.requiredMeasurements ?? []) out.add(r);
+    }
+    return [...out];
+}
+
+function runJioRoute(
+    log: AutotuneLogInput,
+    h: Record<string, string>,
+    mask: Uint8Array,
+    sim: ChainSimulation | null,
+    chainCfg: GyroChainConfig | null,
+    chainOk: (a: number) => boolean,
+    attested: boolean,
+    sweep: SweepInfo | null,
+): JioRouteResult {
+    // Controller in force per axis (with the effective D path over each axis's primary window when
+    // one exists; otherwise the header controller): the JIO plant needs it only for L = G·C.
+    const controllers = AXES.map((name, ai) => {
+        const axis = ai as 0 | 1 | 2;
+        const c = log.chirp[name];
+        return (c && analyzeAxisController(log, h, axis, c, mask)?.cfg) ?? controllerConfigFromHeaders(h, axis);
+    }) as [DigitalControllerConfig | null, DigitalControllerConfig | null, DigitalControllerConfig | null];
+    const analysis = analyzeJioSweeps(
+        {
+            headerPairs: log.headerPairs,
+            sampleRateHz: log.sampleRateHz,
+            gyroAdc: log.channels.gyroAdc,
+            axisD: log.channels.axisD,
+            motors: log.channels.motors,
+            jio: log.channels.jio ?? null,
+            sweeps: log.sweeps ?? [],
+        },
+        controllers,
+    );
+    const chain: Partial<Record<AxisName, JioAxisChain>> = {};
+    const dmax = nums(h, "d_max") ?? [0, 0, 0];
+    for (const name of AXES) {
+        const ai = AXES.indexOf(name) as 0 | 1 | 2;
+        const a = analysis.axes[name];
+        if (!a) continue;
+        const reasons = [...a.blockers];
+        const cfg = controllers[ai];
+        const p = nums(h, `${name}PID`);
+        if (!a.engineInput || !cfg || !p) {
+            chain[name] = {
+                axis: name,
+                margins: null,
+                candidate: null,
+                plan: null,
+                tuningComputable: false,
+                reasons: reasons.length ? reasons : ["jio_engine_input_missing"],
+            };
+            continue;
+        }
+        const win = a.records.find((r) => r.used);
+        const eff =
+            sim && chainCfg && win
+                ? effectiveChainFrf(
+                      sim,
+                      chainCfg,
+                      ai,
+                      win.start,
+                      win.start + Math.round(win.recordS * log.sampleRateHz),
+                  )
+                : null;
+        // No analysis provenance (no Welch segment) and numSegments 1: the engine's uncertainty stays
+        // unknown, so these margins are MEASURED at best and no bound or VALIDATED status can follow.
+        const loop = buildAxisLoop(ai, a.engineInput.tf, cfg, eff, chainOk(ai), attested, null, {
+            sweep,
+            analysis: null,
+            support: null,
+            plant: a.engineInput.plant,
+        });
+        const margins = loopMargins(loop);
+        const current: PidValues = { p: p[0], i: p[1], d: p[2], dMax: dmax[ai] ?? 0 };
+        let candidate = optimizeAxisPid(loop, current, null);
+        // Hard guard: the experimental route never shows a VALIDATED candidate, whatever the margins say.
+        if (candidate.status === "VALIDATED" || margins.status === "VALIDATED") {
+            candidate = {
+                ...candidate,
+                status: "BLOCKED",
+                reasons: [...candidate.reasons, "jio_experimental_never_validated"],
+            };
+            reasons.push("jio_experimental_never_validated");
+        }
+        const plan = planMeasurement(name, loop, margins, log.sampleRateHz, sweep, null);
+        const computable = margins.status !== "UNAVAILABLE" && margins.crossoverHz !== null;
+        if (!computable) reasons.push("jio_margins_unavailable", ...margins.reasons);
+        if (a.repeats.consistency === "unknown") reasons.push("stationarity_unknown:single_sweep");
+        chain[name] = { axis: name, margins, candidate, plan, tuningComputable: computable, reasons };
+    }
+    const anyChain = Object.values(chain).some((c) => c?.tuningComputable);
+    return {
+        status: anyChain ? "DIAGNOSTIC" : "BLOCKED",
+        analysis,
+        chain,
+        requiredMeasurements: jioRequirements(analysis, chain),
+        diagnosticOnly: true,
     };
 }

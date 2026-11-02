@@ -33,6 +33,7 @@ import {
     cdiv,
     cmul,
     evaluateControllerFrf,
+    phaseCompCoeffs,
     type Complex,
 } from "../../../src/js/blackbox/betaflight_digital_controller";
 import { ComplexFFT } from "../../../src/js/blackbox/fft";
@@ -93,6 +94,27 @@ export interface ClosedLoopLogOptions {
      * stays at the stop frequency.
      */
     abortAtHz?: number;
+    /**
+     * CHIRP + JIO fixture (jioSweep.ts tests): the firmware's phaseComp shaping of the chirp before
+     * it is added to the setpoint (lag 3 / lead 30 Hz headers), the logged controller terms
+     * (axisP carries pidSum = C_ref·r − C_fb·y; axisI/F/D logged as 0), the chirp amplitude and
+     * pidsum_limit headers, and an idle gap of `gapS` between sweeps (default 0.6 s).
+     */
+    jio?: {
+        /** Output disturbance fed back through the loop: coloured noise (PT1 at poleHz) through S = 1/(1+G·C_fb). */
+        disturbance?: { sd: number; poleHz: number };
+        /** Sweep every axis this many times (each the full sweepS). */
+        repeats?: number;
+        /** Plants for the second and later repeats (a change during the measurement); default: the same. */
+        plantsAfter?: [Plant | null, Plant | null, Plant | null];
+        /** Log the first repeat's samples again as the second (an exact copy, same noise). */
+        duplicateRepeat?: boolean;
+        /** Omit these logged fields (missing-channel tests): any of axisP, axisI, axisF, axisD, debug1. */
+        omit?: ("axisP" | "axisI" | "axisF" | "axisD" | "debug1")[];
+        /** Header pid_process_denom to write instead of the encoder's (a log not on the PID grid). */
+        pidProcessDenomHeader?: number;
+        gapS?: number;
+    };
 }
 
 const RATE_HZ = 1000; // looptime 125 µs × pid_process_denom 8: the encoder's defaults.
@@ -129,12 +151,25 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
     const f0 = o.startHz ?? 2;
     const f1 = o.endHz ?? 200;
     const amp = o.amplitude ?? 200;
+    const jio = o.jio;
     const headers = [
         ...SIM_IDENTITY_HEADERS,
         ...(o.headers ?? BETAFLIGHT_TUNE_HEADERS).filter((h) => !/^chirp_(frequency_start|frequency_end|time)/.test(h)),
         `chirp_frequency_start_deci_hz:${Math.round(f0 * 10)}`,
         `chirp_frequency_end_deci_hz:${Math.round(f1 * 10)}`,
         `chirp_time_seconds:${sweepS}`,
+        ...(jio
+            ? [
+                  "chirp_lag_freq_hz:3",
+                  "chirp_lead_freq_hz:30",
+                  `chirp_amplitude_roll:${amp}`,
+                  `chirp_amplitude_pitch:${amp}`,
+                  `chirp_amplitude_yaw:${amp}`,
+                  "pidsum_limit:500",
+                  "pidsum_limit_yaw:400",
+                  "use_integrated_yaw:0",
+              ]
+            : []),
     ];
     // The encoder writes looptime and pid_process_denom itself (its defaults: 1 kHz).
     const h = Object.fromEntries([
@@ -148,6 +183,29 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
     const frames: SyntheticFrame[] = [];
     let t = o.startTimeUs ?? 2_000_000;
     const dt = 1e6 / RATE_HZ;
+    // Logged controller terms: pidSum in axisP, the others 0 (the JIO estimate reads their sum).
+    const pidFields = jio
+        ? [
+              "axisP[0]",
+              "axisP[1]",
+              "axisP[2]",
+              "axisI[0]",
+              "axisI[1]",
+              "axisI[2]",
+              "axisF[0]",
+              "axisF[1]",
+              "axisF[2]",
+              "axisD[0]",
+              "axisD[1]",
+              "axisD[2]",
+          ]
+        : [];
+    const omitted = (f: string) => (jio?.omit ?? []).some((o2) => f.startsWith(o2));
+    const extraFields = ["rcCommand[3]", ...pidFields.filter((f) => !omitted(f))];
+    const extraFor = (throttle: number, u: [number, number, number]) => [
+        throttle,
+        ...pidFields.filter((f) => !omitted(f)).map((f) => (f.startsWith("axisP") ? u[Number(f[6])] : 0)),
+    ];
     const idle = (n: number) => {
         for (let k = 0; k < n; k++, t += dt) {
             frames.push({
@@ -155,13 +213,21 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
                 setpoint: [0, 0, 0],
                 gyro: [0, 0, 0],
                 debug: [0, -1, 0, 0],
-                extra: [1400],
+                extra: extraFor(1400, [0, 0, 0]),
             });
         }
     };
     idle(200);
-    o.plants.forEach((G, axis) => {
-        if (!G) return;
+    const pc = jio ? phaseCompCoeffs(3, 30, Math.round(1e6 / RATE_HZ)) : null;
+    const repeats = jio?.repeats ?? 1;
+    const sweptAxes: { axis: number; G: Plant; rep: number }[] = [];
+    for (let rep = 0; rep < repeats; rep++)
+        o.plants.forEach((G, axis) => {
+            const Gr = rep > 0 && jio?.plantsAfter ? jio.plantsAfter[axis] : G;
+            if (Gr) sweptAxes.push({ axis, G: Gr, rep });
+        });
+    const firstRepeat = new Map<number, { sp: number[]; y: Float64Array; u: Float64Array }>();
+    sweptAxes.forEach(({ axis, G, rep }) => {
         const cfg = controllerConfigFromHeaders(h, axis as 0 | 1 | 2)!;
         const n = Math.round(sweepS * RATE_HZ);
         const beta = Math.pow(f1 / f0, 1 / sweepS);
@@ -185,14 +251,64 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
             const g = G(Math.max(f, 1e-3));
             return cdiv(cmul(g, c.cReference), cadd({ re: 1, im: 0 }, cmul(g, c.cFeedback)));
         };
-        const y = o.uncorrelated
+        // Firmware-faithful chirp: amplitude · phaseComp(exc) is what pid.c adds to the setpoint.
+        if (pc) {
+            let x1 = 0;
+            let y1 = 0;
+            for (let i = 0; i < n; i++) {
+                const x = sp[i] / amp;
+                const yy = pc.b0 * x + pc.b1 * x1 - pc.a1 * y1;
+                x1 = x;
+                y1 = yy;
+                sp[i] = Math.round(amp * yy);
+            }
+        }
+        let y: Float64Array = o.uncorrelated
             ? Float64Array.from({ length: n }, (_, i) => amp * Math.sin(2 * Math.PI * 37 * (i / RATE_HZ)))
             : filter(sp, T);
+        let u: Float64Array = new Float64Array(n);
+        if (jio) {
+            // Output disturbance through the loop: d → S·d = d / (1 + G·C_fb), seen by the controller.
+            if (jio.disturbance) {
+                const p = Math.exp((-2 * Math.PI * jio.disturbance.poleHz) / RATE_HZ);
+                const d: number[] = [];
+                let prev = 0;
+                for (let i = 0; i < n; i++) {
+                    prev = p * prev + (1 - p) * gauss();
+                    d.push(prev);
+                }
+                let sd = 0;
+                for (const v of d) sd += v * v;
+                sd = Math.sqrt(sd / n) || 1;
+                const S = (f: number) => {
+                    const c = evaluateControllerFrf(cfg, Math.max(f, 1e-3));
+                    return cdiv({ re: 1, im: 0 }, cadd({ re: 1, im: 0 }, cmul(G(Math.max(f, 1e-3)), c.cFeedback)));
+                };
+                const sd_ = filter(
+                    d.map((v) => (v * jio.disturbance!.sd) / sd),
+                    S,
+                );
+                y = Float64Array.from(y, (v, i) => v + sd_[i]);
+            }
+            // pidSum = C_ref·r − C_fb·y on the samples the log holds (frequency-domain filters).
+            const ur = filter(sp, (f) => evaluateControllerFrf(cfg, Math.max(f, 1e-3)).cReference);
+            const uy = filter(Array.from(y), (f) => evaluateControllerFrf(cfg, Math.max(f, 1e-3)).cFeedback);
+            u = Float64Array.from(ur, (v, i) => v - uy[i]);
+            if (rep === 0) firstRepeat.set(axis, { sp, y, u });
+            else if (jio.duplicateRepeat) {
+                const first = firstRepeat.get(axis)!;
+                y = first.y;
+                u = first.u;
+                for (let i = 0; i < n; i++) sp[i] = first.sp[i];
+            }
+        }
         for (let i = 0; i < n; i++, t += dt) {
             const setpoint: [number, number, number] = [0, 0, 0];
             const gyro: [number, number, number] = [0, 0, 0];
+            const uu: [number, number, number] = [0, 0, 0];
             setpoint[axis] = sp[i];
-            gyro[axis] = Math.round(y[i] + (o.noise ? o.noise * gauss() : 0));
+            gyro[axis] = Math.round(y[i] + (o.noise && !(jio?.duplicateRepeat && rep > 0) ? o.noise * gauss() : 0));
+            uu[axis] = Math.round(u[i]);
             const m = meta[i];
             frames.push({
                 time: Math.round(t),
@@ -200,20 +316,21 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
                 gyro,
                 debug: [
                     Math.round(5000 * (m.phase % (2 * Math.PI))),
-                    axis,
+                    omitted("debug1") ? -1 : axis,
                     Math.round(10 * m.f),
                     Math.round(1000 * m.exc),
                 ],
-                extra: [1400],
+                extra: extraFor(1400, uu),
             });
         }
-        idle(100);
+        idle(jio ? Math.round((jio.gapS ?? 0.6) * RATE_HZ) : 100);
     });
     return encodeLog(frames, {
         iInterval: 32,
         flightModeFlags: CHIRP_FLAG,
         extraHeaders: headers,
-        extraFields: ["rcCommand[3]"],
+        extraFields,
         firstIteration: o.firstIteration,
+        ...(jio?.pidProcessDenomHeader ? { pidProcessDenom: jio.pidProcessDenomHeader } : {}),
     });
 }
