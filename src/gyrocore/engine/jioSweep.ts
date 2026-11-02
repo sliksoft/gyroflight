@@ -75,7 +75,7 @@ export const JIO_SWEEP = Object.freeze({
      * exponential sweep's own 1/f trend falls only ≈ 3 dB per octave and never trips this.
      */
     excitationLocalDropDb: 10,
-    /** cond(U_r) above this: the 3×3 combination is ill-conditioned at the point. */
+    /** Frobenius condition estimate ‖U_r‖_F·‖U_r⁻¹‖_F above this (stricter than the 2-norm): ill-conditioned. */
     maxCondition: 20,
     /**
      * A run of fewer consecutive passing points than this is noise that happened to pass the
@@ -578,13 +578,15 @@ export function analyzeJioSweeps(
     // Common record length: the shortest active sweep (an aborted sweep shortens the grid of all so
     // that columns share one frequency grid), at most the header's sweep, plus the settle tail as
     // far as the log holds it after every sweep.
+    // A sweep shorter than minSweepS is a flagged record, not the ruler for the others.
     const active = log.sweeps.map((s) => Math.min(s.end - s.start, sweepSamples));
-    const minActive = Math.min(...active);
-    if (minActive / fs < JIO_SWEEP.minSweepS) {
-        blockers.push(`jio_sweep_too_short:${(minActive / fs).toFixed(1)}s`);
+    const longEnough = log.sweeps.filter((_, k) => active[k] / fs >= JIO_SWEEP.minSweepS);
+    if (!longEnough.length) {
+        blockers.push(`jio_sweep_too_short:${(Math.max(...active) / fs).toFixed(1)}s`);
         return base;
     }
-    const L = smoothLength(Math.min(minActive + tail, ...log.sweeps.map((s) => n - s.start)));
+    const minActive = Math.min(...longEnough.map((s) => Math.min(s.end - s.start, sweepSamples)));
+    const L = smoothLength(Math.min(minActive + tail, ...longEnough.map((s) => n - s.start)));
     if (L < 2 * (2 * JIO_SWEEP.daniellHalfWidthBins + 1) * 4) {
         blockers.push("jio_record_too_short");
         return base;
@@ -629,6 +631,8 @@ export function analyzeJioSweeps(
         for (const s of recs) {
             const flags: string[] = [];
             const notes: string[] = [];
+            if ((s.end - s.start) / fs < JIO_SWEEP.minSweepS)
+                flags.push(`sweep_too_short:${((s.end - s.start) / fs).toFixed(1)}s`);
             // mode_flag_only: the generator ran the whole BOXCHIRP window (nothing to trim); the axis and
             // excitation are still checked below on debug[1] and debug[3].
             if (s.boundSource !== "firmware_debug_chirp") notes.push("sweep_bounds_from_mode_flag");
@@ -657,7 +661,7 @@ export function analyzeJioSweeps(
             if (axisHits < JIO_SWEEP.minAxisFraction * (activeEnd - s.start)) flags.push("sweep_axis_mismatch_debug1");
             if (s.end - s.start < sweepSamples * 0.98)
                 notes.push(`generator_stopped_early:${((s.end - s.start) / fs).toFixed(1)}s_of_${sweep.durationS}s`);
-            if (s.end - s.start > L - tail + 1)
+            if (s.end - s.start > L - tail + Math.round(0.1 * fs))
                 notes.push(
                     `record_clipped_to_common_length:${((L - tail) / fs).toFixed(1)}s_of_${((s.end - s.start) / fs).toFixed(1)}s`,
                 );
@@ -753,7 +757,7 @@ export function analyzeJioSweeps(
                 }
             repeats.z = Number.isFinite(zMax) ? zMax : null;
             if (repeats.z === null) {
-                repeats.reasons.push("repeat_comparison_no_common_supported_points");
+                repeats.reasons.push("repeat_comparison_no_common_supported_points:first_record_used");
                 col = used[0].column;
             } else if (repeats.z > JIO_SWEEP.repeatZThreshold) {
                 repeats.consistency = "inconsistent";

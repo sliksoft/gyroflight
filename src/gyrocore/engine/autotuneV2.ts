@@ -1139,7 +1139,12 @@ function runJioRoute(
         const plan = planMeasurement(name, loop, margins, log.sampleRateHz, sweep, null);
         const computable = margins.status !== "UNAVAILABLE" && margins.crossoverHz !== null;
         if (!computable) reasons.push("jio_margins_unavailable", ...margins.reasons);
-        if (a.repeats.consistency === "unknown") reasons.push("stationarity_unknown:single_sweep");
+        if (a.repeats.consistency === "unknown")
+            reasons.push(
+                a.repeats.count > 1
+                    ? "stationarity_unknown:repeats_not_comparable"
+                    : "stationarity_unknown:single_sweep",
+            );
         chain[name] = { axis: name, margins, candidate, plan, tuningComputable: computable, reasons };
     }
     const anyChain = Object.values(chain).some((c) => c?.tuningComputable);

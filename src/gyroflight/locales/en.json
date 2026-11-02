@@ -1036,6 +1036,9 @@
     "gyroflightV2Need_log_pid_terms_and_debug_chirp": {
         "message": "a log with debug_mode CHIRP and the axisP/I/D/F fields (default Blackbox field set)"
     },
+    "gyroflightV2Need_chirp_roll_sweep": { "message": "a roll CHIRP sweep in the log" },
+    "gyroflightV2Need_chirp_pitch_sweep": { "message": "a pitch CHIRP sweep in the log" },
+    "gyroflightV2Need_chirp_yaw_sweep": { "message": "a yaw CHIRP sweep in the log" },
     "gyroflightV2Need_log_at_pid_rate": { "message": "a log at the PID loop rate (Blackbox P interval 1/1)" },
     "gyroflightV2Need_chirp_roll_repeated_sweep_for_stationarity": {
         "message": "a second roll sweep in the same flight (stationarity check)"
