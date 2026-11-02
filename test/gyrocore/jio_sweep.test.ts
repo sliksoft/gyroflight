@@ -549,14 +549,21 @@ describe("CHIRP + JIO repeats across independent flights", () => {
             expect(ch.reasons.some((x) => x.startsWith("cross_flight_repeat:consistent:flights:1:z:"))).toBe(true);
             expect(ch.candidate!.status).not.toBe("VALIDATED");
         }
-        // The stationarity need is met by the other flight's sweep; the route still releases nothing.
-        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(false);
+        // Reproducibility between flights is answered; stationarity within a sweep is not, and stays asked.
+        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_for_stationarity");
+        expect(r.jio.requiredMeasurements).not.toContain(
+            "required_measurement:chirp_roll_repeat_flight_for_reproducibility",
+        );
+        expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_roll_repeat_flight_consistent");
         expect(r.jio.diagnosticOnly).toBe(true);
         expect(r.releasableProposal).toBeNull();
         // The same analysis with no other log says so.
         const alone = run(primary);
         expect(alone.jio.crossFlight.candidates).toEqual([]);
         expect(alone.jio.chain.roll!.reasons).toContain("cross_flight_repeat:none");
+        expect(alone.jio.requiredMeasurements).toContain(
+            "required_measurement:chirp_roll_repeat_flight_for_reproducibility",
+        );
         expect(alone.jio.analysis.axes.roll!.points!.gRe).toEqual(r.jio.analysis.axes.roll!.points!.gRe);
     }, 120_000);
 
@@ -566,14 +573,19 @@ describe("CHIRP + JIO repeats across independent flights", () => {
         expect(c.usable).toBe(true);
         expect(c.axes.roll!.consistency).toBe("inconsistent");
         expect(c.axes.roll!.z).toBeGreaterThan(JIO_SWEEP.repeatZThreshold);
+        expect(c.axes.roll!.reasons).toContain("inconsistent_on:closed_loop_T");
+        // The plant z of the same step is recorded (whichever side of the threshold it falls on here).
+        expect(Number.isFinite(c.axes.roll!.zPlant)).toBe(true);
+        expect(r.jio.crossFlight.axes.roll!.zPlantMax).toBe(c.axes.roll!.zPlant);
         expect(c.axes.pitch!.consistency).toBe("consistent");
         expect(c.axes.yaw!.consistency).toBe("consistent");
         expect(r.jio.chain.roll!.candidate!.status).toBe("BLOCKED");
         expect(r.jio.chain.roll!.candidate!.reasons).toContain("jio_cross_flight_inconsistent");
         expect(r.jio.chain.roll!.reasons.some((x) => x.startsWith("jio_cross_flight_inconsistent:z:"))).toBe(true);
         expect(r.jio.chain.pitch!.candidate!.reasons).not.toContain("jio_cross_flight_inconsistent");
-        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_consistent");
-        expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_pitch_repeated_sweep_consistent");
+        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeat_flight_consistent");
+        expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_roll_repeated_sweep_consistent");
+        expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_pitch_repeat_flight_consistent");
         // The primary's margins are still this flight's reading, visible, MEASURED at most.
         expect(r.jio.chain.roll!.margins!.status).not.toBe("VALIDATED");
     }, 120_000);
@@ -602,12 +614,15 @@ describe("CHIRP + JIO repeats across independent flights", () => {
         expect(c0.usable).toBe(false);
         expect(c0.issues.some((i) => i.startsWith("cross_log_duplicate_of_primary:"))).toBe(true);
         expect(c1.usable).toBe(false);
-        expect(c1.issues).toContain("jio_cross_flight_sweep_differs:chirp_amplitude_roll");
+        expect(c1.issues).toContain("jio_cross_flight_setting_differs:chirp_amplitude_roll");
         expect(c2.usable).toBe(false);
         expect(c2.issues.some((i) => i.startsWith("cross_log_config_differs:"))).toBe(true);
         expect(r.jio.crossFlight.axes).toEqual({});
         expect(r.jio.chain.roll!.reasons).toContain("cross_flight_repeat:none:see_crossFlight_candidates");
         expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_for_stationarity");
+        expect(r.jio.requiredMeasurements).toContain(
+            "required_measurement:chirp_roll_repeat_flight_for_reproducibility",
+        );
     }, 120_000);
 
     // Different record lengths (a generator that stopped early on one flight) are exercised on the real
@@ -637,6 +652,15 @@ describe("CHIRP + JIO repeats across independent flights", () => {
         const ok = crossFlightRepeatabilityZ(pts(1, 100, 100), pts(1.5, 60, 60), 25, 25, 2, 90);
         expect(ok.z).toBe(0);
         expect(ok.zPlant).toBe(0);
+        // A fine point exactly half a coarse step from two coarse points is matched once (half-open).
+        const twice = crossFlightRepeatabilityZ(pts(2, 40, 40), pts(1, 80, 80), 25, 25, 2, 79);
+        expect(twice.matched).toBeLessThanOrEqual(39);
+        // The plant can differ while the closed loop agrees: G of b is 1.5× a, T equal (relsd 0.1 each).
+        const bPlant = pts(1, 100, 100);
+        bPlant.gRe.fill(1.5);
+        const g = crossFlightRepeatabilityZ(pts(1, 100, 100), bPlant, 25, 25, 2, 90);
+        expect(g.z).toBe(0);
+        expect(g.zPlant).toBeGreaterThan(JIO_SWEEP.repeatZThreshold);
         expect(ok.matched).toBeGreaterThan(JIO_SWEEP.crossFlightMinPoints);
     });
 });
@@ -664,6 +688,7 @@ describe("CHIRP + JIO sweep advice (firmware-settable exponential sweep only)", 
         expect(sg.secondsPerOctave).toBeGreaterThan(adv.current.secondsPerOctave);
         expect(sg.excitationGainDb).toBeGreaterThan(0);
         expect(adv.basis).toContain("sweep_law:exponential:chirp.c");
+        expect(adv.basis).toContain("end_rounded_up_to:10Hz");
         expect(adv.basis).toContain("start_raised_to_lowest_analysed:2Hz");
         expect(adv.basis.some((b) => b.startsWith("experimental_not_validated"))).toBe(true);
     }, 120_000);

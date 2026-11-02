@@ -189,7 +189,9 @@ describe("AutotuneV2Panel", () => {
         expect(roll.textContent).toMatch(/1: consistent z=\d/);
         expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain(`${sha2.slice(0, 12)}#1`);
         expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("plant z=");
-        expect(q(d, '[data-gyrocore="v2-jio-needs"]')!.textContent).not.toContain("repeated_sweep_for_stationarity");
+        expect(q(d, '[data-gyrocore="v2-jio-needs"]')!.textContent).toContain("repeated_sweep_for_stationarity");
+        expect(q(d, '[data-gyrocore="v2-jio-needs"]')!.textContent).not.toContain("repeat_flight_for_reproducibility");
+        expect(roll.textContent).toContain("gyroflightV2JioCrossFlightHelp");
         // The plot per analysed axis: dots for the evaluation points, and the sweep advice per axis.
         const plots = d.querySelectorAll('[data-gyrocore="v2-jio-plot"]');
         expect(plots).toHaveLength(2);

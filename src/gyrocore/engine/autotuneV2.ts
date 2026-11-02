@@ -319,7 +319,14 @@ export interface JioRouteResult {
         axes: Partial<
             Record<
                 AxisName,
-                { flights: number; consistency: "consistent" | "inconsistent" | "unknown"; zMax: number | null }
+                {
+                    flights: number;
+                    consistency: "consistent" | "inconsistent" | "unknown";
+                    /** Largest closed-loop z over the compared flights (the row's number). */
+                    zMax: number | null;
+                    /** Largest plant z over the compared flights; both vote (crossFlightRepeatabilityZ). */
+                    zPlantMax: number | null;
+                }
             >
         >;
     };
@@ -329,14 +336,31 @@ export interface JioRouteResult {
     diagnosticOnly: true;
 }
 
-/** Sweep settings that a JIO repeat must share with the primary (beyond PLANT_CONFIG_KEYS). */
-const JIO_SWEEP_KEYS = [
+/**
+ * Settings a JIO repeat must share with the primary beyond the identity rules (PLANT_CONFIG_KEYS,
+ * logged PID/FF/D-max): the sweep itself, and the controller behaviours that move the closed-loop
+ * response T between flights without changing the logged PID (anti-gravity, I-term relax, TPA).
+ * Missing on both sides counts as equal; a header present on one side only differs.
+ */
+const JIO_REPEAT_KEYS = [
     "chirp_amplitude_roll",
     "chirp_amplitude_pitch",
     "chirp_amplitude_yaw",
     "chirp_frequency_start_deci_hz",
     "chirp_frequency_end_deci_hz",
     "chirp_time_seconds",
+    "anti_gravity_gain",
+    "anti_gravity_cutoff_hz",
+    "anti_gravity_p_gain",
+    "iterm_relax",
+    "iterm_relax_type",
+    "iterm_relax_cutoff",
+    "tpa_mode",
+    "tpa_rate",
+    "tpa_breakpoint",
+    "tpa_low_rate",
+    "tpa_low_breakpoint",
+    "tpa_low_always",
 ];
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
@@ -1104,13 +1128,15 @@ function jioRequirements(
             out.add(`required_measurement:chirp_${name}_sweep`);
             continue;
         }
-        // A comparable sweep of another independent flight is a repeat too: the need for one
-        // stands only while neither the log nor another flight gives a comparison.
-        const cross = crossFlight.axes[name]?.consistency ?? "unknown";
-        if (a.repeats.count < 2 && cross === "unknown")
-            out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
-        if (a.repeats.consistency === "inconsistent" || cross === "inconsistent")
+        // Stationarity during the measurement needs a second sweep in the same flight; a comparable
+        // other flight answers a different question (reproducibility between flights) and has its
+        // own codes. Neither clears the other.
+        if (a.repeats.count < 2) out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
+        if (a.repeats.consistency === "inconsistent")
             out.add(`required_measurement:chirp_${name}_repeated_sweep_consistent`);
+        const cross = crossFlight.axes[name]?.consistency ?? "unknown";
+        if (cross === "unknown") out.add(`required_measurement:chirp_${name}_repeat_flight_for_reproducibility`);
+        if (cross === "inconsistent") out.add(`required_measurement:chirp_${name}_repeat_flight_consistent`);
         if (a.sweepAdvice?.suggested) out.add(`required_measurement:chirp_${name}_band_matched_sweep`);
         if (a.blockers.some((b) => b.startsWith("record:") && /pidsum_limit_active|motor_saturation/.test(b)))
             out.add(`required_measurement:chirp_${name}_without_saturation`);
@@ -1210,7 +1236,9 @@ function runJioRoute(
                 status: "BLOCKED",
                 reasons: [...candidate.reasons, "jio_cross_flight_inconsistent"],
             };
-            reasons.push(`jio_cross_flight_inconsistent:z:${cross.zMax!.toFixed(2)}`);
+            reasons.push(
+                `jio_cross_flight_inconsistent:z:${cross.zMax!.toFixed(2)}:plant_z:${cross.zPlantMax!.toFixed(2)}`,
+            );
         }
         const plan = planMeasurement(name, loop, margins, log.sampleRateHz, sweep, null);
         const computable = margins.status !== "UNAVAILABLE" && margins.crossoverHz !== null;
@@ -1223,7 +1251,7 @@ function runJioRoute(
             );
         reasons.push(
             cross && cross.consistency !== "unknown"
-                ? `cross_flight_repeat:${cross.consistency}:flights:${cross.flights}:z:${cross.zMax!.toFixed(2)}`
+                ? `cross_flight_repeat:${cross.consistency}:flights:${cross.flights}:z:${cross.zMax!.toFixed(2)}:plant_z:${cross.zPlantMax!.toFixed(2)}`
                 : `cross_flight_repeat:none${others.length ? ":see_crossFlight_candidates" : ""}`,
         );
         chain[name] = { axis: name, margins, candidate, plan, tuningComputable: computable, reasons };
@@ -1257,7 +1285,8 @@ function jioCrossFlight(
     for (const other of others) {
         const issues = crossLogReferenceIssues(log, other, others);
         const hb = new Map(other.headerPairs);
-        for (const k of JIO_SWEEP_KEYS) if (ha.get(k) !== hb.get(k)) issues.push(`jio_cross_flight_sweep_differs:${k}`);
+        for (const k of JIO_REPEAT_KEYS)
+            if (ha.get(k) !== hb.get(k)) issues.push(`jio_cross_flight_setting_differs:${k}`);
         const cand: JioCrossFlightCandidate = {
             sha256: other.sha256,
             logIndex: other.logIndex,
@@ -1320,28 +1349,35 @@ function jioCrossFlight(
                 continue;
             }
             const cmp = crossFlightRepeatabilityZ(a.points, b.points, a.grid!.nEff, b.grid!.nEff, band![0], band![1]);
+            // Either statistic above the threshold is a change: the closed loop (controller in force
+            // included) or the plant itself. Which one is named.
+            const over = (z: number | null) => z !== null && z > JIO_SWEEP.repeatZThreshold;
+            const reasons = [...cmp.reasons];
+            if (over(cmp.z)) reasons.push("inconsistent_on:closed_loop_T");
+            if (over(cmp.zPlant)) reasons.push("inconsistent_on:plant_G");
             cand.axes[name] = {
                 z: cmp.z,
                 zPlant: cmp.zPlant,
                 matchedPoints: cmp.matched,
                 consistency:
-                    cmp.z === null ? "unknown" : cmp.z > JIO_SWEEP.repeatZThreshold ? "inconsistent" : "consistent",
-                reasons: cmp.reasons,
+                    cmp.z === null ? "unknown" : over(cmp.z) || over(cmp.zPlant) ? "inconsistent" : "consistent",
+                reasons,
             };
         }
     }
     const axes: JioRouteResult["crossFlight"]["axes"] = {};
     for (const name of AXES) {
-        const zs = candidates.flatMap((c) => {
-            const z = c.axes[name]?.z;
-            return typeof z === "number" ? [z] : [];
+        const compared = candidates.flatMap((c) => {
+            const a = c.axes[name];
+            return a && typeof a.z === "number" ? [a] : [];
         });
-        if (!zs.length) continue;
-        const zMax = Math.max(...zs);
+        if (!compared.length) continue;
         axes[name] = {
-            flights: zs.length,
-            consistency: zMax > JIO_SWEEP.repeatZThreshold ? "inconsistent" : "consistent",
-            zMax,
+            flights: compared.length,
+            // One flight that disagrees is not outvoted by one that agrees.
+            consistency: compared.some((a) => a.consistency === "inconsistent") ? "inconsistent" : "consistent",
+            zMax: Math.max(...compared.map((a) => a.z!)),
+            zPlantMax: Math.max(...compared.map((a) => a.zPlant ?? 0)),
         };
     }
     return { candidates, axes };

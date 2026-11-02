@@ -1029,6 +1029,9 @@
     "gyroflightV2JioGapPoints": { "message": "gap points" },
     "gyroflightV2JioCrossFlight": { "message": "Repeats across flights" },
     "gyroflightV2JioCrossFlightNone": { "message": "none comparable (see the other flights below)" },
+    "gyroflightV2JioCrossFlightHelp": {
+        "message": "experimental; agreement between flights is not stationarity within a sweep"
+    },
     "gyroflightV2JioCandidates": {
         "message": "Other flights offered as repeats (closed-loop z decides; plant z alongside; nothing averaged across flights)"
     },
@@ -1070,14 +1073,32 @@
     "gyroflightV2Need_chirp_yaw_repeated_sweep_consistent": {
         "message": "two consistent yaw sweeps (the repeats differed)"
     },
+    "gyroflightV2Need_chirp_roll_repeat_flight_for_reproducibility": {
+        "message": "a second independent flight with a roll sweep, same craft and settings (reproducibility between flights; experimental comparison)"
+    },
+    "gyroflightV2Need_chirp_pitch_repeat_flight_for_reproducibility": {
+        "message": "a second independent flight with a pitch sweep, same craft and settings (reproducibility between flights; experimental comparison)"
+    },
+    "gyroflightV2Need_chirp_yaw_repeat_flight_for_reproducibility": {
+        "message": "a second independent flight with a yaw sweep, same craft and settings (reproducibility between flights; experimental comparison)"
+    },
+    "gyroflightV2Need_chirp_roll_repeat_flight_consistent": {
+        "message": "roll sweeps of two independent flights that agree (the compared flights differed: closed loop or plant)"
+    },
+    "gyroflightV2Need_chirp_pitch_repeat_flight_consistent": {
+        "message": "pitch sweeps of two independent flights that agree (the compared flights differed: closed loop or plant)"
+    },
+    "gyroflightV2Need_chirp_yaw_repeat_flight_consistent": {
+        "message": "yaw sweeps of two independent flights that agree (the compared flights differed: closed loop or plant)"
+    },
     "gyroflightV2Need_chirp_roll_band_matched_sweep": {
-        "message": "a roll sweep whose end frequency matches the supported band (see the sweep advice; exponential firmware sweep, same duration and amplitude)"
+        "message": "a roll sweep whose end frequency matches the supported band (experimental sweep advice; exponential firmware sweep, same duration and amplitude)"
     },
     "gyroflightV2Need_chirp_pitch_band_matched_sweep": {
-        "message": "a pitch sweep whose end frequency matches the supported band (see the sweep advice; exponential firmware sweep, same duration and amplitude)"
+        "message": "a pitch sweep whose end frequency matches the supported band (experimental sweep advice; exponential firmware sweep, same duration and amplitude)"
     },
     "gyroflightV2Need_chirp_yaw_band_matched_sweep": {
-        "message": "a yaw sweep whose end frequency matches the supported band (see the sweep advice; exponential firmware sweep, same duration and amplitude)"
+        "message": "a yaw sweep whose end frequency matches the supported band (experimental sweep advice; exponential firmware sweep, same duration and amplitude)"
     },
     "gyroflightV2Need_chirp_roll_without_saturation": {
         "message": "a roll sweep without pidSum limit or motor saturation"

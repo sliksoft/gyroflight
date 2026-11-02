@@ -550,12 +550,13 @@ export function crossFlightRepeatabilityZ(
         while (j + 1 < fine.frequencyHz.length && fine.frequencyHz[j + 1] <= f) j++;
         const cand = [j, j + 1].filter((k) => k < fine.frequencyHz.length);
         let best = -1;
-        for (const k of cand)
-            if (
-                Math.abs(fine.frequencyHz[k] - f) <= half &&
-                (best < 0 || Math.abs(fine.frequencyHz[k] - f) < Math.abs(fine.frequencyHz[best] - f))
-            )
-                best = k;
+        // Half-open acceptance: a fine point exactly half a step above f belongs to the next coarse
+        // point, so no fine point is matched twice.
+        for (const k of cand) {
+            const d = fine.frequencyHz[k] - f;
+            if (d > half || d <= -half) continue;
+            if (best < 0 || Math.abs(d) < Math.abs(fine.frequencyHz[best] - f)) best = k;
+        }
         if (best < 0 || !fine.supported[best]) continue;
         const sdT = Math.hypot(relativeSd(coarse.coherenceRy[i], nC), relativeSd(fine.coherenceRy[best], nF));
         const sdG = Math.hypot(coarse.relativeSd[i], fine.relativeSd[best]);
@@ -592,6 +593,7 @@ export function sweepAdviceFor(sweep: SweepInfo, band: JioAxisResult["band"]): J
     const basis = [
         `supported_band:${supLo.toFixed(1)}-${supHi.toFixed(1)}Hz`,
         `end_target:${FIRMWARE_CHIRP.endMarginFactor}x_supported_top`,
+        `end_rounded_up_to:${FIRMWARE_CHIRP.endRoundHz}Hz`,
         `sweep_law:${FIRMWARE_CHIRP.sweepLaw}`,
         `settable_ranges:${FIRMWARE_CHIRP.settingsSource}`,
         "same_duration_and_amplitude",

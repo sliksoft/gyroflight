@@ -224,8 +224,10 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
             // Still one sweep in this log: the within-flight stationarity stays unknown and is said so.
             expect(r.jio.chain[axis]!.reasons).toContain("stationarity_unknown:single_sweep");
         }
-        // With the other flight's sweep compared, the stationarity need is met; the band advice remains.
-        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(false);
+        // Reproducibility between flights is answered; stationarity within a sweep stays asked; band advice remains.
+        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(true);
+        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeat_flight_for_reproducibility"))).toBe(false);
+        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeat_flight_consistent"))).toBe(false);
         expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_band_matched_sweep");
         // The primary's own JIO estimate and the primary route are unchanged by the other log's presence.
         for (const axis of ["roll", "pitch", "yaw"] as const) {

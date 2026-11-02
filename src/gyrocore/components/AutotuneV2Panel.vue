@@ -623,7 +623,7 @@ const jioRows = computed(() => {
                 repeats: `${a.repeats.count}: ${a.repeats.consistency}${a.repeats.z !== null ? ` z=${a.repeats.z.toFixed(2)}` : ""}`,
                 crossFlightConsistency: cf?.consistency ?? "none",
                 crossFlight: cf
-                    ? `${cf.flights}: ${cf.consistency} z=${cf.zMax!.toFixed(2)}`
+                    ? `${cf.flights}: ${cf.consistency} z=${cf.zMax!.toFixed(2)} (plant z=${num(cf.zPlantMax, 2)}; ${i18n.getMessage("gyroflightV2JioCrossFlightHelp")})`
                     : jio.crossFlight.candidates.length
                       ? i18n.getMessage("gyroflightV2JioCrossFlightNone")
                       : "--",
