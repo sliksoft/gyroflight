@@ -409,6 +409,7 @@ describe("AutotuneV2Panel", () => {
                         activationsPerFlight: 6,
                         perActivationS: 23.5,
                         chirpTimePerFlightS: 141,
+                        generatorTimePerFlightS: 120,
                         flights: 2,
                         totalChirpTimeS: 282,
                         firm: [],
@@ -431,7 +432,7 @@ describe("AutotuneV2Panel", () => {
         expect(ins.getAttribute("data-kind")).toBe("record");
         expect(q(ins, '[data-setting="chirp_frequency_end_deci_hz"]')!.getAttribute("data-changed")).toBe("yes");
         expect(q(ins, '[data-gyrocore="v2-recording-timing"]')!.textContent).toContain(
-            "gyroflightV2RecordingTiming|6|20|141|2|282",
+            "gyroflightV2RecordingTiming|6|20|141|2|282|lead-in 2 s|120",
         );
     });
 

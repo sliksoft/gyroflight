@@ -86,7 +86,10 @@ export interface RecordingInstruction {
         sweepS: number;
         activationsPerFlight: number;
         perActivationS: number;
+        /** The whole activation sequence per flight: lead-in, sweep, settle and pause for each activation. */
         chirpTimePerFlightS: number;
+        /** Generator time only: activations × chirp_time_seconds. */
+        generatorTimePerFlightS: number;
         flights: number;
         totalChirpTimeS: number;
         firm: string[];
@@ -228,12 +231,10 @@ export function recordingInstructions(o: {
             `Import both logs into Autotune and Calculate; the checks below decide whether the axis is complete.`,
         ];
         const completionChecks = [
-            `debug_mode CHIRP and the axisP/I/D/F, debug[1..3] fields present (jioSweep jio_channel_missing).`,
-            `Log rate equals the PID rate within 2 % (jio_log_rate_not_pid_rate).`,
-            `Each sweep excited for ≥ ${Math.round(JIO_SWEEP.completeSweepFraction * 100)} % of chirp_time_seconds (sweep_incomplete) and debug[2] follows the firmware law (debug2_frequency_mismatch).`,
-            `Primary quality gate: mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (chirp/quality.ts low_coherence).`,
-            `Identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top, so the phase crossing and the |S| peak lie inside it (gain_margin_shown_by_band, sensitivity_peak_shown_by_band).`,
-            `${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps of the axis agree within the flight (repeat z ≤ ${JIO_SWEEP.repeatZThreshold}, experimental) and the second flight agrees (experimental).`,
+            `Blocking (the engine excludes the data): debug_mode CHIRP; setpoint, axisP/I/F, debug[1] and debug[3] logged, axisD when D > 0 (jio_channel_missing); log rate equal to the PID rate within 2 % (jio_log_rate_not_pid_rate); debug[2] against the firmware law when logged (debug2_frequency_mismatch).`,
+            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only on a decision band without dropped bins); no unidentified bin inside the decision band (decision_band_gaps); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top so the phase crossing and the |S| peak lie inside it (gain_margin_shown_by_band, sensitivity_peak_shown_by_band).`,
+            `Noted, not excluding: a missing debug[2] (frequency_verification_missing); a sweep below ${Math.round(JIO_SWEEP.completeSweepFraction * 100)} % of chirp_time_seconds is ingested and annotated (sweep_incomplete) and asks for a complete sweep; a single sweep leaves stationarity unknown.`,
+            `Experimental: ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps of the axis agree within the flight (repeat z ≤ ${JIO_SWEEP.repeatZThreshold}) and the second flight agrees.`,
         ];
         out.push({
             axis,
@@ -246,6 +247,7 @@ export function recordingInstructions(o: {
                 activationsPerFlight: activations,
                 perActivationS: perActivation,
                 chirpTimePerFlightS: perFlight,
+                generatorTimePerFlightS: activations * sweepS,
                 flights: RECORDING_TIMING.flights,
                 totalChirpTimeS: perFlight * RECORDING_TIMING.flights,
                 firm: [
@@ -263,7 +265,7 @@ export function recordingInstructions(o: {
                 "flight mode, anti-gravity, TPA, I-term relax, filters and PIDs: not changed (a change makes the logs incomparable as repeats)",
                 `chirp_amplitude_${axis}: not changed by the app`,
             ],
-            note: `Triggered by the ${r.route} route: ${r.status}${fc ? ` — ${fc.rule} = ${fc.value === null ? "unknown" : fc.value} ${fc.unit} (${fc.threshold})` : ""}. A recording of this design is no guarantee of a proposal: the new data must pass these checks.`,
+            note: `Triggered by the ${r.route} route: ${r.status}${fc ? ` — ${fc.rule} = ${fc.value === null ? "unknown" : typeof fc.value === "number" ? +fc.value.toFixed(3) : fc.value} ${fc.unit}; required: ${fc.threshold}; ${fc.consequence}` : ""}. A recording of this design is no guarantee of a proposal: the new data must pass these checks.`,
         });
     }
     return out;

@@ -1056,7 +1056,7 @@
     "gyroflightV2RecordingTitle": { "message": "recording needed (preparation for a flight not yet made)" },
     "gyroflightV2RecordingNone": { "message": "no new recording requested" },
     "gyroflightV2RecordingTiming": {
-        "message": "Time: $1 activations of $2 s per flight, about $3 s of CHIRP per flight, $4 flights, about $5 s in total (take-off and landing on top). Experimental: $6."
+        "message": "Time: $1 activations of $2 s per flight: generator time $7 s, activation sequence with lead-in, settle and pause about $3 s per flight; $4 flights, about $5 s of activation sequence in total (take-off and landing on top). Experimental: $6."
     },
     "gyroflightV2RecordingChecks": { "message": "Afterwards the app checks" },
     "gyroflightV2ExperimentalTitle": { "message": "Experimental tuning (not released, not hardware-validated)" },

@@ -34,8 +34,6 @@ import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { analyzeM4BblFile } from "../../src/js/blackbox/m4_bbl_integration";
 import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
-import { createPinia, setActivePinia } from "pinia";
-import { experimentalWriteDecision } from "../../src/gyrocore/releaseGate/experimentalAuthority";
 import { runAutotuneV2, type AutotuneLogInput, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 
 const FILES = {
@@ -259,47 +257,34 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
             // flights every primary candidate is targets_not_reachable or unchanged (a fact of the data,
             // recorded in the JSON), so whatever is offered comes from a computable candidate, never invented.
             const x = r.experimental;
-            // Block 6: per axis the decision explains it. Facts of these logs: roll and pitch have a plant whose
-            // identified band (γ² ≥ 0.8) ends at 29–45 Hz, below the planner band top, so GM / |S| are not shown
-            // (plant_band_insufficient) or, bbl19 roll, the primary gate holds and the JIO search reaches the
-            // ±30 % step edge (search_limit_max_step); yaw's margins are read inside its band and the measured-
-            // margin search finds a candidate (MEASURED evidence, not bounded).
+            // Block 6 (after the review repair): per axis the decision explains it. Facts of these logs: every
+            // axis has a plant, but its decision band holds unidentified bins (1–9, dropped for coherence), which
+            // can hide a resonance or the |S| peak (loopModel supportIssues; T3 audit), so no candidate search
+            // runs (plant_band_insufficient, decision_band_gaps); bbl19 roll's primary measurement is rejected by
+            // the fixed-band gate (0.586 < 0.6) with a coherence-dropped bin, so the gate is not waived.
             const dec = r.candidateDecisions;
-            expect(dec.yaw!.primary!.status).toBe("candidate_found");
-            expect(dec.yaw!.primary!.searchRan).toBe(true);
-            for (const axis of ["roll", "pitch"] as const) {
-                const routes = [dec[axis]!.primary!, dec[axis]!.jio!];
-                expect(routes.some((d) => d.status === "candidate_found")).toBe(false);
-                for (const d of routes) {
+            for (const axis of ["roll", "pitch", "yaw"] as const) {
+                for (const d of [dec[axis]!.primary!, dec[axis]!.jio!]) {
+                    expect(d.status).not.toBe("candidate_found");
+                    expect(d.status).not.toBe("targets_not_reachable");
+                    expect(d.plant).not.toBe("absent");
                     if (d.status === "plant_band_insufficient") {
                         expect(d.searchRan).toBe(false);
-                        expect(
-                            d.checks.some((c) => c.rule === "identified_band_top" && typeof c.value === "number"),
-                        ).toBe(true);
+                        expect(d.candidate).toBeNull();
+                        expect(d.firstCause!.result).toBe("fail");
                     }
-                    if (d.status === "search_limit_max_step") expect(d.candidatesUsable).toBeGreaterThan(0);
                 }
                 expect(r.experimentalWithheld.some((w) => w.key === `pid_${axis}`)).toBe(true);
+                // Every axis without a candidate gets a recording instruction tied to its failed check.
+                const ins = r.recordingInstructions.find((i) => i.axis === axis)!;
+                expect(ins.kind).toBe("record");
+                expect(ins.trigger.rule).not.toBeNull();
+                expect(ins.timing!.activationsPerFlight).toBe(6);
+                expect(ins.timing!.generatorTimePerFlightS).toBe(6 * ins.timing!.sweepS);
             }
-            expect(x).not.toBeNull();
-            expect(x!.items.map((i) => i.key).every((k) => k.endsWith("_yaw"))).toBe(true);
-            expect(x!.items.every((i) => i.source === "primary_route" && i.evidence === "MEASURED")).toBe(true);
-            expect(x!.limitations).toContain("experimental:yaw:margins_measured_in_band_not_bounded");
-            expect(x!.proposal.release.measurement.valid).toBe(true);
-            // The yaw proposal passes the experimental authority's technical steps (finite integers in the
-            // firmware ranges, plausible step, craft named by the log; computable items). The binding step
-            // needs the store's analysis and is covered by experimental_proposal.test.ts.
-            setActivePinia(createPinia());
-            const decision = experimentalWriteDecision(x!, { recompute: false });
-            expect(decision.steps.find((st) => st.name === "computable_items")!.reasons).toEqual([]);
-            expect(decision.steps.find((st) => st.name === "values_technical")!.reasons).toEqual([]);
-            // Recording instructions: pitch (both logs) asks for a band-matched sweep; none for yaw.
-            const ins = r.recordingInstructions;
-            expect(ins.find((i) => i.axis === "yaw")).toBeUndefined();
-            const pitch = ins.find((i) => i.axis === "pitch")!;
-            expect(pitch.kind).toBe("record");
-            expect(pitch.settings.find((s) => s.name === "chirp_frequency_end_deci_hz")!.changed).toBe(true);
-            expect(pitch.timing!.activationsPerFlight).toBe(6);
+            expect(dec.yaw!.primary!.firstCause!.rule).toBe("decision_band_gaps");
+            expect(typeof dec.yaw!.primary!.firstCause!.value).toBe("number");
+            expect(x).toBeNull();
             if (x) {
                 expect(x.status).toBe("EXPERIMENTAL");
                 expect(x.proposal.id.startsWith("v2x-")).toBe(true);

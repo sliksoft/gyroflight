@@ -45,7 +45,9 @@ export const PID_TARGETS = Object.freeze({
 });
 /** Largest relative change of P, I or D in one proposal. */
 export const MAX_STEP = 0.3;
-export const SCALES = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3];
+export const SCALES: readonly number[] = Object.freeze([
+    0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3,
+]);
 /** Proposals that move the crossover by less than this are not worth a flight. */
 export const MIN_CROSSOVER_GAIN = 1.03;
 

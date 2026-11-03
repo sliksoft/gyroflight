@@ -95,7 +95,8 @@ const DATA_INSUFFICIENT = [
 ];
 
 export function dataInsufficientReasons(reasons: readonly string[]): string[] {
-    return reasons.filter((r) => DATA_INSUFFICIENT.some((re) => re.test(r)));
+    // A reason carried through from the margins (`margins:<reason>`) counts as the reason itself.
+    return reasons.filter((r) => DATA_INSUFFICIENT.some((re) => re.test(r.replace(/^margins:/, ""))));
 }
 
 /** A PID candidate the search really computed (improved / restores margins), with a change. */
@@ -253,7 +254,8 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
             limitations.add(`experimental:${axis}:margins_measured_in_band_not_bounded`);
             continue;
         }
-        const cause = (c: DecisionCheck | null) =>
+        const cause = (c: DecisionCheck | null) => [...causeText(c), ...(c ? [`→ ${c.consequence}`] : [])];
+        const causeText = (c: DecisionCheck | null) =>
             c
                 ? [
                       `${c.rule}=${c.value === null ? "unknown" : typeof c.value === "number" ? +c.value.toFixed(3) : c.value}${c.unit ? ` ${c.unit}` : ""} (${c.threshold})`,

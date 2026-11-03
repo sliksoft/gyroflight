@@ -1100,6 +1100,15 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                   loop: ax?.loop ?? null,
                   current,
                   gate: { state: c.state, gates: c.qualityGates },
+                  // The same Verified Tune segment the release search is bound to (none without one).
+                  segment:
+                      attested && input.verifiedTune
+                          ? {
+                                keys: axisKeys(name),
+                                base: input.verifiedTune.baseline.values,
+                                cand: input.verifiedTune.candidate.values,
+                            }
+                          : null,
                   noPlantReasons: ax ? [] : ["primary_axis_not_identified"],
                   requiredBandHz: measurementPlan.find((m) => m.axis === name)?.bandHz.primary ?? null,
               })

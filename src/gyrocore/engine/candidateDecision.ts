@@ -200,6 +200,8 @@ export function decideAxis(o: {
     route: "primary" | "jio";
     loop: AxisLoop | null;
     current: PidValues | null;
+    /** The Verified Tune segment the release search is bound to (pidOptimizer ValidatedSegment); null: none. */
+    segment?: Parameters<typeof searchGrid>[1];
     gate?: QualityGateInput | null;
     noPlantReasons?: string[];
     /** The band the planner needs for this loop (measurementPlan bandHz.primary); null: unknown. */
@@ -340,6 +342,24 @@ export function decideAxis(o: {
         result: blocker ? "fail" : "pass",
         consequence: blocker ? "margins at the crossover not shown by the data; no candidate search" : "none",
     });
+    // Holes inside the decision band (bins left out for coherence, support or uncertainty) can hide
+    // a resonance or the |S| peak between the bins that remain (loopModel supportIssues; the T3 audit
+    // case: one incoherent bin read PM 82° on a loop with 4.7°). Block 6 review: no search on them.
+    const holesReason = has(cur, /^(unidentified_bins_inside_band|identified_band_has_gaps)/);
+    const holeCount = (() => {
+        const r = cur.reasons.find((x) => x.startsWith("unidentified_bins_inside_band:"));
+        const n = r ? Number(r.split(":")[1]) : NaN;
+        return Number.isFinite(n) ? n : holesReason ? null : 0;
+    })();
+    checks.push({
+        rule: "decision_band_gaps",
+        ref: "src/gyrocore/engine/loopModel.ts:supportIssues",
+        value: holeCount,
+        unit: "unidentified bins",
+        threshold: "0 unidentified bins inside the decision band (a hole can hide a resonance or the |S| peak)",
+        result: holesReason ? "fail" : "pass",
+        consequence: holesReason ? "margins between the holes not shown by the data; no candidate search" : "none",
+    });
     // 5. GM and |S| shown by the band (bounded, or read inside the band).
     const bandTop = band ? band[1] : null;
     const gmCheck: DecisionCheck = {
@@ -367,7 +387,7 @@ export function decideAxis(o: {
     checks.push(gmCheck, sCheck);
     if (!usable(states.gm) || !usable(states.s)) checks.push(bandTopCheck(loop, band, o.requiredBandHz ?? null));
     const limitation = cur.evidence?.level !== "VALIDATED";
-    if (blocker || !usable(states.gm) || !usable(states.s))
+    if (blocker || holesReason || !usable(states.gm) || !usable(states.s))
         return out("plant_band_insufficient", {
             plant: "present_with_limitation",
             bandHz: band,
@@ -394,12 +414,19 @@ export function decideAxis(o: {
     let usableN = 0;
     let best: { v: PidValues; m: LoopMargins; val: ReturnType<typeof valuesOf> } | null = null;
     let safest: { v: PidValues; m: LoopMargins; val: ReturnType<typeof valuesOf> } | null = null;
-    for (const v of searchGrid(current, null)) {
+    for (const v of searchGrid(current, o.segment ?? null)) {
         if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) continue;
         tried++;
         const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
         const st = metricStates(m);
-        if (!usable(st.pm) || !usable(st.gm) || !usable(st.s) || has(m, DATA_BLOCKERS)) continue;
+        if (
+            !usable(st.pm) ||
+            !usable(st.gm) ||
+            !usable(st.s) ||
+            has(m, DATA_BLOCKERS) ||
+            has(m, /^(unidentified_bins_inside_band|identified_band_has_gaps)/)
+        )
+            continue;
         usableN++;
         const val = valuesOf(m);
         if (!safest || val.pmDeg! > safest.val.pmDeg!) safest = { v, m, val };

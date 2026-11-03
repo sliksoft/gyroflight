@@ -1130,9 +1130,15 @@ const decisionRows = computed(() => {
                     status: r.status,
                     plant: `${r.plant}${r.bandHz ? ` (${band(r.bandHz)} Hz)` : ""}`,
                     search: r.searchRan ? `${r.candidatesUsable} of ${r.candidatesTried}` : "not run",
-                    cause: fc
-                        ? `${fc.rule}: ${val(fc.value)}${fc.unit ? ` ${fc.unit}` : ""}; ${fc.threshold}; ${fc.result}; ${fc.consequence}`
-                        : waived || "--",
+                    cause:
+                        [
+                            fc
+                                ? `${fc.rule}: ${val(fc.value)}${fc.unit ? ` ${fc.unit}` : ""}; ${fc.threshold}; ${fc.result}; ${fc.consequence}`
+                                : "",
+                            waived,
+                        ]
+                            .filter(Boolean)
+                            .join(" | ") || "--",
                 },
             ];
         }),
@@ -1155,6 +1161,7 @@ const recordingRows = computed(() =>
                   String(ins.timing.flights),
                   String(Math.round(ins.timing.totalChirpTimeS)),
                   ins.timing.experimental.join("; "),
+                  String(Math.round(ins.timing.generatorTimePerFlightS)),
               ])
             : "",
         checks: ins.completionChecks.join(" "),
