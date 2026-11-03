@@ -57,6 +57,11 @@ export interface SyntheticFrame {
     motors?: number[];
     /** Values for encodeLog's `extraFields`, same order (signed, predictor PREVIOUS). */
     extra?: number[];
+    /**
+     * loopIteration of this frame when the log lost frames before it (default: the previous frame's
+     * + 1). A jump forces an I-frame, as the decoder could not predict the iteration across it.
+     */
+    iteration?: number;
 }
 
 function unsignedVB(out: number[], value: number) {
@@ -151,17 +156,21 @@ export function encodeLog(
 
     let prev: number[] = [];
     let prev2: number[] = [];
+    let lastIteration: number | null = null;
     const slowAt = new Map((opts.sFrames ?? []).map((f) => [f.atFrame, f]));
-    frames.forEach((frame, iteration) => {
-        const slow = slowAt.get(iteration);
+    frames.forEach((frame, index) => {
+        const slow = slowAt.get(index);
         if (slow && opts.slowFields !== false) {
             out.push("S".charCodeAt(0));
             unsignedVB(out, slow.flightModeFlags);
             unsignedVB(out, 0);
             unsignedVB(out, slow.failsafePhase ?? 0);
         }
-        const cur = values(iteration + (opts.firstIteration ?? 0), frame, motorCount, extraFields.length);
-        if (iteration % opts.iInterval === 0) {
+        const iteration = frame.iteration ?? (lastIteration === null ? (opts.firstIteration ?? 0) : lastIteration + 1);
+        const jumped = lastIteration !== null && iteration !== lastIteration + 1;
+        lastIteration = iteration;
+        const cur = values(iteration, frame, motorCount, extraFields.length);
+        if (index % opts.iInterval === 0 || jumped) {
             out.push("I".charCodeAt(0));
             unsignedVB(out, cur[0]);
             unsignedVB(out, cur[1]);

@@ -95,6 +95,20 @@ export interface ClosedLoopLogOptions {
      */
     abortAtHz?: number;
     /**
+     * How a sweep's registration really ends (firmware pid.c / chirp.c at 43875a55a), for one axis
+     * or for every swept axis. Unlike `abortAtHz` (the generator's output held at zero while the
+     * log goes on), these shorten the record itself: channel samples, timestamps, loopIteration,
+     * segment bounds and the record the qualification finds all agree, and nothing is padded.
+     * - modeOffAtHz: CHIRP mode switched off when the sweep reaches this frequency: the frames of
+     *   this axis stop there, the idle gap (debug[1] −1) and any later axis follow.
+     * - logEndsAtHz: the log stops at this frequency: no idle frames, no later axis.
+     * - holdModeS: CHIRP mode kept on this long after the sweep completed: the finished generator logs
+     *   fchirp 0 and exc 0 with debug[1] still the axis (chirpResetSignals); the gyro and pidSum are
+     *   logged as 0 there (a settled loop, simplified).
+     * - lostSamples: frames the log lost between these sweep seconds: time and loopIteration jump.
+     */
+    ending?: SweepEnding | Partial<Record<0 | 1 | 2, SweepEnding>>;
+    /**
      * CHIRP + JIO fixture (jioSweep.ts tests): the firmware's phaseComp shaping of the chirp before
      * it is added to the setpoint (lag 3 / lead 30 Hz headers), the logged controller terms
      * (axisP carries pidSum = C_ref·r − C_fb·y; axisI/F/D logged as 0), the chirp amplitude and
@@ -115,6 +129,15 @@ export interface ClosedLoopLogOptions {
         pidProcessDenomHeader?: number;
         gapS?: number;
     };
+}
+
+export interface SweepEnding {
+    /** Apply only to this repeat of the axis (jio.repeats); default: every repeat. */
+    repeat?: number;
+    modeOffAtHz?: number;
+    logEndsAtHz?: number;
+    holdModeS?: number;
+    lostSamples?: { fromS: number; toS: number };
 }
 
 const RATE_HZ = 1000; // looptime 125 µs × pid_process_denom 8: the encoder's defaults.
@@ -183,6 +206,16 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
     const frames: SyntheticFrame[] = [];
     let t = o.startTimeUs ?? 2_000_000;
     const dt = 1e6 / RATE_HZ;
+    // loopIteration of the next frame (every PID loop counts, logged or lost).
+    let loop = o.firstIteration ?? 0;
+    const endingOf = (axis: number): SweepEnding | undefined => {
+        const e = o.ending;
+        if (!e) return undefined;
+        if ("modeOffAtHz" in e || "logEndsAtHz" in e || "holdModeS" in e || "lostSamples" in e || "repeat" in e)
+            return e as SweepEnding;
+        return (e as Partial<Record<0 | 1 | 2, SweepEnding>>)[axis as 0 | 1 | 2];
+    };
+    let logEnded = false;
     // Logged controller terms: pidSum in axisP, the others 0 (the JIO estimate reads their sum).
     const pidFields = jio
         ? [
@@ -207,9 +240,10 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
         ...pidFields.filter((f) => !omitted(f)).map((f) => (f.startsWith("axisP") ? u[Number(f[6])] : 0)),
     ];
     const idle = (n: number) => {
-        for (let k = 0; k < n; k++, t += dt) {
+        for (let k = 0; k < n; k++, t += dt, loop++) {
             frames.push({
                 time: Math.round(t),
+                iteration: loop,
                 setpoint: [0, 0, 0],
                 gyro: [0, 0, 0],
                 debug: [0, -1, 0, 0],
@@ -227,7 +261,11 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
             if (Gr) sweptAxes.push({ axis, G: Gr, rep });
         });
     const firstRepeat = new Map<number, { sp: number[]; y: Float64Array; u: Float64Array }>();
-    sweptAxes.forEach(({ axis, G, rep }) => {
+    for (const { axis, G, rep } of sweptAxes) {
+        if (logEnded) break;
+        const endingAll = endingOf(axis);
+        const ending =
+            endingAll && (endingAll.repeat === undefined || endingAll.repeat === rep) ? endingAll : undefined;
         const cfg = controllerConfigFromHeaders(h, axis as 0 | 1 | 2)!;
         const n = Math.round(sweepS * RATE_HZ);
         const beta = Math.pow(f1 / f0, 1 / sweepS);
@@ -302,16 +340,26 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
                 for (let i = 0; i < n; i++) sp[i] = first.sp[i];
             }
         }
-        for (let i = 0; i < n; i++, t += dt) {
+        const cutHz = ending?.modeOffAtHz ?? ending?.logEndsAtHz;
+        let cut = false;
+        for (let i = 0; i < n; i++, t += dt, loop++) {
+            const m = meta[i];
+            if (cutHz !== undefined && m.f > cutHz) {
+                cut = true;
+                break;
+            }
+            const tt = i / RATE_HZ;
+            // A lost frame: the loop ran (time and iteration advance) but the log holds nothing.
+            if (ending?.lostSamples && tt >= ending.lostSamples.fromS && tt < ending.lostSamples.toS) continue;
             const setpoint: [number, number, number] = [0, 0, 0];
             const gyro: [number, number, number] = [0, 0, 0];
             const uu: [number, number, number] = [0, 0, 0];
             setpoint[axis] = sp[i];
             gyro[axis] = Math.round(y[i] + (o.noise && !(jio?.duplicateRepeat && rep > 0) ? o.noise * gauss() : 0));
             uu[axis] = Math.round(u[i]);
-            const m = meta[i];
             frames.push({
                 time: Math.round(t),
+                iteration: loop,
                 setpoint,
                 gyro,
                 debug: [
@@ -323,8 +371,26 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
                 extra: extraFor(1400, uu),
             });
         }
+        if (cut && ending?.logEndsAtHz !== undefined && ending.modeOffAtHz === undefined) {
+            logEnded = true;
+            break;
+        }
+        if (!cut && ending?.holdModeS) {
+            // chirp.c after count == N: isFinished, exc = fchirp = sinarg = 0; pid.c keeps debug[1] = axis.
+            for (let k = 0; k < Math.round(ending.holdModeS * RATE_HZ); k++, t += dt, loop++) {
+                const setpoint: [number, number, number] = [0, 0, 0];
+                frames.push({
+                    time: Math.round(t),
+                    iteration: loop,
+                    setpoint,
+                    gyro: [0, 0, 0],
+                    debug: [0, omitted("debug1") ? -1 : axis, 0, 0],
+                    extra: extraFor(1400, [0, 0, 0]),
+                });
+            }
+        }
         idle(jio ? Math.round((jio.gapS ?? 0.6) * RATE_HZ) : 100);
-    });
+    }
     return encodeLog(frames, {
         iInterval: 32,
         flightModeFlags: CHIRP_FLAG,
