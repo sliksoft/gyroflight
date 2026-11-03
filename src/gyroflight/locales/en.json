@@ -1033,7 +1033,7 @@
         "message": "experimental; agreement between flights is not stationarity within a sweep"
     },
     "gyroflightV2JioCandidates": {
-        "message": "Other flights offered as repeats (closed-loop z decides; plant z alongside; nothing averaged across flights)"
+        "message": "Other flights offered as repeats (experimental: closed-loop z and plant z both decide; nothing averaged across flights)"
     },
     "gyroflightV2JioPlot": { "message": "|G| dB (dots, filled = supported) and r→y coherence 0–1 (dashed) over Hz" },
     "gyroflightV2JioAdvice": {

@@ -352,6 +352,8 @@ const JIO_REPEAT_KEYS = [
     "anti_gravity_gain",
     "anti_gravity_cutoff_hz",
     "anti_gravity_p_gain",
+    "anti_gravity_mode",
+    "anti_gravity_threshold",
     "iterm_relax",
     "iterm_relax_type",
     "iterm_relax_cutoff",

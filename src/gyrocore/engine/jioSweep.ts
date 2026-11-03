@@ -125,7 +125,8 @@ export const FIRMWARE_CHIRP = Object.freeze({
     /** The suggested end frequency is rounded up to a multiple of this (Hz). */
     endRoundHz: 10,
     sweepLaw: "exponential:chirp.c" as const,
-    settingsSource: "betaflight/src/main/cli/settings.c@43875a55a" as const,
+    /** No "/" here: the basis is shown through i18n arguments, which HTML-escape slashes. */
+    settingsSource: "betaflight_settings.c@43875a55a" as const,
 });
 
 /**
@@ -517,10 +518,11 @@ export function repeatabilityZ(a: Column, b: Column, axis: number, inBand: Uint8
  * flight's relsd from its own-axis r→y coherence and n_eff (uncalibrated assumption). T is the
  * sensitive quantity (near crossover |ΔT/T| ≈ |ΔL/L| / |1 + L|) and the logged configuration is the
  * same by the identity rules, but a controller behaviour that differs per flight (TPA at another
- * throttle, anti-gravity) shows up in T as well — the plant's own z on G is reported alongside
- * (`plant_z`). The coarser grid's points are matched to the nearest point of the finer grid within
+ * throttle, anti-gravity) shows up in T as well — the plant's own z on G is computed on the same
+ * points (`plant_z`) and votes too. The coarser grid's points are matched to the nearest point of the finer grid within
  * half a coarse step (the Daniell window already averages over that width). ≈ 1 for the same loop
  * twice (experimental); null with fewer than crossFlightMinPoints common points or incomparable grids.
+ * The caller lets either statistic above the threshold decide (autotuneV2.ts jioCrossFlight).
  */
 export function crossFlightRepeatabilityZ(
     a: JioEvalPoints,
@@ -550,8 +552,8 @@ export function crossFlightRepeatabilityZ(
         while (j + 1 < fine.frequencyHz.length && fine.frequencyHz[j + 1] <= f) j++;
         const cand = [j, j + 1].filter((k) => k < fine.frequencyHz.length);
         let best = -1;
-        // Half-open acceptance: a fine point exactly half a step above f belongs to the next coarse
-        // point, so no fine point is matched twice.
+        // Half-open acceptance (−half, +half]: a fine point exactly half a step below f belongs to
+        // the previous coarse point, so no fine point is matched twice.
         for (const k of cand) {
             const d = fine.frequencyHz[k] - f;
             if (d > half || d <= -half) continue;
