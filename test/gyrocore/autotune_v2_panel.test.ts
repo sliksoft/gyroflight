@@ -224,6 +224,27 @@ describe("AutotuneV2Panel", () => {
         expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("anti_gravity_gain");
         expect(q(d, '[data-gyrocore="v2-jio-mimo"]')).toBeNull();
         expect((q(d, '[data-gyrocore="v2-apply"]') as HTMLButtonElement).disabled).toBe(true);
+        // Block 5: the experimental section is its own status; its Apply needs the acknowledgement and the
+        // technical decision, never the release; the comparison loop and the recording labels are shown.
+        expect(q(d, '[data-step="v2-experimental"]')).not.toBeNull();
+        expect(q(d, '[data-gyrocore="v2-compare-loop"]')!.textContent).toContain("gyroflightV2CompareLoop");
+        if (diag.experimental) {
+            expect(q(d, '[data-gyrocore="v2-experimental-status"]')!.getAttribute("data-status")).toBe("EXPERIMENTAL");
+            expect(d.querySelectorAll('[data-gyrocore="v2-experimental-items"] tbody tr').length).toBe(
+                diag.experimental.items.length,
+            );
+            expect(q(d, '[data-gyrocore="v2-experimental-waived"]')!.textContent).toContain("product_lock");
+            const ack = q(d, '[data-gyrocore="v2-experimental-ack"]') as HTMLInputElement;
+            expect(ack.checked).toBe(false);
+            expect((q(d, '[data-gyrocore="v2-experimental-apply"]') as HTMLButtonElement).disabled).toBe(true);
+            expect(q(d, '[data-gyrocore="v2-experimental-blocks"]')!.textContent).toContain(
+                "experimental:not_acknowledged",
+            );
+            expect(q(d, '[data-gyrocore="v2-experimental-items"]')!.textContent).not.toContain("VALIDATED (");
+        } else {
+            expect(q(d, '[data-gyrocore="v2-experimental-none"]')).not.toBeNull();
+        }
+        expect(q(d, '[data-gyrocore="v2-experimental-status"]')?.textContent ?? "").not.toContain("releasable");
         expect(writes()).toEqual([]);
     });
 

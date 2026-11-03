@@ -10,8 +10,19 @@
         <ul v-else class="list-disc ps-5 text-sm" data-gyrocore="v2-sources">
             <li v-for="s in v2.sources" :key="s.filename" :data-source="s.filename">
                 {{ s.filename }} · {{ summary(s) }}
+                <span
+                    v-if="recordingConfig(s)"
+                    class="text-dimmed"
+                    data-gyrocore="v2-recording-config"
+                    :data-role="recordingConfig(s)!.role"
+                >
+                    · {{ recordingConfig(s)!.text }}
+                </span>
             </li>
         </ul>
+        <p v-if="v2.sources.length || result" class="text-sm text-dimmed" data-gyrocore="v2-compare-loop">
+            {{ $t("gyroflightV2CompareLoop") }}
+        </p>
         <UButton
             size="xs"
             class="mt-1"
@@ -488,12 +499,131 @@
             </div>
         </template>
 
+        <!-- 4b. Experimental tuning: the values the measurement supports, written only on an explicit acknowledgement. -->
+        <template v-if="result">
+            <h4 class="font-bold mt-3" data-step="v2-experimental">4b. {{ $t("gyroflightV2ExperimentalTitle") }}</h4>
+            <p class="text-sm text-dimmed">{{ $t("gyroflightV2ExperimentalHelp") }}</p>
+            <p
+                v-if="!experimental"
+                class="text-sm"
+                data-gyrocore="v2-experimental-none"
+                :data-withheld="experimentalWithheld.length"
+            >
+                {{ $t("gyroflightV2ExperimentalNone") }}
+            </p>
+            <template v-else>
+                <p class="text-sm" data-gyrocore="v2-experimental-status" data-status="EXPERIMENTAL">
+                    <span class="font-bold text-yellow-500">EXPERIMENTAL</span> ·
+                    {{ $t("gyroflightV2ExperimentalNotValidated") }}
+                </p>
+                <table class="gyroflight-workflow-table text-sm" data-gyrocore="v2-experimental-items">
+                    <thead>
+                        <tr>
+                            <th>{{ $t("gyroflightCompareSetting") }}</th>
+                            <th>{{ $t("gyroflightPreviewNow") }}</th>
+                            <th>{{ $t("gyroflightPreviewAfter") }}</th>
+                            <th>{{ $t("gyroflightV2ExperimentalSource") }}</th>
+                            <th>{{ $t("gyroflightV2ExperimentalEvidence") }}</th>
+                            <th>{{ $t("gyroflightV2ExperimentalWhy") }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="it in experimental.items"
+                            :key="it.key"
+                            :data-key="it.key"
+                            :data-source="it.source"
+                            :data-status="it.status"
+                        >
+                            <td>{{ it.key }}</td>
+                            <td>{{ it.from }}</td>
+                            <td>{{ it.to }}</td>
+                            <td>{{ $t(`gyroflightV2ExperimentalSource_${it.source}`) }}</td>
+                            <td>{{ it.evidence }} ({{ it.status }})</td>
+                            <td class="text-dimmed">{{ it.qualificationGaps.slice(0, 4).join("; ") }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </template>
+            <ul
+                v-if="experimentalWithheld.length"
+                class="text-sm list-disc ps-5"
+                data-gyrocore="v2-experimental-withheld"
+            >
+                <li v-for="w in experimentalWithheld" :key="w.key" :data-key="w.key">
+                    {{ w.key }}: {{ $t("gyroflightV2ExperimentalWithheld") }} ({{ w.reasons.slice(0, 4).join("; ") }})
+                </li>
+            </ul>
+            <template v-if="experimental">
+                <p class="text-sm text-dimmed" data-gyrocore="v2-experimental-limits">
+                    {{ $t("gyroflightV2ExperimentalLimits") }}: {{ experimental.limitations.join(", ") }}
+                </p>
+                <ul class="text-sm" data-gyrocore="v2-experimental-checks">
+                    <li
+                        v-for="s in experimentalDecision?.steps ?? []"
+                        :key="s.name"
+                        :data-step="s.name"
+                        :data-ok="s.passed ? 'yes' : 'no'"
+                    >
+                        <span :class="s.passed ? 'text-green-500' : 'text-red-500'" class="font-bold">
+                            {{ s.passed ? "✓" : "✗" }}
+                        </span>
+                        {{ $t(`gyroflightV2ExpStep_${s.name}`) }}
+                        <span v-if="s.reasons.length" class="text-dimmed"
+                            >({{ s.reasons.slice(0, 4).join("; ") }})</span
+                        >
+                    </li>
+                    <li v-for="name in LIVE_CONDITIONS" :key="name" :data-condition="name" data-ok="live">
+                        <span class="font-bold">·</span> {{ $t(`gyroflightV2Cond_${name}`) }}
+                    </li>
+                </ul>
+                <p class="text-sm text-dimmed" data-gyrocore="v2-experimental-waived">
+                    {{ $t("gyroflightV2ExperimentalWaived") }}: {{ (experimentalDecision?.waived ?? []).join(", ") }}
+                </p>
+                <label class="text-sm flex items-center gap-2 mt-1">
+                    <input
+                        v-model="experimentalAck"
+                        type="checkbox"
+                        data-gyrocore="v2-experimental-ack"
+                        :disabled="v2.busy"
+                    />
+                    {{ $t("gyroflightV2ExperimentalAck") }}
+                </label>
+                <UButton
+                    size="xs"
+                    variant="outline"
+                    class="mt-1 me-2"
+                    data-gyrocore="v2-experimental-preview"
+                    :disabled="!canPreviewExperimental || v2.busy"
+                    @click="onPreviewExperimental"
+                >
+                    {{ $t("gyroflightPreviewButton") }}
+                </UButton>
+                <UButton
+                    size="xs"
+                    color="warning"
+                    class="mt-1"
+                    data-gyrocore="v2-experimental-apply"
+                    :disabled="!canApplyExperimental || v2.busy"
+                    @click="onApplyExperimental"
+                >
+                    {{ $t("gyroflightV2ExperimentalApply") }}
+                </UButton>
+                <p v-if="experimentalBlocks.length" class="text-sm text-dimmed" data-gyrocore="v2-experimental-blocks">
+                    {{ experimentalBlocks.join("; ") }}
+                </p>
+            </template>
+        </template>
+
         <!-- 5. Verify -->
         <h4 class="font-bold mt-3" data-step="v2-verify">5. {{ $t("gyroflightStepVerify") }}</h4>
         <p v-if="!outcome" class="text-sm text-dimmed">{{ $t("gyroflightVerifyNone") }}</p>
         <div v-else-if="outcome.status === 'verified'" class="text-sm" data-gyrocore="v2-verified">
             <p class="font-bold text-green-500">
                 {{ $t(outcome.action === "apply" ? "gyroflightVerifiedApply" : "gyroflightVerifiedRestore") }}
+            </p>
+            <p v-if="outcome.mode === 'experimental'" class="text-yellow-500" data-gyrocore="v2-verified-experimental">
+                {{ $t("gyroflightV2VerifiedExperimental") }}
             </p>
             <p v-if="outcome.rebootRequired" class="text-yellow-500" data-gyrocore="v2-reboot">
                 {{ $t("gyroflightV2RebootRequired") }}
@@ -593,7 +723,7 @@
  * measurement it still needs; only VALIDATED values under a released contract can be
  * applied, and only by the user's click (useAutotuneV2).
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import UiBox from "@/components/elements/UiBox.vue";
 import { i18n } from "@/js/localization";
 import { useConnectionStore } from "@/stores/connection";
@@ -605,6 +735,9 @@ import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
 import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
+import { experimentalWriteDecision } from "@/gyrocore/releaseGate/experimentalAuthority";
+import { expectedValues } from "@/gyrocore/tuning/absoluteTune";
+import { logIdentity as recordingIdentity } from "@/gyrocore/tuning/fcIdentity";
 import { evaluateAbsoluteSafety } from "@/gyrocore/safety/absoluteEvaluate";
 import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
@@ -617,8 +750,16 @@ const fc = useFlightControllerStore();
 const backupStore = useTuneBackupStore();
 const transactionStates = useFcTransactionStore();
 const verifiedTunes = useVerifiedTuneStore();
-const { calculate, createVerifiedTune, preview, releasedProposal, confirmAndApply, confirmAndRestore } =
-    useAutotuneV2();
+const {
+    calculate,
+    createVerifiedTune,
+    preview,
+    releasedProposal,
+    experimentalProposal,
+    confirmAndApply,
+    confirmAndApplyExperimental,
+    confirmAndRestore,
+} = useAutotuneV2();
 
 const result = computed(() => v2.result);
 const num = (x: number | null | undefined, digits: number) =>
@@ -874,6 +1015,60 @@ const canApply = computed(
     () => !!released.value && connected.value && !connection.virtualMode && !stateBlocks.value.length,
 );
 
+/**
+ * EXPERIMENTAL route: the analysis's experimental proposal (its own status, never the releasable
+ * one), the technical decision of its own authority, and the user's acknowledgement. A missing
+ * release or hardware validation does not disable it; a technical block, an armed or other craft,
+ * an unverified earlier write, or no acknowledgement does.
+ */
+const experimental = computed(() => v2.result?.experimental ?? null);
+const experimentalWithheld = computed(() => v2.result?.experimental?.withheld ?? []);
+const experimentalDecision = computed(() =>
+    experimental.value ? experimentalWriteDecision(experimental.value, { recompute: false }) : null,
+);
+const experimentalAck = ref(false);
+const experimentalBlocks = computed(() => [
+    ...(experimentalDecision.value?.blocks ?? []),
+    ...stateBlocks.value,
+    ...(connected.value ? [] : ["fc:not_connected"]),
+    ...(connection.virtualMode ? ["fc:virtual_mode"] : []),
+    ...(experimentalAck.value ? [] : ["experimental:not_acknowledged"]),
+]);
+const canPreviewExperimental = computed(() => !!experimental.value && connected.value && !connection.virtualMode);
+const canApplyExperimental = computed(
+    () =>
+        !!experimentalProposal() &&
+        experimentalAck.value &&
+        connected.value &&
+        !connection.virtualMode &&
+        !stateBlocks.value.length,
+);
+
+/**
+ * Which configuration a recording was flown with, from this browser's backups: the reference
+ * (its logged values equal a backup's values before an experimental Apply) or the applied
+ * experimental tune (its logged values equal the values that Apply wrote). Different
+ * configurations are never merged as repeats: the engine's identity rules reject them.
+ */
+function recordingConfig(s: AutotuneV2Source): { role: "reference" | "experimental" | "other"; text: string } | null {
+    const headers = s.report.logs[0]?.headerPairs ?? [];
+    if (!headers.length) return null;
+    const logged = loggedAbsoluteValues(headers);
+    const uid = recordingIdentity(headers).uid;
+    const same = (a: Record<string, number>, b: Record<string, number>) => {
+        const keys = Object.keys(a).filter((k) => k in b);
+        return keys.length > 0 && keys.every((k) => a[k] === b[k]);
+    };
+    for (const b of backupStore.forUid(uid)) {
+        if (!b.absolute || b.reason !== "before_experimental_apply" || !b.provenance) continue;
+        if (same(expectedValues(b.absolute.values, b.provenance.change), logged))
+            return { role: "experimental", text: i18n.getMessage("gyroflightV2RecordingExperimental", [b.id]) };
+        if (same(b.absolute.values, logged))
+            return { role: "reference", text: i18n.getMessage("gyroflightV2RecordingReference", [b.id]) };
+    }
+    return { role: "other", text: i18n.getMessage("gyroflightV2RecordingOther") };
+}
+
 function summary(s: AutotuneV2Source) {
     const ms = s.report.measurements;
     return i18n.getMessage("gyroflightAnalyzeChirpSummary", [
@@ -1033,6 +1228,24 @@ async function onPreview() {
 async function onApply() {
     if (canApply.value) {
         await confirmAndApply();
+        backupStore.reload();
+    }
+}
+
+async function onPreviewExperimental() {
+    if (canPreviewExperimental.value && !v2.busy && experimental.value) {
+        v2.busy = true;
+        try {
+            await preview(experimental.value.proposal);
+        } finally {
+            v2.busy = false;
+        }
+    }
+}
+
+async function onApplyExperimental() {
+    if (canApplyExperimental.value) {
+        await confirmAndApplyExperimental(experimentalAck.value);
         backupStore.reload();
     }
 }

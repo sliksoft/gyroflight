@@ -1044,6 +1044,52 @@
     },
     "gyroflightV2JioCandidateNotLogged": { "message": "not logged by either flight, not compared" },
     "gyroflightV2JioCandidateNotInFirmware": { "message": "not in firmware" },
+    "gyroflightV2ExperimentalTitle": { "message": "Experimental tuning (not released, not hardware-validated)" },
+    "gyroflightV2ExperimentalHelp": {
+        "message": "The values the measurement supports but the release contract cannot release: their margins are not VALIDATED, no independent flight has confirmed a prediction, and the hardware procedure has not been executed. A missing qualification does not remove a computable value here; a measurement that does not support a value withholds it, and nothing is invented. Writing is your explicit, acknowledged decision; the write route keeps every technical check (right craft, firmware and parameter support, current configuration equal to the log's, disarmed, finite values in range, backup, readback, verified save, Restore)."
+    },
+    "gyroflightV2ExperimentalNone": {
+        "message": "No experimental proposal: the measurement supports no changed value (see the withheld items and the measurements the routes still need)."
+    },
+    "gyroflightV2ExperimentalNotValidated": {
+        "message": "experimental tuning; hardware validation has not been shown; not a released proposal"
+    },
+    "gyroflightV2ExperimentalSource": { "message": "Source" },
+    "gyroflightV2ExperimentalSource_primary_route": { "message": "primary route (CHIRP loop model)" },
+    "gyroflightV2ExperimentalSource_jio_route": { "message": "CHIRP + JIO route (experimental plant)" },
+    "gyroflightV2ExperimentalEvidence": { "message": "Evidence" },
+    "gyroflightV2ExperimentalWhy": { "message": "Why not released" },
+    "gyroflightV2ExperimentalWithheld": { "message": "withheld, the measurement does not support a value" },
+    "gyroflightV2ExperimentalLimits": { "message": "Limitations" },
+    "gyroflightV2ExperimentalWaived": { "message": "Not required by the experimental route (shown, not dropped)" },
+    "gyroflightV2ExpStep_analysis_binding": {
+        "message": "the proposal is this analysis's experimental proposal (recomputed at the write)"
+    },
+    "gyroflightV2ExpStep_computable_items": {
+        "message": "every value computed by a route from a valid measurement; nothing withheld in the change"
+    },
+    "gyroflightV2ExpStep_values_technical": {
+        "message": "finite integers inside the firmware ranges, plausible step, craft named by the log"
+    },
+    "gyroflightV2ExperimentalAck": {
+        "message": "I understand this is experimental tuning that has not been validated on hardware; I will test-fly carefully and can restore the backup."
+    },
+    "gyroflightV2ExperimentalApply": { "message": "Review and apply experimental…" },
+    "gyroflightV2ExperimentalConfirmTitle": { "message": "Apply experimental tuning?" },
+    "gyroflightV2ExperimentalConfirmText": {
+        "message": "EXPERIMENTAL: these values are computed from the measurement but are not released and not validated on hardware. They are written only after this confirmation, after a backup, and are read back and verified."
+    },
+    "gyroflightV2ExperimentalConfirmLimits": { "message": "Limitations of this proposal:" },
+    "gyroflightV2ExperimentalYes": { "message": "Write experimental values" },
+    "gyroflightV2VerifiedExperimental": {
+        "message": "Experimental tuning written and verified (not hardware-validated). Fly a careful test, record a new CHIRP log, import it and compare; Restore puts the backup back."
+    },
+    "gyroflightV2CompareLoop": {
+        "message": "Comparison loop: keep the reference (the backup Apply takes) → calculate → confirm the changes → apply → fly and record a new CHIRP log → import it → compare. Each recording is labelled with the configuration it was flown with; recordings of different configurations are never merged as repeats."
+    },
+    "gyroflightV2RecordingReference": { "message": "reference configuration (backup $1)" },
+    "gyroflightV2RecordingExperimental": { "message": "experimental configuration applied from backup $1" },
+    "gyroflightV2RecordingOther": { "message": "configuration not matched to an Apply of this browser" },
     "gyroflightV2JioProgressTitle": { "message": "Measurement set per axis (experimental, diagnostic)" },
     "gyroflightV2JioProgressHelp": {
         "message": "Sweeps present, complete and usable in this log; independent repeats within this flight (stationarity) and comparable other flights (reproducibility) are counted separately, one never stands in for the other; copies, overlapping windows and incomplete sweeps add no evidence. The band is what the usable sweeps actually reached. The tuning goal is the band the planner needs and is never lowered to make a set pass. A complete set is a measurement set, not validation: Absolute Apply stays blocked."
