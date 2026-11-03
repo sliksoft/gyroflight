@@ -316,6 +316,25 @@
                 <p v-if="jioCandidates.length" class="text-sm text-dimmed" data-gyrocore="v2-jio-cross">
                     {{ $t("gyroflightV2JioCandidates") }}: {{ jioCandidates.join(" | ") }}
                 </p>
+                <template v-if="jioProgress.length">
+                    <p class="text-sm font-bold mt-1">{{ $t("gyroflightV2JioProgressTitle") }}</p>
+                    <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioProgressHelp") }}</p>
+                    <ul class="text-sm list-disc pl-5">
+                        <li
+                            v-for="pr in jioProgress"
+                            :key="pr.axis"
+                            data-gyrocore="v2-jio-progress"
+                            :data-axis="pr.axis"
+                            :data-complete="pr.complete ? 'yes' : 'no'"
+                        >
+                            <span class="font-bold">{{ pr.axis }}</span
+                            >: {{ pr.text }}
+                            <span v-if="pr.next" class="text-dimmed"
+                                >{{ $t("gyroflightV2JioProgressNext") }}: {{ pr.next }}</span
+                            >
+                        </li>
+                    </ul>
+                </template>
                 <p class="text-sm text-dimmed" data-gyrocore="v2-jio-needs">
                     {{ $t("gyroflightV2JioNeeds") }}:
                     {{ result.jio.requiredMeasurements.map(measurementText).join("; ") || "--" }}
@@ -672,6 +691,9 @@ const jioCandidates = computed(() => {
     return jio.crossFlight.candidates.map((c) => {
         const id = `${c.sha256.slice(0, 12)}#${c.logIndex + 1}`;
         if (!c.usable) return `${id}: ${c.issues.join(", ")}`;
+        const notes = c.notes.length
+            ? ` [${i18n.getMessage("gyroflightV2JioCandidateNotLogged")}: ${c.notes.map((n) => n.replace("setting_not_logged_in_either:", "")).join(", ")}]`
+            : "";
         const axes = (["roll", "pitch", "yaw"] as const).map((axis) => {
             const a = c.axes[axis];
             if (!a) return `${axis} --`;
@@ -679,7 +701,46 @@ const jioCandidates = computed(() => {
                 ? `${axis} ${a.consistency} z=${a.z.toFixed(2)} (plant z=${num(a.zPlant, 2)}, ${a.matchedPoints} pts)`
                 : `${axis} ${a.consistency}: ${a.reasons.join(", ")}`;
         });
-        return `${id}: ${axes.join("; ")}`;
+        return `${id}: ${axes.join("; ")}${notes}`;
+    });
+});
+/**
+ * The measurement set per axis: sweeps present / complete / usable, repeats within this flight and
+ * flights compared, the bands, and the recordings still missing (this axis's own needs). A set that
+ * is complete here is a measurement set, not validation: the route stays diagnostic.
+ */
+const jioProgress = computed(() => {
+    const jio = result.value?.jio;
+    if (!jio) return [];
+    return (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
+        const p = jio.progress[axis];
+        if (!p) return [];
+        const sw = p.sweeps;
+        const excluded = sw.excluded.length
+            ? ` (${i18n.getMessage("gyroflightV2JioProgressExcluded")}: ${sw.excluded.join("; ")})`
+            : "";
+        const within = `${p.withinFlight.repeats}: ${p.withinFlight.consistency}${p.withinFlight.z !== null ? ` z=${p.withinFlight.z.toFixed(2)}` : ""}`;
+        const across = `${p.acrossFlights.flights}/${p.acrossFlights.offered}: ${p.acrossFlights.consistency}${p.acrossFlights.zMax !== null ? ` z=${p.acrossFlights.zMax.toFixed(2)}` : ""}`;
+        const reached =
+            p.bandHz.reached !== null
+                ? ` (${i18n.getMessage("gyroflightV2JioProgressReached")} ${num(p.bandHz.reached, 0)} Hz)`
+                : "";
+        const goal = p.bandHz.tuningGoal
+            ? `${band(p.bandHz.tuningGoal)} Hz: ${p.bandHz.sufficientForTuning ? i18n.getMessage("gyroflightV2JioProgressGoalMet") : i18n.getMessage("gyroflightV2JioProgressGoalShort")}`
+            : "--";
+        const text = i18n.getMessage("gyroflightV2JioProgress", [
+            `${sw.present} / ${sw.complete} / ${sw.usable}${excluded}`,
+            within,
+            across,
+            `${band(p.bandHz.supported)} Hz${reached}`,
+            goal,
+        ]);
+        const complete =
+            sw.complete > 0 &&
+            p.withinFlight.consistency === "consistent" &&
+            p.acrossFlights.consistency === "consistent" &&
+            p.bandHz.sufficientForTuning === true;
+        return [{ axis, text, next: p.nextSteps.map(measurementText).join("; "), complete }];
     });
 });
 /** |G| (dB) over log frequency, filled where supported, with the r→y coherence as a dashed line (0–1 over the plot height). */

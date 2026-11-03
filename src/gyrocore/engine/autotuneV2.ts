@@ -99,6 +99,7 @@ import {
     analyzeJioSweeps,
     crossFlightRepeatabilityZ,
     JIO_SWEEP,
+    sweepAdviceFor,
     type JioChannels,
     type JioSweepAnalysis,
     type JioSweepRecord,
@@ -288,6 +289,8 @@ export interface JioCrossFlightCandidate {
     logIndex: number;
     /** Why the log is not a comparable independent repeat (empty: it is). */
     issues: string[];
+    /** Informative: compatibility keys neither log carries (not compared, not a difference). */
+    notes: string[];
     usable: boolean;
     axes: Partial<
         Record<
@@ -330,10 +333,40 @@ export interface JioRouteResult {
             >
         >;
     };
+    /**
+     * Per axis the state of the measurement set (what the panel shows as progress): sweeps present,
+     * complete and usable, independent repeats within this flight and comparable flights, the bands,
+     * and this axis's own required_measurement:* codes. A complete set is not validation.
+     */
+    progress: Partial<Record<AxisName, JioAxisProgress>>;
     /** Measurement the route still needs, as required_measurement:* codes. */
     requiredMeasurements: string[];
     /** Always true: the route is not release evidence (see JIO_LIMITATIONS). */
     diagnosticOnly: true;
+}
+
+export interface JioAxisProgress {
+    axis: AxisName;
+    sweeps: { present: number; complete: number; usable: number; excluded: string[] };
+    /** Independent usable repeats of this axis within the flight and their consistency (stationarity). */
+    withinFlight: { repeats: number; consistency: "unknown" | "consistent" | "inconsistent"; z: number | null };
+    /** Comparable independent flights and their consistency (reproducibility). */
+    acrossFlights: {
+        flights: number;
+        offered: number;
+        consistency: "unknown" | "consistent" | "inconsistent";
+        zMax: number | null;
+    };
+    bandHz: {
+        analysed: [number, number] | null;
+        supported: [number, number] | null;
+        /** The lowest frequency a usable sweep of this axis reached (null: every usable sweep complete). */
+        reached: number | null;
+        tuningGoal: [number, number] | null;
+        sufficientForTuning: boolean | null;
+    };
+    /** This axis's required_measurement:* codes, in the order the route lists them. */
+    nextSteps: string[];
 }
 
 /**
@@ -363,6 +396,22 @@ const JIO_REPEAT_KEYS = [
     "tpa_low_rate",
     "tpa_low_breakpoint",
     "tpa_low_always",
+    // TPA curve and speed (betaflight parameter_names.h at 43875a55a, written by blackbox.c): the
+    // gain the controller applies at a throttle or airspeed differs when these differ.
+    "tpa_curve_type",
+    "tpa_curve_stall_throttle",
+    "tpa_curve_pid_thr0",
+    "tpa_curve_pid_thr100",
+    "tpa_curve_expo",
+    "tpa_speed_type",
+    "tpa_speed_basic_delay",
+    "tpa_speed_basic_gravity",
+    "tpa_speed_adv_prop_pitch",
+    "tpa_speed_adv_mass",
+    "tpa_speed_adv_drag_k",
+    "tpa_speed_adv_thrust",
+    "tpa_speed_max_voltage",
+    "tpa_speed_pitch_offset",
 ];
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
@@ -1140,6 +1189,10 @@ function jioRequirements(
         if (cross === "unknown") out.add(`required_measurement:chirp_${name}_repeat_flight_for_reproducibility`);
         if (cross === "inconsistent") out.add(`required_measurement:chirp_${name}_repeat_flight_consistent`);
         if (a.sweepAdvice?.suggested) out.add(`required_measurement:chirp_${name}_band_matched_sweep`);
+        if (a.sweeps.usable > 0 && a.sweeps.complete === 0)
+            out.add(`required_measurement:chirp_${name}_complete_sweep`);
+        if (a.sweepAdvice?.bandSufficientForTuning === false)
+            out.add(`required_measurement:chirp_${name}_supported_to_tuning_band`);
         if (a.blockers.some((b) => b.startsWith("record:") && /pidsum_limit_active|motor_saturation/.test(b)))
             out.add(`required_measurement:chirp_${name}_without_saturation`);
         for (const r of chain[name]?.plan?.requiredMeasurements ?? []) out.add(r);
@@ -1243,6 +1296,9 @@ function runJioRoute(
             );
         }
         const plan = planMeasurement(name, loop, margins, log.sampleRateHz, sweep, null);
+        // The sweep advice against the band the tuning goals need (the planner's primary band): the
+        // suggested end never drops below it, and a supported band short of it is named.
+        if (sweep && a.band) a.sweepAdvice = sweepAdviceFor(sweep, a.band, plan.bandHz.primary);
         const computable = margins.status !== "UNAVAILABLE" && margins.crossoverHz !== null;
         if (!computable) reasons.push("jio_margins_unavailable", ...margins.reasons);
         if (a.repeats.consistency === "unknown")
@@ -1259,12 +1315,44 @@ function runJioRoute(
         chain[name] = { axis: name, margins, candidate, plan, tuningComputable: computable, reasons };
     }
     const anyChain = Object.values(chain).some((c) => c?.tuningComputable);
+    const requiredMeasurements = jioRequirements(analysis, chain, crossFlight);
+    const progress: JioRouteResult["progress"] = {};
+    for (const name of AXES) {
+        const a = analysis.axes[name];
+        if (!a) continue;
+        const cross = crossFlight.axes[name];
+        progress[name] = {
+            axis: name,
+            sweeps: {
+                present: a.sweeps.present,
+                complete: a.sweeps.complete,
+                usable: a.sweeps.usable,
+                excluded: a.sweeps.excluded,
+            },
+            withinFlight: { repeats: a.repeats.count, consistency: a.repeats.consistency, z: a.repeats.z },
+            acrossFlights: {
+                flights: cross?.flights ?? 0,
+                offered: crossFlight.candidates.length,
+                consistency: cross?.consistency ?? "unknown",
+                zMax: cross?.zMax ?? null,
+            },
+            bandHz: {
+                analysed: a.band?.analysedHz ?? null,
+                supported: a.band?.supportedHz ?? null,
+                reached: a.sweeps.complete === a.sweeps.usable ? null : a.sweeps.reachedHz,
+                tuningGoal: a.sweepAdvice?.tuningBandHz ?? null,
+                sufficientForTuning: a.sweepAdvice?.bandSufficientForTuning ?? null,
+            },
+            nextSteps: requiredMeasurements.filter((r) => r.includes(`chirp_${name}_`)),
+        };
+    }
     return {
         status: anyChain ? "DIAGNOSTIC" : "BLOCKED",
         analysis,
         chain,
         crossFlight,
-        requiredMeasurements: jioRequirements(analysis, chain, crossFlight),
+        progress,
+        requiredMeasurements,
         diagnosticOnly: true,
     };
 }
@@ -1287,12 +1375,18 @@ function jioCrossFlight(
     for (const other of others) {
         const issues = crossLogReferenceIssues(log, other, others);
         const hb = new Map(other.headerPairs);
-        for (const k of JIO_REPEAT_KEYS)
-            if (ha.get(k) !== hb.get(k)) issues.push(`jio_cross_flight_setting_differs:${k}`);
+        const notes: string[] = [];
+        for (const k of JIO_REPEAT_KEYS) {
+            const va = ha.get(k);
+            const vb = hb.get(k);
+            if (va === undefined && vb === undefined) notes.push(`setting_not_logged_in_either:${k}`);
+            else if (va !== vb) issues.push(`jio_cross_flight_setting_differs:${k}`);
+        }
         const cand: JioCrossFlightCandidate = {
             sha256: other.sha256,
             logIndex: other.logIndex,
             issues: [...new Set(issues)],
+            notes,
             usable: false,
             axes: {},
         };

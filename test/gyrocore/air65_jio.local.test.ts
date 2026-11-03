@@ -85,10 +85,14 @@ function jioSummary(r: AutotuneV2Result) {
                 used: x.used,
                 flags: x.flags,
                 notes: x.notes,
+                excitedS: x.excitedS,
+                reachedHz: x.reachedHz,
+                incomplete: x.incomplete,
                 recordS: x.recordS,
                 rPeakDegS: x.rPeakDegS,
                 uRms: x.uRms,
             })),
+            sweeps: a.sweeps,
             repeats: a.repeats,
             grid: a.grid,
             band: a.band,
@@ -114,6 +118,7 @@ function jioSummary(r: AutotuneV2Result) {
                 : null,
         })),
         crossFlight: j.crossFlight,
+        progress: j.progress,
         chain: Object.values(j.chain).map((c) => ({
             axis: c.axis,
             tuningComputable: c.tuningComputable,
@@ -180,6 +185,36 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
                 expect(c.reasons).toContain("stationarity_unknown:single_sweep");
             }
             expect(j.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(true);
+            // Completeness as the logs have it (block 3): bbl18's sweeps ran to the header's 20 s; on bbl19
+            // the pilot ended CHIRP mode on pitch (17.2 s) and yaw (17.8 s) before the generator finished,
+            // so those registrations ended early and are analysed only to the frequency they reached.
+            for (const axis of ["roll", "pitch", "yaw"] as const) {
+                const a = j.analysis.axes[axis]!;
+                const rec = a.records[0];
+                expect(a.sweeps.present).toBe(a.records.length);
+                expect(a.sweeps.usable).toBe(a.records.filter((x) => x.used).length);
+                if (name === "bbl18" || axis === "roll") {
+                    expect(rec.incomplete).toBeNull();
+                    expect(rec.excitedS).toBeGreaterThan(0.98 * 20);
+                    expect(a.sweeps.complete).toBe(1);
+                    expect(j.requiredMeasurements).not.toContain(`required_measurement:chirp_${axis}_complete_sweep`);
+                } else {
+                    expect(rec.incomplete).toBe("registration_ended_early");
+                    expect(rec.excitedS).toBeLessThan(0.98 * 20);
+                    expect(rec.reachedHz!).toBeGreaterThan(150);
+                    expect(rec.reachedHz!).toBeLessThan(300);
+                    expect(a.band!.analysedHz[1]).toBeCloseTo(rec.reachedHz!, 6);
+                    expect(a.sweeps.complete).toBe(0);
+                    expect(j.requiredMeasurements).toContain(`required_measurement:chirp_${axis}_complete_sweep`);
+                }
+                // Progress mirrors the analysis and carries only this axis's own needs.
+                const p = j.progress[axis]!;
+                expect(p.sweeps).toMatchObject({ present: a.sweeps.present, complete: a.sweeps.complete });
+                expect(p.withinFlight.repeats).toBe(a.repeats.count);
+                expect(p.nextSteps.every((n) => n.includes(`chirp_${axis}_`))).toBe(true);
+                expect(p.bandHz.tuningGoal).toEqual(j.chain[axis]!.plan?.bandHz.primary ?? null);
+                expect(a.sweepAdvice!.tuningBandHz).toEqual(p.bandHz.tuningGoal);
+            }
             // The primary route with and without the JIO channels is identical, and still releases nothing.
             const without = runAutotuneV2({
                 primary: { ...log, channels: { ...log.channels, jio: null }, sweeps: [] },
@@ -211,6 +246,10 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
         // experimental threshold on every axis (recorded here as a fact of the data, not a validation).
         expect(c.issues).toEqual([]);
         expect(c.usable).toBe(true);
+        // Compatibility keys this firmware does not log are named as not compared (c1569ca99 keys).
+        expect(c.notes).toContain("setting_not_logged_in_either:anti_gravity_mode");
+        expect(c.notes).toContain("setting_not_logged_in_either:anti_gravity_threshold");
+        expect(c.notes.some((n) => n.includes("tpa_curve_type"))).toBe(false);
         for (const axis of ["roll", "pitch", "yaw"] as const) {
             const ax = c.axes[axis]!;
             expect(ax.matchedPoints).toBeGreaterThanOrEqual(30);

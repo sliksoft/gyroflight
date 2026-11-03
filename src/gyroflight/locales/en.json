@@ -1042,6 +1042,19 @@
     "gyroflightV2JioAdviceNone": {
         "message": "Next $1 sweep: the current sweep $2 already matches the supported band; basis: $3"
     },
+    "gyroflightV2JioCandidateNotLogged": { "message": "not logged by either flight, not compared" },
+    "gyroflightV2JioProgressTitle": { "message": "Measurement set per axis (experimental, diagnostic)" },
+    "gyroflightV2JioProgressHelp": {
+        "message": "Sweeps present / complete / usable in this log; independent repeats within this flight (stationarity) and comparable other flights (reproducibility) are counted separately, one never stands in for the other; copies, overlapping windows and incomplete sweeps add no evidence. The band is what the usable sweeps actually reached. The tuning goal is the band the planner needs and is never lowered to make a set pass. A complete set is a measurement set, not validation: Absolute Apply stays blocked."
+    },
+    "gyroflightV2JioProgress": {
+        "message": "sweeps $1; repeats in this flight $2; flights compared $3; supported band $4; tuning goal $5."
+    },
+    "gyroflightV2JioProgressExcluded": { "message": "excluded" },
+    "gyroflightV2JioProgressReached": { "message": "an incomplete sweep reached" },
+    "gyroflightV2JioProgressGoalMet": { "message": "covered" },
+    "gyroflightV2JioProgressGoalShort": { "message": "not covered by the supported band" },
+    "gyroflightV2JioProgressNext": { "message": "next recordings" },
     "gyroflightV2JioDiagnosticOnly": { "message": "diagnostic only (no release evidence)" },
     "gyroflightV2JioNotComputable": { "message": "not computable" },
     "gyroflightV2JioNeeds": { "message": "Measurement this route still needs" },
@@ -1099,6 +1112,24 @@
     },
     "gyroflightV2Need_chirp_yaw_band_matched_sweep": {
         "message": "a yaw sweep whose end frequency matches the supported band (experimental sweep advice; exponential firmware sweep, same duration and amplitude)"
+    },
+    "gyroflightV2Need_chirp_roll_complete_sweep": {
+        "message": "a complete roll sweep (every usable roll sweep ended before the header's end frequency: CHIRP mode off or log stopped early)"
+    },
+    "gyroflightV2Need_chirp_pitch_complete_sweep": {
+        "message": "a complete pitch sweep (every usable pitch sweep ended before the header's end frequency: CHIRP mode off or log stopped early)"
+    },
+    "gyroflightV2Need_chirp_yaw_complete_sweep": {
+        "message": "a complete yaw sweep (every usable yaw sweep ended before the header's end frequency: CHIRP mode off or log stopped early)"
+    },
+    "gyroflightV2Need_chirp_roll_supported_to_tuning_band": {
+        "message": "a roll sweep with usable coherence over the whole band the tuning goals need (the requirement is not lowered; amplitude is not raised automatically)"
+    },
+    "gyroflightV2Need_chirp_pitch_supported_to_tuning_band": {
+        "message": "a pitch sweep with usable coherence over the whole band the tuning goals need (the requirement is not lowered; amplitude is not raised automatically)"
+    },
+    "gyroflightV2Need_chirp_yaw_supported_to_tuning_band": {
+        "message": "a yaw sweep with usable coherence over the whole band the tuning goals need (the requirement is not lowered; amplitude is not raised automatically)"
     },
     "gyroflightV2Need_chirp_roll_without_saturation": {
         "message": "a roll sweep without pidSum limit or motor saturation"

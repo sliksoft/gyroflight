@@ -201,6 +201,18 @@ describe("AutotuneV2Panel", () => {
         const advice = d.querySelectorAll('[data-gyrocore="v2-jio-advice"]');
         expect(advice).toHaveLength(2);
         expect(advice[0].textContent).toMatch(/gyroflightV2JioAdvice(None)?\|roll\|/);
+        // The measurement set per axis: counts, repeats within and across flights, bands, and the axis's needs.
+        const progress = d.querySelectorAll('[data-gyrocore="v2-jio-progress"]');
+        expect(progress).toHaveLength(2);
+        const pRoll = q(d, '[data-gyrocore="v2-jio-progress"][data-axis="roll"]')!;
+        expect(pRoll.textContent).toContain("gyroflightV2JioProgress|1 / 1 / 1|1: unknown|1/1: consistent z=");
+        expect(pRoll.textContent).toContain("gyroflightV2JioProgressNext");
+        expect(pRoll.textContent).toContain("repeated_sweep_for_stationarity");
+        expect(pRoll.textContent).not.toContain("pitch");
+        expect(pRoll.getAttribute("data-complete")).toBe("no");
+        // Keys the synthetic headers do not carry are named as not compared on the candidate line.
+        expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("gyroflightV2JioCandidateNotLogged");
+        expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("anti_gravity_gain");
         expect(q(d, '[data-gyrocore="v2-jio-mimo"]')).toBeNull();
         expect((q(d, '[data-gyrocore="v2-apply"]') as HTMLButtonElement).disabled).toBe(true);
         expect(writes()).toEqual([]);

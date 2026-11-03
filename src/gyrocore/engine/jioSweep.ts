@@ -86,6 +86,13 @@ export const JIO_SWEEP = Object.freeze({
     repeatZThreshold: 2.0,
     /** A sweep record shorter than this is not analysed. */
     minSweepS: 5,
+    /**
+     * A record whose excitation (debug[3] ≠ 0 on its axis) covers less than this fraction of the
+     * header's chirp_time_seconds is incomplete: the registration ended (CHIRP mode off, log stopped)
+     * or the generator stopped before the header's end frequency. Its axis is analysed only up to
+     * the frequency the sweep reached (the firmware's law f0·(f1/f0)^(t/T)).
+     */
+    completeSweepFraction: 0.98,
     /** Settle tail appended to each sweep record. */
     tailS: 0.5,
     /** The log must be sampled on the PID grid (phaseComp runs there); tolerance on the rate. */
@@ -137,6 +144,14 @@ export const FIRMWARE_CHIRP = Object.freeze({
  */
 export interface JioSweepAdvice {
     current: { f0Hz: number; f1Hz: number; durationS: number; secondsPerOctave: number; octavesAboveSupport: number };
+    /** The band the tuning goals need measured (the planner's primary band; null without a plan). */
+    tuningBandHz: [number, number] | null;
+    /**
+     * Whether the supported band reaches the tuning band's top. false: the advice keeps the sweep
+     * end at that top (never lowers the requirement) and the coherence there has to improve on the
+     * new log; null without a tuning band.
+     */
+    bandSufficientForTuning: boolean | null;
     suggested: {
         chirp_frequency_start_deci_hz: number;
         chirp_frequency_end_deci_hz: number;
@@ -205,8 +220,18 @@ export interface JioRecordResult {
     recordS: number;
     /** Data flags that exclude the record from the estimate (pidsum limit, motor saturation, …). */
     flags: string[];
-    /** Informative notes (pilot input, early generator stop). */
+    /** Informative notes (pilot input, incomplete sweep, clipped record). */
     notes: string[];
+    /** Seconds of the record in which the generator excited this axis (debug[3] ≠ 0 on debug[1] = axis). */
+    excitedS: number;
+    /** Highest frequency the sweep reached by the firmware's law over excitedS (≤ the header's end). */
+    reachedHz: number | null;
+    /**
+     * How the sweep ended short of the header's chirp_time_seconds: excitation up to the record's
+     * last samples means the registration ended (CHIRP mode off, log stopped); zero excitation
+     * before the end means the generator stopped. null: complete.
+     */
+    incomplete: "registration_ended_early" | "generator_stopped_early" | null;
     used: boolean;
     rPeakDegS: number;
     uRms: number;
@@ -217,6 +242,12 @@ export interface JioAxisResult {
     axis: AxisName;
     method: typeof JIO_METHOD;
     records: JioRecordResult[];
+    /**
+     * The measurement set of this axis: sweeps present in the log, complete ones (excitation reached
+     * the header's end frequency), usable ones (a column was estimated), the excluded ones with their
+     * flags, and the lowest frequency a usable sweep reached (the analysed band ends there).
+     */
+    sweeps: { present: number; complete: number; usable: number; excluded: string[]; reachedHz: number | null };
     repeats: {
         count: number;
         consistency: "unknown" | "consistent" | "inconsistent";
@@ -580,7 +611,11 @@ export function crossFlightRepeatabilityZ(
 }
 
 /** The sweep advice of one axis from its supported band (see JioSweepAdvice). */
-export function sweepAdviceFor(sweep: SweepInfo, band: JioAxisResult["band"]): JioSweepAdvice | null {
+export function sweepAdviceFor(
+    sweep: SweepInfo,
+    band: JioAxisResult["band"],
+    tuningBandHz: [number, number] | null = null,
+): JioSweepAdvice | null {
     if (!band?.supportedHz) return null;
     const { f0Hz, f1Hz, durationS } = sweep;
     const octaves = Math.log2(f1Hz / f0Hz);
@@ -599,22 +634,42 @@ export function sweepAdviceFor(sweep: SweepInfo, band: JioAxisResult["band"]): J
         `sweep_law:${FIRMWARE_CHIRP.sweepLaw}`,
         `settable_ranges:${FIRMWARE_CHIRP.settingsSource}`,
         "same_duration_and_amplitude",
+        "amplitude_unchanged:not_raised_for_coherence",
         "experimental_not_validated:re_evaluate_on_the_new_log",
     ];
     const round = FIRMWARE_CHIRP.endRoundHz;
     let f0New = Math.max(f0Hz, JIO_SWEEP.lowestHz);
     if (f0New > f0Hz) basis.push(`start_raised_to_lowest_analysed:${JIO_SWEEP.lowestHz}Hz`);
     f0New = Math.min(Math.max(f0New, FIRMWARE_CHIRP.startDeciHz[0] / 10), FIRMWARE_CHIRP.startDeciHz[1] / 10);
-    let f1New = Math.ceil((FIRMWARE_CHIRP.endMarginFactor * supHi) / round) * round;
+    // The end never drops below the band the tuning goals need: a narrower sweep buys excitation per
+    // octave only where the goals do not need the frequencies it drops.
+    let endTarget = FIRMWARE_CHIRP.endMarginFactor * supHi;
+    let bandSufficientForTuning: boolean | null = null;
+    if (tuningBandHz) {
+        bandSufficientForTuning = supHi >= tuningBandHz[1] && supLo <= tuningBandHz[0];
+        basis.push(`tuning_band:${tuningBandHz[0].toFixed(1)}-${tuningBandHz[1].toFixed(1)}Hz`);
+        if (!bandSufficientForTuning)
+            basis.push(
+                `supported_band_short_of_tuning_band:${supLo.toFixed(1)}-${supHi.toFixed(1)}Hz:requirement_not_lowered`,
+            );
+        if (tuningBandHz[1] > endTarget) {
+            endTarget = tuningBandHz[1];
+            basis.push(`end_kept_at_tuning_band_top:${tuningBandHz[1].toFixed(0)}Hz`);
+        }
+        if (tuningBandHz[0] < f0New) basis.push(`start_above_tuning_band_low:${tuningBandHz[0].toFixed(1)}Hz`);
+    }
+    let f1New = Math.ceil(endTarget / round) * round;
     f1New = Math.min(Math.max(f1New, 2 * f0New), FIRMWARE_CHIRP.endDeciHz[1] / 10);
     if (f1New >= f1Hz && f0New <= f0Hz) {
         basis.push("current_sweep_already_band_matched");
-        return { current, suggested: null, basis };
+        return { current, tuningBandHz, bandSufficientForTuning, suggested: null, basis };
     }
     const T = Math.min(Math.max(Math.round(durationS), FIRMWARE_CHIRP.timeS[0]), FIRMWARE_CHIRP.timeS[1]);
     const octavesNew = Math.log2(f1New / f0New);
     return {
         current,
+        tuningBandHz,
+        bandSufficientForTuning,
         suggested: {
             chirp_frequency_start_deci_hz: Math.round(10 * f0New),
             chirp_frequency_end_deci_hz: Math.round(10 * f1New),
@@ -729,8 +784,45 @@ export function analyzeJioSweeps(
     const fs = log.sampleRateHz;
     const scale = highResolutionScale(logged);
     const n = log.gyroAdc[0].length;
-    const tail = Math.round(JIO_SWEEP.tailS * fs);
     const sweepSamples = Math.round(sweep.durationS * fs);
+    // The settle tail never reaches into the next sweep record: a record's window would otherwise
+    // hold the start of another sweep (of the same axis: not an independent repeat).
+    const tailMax = Math.round(JIO_SWEEP.tailS * fs);
+    const byStart = [...log.sweeps].sort((a, b) => a.start - b.start);
+    let tail = tailMax;
+    for (let k = 0; k + 1 < byStart.length; k++)
+        tail = Math.min(tail, Math.max(0, byStart[k + 1].start - byStart[k].end));
+    const tailNote = tail < tailMax ? `tail_shortened_to_gap:${(tail / fs).toFixed(2)}s` : null;
+    // Excitation of a record: the last sample on which the generator excited its axis (firmware
+    // chirp.c zeroes exc when finished; a mode switch-off ends the registration instead).
+    const excitedSamples = (s: JioSweepRecord): number => {
+        let last = -1;
+        for (let k = s.start; k < s.end; k++)
+            if (ch.debugAxis![k] === s.axisIndex && ch.excitation![k] !== 0 && Number.isFinite(ch.excitation![k]))
+                last = k;
+        return last < 0 ? 0 : last + 1 - s.start;
+    };
+    const reachedHzOf = (excitedS: number): number =>
+        Math.min(sweep.f1Hz, sweep.f0Hz * Math.pow(sweep.f1Hz / sweep.f0Hz, excitedS / sweep.durationS));
+    // Completeness per record, before the common record length: an incomplete sweep beside a complete
+    // one of its axis is excluded below and must not set the grid of the others. The excited time is
+    // corrected for samples the log lost (the generator ran on through a timestamp gap).
+    const completeness = new Map<string, Pick<JioRecordResult, "excitedS" | "reachedHz" | "incomplete">>();
+    for (const s of log.sweeps) {
+        const excited = excitedSamples(s);
+        const excitedS = excited / fs / Math.max(1e-9, 1 - Math.min(0.99, s.timestampGapFraction));
+        const reachedHz = excited > 0 ? reachedHzOf(excitedS) : null;
+        let incomplete: JioRecordResult["incomplete"] = null;
+        if (excitedS < JIO_SWEEP.completeSweepFraction * sweep.durationS)
+            incomplete =
+                s.end - (s.start + excited) <= Math.round(0.1 * fs)
+                    ? "registration_ended_early"
+                    : "generator_stopped_early";
+        completeness.set(s.id, { excitedS, reachedHz, incomplete });
+    }
+    const besideComplete = (s: JioSweepRecord) =>
+        completeness.get(s.id)!.incomplete !== null &&
+        log.sweeps.some((o) => o.axisIndex === s.axisIndex && completeness.get(o.id)!.incomplete === null);
     // D-term channels: with D > 0 the logged axisD is part of pidSum; absent, u is unknown.
     const dNeeded = AXES.map((_, a) => (controllers[a]?.axis.d ?? 0) > 0);
     const dMissing = AXES.filter((_, a) => dNeeded[a] && !log.axisD?.[a]);
@@ -742,7 +834,7 @@ export function analyzeJioSweeps(
     // far as the log holds it after every sweep.
     // A sweep shorter than minSweepS is a flagged record, not the ruler for the others.
     const active = log.sweeps.map((s) => Math.min(s.end - s.start, sweepSamples));
-    const longEnough = log.sweeps.filter((_, k) => active[k] / fs >= JIO_SWEEP.minSweepS);
+    const longEnough = log.sweeps.filter((s, k) => active[k] / fs >= JIO_SWEEP.minSweepS && !besideComplete(s));
     if (!longEnough.length) {
         blockers.push(`jio_sweep_too_short:${(Math.max(...active) / fs).toFixed(1)}s`);
         return base;
@@ -792,9 +884,17 @@ export function analyzeJioSweeps(
         const results: JioRecordResult[] = [];
         for (const s of recs) {
             const flags: string[] = [];
-            const notes: string[] = [];
+            const notes: string[] = tailNote ? [tailNote] : [];
+            const { excitedS, reachedHz, incomplete } = completeness.get(s.id)!;
+            if (incomplete)
+                notes.push(
+                    `sweep_incomplete:${incomplete}:${excitedS.toFixed(1)}s_of_${sweep.durationS}s:reached_${(reachedHz ?? 0).toFixed(0)}Hz_of_${sweep.f1Hz}Hz`,
+                );
+            if (besideComplete(s))
+                flags.push(`incomplete_sweep_beside_complete:reached_${(reachedHz ?? 0).toFixed(0)}Hz`);
             if ((s.end - s.start) / fs < JIO_SWEEP.minSweepS)
                 flags.push(`sweep_too_short:${((s.end - s.start) / fs).toFixed(1)}s`);
+            else if (excitedS < JIO_SWEEP.minSweepS) flags.push(`excitation_too_short:${excitedS.toFixed(1)}s`);
             // mode_flag_only: the generator ran the whole BOXCHIRP window (nothing to trim); the axis and
             // excitation are still checked below on debug[1] and debug[3].
             if (s.boundSource !== "firmware_debug_chirp") notes.push("sweep_bounds_from_mode_flag");
@@ -809,6 +909,9 @@ export function analyzeJioSweeps(
                     recordS,
                     flags,
                     notes,
+                    excitedS,
+                    reachedHz,
+                    incomplete,
                     used: false,
                     rPeakDegS: NaN,
                     uRms: NaN,
@@ -821,8 +924,6 @@ export function analyzeJioSweeps(
             const activeEnd = Math.min(s.start + minActive, end);
             for (let k = s.start; k < activeEnd; k++) if (ch.debugAxis![k] === ai) axisHits++;
             if (axisHits < JIO_SWEEP.minAxisFraction * (activeEnd - s.start)) flags.push("sweep_axis_mismatch_debug1");
-            if (s.end - s.start < sweepSamples * 0.98)
-                notes.push(`generator_stopped_early:${((s.end - s.start) / fs).toFixed(1)}s_of_${sweep.durationS}s`);
             if (s.end - s.start > L - tail + Math.round(0.1 * fs))
                 notes.push(
                     `record_clipped_to_common_length:${((L - tail) / fs).toFixed(1)}s_of_${((s.end - s.start) / fs).toFixed(1)}s`,
@@ -891,13 +992,30 @@ export function analyzeJioSweeps(
                 recordS,
                 flags,
                 notes,
+                excitedS,
+                reachedHz,
+                incomplete,
                 used: !!column,
                 rPeakDegS: rPeak,
                 uRms: Math.sqrt(uSq / L),
                 column,
             });
         }
+        // Beside a complete sweep an incomplete one was flagged above (no independent repeat: above
+        // the frequency it reached it holds no excitation, below it would only narrow the band of the
+        // complete one). Without any complete sweep the incomplete ones are what there is.
         const used = results.filter((x) => x.column);
+        // The axis is analysed only up to the frequency every usable sweep reached: above it an
+        // incomplete sweep holds no excitation, and a repeat or combination there would be noise.
+        const reachedAxis = used.length ? Math.min(...used.map((x) => x.reachedHz ?? bandHi)) : null;
+        const axisBandHi = reachedAxis !== null ? Math.min(bandHi, reachedAxis) : bandHi;
+        const sweepsSummary: JioAxisResult["sweeps"] = {
+            present: results.length,
+            complete: results.filter((x) => x.incomplete === null && x.excitedS > 0).length,
+            usable: used.length,
+            excluded: results.filter((x) => !x.column).map((x) => `${x.id}:${x.flags.join(",") || "no_column"}`),
+            reachedHz: reachedAxis,
+        };
         const repeats: JioAxisResult["repeats"] = { count: used.length, consistency: "unknown", z: null, reasons: [] };
         let col: Column | null = null;
         const axisBlockers: string[] = [];
@@ -910,7 +1028,7 @@ export function analyzeJioSweeps(
             col = used[0].column;
             repeats.reasons.push("single_sweep:repeatability_unknown");
         } else {
-            const inBand = Uint8Array.from(used[0].column!.f, (f) => (f >= bandLo && f <= bandHi ? 1 : 0));
+            const inBand = Uint8Array.from(used[0].column!.f, (f) => (f >= bandLo && f <= axisBandHi ? 1 : 0));
             let zMax = -Infinity;
             for (let i = 0; i < used.length; i++)
                 for (let j = i + 1; j < used.length; j++) {
@@ -935,6 +1053,7 @@ export function analyzeJioSweeps(
             axis: name,
             method: JIO_METHOD,
             records: results,
+            sweeps: sweepsSummary,
             repeats,
             grid: null,
             band: null,
@@ -969,7 +1088,7 @@ export function analyzeJioSweeps(
             let srrMax = 0;
             const srrIn: number[] = [];
             for (let i = 0; i < nf; i++)
-                if (show.f[i] >= bandLo && show.f[i] <= bandHi) {
+                if (show.f[i] >= bandLo && show.f[i] <= axisBandHi) {
                     srrMax = Math.max(srrMax, show.srr[i]);
                     srrIn.push(show.srr[i]);
                 }
@@ -993,11 +1112,12 @@ export function analyzeJioSweeps(
                 pts.excitationRelDb[i] = 10 * Math.log10(show.srr[i] / srrMedian);
                 let reason = "";
                 if (!(show.f[i] >= bandLo && show.f[i] <= bandHi)) reason = "out_of_band";
+                else if (show.f[i] > axisBandHi) reason = "not_swept:incomplete_sweep";
                 else if (show.nEff < JIO_SWEEP.minEffectiveAverages) reason = "too_few_averages";
                 else if (!(show.srr[i] >= JIO_SWEEP.excitationFloorRel * srrMax)) reason = "no_excitation";
                 else if (
                     pts.excitationRelDb[i] <
-                    localMedianDb(show, i, bandLo, bandHi, srrMedian) - JIO_SWEEP.excitationLocalDropDb
+                    localMedianDb(show, i, bandLo, axisBandHi, srrMedian) - JIO_SWEEP.excitationLocalDropDb
                 )
                     reason = "excitation_hole";
                 else if (!(Math.max(sdU, sdY) <= JIO_SWEEP.maxRelativeSd)) reason = "uncertainty_too_large";
@@ -1025,7 +1145,9 @@ export function analyzeJioSweeps(
             axisResult.reasons = reasons;
             axisResult.grid = { stepHz: nf > 1 ? show.f[1] - show.f[0] : fs / L, nEval: nf, nEff: show.nEff };
             const inBandIdx: number[] = [];
-            for (let i = 0; i < nf; i++) if (pts.reason[i] !== "out_of_band") inBandIdx.push(i);
+            for (let i = 0; i < nf; i++)
+                if (pts.reason[i] !== "out_of_band" && pts.reason[i] !== "not_swept:incomplete_sweep")
+                    inBandIdx.push(i);
             const supIdx = inBandIdx.filter((i) => pts.supported[i]);
             let gaps = 0;
             let largest = 0;
@@ -1050,7 +1172,7 @@ export function analyzeJioSweeps(
                 }
             }
             axisResult.band = {
-                analysedHz: [bandLo, bandHi],
+                analysedHz: [bandLo, axisBandHi],
                 supportedHz: supIdx.length
                     ? [pts.frequencyHz[supIdx[0]], pts.frequencyHz[supIdx[supIdx.length - 1]]]
                     : null,
