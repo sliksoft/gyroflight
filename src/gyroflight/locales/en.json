@@ -1044,6 +1044,21 @@
     },
     "gyroflightV2JioCandidateNotLogged": { "message": "not logged by either flight, not compared" },
     "gyroflightV2JioCandidateNotInFirmware": { "message": "not in firmware" },
+    "gyroflightV2DecisionTitle": { "message": "Why each axis has (no) experimental candidate" },
+    "gyroflightV2DecisionHelp": {
+        "message": "Per axis and route (primary CHIRP loop, CHIRP + JIO plant): whether a plant is identified and over which band, whether the candidate search ran, and the first check that decided it, with the measured value, the threshold and what it stops. Unknown values are shown as unknown."
+    },
+    "gyroflightV2DecisionRoute": { "message": "Route" },
+    "gyroflightV2DecisionPlant": { "message": "Plant (identified band)" },
+    "gyroflightV2DecisionSearch": { "message": "Search (usable of tried)" },
+    "gyroflightV2DecisionStatus": { "message": "Status" },
+    "gyroflightV2DecisionCause": { "message": "First decisive check: value; threshold; result; consequence" },
+    "gyroflightV2RecordingTitle": { "message": "recording needed (preparation for a flight not yet made)" },
+    "gyroflightV2RecordingNone": { "message": "no new recording requested" },
+    "gyroflightV2RecordingTiming": {
+        "message": "Time: $1 activations of $2 s per flight, about $3 s of CHIRP per flight, $4 flights, about $5 s in total (take-off and landing on top). Experimental: $6."
+    },
+    "gyroflightV2RecordingChecks": { "message": "Afterwards the app checks" },
     "gyroflightV2ExperimentalTitle": { "message": "Experimental tuning (not released, not hardware-validated)" },
     "gyroflightV2ExperimentalHelp": {
         "message": "The values the measurement supports but the release contract cannot release: their margins are not VALIDATED, no independent flight has confirmed a prediction, and the hardware procedure has not been executed. A missing qualification does not remove a computable value here; a measurement that does not support a value withholds it, and nothing is invented. Writing is your explicit, acknowledged decision; the write route keeps every technical check (right craft, firmware and parameter support, current configuration equal to the log's, disarmed, finite values in range, backup, readback, verified save, Restore)."

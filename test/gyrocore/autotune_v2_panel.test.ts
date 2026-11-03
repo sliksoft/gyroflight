@@ -121,6 +121,8 @@ const emptyResult = () => ({
     jio: null,
     experimental: null,
     experimentalWithheld: [],
+    candidateDecisions: {},
+    recordingInstructions: [],
 });
 
 let unmount: (() => void) | null = null;
@@ -345,6 +347,92 @@ describe("AutotuneV2Panel", () => {
         expect(roles).toEqual(["experimental", "reference"]);
         // The Restore of that backup is offered (its own route and confirmation).
         expect(q(d, `[data-gyrocore="v2-backups"] [data-backup="${backup.id}"]`)).not.toBeNull();
+    });
+
+    it("section 4c: per axis the decision with value and threshold, and the recording instruction it triggers", async () => {
+        const fail = {
+            rule: "identified_band_top",
+            ref: "loopModel",
+            value: 37.109,
+            unit: "Hz",
+            threshold: "≥ 66.0 Hz (planner band 9.8–66.0 Hz); next bin 39.1 Hz: γ² 0.620 < LOOP_MIN_COHERENCE 0.8",
+            result: "fail",
+            consequence: "record a sweep whose coherence reaches the planner band",
+        };
+        const r = {
+            ...emptyResult(),
+            candidateDecisions: {
+                roll: {
+                    primary: {
+                        route: "primary",
+                        plant: "present_with_limitation",
+                        bandHz: [9.8, 37.1],
+                        metrics: null,
+                        current: null,
+                        checks: [fail],
+                        searchRan: false,
+                        candidatesTried: 0,
+                        candidatesUsable: 0,
+                        status: "plant_band_insufficient",
+                        firstCause: fail,
+                        candidate: null,
+                        measurementUsable: true,
+                        waived: [],
+                    },
+                    jio: null,
+                },
+            },
+            recordingInstructions: [
+                {
+                    axis: "roll",
+                    trigger: {
+                        route: "primary",
+                        status: "plant_band_insufficient",
+                        rule: "identified_band_top",
+                        value: 37.1,
+                        threshold: "x",
+                    },
+                    kind: "record",
+                    settings: [
+                        {
+                            name: "chirp_frequency_end_deci_hz",
+                            current: 6000,
+                            required: 1200,
+                            unit: "dHz (0.1 Hz)",
+                            changed: true,
+                            basis: "band-matched advice",
+                        },
+                    ],
+                    procedure: ["Switch CHIRP_MODE on …"],
+                    timing: {
+                        sweepS: 20,
+                        activationsPerFlight: 6,
+                        perActivationS: 23.5,
+                        chirpTimePerFlightS: 141,
+                        flights: 2,
+                        totalChirpTimeS: 282,
+                        firm: [],
+                        experimental: ["lead-in 2 s"],
+                    },
+                    completionChecks: ["Identified band reaches the planner band top."],
+                    notChanged: [],
+                    note: "Triggered by the primary route",
+                },
+            ],
+        } as unknown as AutotuneV2Result;
+        const d = mount(r);
+        await flush();
+        const row = q(d, '[data-gyrocore="v2-decisions"] tr[data-axis="roll"][data-route="primary"]')!;
+        expect(row.getAttribute("data-status")).toBe("plant_band_insufficient");
+        expect(row.textContent).toContain("identified_band_top: 37.109 Hz");
+        expect(row.textContent).toContain("γ² 0.620 < LOOP_MIN_COHERENCE 0.8");
+        expect(row.textContent).toContain("not run");
+        const ins = q(d, '[data-gyrocore="v2-recording-instruction"][data-axis="roll"]')!;
+        expect(ins.getAttribute("data-kind")).toBe("record");
+        expect(q(ins, '[data-setting="chirp_frequency_end_deci_hz"]')!.getAttribute("data-changed")).toBe("yes");
+        expect(q(ins, '[data-gyrocore="v2-recording-timing"]')!.textContent).toContain(
+            "gyroflightV2RecordingTiming|6|20|141|2|282",
+        );
     });
 
     it("experimental Apply is refused when the craft is armed, without a write and without a backup", async () => {

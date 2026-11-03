@@ -615,6 +615,71 @@
             </template>
         </template>
 
+        <!-- 4c. Per axis: why there is (no) experimental candidate, and the recording the failed check asks for. -->
+        <template v-if="decisionRows.length">
+            <h4 class="font-bold mt-3" data-step="v2-decisions">4c. {{ $t("gyroflightV2DecisionTitle") }}</h4>
+            <p class="text-sm text-dimmed">{{ $t("gyroflightV2DecisionHelp") }}</p>
+            <table class="gyroflight-workflow-table text-sm" data-gyrocore="v2-decisions">
+                <thead>
+                    <tr>
+                        <th>{{ $t("gyroflightV2Axis") }}</th>
+                        <th>{{ $t("gyroflightV2DecisionRoute") }}</th>
+                        <th>{{ $t("gyroflightV2DecisionPlant") }}</th>
+                        <th>{{ $t("gyroflightV2DecisionSearch") }}</th>
+                        <th>{{ $t("gyroflightV2DecisionStatus") }}</th>
+                        <th>{{ $t("gyroflightV2DecisionCause") }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="row in decisionRows"
+                        :key="`${row.axis}-${row.route}`"
+                        :data-axis="row.axis"
+                        :data-route="row.route"
+                        :data-status="row.status"
+                    >
+                        <td>{{ row.axis }}</td>
+                        <td>{{ row.route }}</td>
+                        <td>{{ row.plant }}</td>
+                        <td>{{ row.search }}</td>
+                        <td>{{ row.status }}</td>
+                        <td class="text-dimmed">{{ row.cause }}</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div
+                v-for="ins in recordingRows"
+                :key="ins.axis"
+                class="text-sm mt-2"
+                data-gyrocore="v2-recording-instruction"
+                :data-axis="ins.axis"
+                :data-kind="ins.kind"
+            >
+                <p class="font-bold">{{ ins.axis }}: {{ ins.title }}</p>
+                <p class="text-dimmed">{{ ins.note }}</p>
+                <table v-if="ins.settings.length" class="gyroflight-workflow-table">
+                    <tbody>
+                        <tr
+                            v-for="st in ins.settings"
+                            :key="st.name"
+                            :data-setting="st.name"
+                            :data-changed="st.changed ? 'yes' : 'no'"
+                        >
+                            <td>{{ st.name }}</td>
+                            <td>{{ st.current ?? "unknown" }}</td>
+                            <td :class="st.changed ? 'font-bold' : ''">{{ st.required }} {{ st.unit }}</td>
+                            <td class="text-dimmed">{{ st.basis }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <ol v-if="ins.procedure.length" class="list-decimal ps-5">
+                    <li v-for="(step, i) in ins.procedure" :key="i">{{ step }}</li>
+                </ol>
+                <p v-if="ins.timing" data-gyrocore="v2-recording-timing">{{ ins.timing }}</p>
+                <p v-if="ins.checks" class="text-dimmed">{{ $t("gyroflightV2RecordingChecks") }}: {{ ins.checks }}</p>
+            </div>
+        </template>
+
         <!-- 5. Verify -->
         <h4 class="font-bold mt-3" data-step="v2-verify">5. {{ $t("gyroflightStepVerify") }}</h4>
         <p v-if="!outcome" class="text-sm text-dimmed">{{ $t("gyroflightVerifyNone") }}</p>
@@ -1042,6 +1107,58 @@ const canApplyExperimental = computed(
         connected.value &&
         !connection.virtualMode &&
         !stateBlocks.value.length,
+);
+
+/** Per axis and route the candidate decision (engine candidateDecision.ts) as table rows. */
+const decisionRows = computed(() => {
+    const d = v2.result?.candidateDecisions;
+    if (!d) return [];
+    const val = (v: number | string | null) => (v === null ? "unknown" : typeof v === "number" ? v.toFixed(3) : v);
+    return (["roll", "pitch", "yaw"] as const).flatMap((axis) =>
+        (["primary", "jio"] as const).flatMap((route) => {
+            const r = d[axis]?.[route];
+            if (!r) return [];
+            const fc = r.firstCause;
+            const waived = r.checks
+                .filter((c) => c.result === "waived")
+                .map((c) => `${c.rule}: waived (${c.consequence})`)
+                .join("; ");
+            return [
+                {
+                    axis,
+                    route,
+                    status: r.status,
+                    plant: `${r.plant}${r.bandHz ? ` (${band(r.bandHz)} Hz)` : ""}`,
+                    search: r.searchRan ? `${r.candidatesUsable} of ${r.candidatesTried}` : "not run",
+                    cause: fc
+                        ? `${fc.rule}: ${val(fc.value)}${fc.unit ? ` ${fc.unit}` : ""}; ${fc.threshold}; ${fc.result}; ${fc.consequence}`
+                        : waived || "--",
+                },
+            ];
+        }),
+    );
+});
+/** The recording each failed check asks for (engine recordingInstruction.ts). */
+const recordingRows = computed(() =>
+    (v2.result?.recordingInstructions ?? []).map((ins) => ({
+        axis: ins.axis,
+        kind: ins.kind,
+        title: i18n.getMessage(ins.kind === "record" ? "gyroflightV2RecordingTitle" : "gyroflightV2RecordingNone"),
+        note: ins.note,
+        settings: ins.settings,
+        procedure: ins.procedure,
+        timing: ins.timing
+            ? i18n.getMessage("gyroflightV2RecordingTiming", [
+                  String(ins.timing.activationsPerFlight),
+                  String(ins.timing.sweepS),
+                  String(Math.round(ins.timing.chirpTimePerFlightS)),
+                  String(ins.timing.flights),
+                  String(Math.round(ins.timing.totalChirpTimeS)),
+                  ins.timing.experimental.join("; "),
+              ])
+            : "",
+        checks: ins.completionChecks.join(" "),
+    })),
 );
 
 /**
