@@ -126,7 +126,7 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
             ],
             jio: null,
             buildProposal,
-        })!;
+        }).proposal!;
         expect(x.status).toBe("EXPERIMENTAL");
         expect(x.hardwareValidated).toBe(false);
         expect(x.proposal.id.startsWith("v2x-")).toBe(true);
@@ -151,7 +151,7 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
             ],
             jio: null,
             buildProposal,
-        })!;
+        }).proposal!;
         expect(x.items.map((i) => i.key)).toEqual(["p_yaw"]);
         expect(x.withheld.map((w) => w.key)).toEqual(["pid_roll", "pid_pitch"]);
         expect(x.withheld[0].reasons).toContain("no_candidate_meets_all_targets");
@@ -176,8 +176,17 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
                 primaryPid: [pidCandidate("roll", "targets_not_reachable", {}, ["no_candidate_meets_all_targets"])],
                 jio: null,
                 buildProposal,
-            }),
+            }).proposal,
         ).toBeNull();
+        // The reasons stay visible even without a proposal.
+        const none = buildExperimentalProposal({
+            primaryItems: [],
+            primaryPid: [pidCandidate("roll", "targets_not_reachable", {}, ["no_candidate_meets_all_targets"])],
+            jio: null,
+            buildProposal,
+        });
+        expect(none.proposal).toBeNull();
+        expect(none.withheld.map((w) => w.key)).toEqual(["pid_roll"]);
     });
 
     it("a JIO candidate fills an axis the primary route cannot, named as such with its limitations", () => {
@@ -201,7 +210,7 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
             primaryPid: [pidCandidate("roll", "targets_not_reachable", {}, ["no_candidate_meets_all_targets"])],
             jio,
             buildProposal,
-        })!;
+        }).proposal!;
         expect(x.items.map((i) => [i.key, i.to, i.source])).toEqual([
             ["p_roll", 48, "jio_route"],
             ["i_roll", 84, "jio_route"],
@@ -226,14 +235,9 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
                 },
             },
         } as unknown as JioRouteResult;
-        expect(
-            buildExperimentalProposal({
-                primaryItems: [],
-                primaryPid: [],
-                jio,
-                buildProposal,
-            }),
-        ).toBeNull();
+        const none = buildExperimentalProposal({ primaryItems: [], primaryPid: [], jio, buildProposal });
+        expect(none.proposal).toBeNull();
+        expect(none.withheld[0].reasons).toContain("jio_cross_flight_inconsistent");
         expect(dataInsufficientReasons(["jio_cross_flight_inconsistent:z:3.10"])).toHaveLength(1);
     });
 
@@ -260,7 +264,7 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
             primaryPid: [pidCandidate("roll", "no_change_needed")],
             jio: null,
             buildProposal,
-        })!;
+        }).proposal!;
         expect(x.items.map((i) => i.key)).toEqual(["dterm_lpf1_static_hz"]);
         expect(x.withheld.map((w) => w.key)).toEqual(["f_pitch"]);
     });
@@ -300,7 +304,7 @@ describe("experimental proposal through the engine on simulated flights", () => 
             } else {
                 expect(keys).toEqual([]);
                 if (pid.outcome !== "no_change_needed" && jioCand?.outcome !== "no_change_needed")
-                    expect(x?.withheld.some((w) => w.key === `pid_${axis}`) ?? true).toBe(true);
+                    expect(r.experimentalWithheld.some((w) => w.key === `pid_${axis}`)).toBe(true);
             }
         }
         if (x) {
@@ -339,7 +343,7 @@ describe("experimental authority against the real analysis binding", () => {
                     },
                 };
             },
-        })!;
+        }).proposal!;
         const store = useAutotuneV2Store();
         let d = experimentalWriteDecision(x, { recompute: false });
         expect(d.verdict).toBe("EXPERIMENTAL_APPLY_DENIED");

@@ -151,7 +151,13 @@ export interface ExperimentalInput {
     buildProposal: (selected: ProposalItem[]) => AbsoluteProposal | null;
 }
 
-export function buildExperimentalProposal(input: ExperimentalInput): ExperimentalProposal | null {
+/** The proposal (null when no value is computable) and, always, what was withheld and why. */
+export interface ExperimentalOutcome {
+    proposal: ExperimentalProposal | null;
+    withheld: WithheldItem[];
+}
+
+export function buildExperimentalProposal(input: ExperimentalInput): ExperimentalOutcome {
     const items: ExperimentalItem[] = [];
     const withheld: WithheldItem[] = [];
     const limitations = new Set<string>([
@@ -225,7 +231,7 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
             withheld.push({ key: `pid_${axis}`, part: "pid", source: "primary_route", reasons: [...new Set(reasons)] });
     }
 
-    if (!items.length) return null;
+    if (!items.length) return { proposal: null, withheld };
     const selected: ProposalItem[] = items.map(({ key, part, from, to, status, reasons }) => ({
         key,
         part,
@@ -235,16 +241,19 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
         reasons,
     }));
     const built = input.buildProposal(selected);
-    if (!built) return null;
+    if (!built) return { proposal: null, withheld };
     const proposal: AbsoluteProposal = { ...built, id: built.id.replace(/^v2-/, "v2x-") };
     return {
-        status: "EXPERIMENTAL",
-        proposal,
-        items,
+        proposal: {
+            status: "EXPERIMENTAL",
+            proposal,
+            items,
+            withheld,
+            qualificationGaps: [...new Set(items.flatMap((i) => i.qualificationGaps))],
+            limitations: [...limitations],
+            hardwareValidated: false,
+        },
         withheld,
-        qualificationGaps: [...new Set(items.flatMap((i) => i.qualificationGaps))],
-        limitations: [...limitations],
-        hardwareValidated: false,
     };
 }
 

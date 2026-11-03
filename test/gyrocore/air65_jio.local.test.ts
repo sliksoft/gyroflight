@@ -128,7 +128,7 @@ function jioSummary(r: AutotuneV2Result) {
                   withheld: r.experimental.withheld,
                   limitations: r.experimental.limitations,
               }
-            : { status: "NONE", withheld: [], reason: "no_computable_value" },
+            : { status: "NONE", withheld: r.experimentalWithheld, reason: "no_computable_value" },
         primaryCandidates: r.pid.map((p) => [p.axis, p.outcome, p.status, p.changed]),
         chain: Object.values(j.chain).map((c) => ({
             axis: c.axis,
@@ -261,7 +261,7 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
                 const offered = x?.items.some((i) => i.key.endsWith(`_${p.axis}`) && i.source === "primary_route");
                 if (offered) expect(["improved", "restores_margins"]).toContain(p.outcome);
                 else if (p.outcome === "targets_not_reachable" || p.outcome === "not_computable")
-                    expect(x?.withheld.some((w) => w.key === `pid_${p.axis}`) ?? true).toBe(true);
+                    expect(r.experimentalWithheld.some((w) => w.key === `pid_${p.axis}`)).toBe(true);
             }
             if (x) {
                 expect(x.status).toBe("EXPERIMENTAL");

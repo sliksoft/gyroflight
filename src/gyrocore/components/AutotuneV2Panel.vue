@@ -1022,7 +1022,7 @@ const canApply = computed(
  * an unverified earlier write, or no acknowledgement does.
  */
 const experimental = computed(() => v2.result?.experimental ?? null);
-const experimentalWithheld = computed(() => v2.result?.experimental?.withheld ?? []);
+const experimentalWithheld = computed(() => v2.result?.experimentalWithheld ?? []);
 const experimentalDecision = computed(() =>
     experimental.value ? experimentalWriteDecision(experimental.value, { recompute: false }) : null,
 );

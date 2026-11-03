@@ -94,7 +94,7 @@ import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, PLANT_CONFIG_KEYS, sameFlight } from "./logInput";
-import { buildExperimentalProposal, type ExperimentalProposal } from "./experimentalProposal";
+import { buildExperimentalProposal, type ExperimentalProposal, type WithheldItem } from "./experimentalProposal";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
 import {
     analyzeJioSweeps,
@@ -276,6 +276,8 @@ export interface AutotuneV2Result {
      * user's explicit acknowledgement and every technical check of the absolute route.
      */
     experimental: ExperimentalProposal | null;
+    /** What the experimental route withheld and why (also when no proposal exists at all). */
+    experimentalWithheld: WithheldItem[];
 }
 
 export interface JioAxisChain {
@@ -1069,6 +1071,13 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         buildMeasurementStrategy(p, { sampleRateHz: p.sampleRateHz }),
     );
 
+    const experimentalOutcome = buildExperimentalProposal({
+        primaryItems: items,
+        primaryPid: pid,
+        jio,
+        buildProposal: (selected) => build(selected).proposal,
+    });
+
     // Part summary for the interface and the report.
     const part = (p: PartReport["part"], status: PartReport["status"], reasons: string[]): PartReport => ({
         part: p,
@@ -1180,12 +1189,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         measurementStrategy,
         jio,
         // EXPERIMENTAL: computable values with their qualification gaps named; nothing invented.
-        experimental: buildExperimentalProposal({
-            primaryItems: items,
-            primaryPid: pid,
-            jio,
-            buildProposal: (selected) => build(selected).proposal,
-        }),
+        experimental: experimentalOutcome.proposal,
+        experimentalWithheld: experimentalOutcome.withheld,
     };
 }
 
