@@ -284,6 +284,32 @@ describe("recordingInstructions follow the failed check", () => {
         expect(s.chirp_frequency_end_deci_hz).toMatchObject({ required: 6000, changed: false });
     });
 
+    it("a search constrained by a Verified Tune segment that moves feedforward asks for no sweep design", () => {
+        const [ins] = recordingInstructions({
+            decisions: {
+                pitch: {
+                    primary: decision("search_constrained_by_verified_tune", {
+                        firstCause: {
+                            rule: "verified_tune_segment",
+                            ref: "x",
+                            value: "f_pitch:120->140",
+                            unit: "",
+                            threshold: "t",
+                            result: "fail",
+                            consequence: "c",
+                        },
+                    }),
+                    jio: null,
+                },
+            },
+            headers: HEADERS,
+            advice: {},
+        });
+        expect(ins).toMatchObject({ axis: "pitch", kind: "none_search_limit", settings: [], timing: null });
+        expect(ins.note).toContain("gain_change_flight_with_feedforward_unchanged");
+        expect(ins.note).toContain("f_pitch:120->140");
+    });
+
     it("a usable plant whose search fails asks for no data; a found candidate needs no instruction", () => {
         const out = recordingInstructions({
             decisions: {

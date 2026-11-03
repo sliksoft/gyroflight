@@ -111,7 +111,10 @@ function decisive(d: { primary: RouteDecision | null; jio: RouteDecision | null 
     const routes = [d.primary, d.jio].filter((r): r is RouteDecision => !!r);
     if (routes.some((r) => r.status === "candidate_found" || r.status === "no_change_needed")) return null;
     const searchFailed = routes.find(
-        (r) => r.status === "search_limit_max_step" || r.status === "targets_not_reachable",
+        (r) =>
+            r.status === "search_limit_max_step" ||
+            r.status === "targets_not_reachable" ||
+            r.status === "search_constrained_by_verified_tune",
     );
     if (searchFailed) return searchFailed;
     return d.primary ?? d.jio;
@@ -137,6 +140,20 @@ export function recordingInstructions(o: {
             value: fc?.value ?? null,
             threshold: fc?.threshold ?? null,
         };
+        if (r.status === "search_constrained_by_verified_tune") {
+            out.push({
+                axis,
+                trigger,
+                kind: "none_search_limit",
+                settings: [],
+                procedure: [],
+                timing: null,
+                completionChecks: [],
+                notChanged: [],
+                note: `No new CHIRP sweep design requested for ${axis}: the bound Verified Tune's gain-change flight also moved feedforward (${fc?.value ?? "unknown"}), so the search finds no point on its segment. What is needed is a gain-change flight with feedforward unchanged (release route: required_measurement:gain_change_flight_with_feedforward_unchanged).`,
+            });
+            continue;
+        }
         if (r.status === "search_limit_max_step" || r.status === "targets_not_reachable") {
             out.push({
                 axis,
@@ -226,15 +243,15 @@ export function recordingInstructions(o: {
             `Arm and take off; hover steadily for at least ${RECORDING_TIMING.leadInS} s before the first activation; keep the sticks still during each sweep.`,
             `Switch CHIRP_MODE on and keep it on for the whole sweep (${sweepS} s); the generator stops itself; keep the mode on ${RECORDING_TIMING.settleS} s longer, then switch it off.`,
             `Wait at least ${RECORDING_TIMING.pauseS} s with CHIRP_MODE off. Each switch-off advances the axis roll → pitch → yaw → roll (pid.c): the first activation after power-up is roll.`,
-            `Repeat until every axis has ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps in this flight (${activations} activations: roll, pitch, yaw, roll, pitch, yaw). A sweep switched off early is incomplete and does not count.`,
+            `Repeat until every axis has ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps in this flight (${activations} activations: roll, pitch, yaw, roll, pitch, yaw). A sweep switched off early is still read in and marked incomplete; it is not one of the complete sweeps.`,
             `Fly a second, independent flight with exactly the same settings (reproducibility between flights).`,
             `Import both logs into Autotune and Calculate; the checks below decide whether the axis is complete.`,
         ];
         const completionChecks = [
             `Blocking (the engine excludes the data): debug_mode CHIRP; setpoint, axisP/I/F, debug[1] and debug[3] logged, axisD when D > 0 (jio_channel_missing); log rate equal to the PID rate within 2 % (jio_log_rate_not_pid_rate); debug[2] against the firmware law when logged (debug2_frequency_mismatch).`,
-            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only on a decision band without dropped bins); no unidentified bin inside the decision band (decision_band_gaps); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top so the phase crossing and the |S| peak lie inside it (gain_margin_shown_by_band, sensitivity_peak_shown_by_band).`,
+            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only when every other gate passed and the decision band drops no bin for coherence, support or plant status — bins dropped for uncertainty do not count for the waiver but stop the search through decision_band_gaps); no unidentified bin inside the decision band (decision_band_gaps); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top so the phase crossing and the |S| peak lie inside it (gain_margin_shown_by_band, sensitivity_peak_shown_by_band); two sweeps of the axis that disagree (repeat z > ${JIO_SWEEP.repeatZThreshold}, experimental threshold) or a second flight that disagrees exclude the JIO candidate.`,
             `Noted, not excluding: a missing debug[2] (frequency_verification_missing); a sweep below ${Math.round(JIO_SWEEP.completeSweepFraction * 100)} % of chirp_time_seconds is ingested and annotated (sweep_incomplete) and asks for a complete sweep; a single sweep leaves stationarity unknown.`,
-            `Experimental: ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps of the axis agree within the flight (repeat z ≤ ${JIO_SWEEP.repeatZThreshold}) and the second flight agrees.`,
+            `Experimental (not yet required for a candidate): ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps per axis in one flight and a second flight; the z threshold ${JIO_SWEEP.repeatZThreshold} itself is not calibrated.`,
         ];
         out.push({
             axis,
@@ -257,7 +274,7 @@ export function recordingInstructions(o: {
                 experimental: [
                     `lead-in ${RECORDING_TIMING.leadInS} s, settle ${RECORDING_TIMING.settleS} s, pause ${RECORDING_TIMING.pauseS} s per activation`,
                     `${RECORDING_TIMING.sweepsPerAxisPerFlight} sweeps per axis per flight and ${RECORDING_TIMING.flights} flights (repeat checks are experimental)`,
-                    `take-off, climb and landing come on top; whether ${Math.round(perFlight)} s of CHIRP fits one AIR65 pack is not known to the app: if not, split the flights, but keep both sweeps of an axis in the same flight`,
+                    `take-off, climb and landing come on top; whether ${Math.round(perFlight)} s of activation sequence fits one AIR65 pack is not known to the app: if not, split the flights, but keep both sweeps of an axis in the same flight`,
                 ],
             },
             completionChecks,

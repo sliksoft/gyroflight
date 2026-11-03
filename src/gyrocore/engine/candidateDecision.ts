@@ -73,6 +73,7 @@ export type DecisionStatus =
     | "plant_band_insufficient"
     | "targets_not_reachable"
     | "search_limit_max_step"
+    | "search_constrained_by_verified_tune"
     | "no_change_needed"
     | "candidate_found";
 
@@ -408,6 +409,30 @@ export function decideAxis(o: {
 
     // 6. Candidate search on the in-band margins (same grid as the release route's search).
     const current = o.current;
+    // A bound Verified Tune whose gain-change flight also moved feedforward covers no point this
+    // search can propose (pidOptimizer: verified_tune_segment_moves_feedforward): no search, and no
+    // claim that the band is short.
+    const seg = o.segment ?? null;
+    const fKey = seg?.keys[3];
+    if (seg && fKey && seg.base[fKey] !== seg.cand[fKey]) {
+        checks.push({
+            rule: "verified_tune_segment",
+            ref: "src/gyrocore/engine/pidOptimizer.ts:optimizeAxisPid",
+            value: `${fKey}:${seg.base[fKey]}->${seg.cand[fKey]}`,
+            unit: "",
+            threshold: "the Verified Tune's gain-change flight leaves feedforward unchanged",
+            result: "fail",
+            consequence:
+                "the search stays on that segment and finds no point on it; a gain-change flight with feedforward unchanged is needed",
+        });
+        return out("search_constrained_by_verified_tune", {
+            plant: limitation ? "present_with_limitation" : "present",
+            bandHz: band,
+            metrics: states,
+            current: valuesOf(cur),
+            measurementUsable,
+        });
+    }
     const kdRatio = current.d > 0 ? loop.cfg.axis.d / current.d : 1;
     const curV = valuesOf(cur);
     let tried = 0;
