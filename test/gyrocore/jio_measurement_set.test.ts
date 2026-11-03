@@ -92,14 +92,15 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
         expect(roll.band!.analysedHz[1]).toBeLessThanOrEqual(roll.records[0].reachedHz!);
         expect(roll.band!.supportedHz![1]).toBeLessThanOrEqual(roll.band!.analysedHz[1]);
         expect(roll.reasons["not_swept:above_reached_frequency"]).toBeGreaterThan(0);
-        // The complete pitch sweep is complete but clipped to the common record length (named): its
-        // transformed window reaches only what the roll sweep's length allows, and its band ends there.
+        // The complete pitch sweep keeps its own record length, grid and band (block 4: an axis is no
+        // longer clipped by another axis's short sweep); nothing above its analysed band is supported.
         expect(pitch.records[0].incomplete).toBeNull();
         expect(pitch.sweeps).toMatchObject({ present: 1, complete: 1, usable: 1, usableComplete: 1 });
-        expect(pitch.records[0].notes.some((n) => n.startsWith("record_clipped_to_common_length"))).toBe(true);
-        expect(pitch.records[0].notes.some((n) => n.startsWith("window_reaches:"))).toBe(true);
-        expect(pitch.band!.analysedHz[1]).toBeLessThanOrEqual(reachedAt(pitch.records[0].recordS) + 0.01);
-        expect(pitch.band!.analysedHz[1]).toBeLessThan(45);
+        expect(pitch.records[0].notes.some((n) => n.startsWith("record_clipped_"))).toBe(false);
+        expect(pitch.records[0].notes.some((n) => n.startsWith("window_reaches:"))).toBe(false);
+        expect(pitch.records[0].recordS).toBeGreaterThan(12);
+        expect(pitch.band!.analysedHz[1]).toBeGreaterThan(150);
+        expect(pitch.grid!.stepHz).toBeLessThan(roll.grid!.stepHz);
         for (let i = 0; i < pitch.points!.frequencyHz.length; i++)
             if (pitch.points!.frequencyHz[i] > pitch.band!.analysedHz[1]) expect(pitch.points!.supported[i]).toBe(0);
         // The route asks for a complete roll sweep, not a complete pitch sweep; stationarity stays unknown.

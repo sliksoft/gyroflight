@@ -351,6 +351,7 @@ export function buildLogInputs(
             axisF: triple("axisF"),
             debugAxis: aligned(ch["debug[1]"]),
             excitation,
+            frequencyDeciHz: aligned(ch["debug[2]"]),
         };
         // Every sweep of every axis, in log order, for the JIO route's own grouping of repeats.
         const sweeps: JioSweepRecord[] = log.measurements
@@ -694,7 +695,9 @@ export const PLANT_CONFIG_KEYS = [
     "pid_process_denom",
     "motor_poles",
     "gyro_notch_hz",
+    "gyro_notch_cutoff",
     "dterm_notch_hz",
+    "dterm_notch_cutoff",
     "gyro_lpf1_type",
     "gyro_lpf1_static_hz",
     "gyro_lpf1_dyn_hz",

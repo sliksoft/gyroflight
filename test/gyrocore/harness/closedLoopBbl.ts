@@ -127,6 +127,8 @@ export interface ClosedLoopLogOptions {
         omit?: ("axisP" | "axisI" | "axisF" | "axisD" | "debug1")[];
         /** Header pid_process_denom to write instead of the encoder's (a log not on the PID grid). */
         pidProcessDenomHeader?: number;
+        /** Scale on the logged debug[2] frequency (a firmware/decoder mismatch fixture); default 1. */
+        debug2Scale?: number;
         gapS?: number;
     };
 }
@@ -365,7 +367,7 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
                 debug: [
                     Math.round(5000 * (m.phase % (2 * Math.PI))),
                     omitted("debug1") ? -1 : axis,
-                    Math.round(10 * m.f),
+                    Math.round(10 * m.f * (jio?.debug2Scale ?? 1)),
                     Math.round(1000 * m.exc),
                 ],
                 extra: extraFor(1400, uu),

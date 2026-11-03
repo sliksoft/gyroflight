@@ -93,7 +93,7 @@ import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOpti
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
-import { crossLogReferenceIssues, sameFlight } from "./logInput";
+import { crossLogReferenceIssues, PLANT_CONFIG_KEYS, sameFlight } from "./logInput";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
 import {
     analyzeJioSweeps,
@@ -364,6 +364,8 @@ export interface JioAxisProgress {
         reached: number | null;
         tuningGoal: [number, number] | null;
         sufficientForTuning: boolean | null;
+        /** The part of the tuning band the supported band does not cover (null: covered or no goal). */
+        missing: [number, number] | null;
     };
     /** This axis's required_measurement:* codes, in the order the route lists them. */
     nextSteps: string[];
@@ -416,6 +418,15 @@ const JIO_REPEAT_KEYS = [
     "tpa_speed_max_voltage",
     "tpa_speed_pitch_offset",
 ];
+
+/**
+ * Settings that provably do not exist in a firmware revision (parameter_names.h / settings.c of
+ * that revision): a header missing on both sides is then "not in this firmware", not "not logged".
+ * Keyed by the commit hash the log's "Firmware revision" names.
+ */
+const FIRMWARE_ABSENT_SETTINGS: Record<string, readonly string[]> = {
+    "43875a55a": ["anti_gravity_mode", "anti_gravity_threshold"],
+};
 
 function headerMap(pairs: readonly (readonly [string, string])[]): Record<string, string> {
     return Object.fromEntries(pairs.map(([k, v]) => [k, v]));
@@ -1163,6 +1174,16 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     };
 }
 
+/** The part of the tuning band above or below the supported band (the larger gap; null when covered). */
+function missingBand(supported: [number, number] | null, goal: [number, number] | null): [number, number] | null {
+    if (!goal) return null;
+    if (!supported) return goal;
+    const above: [number, number] | null = supported[1] < goal[1] ? [Math.max(supported[1], goal[0]), goal[1]] : null;
+    const below: [number, number] | null = supported[0] > goal[0] ? [goal[0], Math.min(supported[0], goal[1])] : null;
+    if (above && below) return above[1] - above[0] >= below[1] - below[0] ? above : below;
+    return above ?? below;
+}
+
 /** The required_measurement:* codes of the JIO route's own blockers. */
 function jioRequirements(
     analysis: JioSweepAnalysis,
@@ -1346,6 +1367,7 @@ function runJioRoute(
                 reached: a.records.some((r) => r.used && r.incomplete !== null) ? a.sweeps.reachedHz : null,
                 tuningGoal: a.sweepAdvice?.tuningBandHz ?? null,
                 sufficientForTuning: a.sweepAdvice?.bandSufficientForTuning ?? null,
+                missing: missingBand(a.band?.supportedHz ?? null, a.sweepAdvice?.tuningBandHz ?? null),
             },
             nextSteps: requiredMeasurements.filter((r) => r.includes(`chirp_${name}_`)),
         };
@@ -1380,12 +1402,23 @@ function jioCrossFlight(
         const issues = crossLogReferenceIssues(log, other, others);
         const hb = new Map(other.headerPairs);
         const notes: string[] = [];
+        const rev = analysis.firmwareRevision ?? "";
+        const absent = Object.entries(FIRMWARE_ABSENT_SETTINGS).find(([hash]) => rev.includes(hash));
         for (const k of JIO_REPEAT_KEYS) {
             const va = ha.get(k);
             const vb = hb.get(k);
-            if (va === undefined && vb === undefined) notes.push(`setting_not_logged_in_either:${k}`);
+            if (va === undefined && vb === undefined)
+                notes.push(
+                    absent && absent[1].includes(k)
+                        ? `setting_not_in_firmware:${k}:${absent[0]}`
+                        : `setting_not_logged_in_either:${k}`,
+                );
             else if (va !== vb) issues.push(`jio_cross_flight_setting_differs:${k}`);
         }
+        // The plant/filter keys the identity rules compare (PLANT_CONFIG_KEYS): missing on both sides
+        // is equal there too; named here so an unlogged filter setting is visible, not assumed.
+        for (const k of PLANT_CONFIG_KEYS)
+            if (ha.get(k) === undefined && hb.get(k) === undefined) notes.push(`setting_not_logged_in_either:${k}`);
         const cand: JioCrossFlightCandidate = {
             sha256: other.sha256,
             logIndex: other.logIndex,

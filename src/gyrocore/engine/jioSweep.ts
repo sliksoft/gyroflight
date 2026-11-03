@@ -93,6 +93,20 @@ export const JIO_SWEEP = Object.freeze({
      * the frequency the sweep reached (the firmware's law f0·(f1/f0)^(t/T)).
      */
     completeSweepFraction: 0.98,
+    /**
+     * debug[2] against the reconstructed firmware law (chirp.c fchirp = f0·β^(count·Ts), logged as
+     * lrintf(10·fchirp)): a sample is in tolerance within max(this fraction, debug2ToleranceHz).
+     * pow_approx and the 0.05 Hz quantisation stay well inside; more samples out than
+     * debug2MaxOutOfToleranceFraction is a mismatch (the record is not analysed).
+     */
+    debug2ToleranceRel: 0.01,
+    debug2ToleranceHz: 0.1,
+    debug2MaxOutOfToleranceFraction: 0.02,
+    /**
+     * Grids of two columns (axes of one flight, or two flights) are matched point by point when
+     * their steps differ by at most this ratio; never interpolated.
+     */
+    gridMaxStepRatio: 2,
     /** Settle tail appended to each sweep record. */
     tailS: 0.5,
     /** The log must be sampled on the PID grid (phaseComp runs there); tolerance on the rate. */
@@ -173,6 +187,8 @@ export interface JioChannels {
     debugAxis: ArrayLike<number> | null;
     /** DEBUG_CHIRP debug[3]: the generator's excitation × 1000 before phaseComp. */
     excitation: ArrayLike<number> | null;
+    /** DEBUG_CHIRP debug[2]: the generator's instantaneous frequency in deci-Hz (verification only). */
+    frequencyDeciHz?: ArrayLike<number> | null;
 }
 
 /** One sweep the qualification found (chirp/qualification.ts measurement), all occurrences of every axis. */
@@ -232,6 +248,20 @@ export interface JioRecordResult {
      * before the end means the generator stopped. null: complete.
      */
     incomplete: "registration_ended_early" | "generator_stopped_early" | null;
+    /**
+     * debug[2] against the firmware law over the excited samples of this record: `ok`, `mismatch`
+     * (record not analysed), or `missing` (no channel: the frequency is not verified, which is a
+     * limitation, never a pass).
+     */
+    frequencyCheck: {
+        status: "ok" | "mismatch" | "missing";
+        samples: number;
+        outOfTolerance: number;
+        medianRelError: number | null;
+        maxAbsErrorHz: number | null;
+        /** Samples inside the record with debug[2] > 0 while debug[3] = 0 (generator output held). */
+        heldWhileSilent: number;
+    };
     used: boolean;
     rPeakDegS: number;
     uRms: number;
@@ -301,6 +331,8 @@ export interface JioMimoResult {
     conditionMedian: number | null;
     /** Diagonal |G| (dB) at the first and last well-conditioned point, per axis. */
     diagonalDbFirstLast: [number, number][] | null;
+    /** Step of the coarsest axis grid the others were matched to (nearest point, no interpolation). */
+    gridStepHz: number | null;
     notes: string[];
 }
 
@@ -843,29 +875,23 @@ export function analyzeJioSweeps(
     if (dMissing.length) blockers.push(...dMissing.map((a) => `jio_channel_missing:axisD:${a}`));
     if (blockers.length) return base;
 
-    // Common record length: the shortest active sweep (an aborted sweep shortens the grid of all so
-    // that columns share one frequency grid), at most the header's sweep, plus the settle tail as
-    // far as the log holds it after every sweep.
-    // A sweep shorter than minSweepS is a flagged record, not the ruler for the others.
+    // Record length per axis (block 4): the shortest usable sweep of that axis, at most the header's
+    // sweep, plus the settle tail as far as the log holds it. Another axis's short sweep no longer
+    // clips this one; the 3×3 combination matches the axes' grids point by point (mimo).
+    // A sweep shorter than minSweepS is a flagged record, not the ruler for its axis.
     const active = log.sweeps.map((s) => Math.min(s.end - s.start, sweepSamples));
-    const longEnough = log.sweeps.filter((s, k) => active[k] / fs >= JIO_SWEEP.minSweepS && !besideComplete(s));
-    if (!longEnough.length) {
+    const eligible = (s: JioSweepRecord, k: number) => active[k] / fs >= JIO_SWEEP.minSweepS && !besideComplete(s);
+    if (!log.sweeps.some(eligible)) {
         blockers.push(`jio_sweep_too_short:${(Math.max(...active) / fs).toFixed(1)}s`);
         return base;
     }
-    const minActive = Math.min(...longEnough.map((s) => Math.min(s.end - s.start, sweepSamples)));
-    const L = smoothLength(Math.min(minActive + tail, ...longEnough.map((s) => n - s.start)));
-    if (L < 2 * (2 * JIO_SWEEP.daniellHalfWidthBins + 1) * 4) {
-        blockers.push("jio_record_too_short");
-        return base;
-    }
-    const recordS = L / fs;
+    const minRecord = 2 * (2 * JIO_SWEEP.daniellHalfWidthBins + 1) * 4;
     const bandLo = Math.max(JIO_SWEEP.lowestHz, sweep.f0Hz);
     const bandHi = Math.min(sweep.f1Hz, JIO_SWEEP.nyquistFraction * fs);
     const m = JIO_SWEEP.daniellHalfWidthBins;
 
     // u = P + I + D + F per axis over a record (D only when logged; yaw D is usually 0).
-    const pidSum = (a: number, start: number): Float64Array => {
+    const pidSum = (a: number, start: number, L: number): Float64Array => {
         const out = new Float64Array(L);
         const P = ch.axisP![a];
         const I = ch.axisI![a];
@@ -878,7 +904,7 @@ export function analyzeJioSweeps(
         }
         return out;
     };
-    const gyro = (a: number, start: number): Float64Array => {
+    const gyro = (a: number, start: number, L: number): Float64Array => {
         const out = new Float64Array(L);
         const Y = log.gyroAdc[a];
         for (let k = 0; k < L; k++) {
@@ -888,10 +914,84 @@ export function analyzeJioSweeps(
         return out;
     };
 
+    // debug[2] against the law: fchirp = f0·β^(k·Ts) from the first excited sample (count 0), logged
+    // as lrintf(10·fchirp); compared only while the generator excites this axis (debug[3] ≠ 0 on
+    // debug[1] = axis): after chirp.c's finish both are 0, a held frequency with zero excitation is
+    // counted separately. Without the channel the frequency is not verified (a limitation).
+    const frequencyCheckOf = (s: JioSweepRecord, excited: number): JioRecordResult["frequencyCheck"] => {
+        const fq = ch.frequencyDeciHz;
+        if (!fq)
+            return {
+                status: "missing",
+                samples: 0,
+                outOfTolerance: 0,
+                medianRelError: null,
+                maxAbsErrorHz: null,
+                heldWhileSilent: 0,
+            };
+        const beta = Math.pow(sweep.f1Hz / sweep.f0Hz, 1 / sweep.durationS);
+        const Ts = pidDtUs * 1e-6;
+        let first = -1;
+        for (let k = s.start; k < s.end; k++)
+            if (ch.debugAxis![k] === s.axisIndex && ch.excitation![k] !== 0) {
+                first = k;
+                break;
+            }
+        const errs: number[] = [];
+        let out = 0;
+        let maxAbs = 0;
+        let held = 0;
+        // A zero crossing of the excitation rounds debug[3] to 0 for a sample or two; only a run of
+        // silent samples with a logged frequency counts as the generator's output being held.
+        const minHeldRun = 10;
+        let silentRun = 0;
+        if (first >= 0)
+            for (let k = first; k < s.start + excited && k < s.end; k++) {
+                const silent = ch.excitation![k] === 0;
+                const logged = fq[k];
+                if (!Number.isFinite(logged)) continue;
+                if (silent) {
+                    if (logged > 0 && ch.debugAxis![k] === s.axisIndex) {
+                        silentRun++;
+                        if (silentRun === minHeldRun) held += minHeldRun;
+                        else if (silentRun > minHeldRun) held++;
+                    } else silentRun = 0;
+                    continue;
+                }
+                silentRun = 0;
+                if (ch.debugAxis![k] !== s.axisIndex) continue;
+                const expected = sweep.f0Hz * Math.pow(beta, (k - first) * Ts);
+                const err = Math.abs(logged / 10 - expected);
+                const tol = Math.max(JIO_SWEEP.debug2ToleranceHz, JIO_SWEEP.debug2ToleranceRel * expected);
+                errs.push(err / expected);
+                maxAbs = Math.max(maxAbs, err);
+                if (err > tol) out++;
+            }
+        if (!errs.length)
+            return {
+                status: "mismatch",
+                samples: 0,
+                outOfTolerance: 0,
+                medianRelError: null,
+                maxAbsErrorHz: null,
+                heldWhileSilent: held,
+            };
+        const status = out / errs.length > JIO_SWEEP.debug2MaxOutOfToleranceFraction ? "mismatch" : "ok";
+        return {
+            status,
+            samples: errs.length,
+            outOfTolerance: out,
+            medianRelError: median(errs),
+            maxAbsErrorHz: maxAbs,
+            heldWhileSilent: held,
+        };
+    };
+    if (!ch.frequencyDeciHz) limitations.push("frequency_verification_missing:debug[2]_not_logged");
+
     const axes: Partial<Record<AxisName, JioAxisResult>> = {};
     const combined: Partial<Record<number, Column>> = {};
     // The frequency the transformed window of a record really holds: its excitation clipped to the
-    // common record length (a short sweep of another axis clips this one; review block 3).
+    // axis's record length (a shorter repeat of the same axis, or the log's end, clips it).
     const windowReached = new Map<string, number>();
     for (const name of AXES) {
         const ai = AXES.indexOf(name) as 0 | 1 | 2;
@@ -899,11 +999,30 @@ export function analyzeJioSweeps(
         if (!recs.length) continue;
         const limit = ai === 2 ? pidsumLimitYaw! : pidsumLimit!;
         const results: JioRecordResult[] = [];
+        const rulers = recs.filter((s) => eligible(s, log.sweeps.indexOf(s)));
+        const minActive = rulers.length ? Math.min(...rulers.map((s) => Math.min(s.end - s.start, sweepSamples))) : 0;
+        const L = rulers.length ? smoothLength(Math.min(minActive + tail, ...rulers.map((s) => n - s.start))) : 0;
+        const recordS = L / fs;
         for (const s of recs) {
             const flags: string[] = [];
             const notes: string[] = tailNote ? [tailNote] : [];
-            const { excitedS, reachedHz, incomplete } = completeness.get(s.id)!;
-            windowReached.set(s.id, reachedHzOf(Math.min(completeness.get(s.id)!.excited, L - tail) / fs));
+            const { excitedS, reachedHz, incomplete, excited } = completeness.get(s.id)!;
+            // The transformed window is [start, start + L): the excitation it holds is min(excited, L)
+            // (the settle tail, not the excitation, absorbs the 5-smooth shortening of L).
+            windowReached.set(s.id, reachedHzOf(Math.min(excited, L) / fs));
+            const frequencyCheck = frequencyCheckOf(s, excited);
+            if (frequencyCheck.status === "mismatch")
+                flags.push(
+                    `debug2_frequency_mismatch:${frequencyCheck.outOfTolerance}_of_${frequencyCheck.samples}_samples:median_rel_err_${((frequencyCheck.medianRelError ?? NaN) * 100).toFixed(2)}pct`,
+                );
+            else if (frequencyCheck.status === "missing") notes.push("frequency_not_verified:debug2_missing");
+            else
+                notes.push(
+                    `debug2_frequency_verified:${frequencyCheck.samples}_samples:max_abs_err_${frequencyCheck.maxAbsErrorHz!.toFixed(2)}Hz`,
+                );
+            if (frequencyCheck.heldWhileSilent > 0)
+                notes.push(`debug2_frequency_held_while_excitation_zero:${frequencyCheck.heldWhileSilent}_samples`);
+            if (L < minRecord) flags.push(`axis_record_too_short:${recordS.toFixed(1)}s`);
             if (incomplete)
                 notes.push(
                     `sweep_incomplete:${incomplete}:${excitedS.toFixed(1)}s_of_${sweep.durationS}s:reached_${(reachedHz ?? 0).toFixed(0)}Hz_of_${sweep.f1Hz}Hz`,
@@ -930,6 +1049,7 @@ export function analyzeJioSweeps(
                     excitedS,
                     reachedHz,
                     incomplete,
+                    frequencyCheck,
                     used: false,
                     rPeakDegS: NaN,
                     uRms: NaN,
@@ -942,9 +1062,9 @@ export function analyzeJioSweeps(
             const activeEnd = Math.min(s.start + minActive, end);
             for (let k = s.start; k < activeEnd; k++) if (ch.debugAxis![k] === ai) axisHits++;
             if (axisHits < JIO_SWEEP.minAxisFraction * (activeEnd - s.start)) flags.push("sweep_axis_mismatch_debug1");
-            if (s.end - s.start > L - tail + Math.round(0.1 * fs))
+            if (s.end - s.start > L + Math.round(0.1 * fs))
                 notes.push(
-                    `record_clipped_to_common_length:${((L - tail) / fs).toFixed(1)}s_of_${((s.end - s.start) / fs).toFixed(1)}s`,
+                    `record_clipped_to_axis_record_length:${(L / fs).toFixed(1)}s_of_${((s.end - s.start) / fs).toFixed(1)}s`,
                 );
             const r = reconstructChirpReference(
                 ch.excitation!,
@@ -958,14 +1078,14 @@ export function analyzeJioSweeps(
                 pidDtUs,
             )!;
             const u: [Float64Array, Float64Array, Float64Array] = [
-                pidSum(0, s.start),
-                pidSum(1, s.start),
-                pidSum(2, s.start),
+                pidSum(0, s.start, L),
+                pidSum(1, s.start, L),
+                pidSum(2, s.start, L),
             ];
             const y: [Float64Array, Float64Array, Float64Array] = [
-                gyro(0, s.start),
-                gyro(1, s.start),
-                gyro(2, s.start),
+                gyro(0, s.start, L),
+                gyro(1, s.start, L),
+                gyro(2, s.start, L),
             ];
             let limitHits = 0;
             let uSq = 0;
@@ -1013,6 +1133,7 @@ export function analyzeJioSweeps(
                 excitedS,
                 reachedHz,
                 incomplete,
+                frequencyCheck,
                 used: !!column,
                 rPeakDegS: rPeak,
                 uRms: Math.sqrt(uSq / L),
@@ -1031,7 +1152,7 @@ export function analyzeJioSweeps(
         for (const x of used) {
             const w = windowReached.get(x.id)!;
             if (x.reachedHz !== null && w < x.reachedHz - 1e-9)
-                x.notes.push(`window_reaches:${w.toFixed(0)}Hz_of_${x.reachedHz.toFixed(0)}Hz:common_record_length`);
+                x.notes.push(`window_reaches:${w.toFixed(0)}Hz_of_${x.reachedHz.toFixed(0)}Hz:axis_record_length`);
         }
         const allComplete = used.length > 0 && used.every((x) => x.incomplete === null);
         const sweepsSummary: JioAxisResult["sweeps"] = {
@@ -1176,7 +1297,11 @@ export function analyzeJioSweeps(
             for (let i = 0; i < nf; i++) if (pts.reason[i] && pts.reason[i] !== "out_of_band") count(pts.reason[i]);
             axisResult.points = pts;
             axisResult.reasons = reasons;
-            axisResult.grid = { stepHz: nf > 1 ? show.f[1] - show.f[0] : fs / L, nEval: nf, nEff: show.nEff };
+            axisResult.grid = {
+                stepHz: nf > 1 ? show.f[1] - show.f[0] : fs / Math.max(1, L),
+                nEval: nf,
+                nEff: show.nEff,
+            };
             const inBandIdx: number[] = [];
             for (let i = 0; i < nf; i++)
                 if (pts.reason[i] !== "out_of_band" && pts.reason[i] !== "not_swept:above_reached_frequency")
@@ -1227,7 +1352,9 @@ export function analyzeJioSweeps(
         axes[name] = axisResult;
     }
     base.axes = axes;
-    base.mimo = mimo(combined, axes, bandLo, bandHi);
+    // The 3×3 combination only over the band every axis analysed (the lowest reached frequency).
+    const mimoHi = Math.min(bandHi, ...AXES.map((a) => axes[a]?.band?.analysedHz[1] ?? bandHi));
+    base.mimo = mimo(combined, axes, bandLo, mimoHi);
     return base;
 }
 
@@ -1380,31 +1507,73 @@ function mimo(
         if (a && a.repeats.consistency !== "consistent")
             notes.push(`stationarity_unproven:${name}:${a.repeats.consistency}`);
     }
-    const nf = c0.f.length;
-    if (c1.f.length !== nf || c2.f.length !== nf)
+    // Axes on their own grids (block 4): the coarsest grid is the reference, the other two columns
+    // are matched to the nearest point within half a coarse step (half-open, no point twice), never
+    // interpolated; only points supported on all three axes inside the common band take part.
+    const C = [c0, c1, c2];
+    const steps = C.map((c) => (c.f.length > 1 ? c.f[1] - c.f[0] : NaN));
+    if (steps.some((x) => !(x > 0)))
         return {
             pointsWellConditioned: 0,
             pointsCommonSupported: 0,
             bandHz: null,
             conditionMedian: null,
             diagonalDbFirstLast: null,
-            notes: [...notes, "grids_differ"],
+            gridStepHz: null,
+            notes: [...notes, "grid_missing"],
         };
+    const ratio = Math.max(...steps) / Math.min(...steps);
+    if (ratio > JIO_SWEEP.gridMaxStepRatio)
+        return {
+            pointsWellConditioned: 0,
+            pointsCommonSupported: 0,
+            bandHz: null,
+            conditionMedian: null,
+            diagonalDbFirstLast: null,
+            gridStepHz: null,
+            notes: [...notes, `grids_incomparable:step_ratio:${ratio.toFixed(2)}`],
+        };
+    const ref = steps.indexOf(Math.max(...steps));
+    if (ratio > 1.0001) notes.push(`grids_matched_nearest:step_ratio:${ratio.toFixed(2)}`);
+    const half = steps[ref] / 2;
     const sup = [0, 1, 2].map((a) => axes[AXES[a]]!.points!.supported);
+    const cursor = [0, 0, 0];
+    const matchIdx = (a: number, f: number): number => {
+        if (a === ref) return -2;
+        const cf = C[a].f;
+        while (cursor[a] + 1 < cf.length && cf[cursor[a] + 1] <= f) cursor[a]++;
+        let best = -1;
+        for (const k of [cursor[a], cursor[a] + 1]) {
+            if (k >= cf.length) continue;
+            const d = cf[k] - f;
+            if (d > half || d <= -half) continue;
+            if (best < 0 || Math.abs(d) < Math.abs(cf[best] - f)) best = k;
+        }
+        return best;
+    };
+    const nf = C[ref].f.length;
     const conds: number[] = [];
     const okIdx: number[] = [];
     let common = 0;
     const Gs: Complex[][][] = [];
     for (let i = 0; i < nf; i++) {
-        if (!(c0.f[i] >= lo && c0.f[i] <= hi)) continue;
-        if (!(sup[0][i] && sup[1][i] && sup[2][i])) continue;
+        const f = C[ref].f[i];
+        if (!(f >= lo && f <= hi)) continue;
+        const idx = [0, 1, 2].map((a) => (a === ref ? i : matchIdx(a, f)));
+        if (idx.some((k) => k < 0)) continue;
+        if (!idx.every((k, a) => sup[a][k])) continue;
         common++;
-        const C = [c0, c1, c2];
         const Ur = [0, 1, 2].map((row) =>
-            [0, 1, 2].map((colIdx) => ({ re: C[colIdx].hruRe[i * 3 + row], im: C[colIdx].hruIm[i * 3 + row] })),
+            [0, 1, 2].map((colIdx) => ({
+                re: C[colIdx].hruRe[idx[colIdx] * 3 + row],
+                im: C[colIdx].hruIm[idx[colIdx] * 3 + row],
+            })),
         );
         const Yr = [0, 1, 2].map((row) =>
-            [0, 1, 2].map((colIdx) => ({ re: C[colIdx].hryRe[i * 3 + row], im: C[colIdx].hryIm[i * 3 + row] })),
+            [0, 1, 2].map((colIdx) => ({
+                re: C[colIdx].hryRe[idx[colIdx] * 3 + row],
+                im: C[colIdx].hryIm[idx[colIdx] * 3 + row],
+            })),
         );
         const inv = inv3(Ur);
         if (!inv) continue;
@@ -1418,11 +1587,12 @@ function mimo(
     return {
         pointsWellConditioned: okIdx.length,
         pointsCommonSupported: common,
-        bandHz: okIdx.length ? [c0.f[okIdx[0]], c0.f[okIdx[okIdx.length - 1]]] : null,
+        bandHz: okIdx.length ? [C[ref].f[okIdx[0]], C[ref].f[okIdx[okIdx.length - 1]]] : null,
         conditionMedian: conds.length ? median(conds) : null,
         diagonalDbFirstLast: Gs.length
             ? [0, 1, 2].map((a) => [db(Gs[0][a][a]), db(Gs[Gs.length - 1][a][a])] as [number, number])
             : null,
+        gridStepHz: steps[ref],
         notes,
     };
 }

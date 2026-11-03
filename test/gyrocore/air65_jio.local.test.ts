@@ -88,6 +88,7 @@ function jioSummary(r: AutotuneV2Result) {
                 excitedS: x.excitedS,
                 reachedHz: x.reachedHz,
                 incomplete: x.incomplete,
+                frequencyCheck: x.frequencyCheck,
                 recordS: x.recordS,
                 rPeakDegS: x.rPeakDegS,
                 uRms: x.uRms,
@@ -185,6 +186,23 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
                 expect(c.reasons).toContain("stationarity_unknown:single_sweep");
             }
             expect(j.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(true);
+            // Block 4: debug[2] of this firmware follows the law within tolerance on every axis (a fact of
+            // the data; the max error is a quantisation plus pow_approx effect, far under 1 %).
+            for (const axis of ["roll", "pitch", "yaw"] as const) {
+                const fc = j.analysis.axes[axis]!.records[0].frequencyCheck;
+                expect(fc.status).toBe("ok");
+                expect(fc.samples).toBeGreaterThan(60_000);
+                expect(fc.outOfTolerance).toBe(0);
+                expect(fc.maxAbsErrorHz!).toBeLessThan(0.5);
+            }
+            expect(j.analysis.limitations.some((l) => l.startsWith("frequency_verification_missing"))).toBe(false);
+            // Block 4: each axis on its own record (bbl19: pitch 17.2 s and yaw 17.9 s no longer clip roll's 19.8 s).
+            if (name === "bbl19") {
+                expect(j.analysis.axes.roll!.records[0].recordS).toBeGreaterThan(19);
+                expect(j.analysis.axes.roll!.band!.analysedHz[1]).toBeGreaterThan(500);
+                expect(j.analysis.axes.pitch!.grid!.stepHz).toBeGreaterThan(j.analysis.axes.roll!.grid!.stepHz);
+                expect(j.analysis.mimo?.notes.some((x) => x.startsWith("grids_matched_nearest:"))).toBe(true);
+            }
             // Completeness as the logs have it (block 3): bbl18's sweeps ran to the header's 20 s; on bbl19
             // the pilot ended CHIRP mode on pitch (17.2 s) and yaw (17.8 s) before the generator finished,
             // so those registrations ended early and are analysed only to the frequency they reached.
@@ -252,9 +270,14 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
         // anti_gravity_mode/threshold (not in firmware 43875a55a) and, on this G473 build, the tpa_curve_*
         // and tpa_speed_* lines (blackbox.c writes them only when the build has them); tpa_mode/rate/
         // breakpoint and tpa_low_* are logged and equal.
-        expect(c.notes).toContain("setting_not_logged_in_either:anti_gravity_mode");
-        expect(c.notes).toContain("setting_not_logged_in_either:anti_gravity_threshold");
+        // Block 4: the log names firmware 43875a55a, where these two settings provably do not exist.
+        expect(c.notes).toContain("setting_not_in_firmware:anti_gravity_mode:43875a55a");
+        expect(c.notes).toContain("setting_not_in_firmware:anti_gravity_threshold:43875a55a");
+        expect(c.notes.some((n) => n.startsWith("setting_not_logged_in_either:anti_gravity_"))).toBe(false);
         expect(c.notes).toContain("setting_not_logged_in_either:tpa_curve_type");
+        // The notch headers are logged (0) on both flights: compared equal, not noted.
+        expect(c.notes.some((n) => /notch/.test(n))).toBe(false);
+        expect(c.issues.some((i) => /notch/.test(i))).toBe(false);
         expect(c.notes.some((n) => /:(tpa_mode|tpa_rate|tpa_breakpoint|tpa_low_rate|anti_gravity_gain)$/.test(n))).toBe(
             false,
         );
@@ -262,7 +285,10 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
         for (const axis of ["roll", "pitch", "yaw"] as const) {
             const ax = c.axes[axis]!;
             expect(ax.matchedPoints).toBeGreaterThanOrEqual(30);
-            expect(ax.reasons).toContain("grid_matched_nearest:step_ratio:1.17");
+            // Block 4: each axis on its own record; bbl19's roll (19.8 s) now matches bbl18's grid
+            // closely, pitch (17.2 s) and yaw (17.9 s) are coarser and matched point by point.
+            if (axis === "roll") expect(ax.reasons.some((x) => x.startsWith("grids_incomparable"))).toBe(false);
+            else expect(ax.reasons.some((x) => x.startsWith("grid_matched_nearest:step_ratio:1.1"))).toBe(true);
             expect(ax.reasons.some((x) => x.startsWith("plant_z:"))).toBe(true);
             expect(ax.z).not.toBeNull();
             expect(ax.z!).toBeLessThan(2);
