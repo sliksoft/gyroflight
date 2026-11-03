@@ -691,8 +691,9 @@ const jioCandidates = computed(() => {
     return jio.crossFlight.candidates.map((c) => {
         const id = `${c.sha256.slice(0, 12)}#${c.logIndex + 1}`;
         if (!c.usable) return `${id}: ${c.issues.join(", ")}`;
-        const notes = c.notes.length
-            ? ` [${i18n.getMessage("gyroflightV2JioCandidateNotLogged")}: ${c.notes.map((n) => n.replace("setting_not_logged_in_either:", "")).join(", ")}]`
+        const keys = c.notes.map((n) => n.replace("setting_not_logged_in_either:", ""));
+        const notes = keys.length
+            ? ` [${i18n.getMessage("gyroflightV2JioCandidateNotLogged")}: ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ` +${keys.length - 4}` : ""}]`
             : "";
         const axes = (["roll", "pitch", "yaw"] as const).map((axis) => {
             const a = c.axes[axis];

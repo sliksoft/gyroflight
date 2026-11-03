@@ -246,10 +246,17 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
         // experimental threshold on every axis (recorded here as a fact of the data, not a validation).
         expect(c.issues).toEqual([]);
         expect(c.usable).toBe(true);
-        // Compatibility keys this firmware does not log are named as not compared (c1569ca99 keys).
+        // Compatibility keys these logs do not carry are named as not compared, never as a difference:
+        // anti_gravity_mode/threshold (not in firmware 43875a55a) and, on this G473 build, the tpa_curve_*
+        // and tpa_speed_* lines (blackbox.c writes them only when the build has them); tpa_mode/rate/
+        // breakpoint and tpa_low_* are logged and equal.
         expect(c.notes).toContain("setting_not_logged_in_either:anti_gravity_mode");
         expect(c.notes).toContain("setting_not_logged_in_either:anti_gravity_threshold");
-        expect(c.notes.some((n) => n.includes("tpa_curve_type"))).toBe(false);
+        expect(c.notes).toContain("setting_not_logged_in_either:tpa_curve_type");
+        expect(c.notes.some((n) => /:(tpa_mode|tpa_rate|tpa_breakpoint|tpa_low_rate|anti_gravity_gain)$/.test(n))).toBe(
+            false,
+        );
+        expect(c.issues.some((i) => i.startsWith("jio_cross_flight_setting_differs"))).toBe(false);
         for (const axis of ["roll", "pitch", "yaw"] as const) {
             const ax = c.axes[axis]!;
             expect(ax.matchedPoints).toBeGreaterThanOrEqual(30);
