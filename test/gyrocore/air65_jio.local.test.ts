@@ -34,6 +34,8 @@ import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { analyzeM4BblFile } from "../../src/js/blackbox/m4_bbl_integration";
 import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
+import { createPinia, setActivePinia } from "pinia";
+import { experimentalWriteDecision } from "../../src/gyrocore/releaseGate/experimentalAuthority";
 import { runAutotuneV2, type AutotuneLogInput, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 
 const FILES = {
@@ -284,6 +286,13 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
             expect(x!.items.every((i) => i.source === "primary_route" && i.evidence === "MEASURED")).toBe(true);
             expect(x!.limitations).toContain("experimental:yaw:margins_measured_in_band_not_bounded");
             expect(x!.proposal.release.measurement.valid).toBe(true);
+            // The yaw proposal passes the experimental authority's technical steps (finite integers in the
+            // firmware ranges, plausible step, craft named by the log; computable items). The binding step
+            // needs the store's analysis and is covered by experimental_proposal.test.ts.
+            setActivePinia(createPinia());
+            const decision = experimentalWriteDecision(x!, { recompute: false });
+            expect(decision.steps.find((st) => st.name === "computable_items")!.reasons).toEqual([]);
+            expect(decision.steps.find((st) => st.name === "values_technical")!.reasons).toEqual([]);
             // Recording instructions: pitch (both logs) asks for a band-matched sweep; none for yaw.
             const ins = r.recordingInstructions;
             expect(ins.find((i) => i.axis === "yaw")).toBeUndefined();
