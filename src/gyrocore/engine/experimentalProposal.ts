@@ -234,7 +234,11 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
         ];
         // An axis without a change on either route is not "withheld": nothing to propose there.
         // An axis is not "withheld" only when every route that analysed it needs no change.
-        const outcomes = [primary?.outcome, jioCand?.outcome].filter((o): o is NonNullable<typeof o> => !!o);
+        // A JIO chain that analysed the axis but built no candidate (no engine input, controller or
+        // PID) did not say "no change needed": it counts as not computable here.
+        const outcomes = [primary?.outcome, jioCand?.outcome ?? (jioChain ? "not_computable" : undefined)].filter(
+            (o): o is NonNullable<typeof o> => !!o,
+        );
         const unchanged = outcomes.length > 0 && outcomes.every((o) => o === "no_change_needed");
         if (!unchanged)
             withheld.push({ key: `pid_${axis}`, part: "pid", source: "primary_route", reasons: [...new Set(reasons)] });

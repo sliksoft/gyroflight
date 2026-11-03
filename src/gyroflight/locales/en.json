@@ -840,7 +840,7 @@
     "gyroflightBackupReason_before_absolute_apply": { "message": "before absolute Apply" },
     "gyroflightV2Title": { "message": "Autotune engine v2: absolute PID, feedforward and filters" },
     "gyroflightV2Intro": {
-        "message": "Calculates absolute P/I/D, feedforward, gyro and D-term lowpass, RPM filter and dynamic notch values from your CHIRP logs. Every part shows whether it is validated and which measurement it still needs. Only validated values under a complete release contract can be applied, and only when you click Apply."
+        "message": "Calculates absolute P/I/D, feedforward, gyro and D-term lowpass, RPM filter and dynamic notch values from your CHIRP logs. Every part shows whether it is validated and which measurement it still needs. Only validated values under a complete release contract are applied by the released Apply (section 4), and only when you click Apply; section 4b offers computable but unreleased values as experimental tuning on your explicit acknowledgement."
     },
     "gyroflightV2NoSource": {
         "message": "Import a blackbox log with CHIRP sweeps above; it is listed here for the calculation."

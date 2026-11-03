@@ -802,7 +802,7 @@ const jioRows = computed(() => {
                 tuning: c
                     ? c.tuningComputable
                         ? i18n.getMessage("gyroflightV2JioDiagnosticOnly")
-                        : `${i18n.getMessage("gyroflightV2JioNotComputable")}: ${c.reasons.slice(0, 4).join(", ")}`
+                        : `${i18n.getMessage("gyroflightV2JioNotComputable")}: ${c.reasons.join(", ")}`
                     : a.blockers.join(", "),
             },
         ];

@@ -34,9 +34,10 @@
  *   acknowledgement     enforced by the route: a confirmation of kind "experimental", acknowledged
  *
  * Not required here (named in `waived` so the interface says so): release contract conditions that
- * are qualification (margins VALIDATED, model quality, independent validation, items_validated),
- * the product lock (full_safety_engine_pending, independent_pid_validation_missing) and Safety's
- * hardware validation. The route itself still reads identity, refuses an armed or other craft, a
+ * are qualification (phase_margin, robustness, model_quality, independent_validation,
+ * safety_evidence, items_validated), the product lock (full_safety_engine_pending,
+ * independent_pid_validation_missing, independent_pid_validation_not_current) and Safety's
+ * validated_starting_configuration, dynamic_margins and hardware_validation. The route itself still reads identity, refuses an armed or other craft, a
  * live configuration that differs from the log, takes a backup, reads back and verifies the save.
  */
 

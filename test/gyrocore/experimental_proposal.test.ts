@@ -283,6 +283,33 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
         expect(none.withheld.map((w) => w.key)).toEqual(["pid_roll"]);
     });
 
+    it("a JIO chain without a candidate beside a primary 'no change needed' still withholds the axis with its reasons", () => {
+        const jio = {
+            status: "DIAGNOSTIC",
+            chain: {
+                roll: {
+                    axis: "roll",
+                    margins: null,
+                    candidate: null,
+                    plan: null,
+                    tuningComputable: false,
+                    reasons: ["jio_repeats_inconsistent", "jio_engine_input_missing"],
+                },
+            },
+        } as unknown as JioRouteResult;
+        const none = buildExperimentalProposal({
+            primaryItems: [],
+            primaryPid: [pidCandidate("roll", "no_change_needed")],
+            jio,
+            buildProposal,
+        });
+        expect(none.proposal).toBeNull();
+        expect(none.withheld.map((w) => w.key)).toEqual(["pid_roll"]);
+        expect(none.withheld[0].reasons).toEqual(
+            expect.arrayContaining(["primary:no_change_needed", "jio:not_computable", "jio_repeats_inconsistent"]),
+        );
+    });
+
     it("filters and feedforward: PARTIAL is offered, BLOCKED withheld; an axis with no change is not withheld", () => {
         const x = buildExperimentalProposal({
             primaryItems: [
@@ -345,8 +372,11 @@ describe("experimental proposal through the engine on simulated flights", () => 
                 );
             } else {
                 expect(keys).toEqual([]);
-                if (pid.outcome !== "no_change_needed" && jioCand?.outcome !== "no_change_needed")
-                    expect(r.experimentalWithheld.some((w) => w.key === `pid_${axis}`)).toBe(true);
+                // Withheld unless every route that analysed the axis said "no change needed" (a JIO chain
+                // without a candidate counts as not computable).
+                const jioOutcome = jioCand?.outcome ?? (r.jio.chain[axis] ? "not_computable" : undefined);
+                const allUnchanged = [pid.outcome, jioOutcome].filter(Boolean).every((o) => o === "no_change_needed");
+                if (!allUnchanged) expect(r.experimentalWithheld.some((w) => w.key === `pid_${axis}`)).toBe(true);
             }
         }
         if (x) {
