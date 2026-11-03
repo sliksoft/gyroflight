@@ -66,6 +66,7 @@ import UApp from "@nuxt/ui/components/App.vue";
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import AutotuneV2Panel from "../../src/gyrocore/components/AutotuneV2Panel.vue";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
+import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
 import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { useFlightControllerStore } from "../../src/stores/fc";
@@ -97,6 +98,31 @@ beforeAll(() => {
 }, 600_000);
 
 let pinia: ReturnType<typeof createPinia>;
+import { experimentalFixture, headersFor } from "./harness/experimentalFixture";
+import { air65FirmwareState } from "./harness/mspFirmware";
+
+/** A result with nothing to release: the template reads only what is present. */
+const emptyResult = () => ({
+    chain: { config: null, validation: [], notes: [] },
+    dterm: [],
+    margins: {},
+    pid: [],
+    filters: [],
+    feedforward: [],
+    crossLogPlant: {},
+    crossLogRejected: [],
+    multiRecording: { contributors: [], rejected: [] },
+    safety: null,
+    parts: [],
+    proposal: null,
+    releasableProposal: null,
+    measurementPlan: [],
+    measurementStrategy: [],
+    jio: null,
+    experimental: null,
+    experimentalWithheld: [],
+});
+
 let unmount: (() => void) | null = null;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const writes = () => mocks.fc.calls.map((c) => c.code).filter((c) => FIRMWARE_WRITE_CODES.has(c));
@@ -246,6 +272,99 @@ describe("AutotuneV2Panel", () => {
         }
         expect(q(d, '[data-gyrocore="v2-experimental-status"]')?.textContent ?? "").not.toContain("releasable");
         expect(writes()).toEqual([]);
+    });
+
+    it("experimental Apply: own status, acknowledgement required, writes through the technical checks, labels the next recording", async () => {
+        // The standard release is unavailable (no releasable proposal); the experimental proposal is the
+        // analysis's own (store.result.experimental). The product lock and Safety mocks of this file release
+        // nothing for the experimental route: it has its own authority.
+        const x = experimentalFixture();
+        const r = {
+            ...emptyResult(),
+            experimental: x,
+            experimentalWithheld: [
+                { key: "pid_yaw", part: "pid", source: "primary_route", reasons: ["no_candidate_meets_all_targets"] },
+            ],
+        } as unknown as AutotuneV2Result;
+        const d = mount(r);
+        await flush();
+        expect((q(d, '[data-gyrocore="v2-apply"]') as HTMLButtonElement).disabled).toBe(true);
+        expect(q(d, '[data-gyrocore="v2-experimental-status"]')!.getAttribute("data-status")).toBe("EXPERIMENTAL");
+        expect(d.querySelectorAll('[data-gyrocore="v2-experimental-items"] tbody tr')).toHaveLength(3);
+        expect(q(d, '[data-gyrocore="v2-experimental-withheld"]')!.textContent).toContain("pid_yaw");
+        const apply = q(d, '[data-gyrocore="v2-experimental-apply"]') as HTMLButtonElement;
+        const ack = q(d, '[data-gyrocore="v2-experimental-ack"]') as HTMLInputElement;
+        expect(apply.disabled).toBe(true);
+        ack.click();
+        await flush();
+        expect(ack.checked).toBe(true);
+        expect(apply.disabled).toBe(false);
+        // No: nothing written. Yes: written, verified, saved; the outcome says experimental; backup with provenance.
+        mocks.showYesNo.mockResolvedValueOnce(false);
+        apply.click();
+        await flush();
+        await flush();
+        expect(writes()).toEqual([]);
+        mocks.showYesNo.mockResolvedValueOnce(true);
+        apply.click();
+        for (let i = 0; i < 20 && !q(d, '[data-gyrocore="v2-verified"]'); i++) await flush();
+        expect(mocks.showYesNo.mock.calls.at(-1)![0]).toBe("gyroflightV2ExperimentalConfirmTitle");
+        expect(String(mocks.showYesNo.mock.calls.at(-1)![1])).toContain("experimental:not_hardware_validated");
+        expect(q(d, '[data-gyrocore="v2-verified"]')).not.toBeNull();
+        expect(q(d, '[data-gyrocore="v2-verified-experimental"]')).not.toBeNull();
+        expect(writes()).toContain(MSPCodes.MSP_EEPROM_WRITE);
+        expect(mocks.fc.eeprom.pids[0]).toEqual([60, 79, 32]);
+        const backup = useTuneBackupStore().backups[0];
+        expect(backup.reason).toBe("before_experimental_apply");
+        expect(backup.provenance?.route).toBe("experimental");
+        expect(backup.provenance?.hardwareValidated).toBe(false);
+        // The next recording with the written values is labelled as the experimental configuration;
+        // one with the backup's values as the reference.
+        const store = useAutotuneV2Store();
+        const written = { ...air65FirmwareState() };
+        written.pids = [[60, 79, 32], ...written.pids.slice(1)];
+        written.p = { ...written.p, dterm_lpf1_static_hz: 80 };
+        store.sources = [
+            {
+                filename: "after.bbl",
+                bytes: new Uint8Array(),
+                uid: null,
+                report: { logs: [{ headerPairs: headersFor(written) }], measurements: [] } as never,
+            },
+            {
+                filename: "before.bbl",
+                bytes: new Uint8Array(),
+                uid: null,
+                report: { logs: [{ headerPairs: headersFor(air65FirmwareState()) }], measurements: [] } as never,
+            },
+        ];
+        await flush();
+        const roles = [...d.querySelectorAll('[data-gyrocore="v2-recording-config"]')].map((e) =>
+            e.getAttribute("data-role"),
+        );
+        expect(roles).toEqual(["experimental", "reference"]);
+        // The Restore of that backup is offered (its own route and confirmation).
+        expect(q(d, `[data-gyrocore="v2-backups"] [data-backup="${backup.id}"]`)).not.toBeNull();
+    });
+
+    it("experimental Apply is refused when the craft is armed, without a write and without a backup", async () => {
+        const r = {
+            ...emptyResult(),
+            experimental: experimentalFixture(),
+            experimentalWithheld: [],
+        } as unknown as AutotuneV2Result;
+        const d = mount(r);
+        await flush();
+        (q(d, '[data-gyrocore="v2-experimental-ack"]') as HTMLInputElement).click();
+        await flush();
+        mocks.fc.armed = true;
+        mocks.showYesNo.mockResolvedValueOnce(true);
+        (q(d, '[data-gyrocore="v2-experimental-apply"]') as HTMLButtonElement).click();
+        for (let i = 0; i < 20 && !q(d, '[data-gyrocore="v2-failed"]'); i++) await flush();
+        expect(q(d, '[data-gyrocore="v2-failed"]')!.getAttribute("data-status")).toBe("blocked");
+        expect(q(d, '[data-gyrocore="v2-failed"]')!.textContent).toContain("fc:armed");
+        expect(writes()).toEqual([]);
+        expect(useTuneBackupStore().backups).toEqual([]);
     });
 
     it("without an imported CHIRP file: nothing to calculate", async () => {

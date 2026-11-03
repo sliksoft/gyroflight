@@ -65,12 +65,15 @@ export interface ExperimentalWriteDecision {
 }
 
 export const EXPERIMENTAL_WAIVED: readonly string[] = Object.freeze([
-    "release_contract:phase_margin_and_robustness_validated",
-    "release_contract:model_quality_validated",
+    "release_contract:phase_margin",
+    "release_contract:robustness",
+    "release_contract:model_quality",
     "release_contract:independent_validation",
+    "release_contract:safety_evidence",
     "release_contract:items_validated",
     "product_lock:full_safety_engine_pending",
     "product_lock:independent_pid_validation_missing",
+    "product_lock:independent_pid_validation_not_current",
     "gyrocore_safety:hardware_validation_not_executed",
     "gyrocore_safety:validated_starting_configuration",
     "gyrocore_safety:dynamic_margins",

@@ -202,7 +202,14 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
                 );
             continue;
         }
-        if (jioCand && jioChain && pidCandidateComputable(jioCand)) {
+        // The JIO chain's own blockers (inconsistent repeats, cross-flight disagreement, no usable
+        // record) count against its candidate as well, whatever the candidate object carries.
+        if (
+            jioCand &&
+            jioChain &&
+            pidCandidateComputable(jioCand) &&
+            !dataInsufficientReasons(jioChain.reasons).length
+        ) {
             const jioLimits = [
                 "jio_experimental_plant",
                 "jio_uncertainty_n_eff_not_calibrated",
@@ -222,11 +229,13 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
                       ...dataInsufficientReasons([...jioCand.reasons, ...(jioChain?.reasons ?? [])]),
                   ]
                 : jioChain
-                  ? [`jio:not_computable`, ...jioChain.reasons.slice(0, 3)]
+                  ? [`jio:not_computable`, ...jioChain.reasons]
                   : ["jio:axis_not_analysed"]),
         ];
         // An axis without a change on either route is not "withheld": nothing to propose there.
-        const unchanged = primary?.outcome === "no_change_needed" || jioCand?.outcome === "no_change_needed";
+        // An axis is not "withheld" only when every route that analysed it needs no change.
+        const outcomes = [primary?.outcome, jioCand?.outcome].filter((o): o is NonNullable<typeof o> => !!o);
+        const unchanged = outcomes.length > 0 && outcomes.every((o) => o === "no_change_needed");
         if (!unchanged)
             withheld.push({ key: `pid_${axis}`, part: "pid", source: "primary_route", reasons: [...new Set(reasons)] });
     }

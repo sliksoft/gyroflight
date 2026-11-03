@@ -241,6 +241,48 @@ describe("buildExperimentalProposal: computable values offered, unsupported ones
         expect(dataInsufficientReasons(["jio_cross_flight_inconsistent:z:3.10"])).toHaveLength(1);
     });
 
+    it("a JIO candidate is refused when the chain itself carries a data blocker, whatever the candidate says", () => {
+        const jio = {
+            status: "DIAGNOSTIC",
+            chain: {
+                roll: {
+                    axis: "roll",
+                    margins: null,
+                    candidate: pidCandidate("roll", "improved", { p: 48 }),
+                    plan: null,
+                    tuningComputable: true,
+                    reasons: ["jio_repeats_inconsistent"],
+                },
+            },
+        } as unknown as JioRouteResult;
+        const none = buildExperimentalProposal({ primaryItems: [], primaryPid: [], jio, buildProposal });
+        expect(none.proposal).toBeNull();
+        expect(none.withheld[0].reasons).toContain("jio_repeats_inconsistent");
+    });
+
+    it("an axis unchanged on one route but unreachable on the other is still withheld", () => {
+        const jio = {
+            status: "DIAGNOSTIC",
+            chain: {
+                roll: {
+                    axis: "roll",
+                    margins: null,
+                    candidate: pidCandidate("roll", "no_change_needed"),
+                    plan: null,
+                    tuningComputable: true,
+                    reasons: [],
+                },
+            },
+        } as unknown as JioRouteResult;
+        const none = buildExperimentalProposal({
+            primaryItems: [],
+            primaryPid: [pidCandidate("roll", "targets_not_reachable", {}, ["no_candidate_meets_all_targets"])],
+            jio,
+            buildProposal,
+        });
+        expect(none.withheld.map((w) => w.key)).toEqual(["pid_roll"]);
+    });
+
     it("filters and feedforward: PARTIAL is offered, BLOCKED withheld; an axis with no change is not withheld", () => {
         const x = buildExperimentalProposal({
             primaryItems: [

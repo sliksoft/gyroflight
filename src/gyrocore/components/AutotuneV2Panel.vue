@@ -540,7 +540,7 @@
                             <td>{{ it.to }}</td>
                             <td>{{ $t(`gyroflightV2ExperimentalSource_${it.source}`) }}</td>
                             <td>{{ it.evidence }} ({{ it.status }})</td>
-                            <td class="text-dimmed">{{ it.qualificationGaps.slice(0, 4).join("; ") }}</td>
+                            <td class="text-dimmed">{{ it.qualificationGaps.join("; ") }}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -551,7 +551,7 @@
                 data-gyrocore="v2-experimental-withheld"
             >
                 <li v-for="w in experimentalWithheld" :key="w.key" :data-key="w.key">
-                    {{ w.key }}: {{ $t("gyroflightV2ExperimentalWithheld") }} ({{ w.reasons.slice(0, 4).join("; ") }})
+                    {{ w.key }}: {{ $t("gyroflightV2ExperimentalWithheld") }} ({{ w.reasons.join("; ") }})
                 </li>
             </ul>
             <template v-if="experimental">

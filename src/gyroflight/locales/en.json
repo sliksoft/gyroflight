@@ -883,7 +883,7 @@
     "gyroflightV2NoChange": { "message": "No change is proposed." },
     "gyroflightV2Written": { "message": "Applied" },
     "gyroflightV2NotValidatedNote": {
-        "message": "Values that are not VALIDATED stay visible here but are never written."
+        "message": "Values that are not VALIDATED stay visible here but are never written by the released Apply (section 4). The experimental route (section 4b) writes computable but unreleased values only on your explicit acknowledgement."
     },
     "gyroflightV2Cond_measurement": { "message": "Qualified CHIRP measurement on every changed axis" },
     "gyroflightV2Cond_model_quality": { "message": "Filter chain, D path and plant validated on the logs" },
