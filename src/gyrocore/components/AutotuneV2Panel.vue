@@ -304,6 +304,9 @@
                         </svg>
                     </figure>
                 </div>
+                <p v-if="jioAdvice.length" class="text-sm text-dimmed" data-gyrocore="v2-jio-preparation">
+                    {{ $t("gyroflightV2JioPreparation") }}
+                </p>
                 <p
                     v-for="adv in jioAdvice"
                     :key="adv.axis"
@@ -319,9 +322,6 @@
                 <template v-if="jioProgress.length">
                     <p class="text-sm font-bold mt-1">{{ $t("gyroflightV2JioProgressTitle") }}</p>
                     <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioProgressHelp") }}</p>
-                    <p class="text-sm text-dimmed" data-gyrocore="v2-jio-preparation">
-                        {{ $t("gyroflightV2JioPreparation") }}
-                    </p>
                     <ul class="text-sm list-disc pl-5">
                         <li
                             v-for="pr in jioProgress"
@@ -680,7 +680,7 @@ const jioAdvice = computed(() => {
             ? i18n.getMessage("gyroflightV2JioAdvice", [
                   axis,
                   cur,
-                  `chirp_frequency_start_deci_hz=${sg.chirp_frequency_start_deci_hz}, chirp_frequency_end_deci_hz=${sg.chirp_frequency_end_deci_hz}, chirp_time_seconds=${sg.chirp_time_seconds} (${num(sg.secondsPerOctave, 2)} s per octave, +${num(sg.excitationGainDb, 1)} dB per octave)`,
+                  `chirp_frequency_start_deci_hz=${sg.chirp_frequency_start_deci_hz}, chirp_frequency_end_deci_hz=${sg.chirp_frequency_end_deci_hz}, chirp_time_seconds=${sg.chirp_time_seconds} (${num(sg.secondsPerOctave, 2)} s per octave; excitation per octave +${num(sg.excitationGainDb, 1)} dB from the shorter band, not an amplitude setting)`,
                   adv.basis.join(", "),
               ])
             : i18n.getMessage("gyroflightV2JioAdviceNone", [axis, cur, adv.basis.join(", ")]);
@@ -694,7 +694,12 @@ const jioCandidates = computed(() => {
     return jio.crossFlight.candidates.map((c) => {
         const id = `${c.sha256.slice(0, 12)}#${c.logIndex + 1}`;
         if (!c.usable) return `${id}: ${c.issues.join(", ")}`;
-        const keys = c.notes.map((n) => n.replace("setting_not_logged_in_either:", ""));
+        // "setting_not_logged_in_either:<key>" shows as the key; "setting_not_in_firmware:<key>:<hash>" says so.
+        const keys = c.notes.map((n) =>
+            n.startsWith("setting_not_in_firmware:")
+                ? `${n.split(":")[1]} (${i18n.getMessage("gyroflightV2JioCandidateNotInFirmware")} ${n.split(":")[2]})`
+                : n.replace("setting_not_logged_in_either:", ""),
+        );
         const notes = keys.length
             ? ` [${i18n.getMessage("gyroflightV2JioCandidateNotLogged")}: ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ` +${keys.length - 4}` : ""}]`
             : "";
@@ -731,7 +736,7 @@ const jioProgress = computed(() => {
                 ? ` (${i18n.getMessage("gyroflightV2JioProgressReached")} ${num(p.bandHz.reached, 0)} Hz)`
                 : "";
         const goal = p.bandHz.tuningGoal
-            ? `${band(p.bandHz.tuningGoal)} Hz: ${p.bandHz.sufficientForTuning ? i18n.getMessage("gyroflightV2JioProgressGoalMet") : `${i18n.getMessage("gyroflightV2JioProgressGoalShort")}, ${i18n.getMessage("gyroflightV2JioProgressMissing")} ${band(p.bandHz.missing)} Hz`}`
+            ? `${band(p.bandHz.tuningGoal)} Hz: ${p.bandHz.sufficientForTuning ? i18n.getMessage("gyroflightV2JioProgressGoalMet") : `${i18n.getMessage("gyroflightV2JioProgressGoalShort")}, ${i18n.getMessage("gyroflightV2JioProgressMissing")} ${p.bandHz.missing.map((b) => `${band(b)} Hz`).join(", ")}`}`
             : "--";
         const text = i18n.getMessage("gyroflightV2JioProgress", [
             `${sw.present} ${i18n.getMessage("gyroflightV2JioProgressPresent")}, ${sw.complete} ${i18n.getMessage("gyroflightV2JioProgressComplete")}, ${sw.usable} ${i18n.getMessage("gyroflightV2JioProgressUsable")}${excluded}`,

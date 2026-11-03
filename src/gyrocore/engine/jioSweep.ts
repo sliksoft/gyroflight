@@ -701,6 +701,10 @@ export function sweepAdviceFor(
     }
     let f1New = Math.ceil(endTarget / round) * round;
     f1New = Math.min(Math.max(f1New, 2 * f0New), FIRMWARE_CHIRP.endDeciHz[1] / 10);
+    if (tuningBandHz && f1New < tuningBandHz[1])
+        basis.push(
+            `end_capped_by_firmware_max:${FIRMWARE_CHIRP.endDeciHz[1] / 10}Hz_below_tuning_band_top:requirement_in_force`,
+        );
     if (f1New >= f1Hz && f0New <= f0Hz) {
         basis.push("current_sweep_already_band_matched");
         return { current, tuningBandHz, bandSufficientForTuning, suggested: null, basis };
@@ -828,12 +832,11 @@ export function analyzeJioSweeps(
     const sweepSamples = Math.round(sweep.durationS * fs);
     // The settle tail never reaches into the next sweep record: a record's window would otherwise
     // hold the start of another sweep (of the same axis: not an independent repeat).
+    // Each sweep's tail is capped by its own successor (the next sweep of any axis, or the log's end).
     const tailMax = Math.round(JIO_SWEEP.tailS * fs);
     const byStart = [...log.sweeps].sort((a, b) => a.start - b.start);
-    let tail = tailMax;
-    for (let k = 0; k + 1 < byStart.length; k++)
-        tail = Math.min(tail, Math.max(0, byStart[k + 1].start - byStart[k].end));
-    const tailNote = tail < tailMax ? `tail_shortened_to_gap:${(tail / fs).toFixed(2)}s` : null;
+    const tailOf = new Map<string, number>();
+    byStart.forEach((s, k) => tailOf.set(s.id, Math.min(tailMax, Math.max(0, (byStart[k + 1]?.start ?? n) - s.end))));
     // Excitation of a record: the last sample on which the generator excited its axis (firmware
     // chirp.c zeroes exc when finished; a mode switch-off ends the registration instead).
     const excitedSamples = (s: JioSweepRecord): number => {
@@ -949,7 +952,14 @@ export function analyzeJioSweeps(
             for (let k = first; k < s.start + excited && k < s.end; k++) {
                 const silent = ch.excitation![k] === 0;
                 const logged = fq[k];
-                if (!Number.isFinite(logged)) continue;
+                if (!Number.isFinite(logged)) {
+                    // A non-finite logged frequency during excitation fails the sample, never passes it.
+                    if (!silent && ch.debugAxis![k] === s.axisIndex) {
+                        errs.push(1);
+                        out++;
+                    }
+                    continue;
+                }
                 if (silent) {
                     if (logged > 0 && ch.debugAxis![k] === s.axisIndex) {
                         silentRun++;
@@ -967,6 +977,17 @@ export function analyzeJioSweeps(
                 maxAbs = Math.max(maxAbs, err);
                 if (err > tol) out++;
             }
+        // After the excitation: a run of samples with the generator's frequency still logged while
+        // the excitation is zero (output held, not chirp.c's finish, which zeroes both).
+        silentRun = 0;
+        for (let k = Math.max(first, s.start + excited); k < s.end; k++) {
+            const logged = fq[k];
+            if (ch.excitation![k] === 0 && Number.isFinite(logged) && logged > 0 && ch.debugAxis![k] === s.axisIndex) {
+                silentRun++;
+                if (silentRun === minHeldRun) held += minHeldRun;
+                else if (silentRun > minHeldRun) held++;
+            } else silentRun = 0;
+        }
         if (!errs.length)
             return {
                 status: "mismatch",
@@ -1001,15 +1022,29 @@ export function analyzeJioSweeps(
         const results: JioRecordResult[] = [];
         const rulers = recs.filter((s) => eligible(s, log.sweeps.indexOf(s)));
         const minActive = rulers.length ? Math.min(...rulers.map((s) => Math.min(s.end - s.start, sweepSamples))) : 0;
-        const L = rulers.length ? smoothLength(Math.min(minActive + tail, ...rulers.map((s) => n - s.start))) : 0;
+        const L = rulers.length
+            ? smoothLength(
+                  Math.min(
+                      ...rulers.map((s) => Math.min(s.end - s.start, sweepSamples) + tailOf.get(s.id)!),
+                      ...rulers.map((s) => n - s.start),
+                  ),
+              )
+            : 0;
         const recordS = L / fs;
         for (const s of recs) {
             const flags: string[] = [];
-            const notes: string[] = tailNote ? [tailNote] : [];
+            const tail = tailOf.get(s.id)!;
+            const notes: string[] = tail < tailMax ? [`tail_shortened_to_gap:${(tail / fs).toFixed(2)}s`] : [];
             const { excitedS, reachedHz, incomplete, excited } = completeness.get(s.id)!;
             // The transformed window is [start, start + L): the excitation it holds is min(excited, L)
-            // (the settle tail, not the excitation, absorbs the 5-smooth shortening of L).
-            windowReached.set(s.id, reachedHzOf(Math.min(excited, L) / fs));
+            // (the settle tail, not the excitation, absorbs the 5-smooth shortening of L); the same
+            // gap correction as reachedHz, so the two differ only when L really clips the excitation.
+            windowReached.set(
+                s.id,
+                L < excited
+                    ? reachedHzOf(L / fs / Math.max(1e-9, 1 - Math.min(0.99, s.timestampGapFraction)))
+                    : (reachedHz ?? 0),
+            );
             const frequencyCheck = frequencyCheckOf(s, excited);
             if (frequencyCheck.status === "mismatch")
                 flags.push(

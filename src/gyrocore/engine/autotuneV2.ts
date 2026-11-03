@@ -364,8 +364,8 @@ export interface JioAxisProgress {
         reached: number | null;
         tuningGoal: [number, number] | null;
         sufficientForTuning: boolean | null;
-        /** The part of the tuning band the supported band does not cover (null: covered or no goal). */
-        missing: [number, number] | null;
+        /** The parts of the tuning band the supported band does not cover (empty: covered or no goal). */
+        missing: [number, number][];
     };
     /** This axis's required_measurement:* codes, in the order the route lists them. */
     nextSteps: string[];
@@ -1174,14 +1174,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     };
 }
 
-/** The part of the tuning band above or below the supported band (the larger gap; null when covered). */
-function missingBand(supported: [number, number] | null, goal: [number, number] | null): [number, number] | null {
-    if (!goal) return null;
-    if (!supported) return goal;
-    const above: [number, number] | null = supported[1] < goal[1] ? [Math.max(supported[1], goal[0]), goal[1]] : null;
-    const below: [number, number] | null = supported[0] > goal[0] ? [goal[0], Math.min(supported[0], goal[1])] : null;
-    if (above && below) return above[1] - above[0] >= below[1] - below[0] ? above : below;
-    return above ?? below;
+/** The parts of the tuning band below and above the supported band (gaps inside it stay in band.gapPoints). */
+function missingBand(supported: [number, number] | null, goal: [number, number] | null): [number, number][] {
+    if (!goal) return [];
+    if (!supported) return [goal];
+    const out: [number, number][] = [];
+    if (supported[0] > goal[0]) out.push([goal[0], Math.min(supported[0], goal[1])]);
+    if (supported[1] < goal[1]) out.push([Math.max(supported[1], goal[0]), goal[1]]);
+    return out;
 }
 
 /** The required_measurement:* codes of the JIO route's own blockers. */
@@ -1402,8 +1402,14 @@ function jioCrossFlight(
         const issues = crossLogReferenceIssues(log, other, others);
         const hb = new Map(other.headerPairs);
         const notes: string[] = [];
-        const rev = analysis.firmwareRevision ?? "";
-        const absent = Object.entries(FIRMWARE_ABSENT_SETTINGS).find(([hash]) => rev.includes(hash));
+        // The hash as a delimited token in both logs' "Firmware revision" (a longer hex string that
+        // merely contains it is another build).
+        const revA = analysis.firmwareRevision ?? "";
+        const revB = headerMap(other.headerPairs)["Firmware revision"] ?? "";
+        const hasToken = (rev: string, hash: string) => new RegExp(`(^|[^0-9a-fA-F])${hash}([^0-9a-fA-F]|$)`).test(rev);
+        const absent = Object.entries(FIRMWARE_ABSENT_SETTINGS).find(
+            ([hash]) => hasToken(revA, hash) && hasToken(revB, hash),
+        );
         for (const k of JIO_REPEAT_KEYS) {
             const va = ha.get(k);
             const vb = hb.get(k);

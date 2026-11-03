@@ -265,7 +265,8 @@ describe("CHIRP + JIO: debug[2] frequency verification against the firmware law"
         // at the stop frequency: not compared, counted and named.
         expect(recAbort.frequencyCheck.status).toBe("ok");
         expect(recAbort.frequencyCheck.samples).toBeLessThan(timeAt(60) * 1000 + 5);
-        expect(recAbort.frequencyCheck.heldWhileSilent).toBe(0);
+        expect(recAbort.frequencyCheck.heldWhileSilent).toBeGreaterThan(1000);
+        expect(recAbort.notes.some((x) => x.startsWith("debug2_frequency_held_while_excitation_zero:"))).toBe(true);
         expect(recAbort.incomplete).toBe("generator_stopped_early");
         expect(JIO_SWEEP.debug2ToleranceRel).toBe(0.01);
     }, 180_000);
