@@ -811,13 +811,15 @@ export function analyzeJioSweeps(
     for (const s of log.sweeps) {
         const excited = excitedSamples(s);
         const excitedS = excited / fs / Math.max(1e-9, 1 - Math.min(0.99, s.timestampGapFraction));
-        const reachedHz = excited > 0 ? reachedHzOf(excitedS) : null;
         let incomplete: JioRecordResult["incomplete"] = null;
         if (excitedS < JIO_SWEEP.completeSweepFraction * sweep.durationS)
             incomplete =
                 s.end - (s.start + excited) <= Math.round(0.1 * fs)
                     ? "registration_ended_early"
                     : "generator_stopped_early";
+        // A complete sweep reached the header's end (the last ≤ 2 % is within the completeness
+        // tolerance and does not cap the band); an incomplete one reached what the law says.
+        const reachedHz = excited > 0 ? (incomplete ? reachedHzOf(excitedS) : sweep.f1Hz) : null;
         completeness.set(s.id, { excitedS, reachedHz, incomplete });
     }
     const besideComplete = (s: JioSweepRecord) =>

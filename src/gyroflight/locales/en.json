@@ -1045,11 +1045,14 @@
     "gyroflightV2JioCandidateNotLogged": { "message": "not logged by either flight, not compared" },
     "gyroflightV2JioProgressTitle": { "message": "Measurement set per axis (experimental, diagnostic)" },
     "gyroflightV2JioProgressHelp": {
-        "message": "Sweeps present / complete / usable in this log; independent repeats within this flight (stationarity) and comparable other flights (reproducibility) are counted separately, one never stands in for the other; copies, overlapping windows and incomplete sweeps add no evidence. The band is what the usable sweeps actually reached. The tuning goal is the band the planner needs and is never lowered to make a set pass. A complete set is a measurement set, not validation: Absolute Apply stays blocked."
+        "message": "Sweeps present, complete and usable in this log; independent repeats within this flight (stationarity) and comparable other flights (reproducibility) are counted separately, one never stands in for the other; copies, overlapping windows and incomplete sweeps add no evidence. The band is what the usable sweeps actually reached. The tuning goal is the band the planner needs and is never lowered to make a set pass. A complete set is a measurement set, not validation: Absolute Apply stays blocked."
     },
     "gyroflightV2JioProgress": {
         "message": "sweeps $1; repeats in this flight $2; flights compared $3; supported band $4; tuning goal $5."
     },
+    "gyroflightV2JioProgressPresent": { "message": "present" },
+    "gyroflightV2JioProgressComplete": { "message": "complete" },
+    "gyroflightV2JioProgressUsable": { "message": "usable" },
     "gyroflightV2JioProgressExcluded": { "message": "excluded" },
     "gyroflightV2JioProgressReached": { "message": "an incomplete sweep reached" },
     "gyroflightV2JioProgressGoalMet": { "message": "covered" },

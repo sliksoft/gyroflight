@@ -208,6 +208,7 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
         expect(m.sampleCount).toBeLessThan(12_000 + 5);
         const roll = run(log).jio.analysis.axes.roll!;
         expect(roll.records[0].incomplete).toBeNull();
+        expect(roll.records[0].reachedHz).toBe(200);
         expect(roll.records[0].excitedS).toBeCloseTo(12, 1);
         expect(roll.records[0].notes.some((n) => n.startsWith("sweep_incomplete"))).toBe(false);
         expect(roll.sweeps).toMatchObject({ present: 1, complete: 1, usable: 1 });

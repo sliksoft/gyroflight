@@ -721,7 +721,8 @@ const jioProgress = computed(() => {
             ? ` (${i18n.getMessage("gyroflightV2JioProgressExcluded")}: ${sw.excluded.join("; ")})`
             : "";
         const within = `${p.withinFlight.repeats}: ${p.withinFlight.consistency}${p.withinFlight.z !== null ? ` z=${p.withinFlight.z.toFixed(2)}` : ""}`;
-        const across = `${p.acrossFlights.flights}/${p.acrossFlights.offered}: ${p.acrossFlights.consistency}${p.acrossFlights.zMax !== null ? ` z=${p.acrossFlights.zMax.toFixed(2)}` : ""}`;
+        // No "/" in i18n arguments: the substitution HTML-escapes it (seen in the browser run).
+        const across = `${p.acrossFlights.flights} of ${p.acrossFlights.offered}: ${p.acrossFlights.consistency}${p.acrossFlights.zMax !== null ? ` z=${p.acrossFlights.zMax.toFixed(2)}` : ""}`;
         const reached =
             p.bandHz.reached !== null
                 ? ` (${i18n.getMessage("gyroflightV2JioProgressReached")} ${num(p.bandHz.reached, 0)} Hz)`
@@ -730,7 +731,7 @@ const jioProgress = computed(() => {
             ? `${band(p.bandHz.tuningGoal)} Hz: ${p.bandHz.sufficientForTuning ? i18n.getMessage("gyroflightV2JioProgressGoalMet") : i18n.getMessage("gyroflightV2JioProgressGoalShort")}`
             : "--";
         const text = i18n.getMessage("gyroflightV2JioProgress", [
-            `${sw.present} / ${sw.complete} / ${sw.usable}${excluded}`,
+            `${sw.present} ${i18n.getMessage("gyroflightV2JioProgressPresent")}, ${sw.complete} ${i18n.getMessage("gyroflightV2JioProgressComplete")}, ${sw.usable} ${i18n.getMessage("gyroflightV2JioProgressUsable")}${excluded}`,
             within,
             across,
             `${band(p.bandHz.supported)} Hz${reached}`,

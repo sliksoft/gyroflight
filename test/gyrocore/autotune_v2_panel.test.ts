@@ -205,7 +205,11 @@ describe("AutotuneV2Panel", () => {
         const progress = d.querySelectorAll('[data-gyrocore="v2-jio-progress"]');
         expect(progress).toHaveLength(2);
         const pRoll = q(d, '[data-gyrocore="v2-jio-progress"][data-axis="roll"]')!;
-        expect(pRoll.textContent).toContain("gyroflightV2JioProgress|1 / 1 / 1|1: unknown|1/1: consistent z=");
+        expect(pRoll.textContent).toContain(
+            "gyroflightV2JioProgress|1 gyroflightV2JioProgressPresent, 1 gyroflightV2JioProgressComplete, 1 gyroflightV2JioProgressUsable|1: unknown|1 of 1: consistent z=",
+        );
+        // No "/" reaches an i18n argument (the real app HTML-escapes it).
+        expect(pRoll.textContent).not.toMatch(/\d\/\d/);
         expect(pRoll.textContent).toContain("gyroflightV2JioProgressNext");
         expect(pRoll.textContent).toContain("repeated_sweep_for_stationarity");
         expect(pRoll.textContent).not.toContain("pitch");
