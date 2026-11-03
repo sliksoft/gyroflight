@@ -245,9 +245,18 @@ export interface JioAxisResult {
     /**
      * The measurement set of this axis: sweeps present in the log, complete ones (excitation reached
      * the header's end frequency), usable ones (a column was estimated), the excluded ones with their
-     * flags, and the lowest frequency a usable sweep reached (the analysed band ends there).
+     * flags, and the lowest frequency a usable sweep's window reached (the analysed band ends there).
      */
-    sweeps: { present: number; complete: number; usable: number; excluded: string[]; reachedHz: number | null };
+    sweeps: {
+        present: number;
+        complete: number;
+        /** Usable sweeps that are complete: only these count as repeats for stationarity. */
+        usableComplete: number;
+        usable: number;
+        excluded: string[];
+        /** The lowest frequency a usable sweep's transformed window reached: the analysed band ends there. */
+        reachedHz: number | null;
+    };
     repeats: {
         count: number;
         consistency: "unknown" | "consistent" | "inconsistent";
@@ -807,7 +816,10 @@ export function analyzeJioSweeps(
     // Completeness per record, before the common record length: an incomplete sweep beside a complete
     // one of its axis is excluded below and must not set the grid of the others. The excited time is
     // corrected for samples the log lost (the generator ran on through a timestamp gap).
-    const completeness = new Map<string, Pick<JioRecordResult, "excitedS" | "reachedHz" | "incomplete">>();
+    const completeness = new Map<
+        string,
+        Pick<JioRecordResult, "excitedS" | "reachedHz" | "incomplete"> & { excited: number }
+    >();
     for (const s of log.sweeps) {
         const excited = excitedSamples(s);
         const excitedS = excited / fs / Math.max(1e-9, 1 - Math.min(0.99, s.timestampGapFraction));
@@ -817,10 +829,10 @@ export function analyzeJioSweeps(
                 s.end - (s.start + excited) <= Math.round(0.1 * fs)
                     ? "registration_ended_early"
                     : "generator_stopped_early";
-        // A complete sweep reached the header's end (the last ≤ 2 % is within the completeness
-        // tolerance and does not cap the band); an incomplete one reached what the law says.
-        const reachedHz = excited > 0 ? (incomplete ? reachedHzOf(excitedS) : sweep.f1Hz) : null;
-        completeness.set(s.id, { excitedS, reachedHz, incomplete });
+        // Reached by the law over the excited time, complete or not: a complete sweep that stopped
+        // exciting at 99 % of T was not swept over its last frequencies either (named, not claimed).
+        const reachedHz = excited > 0 ? reachedHzOf(excitedS) : null;
+        completeness.set(s.id, { excitedS, reachedHz, incomplete, excited });
     }
     const besideComplete = (s: JioSweepRecord) =>
         completeness.get(s.id)!.incomplete !== null &&
@@ -878,6 +890,9 @@ export function analyzeJioSweeps(
 
     const axes: Partial<Record<AxisName, JioAxisResult>> = {};
     const combined: Partial<Record<number, Column>> = {};
+    // The frequency the transformed window of a record really holds: its excitation clipped to the
+    // common record length (a short sweep of another axis clips this one; review block 3).
+    const windowReached = new Map<string, number>();
     for (const name of AXES) {
         const ai = AXES.indexOf(name) as 0 | 1 | 2;
         const recs = log.sweeps.filter((s) => s.axisIndex === ai);
@@ -888,6 +903,7 @@ export function analyzeJioSweeps(
             const flags: string[] = [];
             const notes: string[] = tailNote ? [tailNote] : [];
             const { excitedS, reachedHz, incomplete } = completeness.get(s.id)!;
+            windowReached.set(s.id, reachedHzOf(Math.min(completeness.get(s.id)!.excited, L - tail) / fs));
             if (incomplete)
                 notes.push(
                     `sweep_incomplete:${incomplete}:${excitedS.toFixed(1)}s_of_${sweep.durationS}s:reached_${(reachedHz ?? 0).toFixed(0)}Hz_of_${sweep.f1Hz}Hz`,
@@ -1007,13 +1023,21 @@ export function analyzeJioSweeps(
         // the frequency it reached it holds no excitation, below it would only narrow the band of the
         // complete one). Without any complete sweep the incomplete ones are what there is.
         const used = results.filter((x) => x.column);
-        // The axis is analysed only up to the frequency every usable sweep reached: above it an
-        // incomplete sweep holds no excitation, and a repeat or combination there would be noise.
-        const reachedAxis = used.length ? Math.min(...used.map((x) => x.reachedHz ?? bandHi)) : null;
+        // The axis is analysed only up to the frequency every usable sweep's window reached: above it
+        // the window holds no excitation (sweep ended, or clipped to the common length), and a repeat
+        // or combination there would be noise.
+        const reachedAxis = used.length ? Math.min(...used.map((x) => windowReached.get(x.id) ?? bandHi)) : null;
         const axisBandHi = reachedAxis !== null ? Math.min(bandHi, reachedAxis) : bandHi;
+        for (const x of used) {
+            const w = windowReached.get(x.id)!;
+            if (x.reachedHz !== null && w < x.reachedHz - 1e-9)
+                x.notes.push(`window_reaches:${w.toFixed(0)}Hz_of_${x.reachedHz.toFixed(0)}Hz:common_record_length`);
+        }
+        const allComplete = used.length > 0 && used.every((x) => x.incomplete === null);
         const sweepsSummary: JioAxisResult["sweeps"] = {
             present: results.length,
             complete: results.filter((x) => x.incomplete === null && x.excitedS > 0).length,
+            usableComplete: used.filter((x) => x.incomplete === null).length,
             usable: used.length,
             excluded: results.filter((x) => !x.column).map((x) => `${x.id}:${x.flags.join(",") || "no_column"}`),
             reachedHz: reachedAxis,
@@ -1045,6 +1069,13 @@ export function analyzeJioSweeps(
                 repeats.consistency = "inconsistent";
                 repeats.reasons.push(`nonstationary_repeat:z:${repeats.z.toFixed(2)}>${JIO_SWEEP.repeatZThreshold}`);
                 axisBlockers.push("jio_repeats_inconsistent");
+            } else if (!allComplete) {
+                // Incomplete sweeps that agree over the band they reached are no stationarity
+                // evidence and are not combined (no extra averages from them): first record used.
+                repeats.reasons.push(
+                    `repeats_agree_over_reached_band:z:${repeats.z.toFixed(2)}:incomplete_sweeps_no_stationarity_evidence`,
+                );
+                col = used[0].column;
             } else {
                 repeats.consistency = "consistent";
                 repeats.reasons.push(`repeats_consistent:z:${repeats.z.toFixed(2)}`);
@@ -1114,7 +1145,7 @@ export function analyzeJioSweeps(
                 pts.excitationRelDb[i] = 10 * Math.log10(show.srr[i] / srrMedian);
                 let reason = "";
                 if (!(show.f[i] >= bandLo && show.f[i] <= bandHi)) reason = "out_of_band";
-                else if (show.f[i] > axisBandHi) reason = "not_swept:incomplete_sweep";
+                else if (show.f[i] > axisBandHi) reason = "not_swept:above_reached_frequency";
                 else if (show.nEff < JIO_SWEEP.minEffectiveAverages) reason = "too_few_averages";
                 else if (!(show.srr[i] >= JIO_SWEEP.excitationFloorRel * srrMax)) reason = "no_excitation";
                 else if (
@@ -1148,7 +1179,7 @@ export function analyzeJioSweeps(
             axisResult.grid = { stepHz: nf > 1 ? show.f[1] - show.f[0] : fs / L, nEval: nf, nEff: show.nEff };
             const inBandIdx: number[] = [];
             for (let i = 0; i < nf; i++)
-                if (pts.reason[i] !== "out_of_band" && pts.reason[i] !== "not_swept:incomplete_sweep")
+                if (pts.reason[i] !== "out_of_band" && pts.reason[i] !== "not_swept:above_reached_frequency")
                     inBandIdx.push(i);
             const supIdx = inBandIdx.filter((i) => pts.supported[i]);
             let gaps = 0;

@@ -87,16 +87,21 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
         );
         expect(roll.records[0].used).toBe(true);
         expect(roll.sweeps).toMatchObject({ present: 1, complete: 0, usable: 1, excluded: [] });
-        expect(roll.sweeps.reachedHz).toBe(roll.records[0].reachedHz);
+        expect(roll.sweeps.reachedHz!).toBeLessThanOrEqual(roll.records[0].reachedHz!);
         // Analysed band ends where the sweep ended; the points above are named, not "no excitation".
         expect(roll.band!.analysedHz[1]).toBeLessThanOrEqual(roll.records[0].reachedHz!);
         expect(roll.band!.supportedHz![1]).toBeLessThanOrEqual(roll.band!.analysedHz[1]);
-        expect(roll.reasons["not_swept:incomplete_sweep"]).toBeGreaterThan(0);
-        // The complete pitch sweep is complete, clipped to the common record length (named).
+        expect(roll.reasons["not_swept:above_reached_frequency"]).toBeGreaterThan(0);
+        // The complete pitch sweep is complete but clipped to the common record length (named): its
+        // transformed window reaches only what the roll sweep's length allows, and its band ends there.
         expect(pitch.records[0].incomplete).toBeNull();
-        expect(pitch.sweeps).toMatchObject({ present: 1, complete: 1, usable: 1 });
+        expect(pitch.sweeps).toMatchObject({ present: 1, complete: 1, usable: 1, usableComplete: 1 });
         expect(pitch.records[0].notes.some((n) => n.startsWith("record_clipped_to_common_length"))).toBe(true);
-        expect(pitch.band!.analysedHz[1]).toBeGreaterThan(80);
+        expect(pitch.records[0].notes.some((n) => n.startsWith("window_reaches:"))).toBe(true);
+        expect(pitch.band!.analysedHz[1]).toBeLessThanOrEqual(reachedAt(pitch.records[0].recordS) + 0.01);
+        expect(pitch.band!.analysedHz[1]).toBeLessThan(45);
+        for (let i = 0; i < pitch.points!.frequencyHz.length; i++)
+            if (pitch.points!.frequencyHz[i] > pitch.band!.analysedHz[1]) expect(pitch.points!.supported[i]).toBe(0);
         // The route asks for a complete roll sweep, not a complete pitch sweep; stationarity stays unknown.
         expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_complete_sweep");
         expect(r.jio.requiredMeasurements).not.toContain("required_measurement:chirp_pitch_complete_sweep");
@@ -106,7 +111,9 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
             withinFlight: { repeats: 1, consistency: "unknown" },
             acrossFlights: { flights: 0, offered: 0, consistency: "unknown" },
         });
-        expect(r.jio.progress.roll!.bandHz.reached).toBe(roll.records[0].reachedHz);
+        expect(r.jio.progress.roll!.bandHz.reached).toBe(roll.sweeps.reachedHz);
+        expect(roll.sweeps.reachedHz!).toBeLessThanOrEqual(roll.records[0].reachedHz!);
+        expect(roll.sweeps.reachedHz!).toBeGreaterThan(roll.records[0].reachedHz! - 2);
         expect(r.jio.progress.pitch!.bandHz.reached).toBeNull();
         expect(r.jio.progress.roll!.nextSteps).toContain("required_measurement:chirp_roll_complete_sweep");
         expect(r.jio.progress.roll!.nextSteps.every((n) => n.includes("chirp_roll_"))).toBe(true);
@@ -134,7 +141,7 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
         expect(roll.records[1].incomplete).toBe("registration_ended_early");
         expect(roll.records[1].used).toBe(false);
         expect(roll.records[1].flags.some((f) => f.startsWith("incomplete_sweep_beside_complete:reached_"))).toBe(true);
-        expect(roll.sweeps).toMatchObject({ present: 2, complete: 1, usable: 1 });
+        expect(roll.sweeps).toMatchObject({ present: 2, complete: 1, usable: 1, usableComplete: 1 });
         expect(roll.sweeps.excluded).toHaveLength(1);
         expect(roll.sweeps.excluded[0]).toContain(roll.records[1].id);
         // One usable sweep: repeatability unknown, the stationarity need stays, no complete-sweep need.
@@ -148,7 +155,7 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
         noValidated(r);
     }, 120_000);
 
-    it("two incomplete sweeps are compared only over the band both reached and still ask for a complete sweep", () => {
+    it("two incomplete sweeps that agree are no stationarity evidence: not combined, needs kept", () => {
         const r = run(
             decoded(
                 {
@@ -162,14 +169,17 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
             ),
         );
         const roll = r.jio.analysis.axes.roll!;
-        expect(roll.sweeps).toMatchObject({ present: 2, complete: 0, usable: 2 });
+        expect(roll.sweeps).toMatchObject({ present: 2, complete: 0, usable: 2, usableComplete: 0 });
         expect(roll.repeats.count).toBe(2);
-        expect(roll.repeats.consistency).toBe("consistent");
+        expect(roll.repeats.z).not.toBeNull();
+        expect(roll.repeats.z!).toBeLessThan(JIO_SWEEP.repeatZThreshold);
+        expect(roll.repeats.consistency).toBe("unknown");
+        expect(roll.repeats.reasons.some((x) => x.includes("incomplete_sweeps_no_stationarity_evidence"))).toBe(true);
         expect(roll.band!.analysedHz[1]).toBeLessThanOrEqual(reachedAt(timeAt(40)) + 0.01);
+        // Not combined: the grid's n_eff is one record's, not two.
+        expect(roll.grid!.nEff).toBe(2 * JIO_SWEEP.daniellHalfWidthBins + 1);
         expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_complete_sweep");
-        expect(r.jio.requiredMeasurements).not.toContain(
-            "required_measurement:chirp_roll_repeated_sweep_for_stationarity",
-        );
+        expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_repeated_sweep_for_stationarity");
         noValidated(r);
     }, 120_000);
 
@@ -208,7 +218,7 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
         expect(m.sampleCount).toBeLessThan(12_000 + 5);
         const roll = run(log).jio.analysis.axes.roll!;
         expect(roll.records[0].incomplete).toBeNull();
-        expect(roll.records[0].reachedHz).toBe(200);
+        expect(roll.records[0].reachedHz!).toBeCloseTo(200, 0);
         expect(roll.records[0].excitedS).toBeCloseTo(12, 1);
         expect(roll.records[0].notes.some((n) => n.startsWith("sweep_incomplete"))).toBe(false);
         expect(roll.sweeps).toMatchObject({ present: 1, complete: 1, usable: 1 });
@@ -271,6 +281,48 @@ describe("CHIRP + JIO incomplete sweeps (harness records that really end early)"
             expect(rec.used).toBe(true);
         }
     }, 120_000);
+
+    it("an incomplete sweep in the other flight is no reproducibility evidence, but a disagreement still counts", () => {
+        const primary = decoded({ plants: [G, null, null], sweepS: 12, seed: 71, jio: DISTURBANCE }, "p.bbl");
+        const otherIncomplete = decoded(
+            {
+                plants: [G, null, null],
+                sweepS: 12,
+                seed: 72,
+                startTimeUs: 9_000_000,
+                jio: DISTURBANCE,
+                ending: { modeOffAtHz: 60 },
+            },
+            "o.bbl",
+        );
+        const r = run(primary, [otherIncomplete]);
+        const ax = r.jio.crossFlight.candidates[0].axes.roll!;
+        expect(ax.z).not.toBeNull();
+        expect(ax.consistency).toBe("unknown");
+        expect(ax.reasons).toContain("incomplete_sweep_on:other:no_reproducibility_evidence");
+        expect(r.jio.crossFlight.axes.roll!.consistency).toBe("unknown");
+        expect(r.jio.requiredMeasurements).toContain(
+            "required_measurement:chirp_roll_repeat_flight_for_reproducibility",
+        );
+        expect(r.jio.chain.roll!.reasons.some((x) => x.startsWith("cross_flight_repeat:unknown:flights:1:z:"))).toBe(
+            true,
+        );
+        const otherChanged = decoded(
+            {
+                plants: [ratePlant({ K: 60 * 1.5, motorHz: 40, delayS: 0.002 }), null, null],
+                sweepS: 12,
+                seed: 73,
+                startTimeUs: 9_000_000,
+                jio: DISTURBANCE,
+                ending: { modeOffAtHz: 60 },
+            },
+            "o2.bbl",
+        );
+        const r2 = run(primary, [otherChanged]);
+        expect(r2.jio.crossFlight.candidates[0].axes.roll!.consistency).toBe("inconsistent");
+        expect(r2.jio.chain.roll!.candidate?.status).toBe("BLOCKED");
+        noValidated(r2);
+    }, 180_000);
 });
 
 describe("CHIRP + JIO compatibility keys between flights (c1569ca99 and block 3)", () => {
@@ -301,6 +353,10 @@ describe("CHIRP + JIO compatibility keys between flights (c1569ca99 and block 3)
         expect(oneSide.usable).toBe(false);
         const curve = differs(base.map((h) => (h.startsWith("tpa_curve_type:") ? "tpa_curve_type:1" : h)));
         expect(curve.issues).toContain("jio_cross_flight_setting_differs:tpa_curve_type");
+        const sag = differs([...base, "vbat_sag_compensation:50"]);
+        expect(sag.issues).toContain("jio_cross_flight_setting_differs:vbat_sag_compensation");
+        const windup = differs([...base, "iterm_windup:85"]);
+        expect(windup.issues).toContain("jio_cross_flight_setting_differs:iterm_windup");
         const missingHere = run(
             flight(
                 54,

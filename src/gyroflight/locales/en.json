@@ -1040,7 +1040,7 @@
         "message": "Next $1 sweep (experimental, firmware exponential sweep, same duration and amplitude): current $2 → suggested $3; basis: $4"
     },
     "gyroflightV2JioAdviceNone": {
-        "message": "Next $1 sweep: the current sweep $2 already matches the supported band; basis: $3"
+        "message": "Next $1 sweep (experimental): the current sweep $2 already matches the supported band; basis: $3"
     },
     "gyroflightV2JioCandidateNotLogged": { "message": "not logged by either flight, not compared" },
     "gyroflightV2JioProgressTitle": { "message": "Measurement set per axis (experimental, diagnostic)" },
@@ -1054,7 +1054,7 @@
     "gyroflightV2JioProgressComplete": { "message": "complete" },
     "gyroflightV2JioProgressUsable": { "message": "usable" },
     "gyroflightV2JioProgressExcluded": { "message": "excluded" },
-    "gyroflightV2JioProgressReached": { "message": "an incomplete sweep reached" },
+    "gyroflightV2JioProgressReached": { "message": "incomplete sweep, analysed up to" },
     "gyroflightV2JioProgressGoalMet": { "message": "covered" },
     "gyroflightV2JioProgressGoalShort": { "message": "not covered by the supported band" },
     "gyroflightV2JioProgressNext": { "message": "next recordings" },

@@ -203,7 +203,9 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
                     expect(rec.excitedS).toBeLessThan(0.98 * 20);
                     expect(rec.reachedHz!).toBeGreaterThan(150);
                     expect(rec.reachedHz!).toBeLessThan(300);
-                    expect(a.band!.analysedHz[1]).toBeCloseTo(rec.reachedHz!, 6);
+                    // The window (common record length 16.9 s) reaches less than the sweep did.
+                    expect(a.band!.analysedHz[1]).toBeLessThanOrEqual(rec.reachedHz!);
+                    expect(a.band!.analysedHz[1]).toBeGreaterThan(150);
                     expect(a.sweeps.complete).toBe(0);
                     expect(j.requiredMeasurements).toContain(`required_measurement:chirp_${axis}_complete_sweep`);
                 }
@@ -263,16 +265,29 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
             expect(ax.reasons).toContain("grid_matched_nearest:step_ratio:1.17");
             expect(ax.reasons.some((x) => x.startsWith("plant_z:"))).toBe(true);
             expect(ax.z).not.toBeNull();
-            expect(ax.consistency).toBe("consistent");
+            expect(ax.z!).toBeLessThan(2);
+            // bbl19's pitch and yaw sweeps are incomplete (block 3): their agreement with bbl18 is shown
+            // (z) but is no reproducibility evidence; roll (complete on both) is.
+            const expected = axis === "roll" ? "consistent" : "unknown";
+            expect(ax.consistency).toBe(expected);
+            if (axis !== "roll") expect(ax.reasons).toContain("incomplete_sweep_on:other:no_reproducibility_evidence");
             expect(
-                r.jio.chain[axis]!.reasons.some((x) => x.startsWith("cross_flight_repeat:consistent:flights:1:z:")),
+                r.jio.chain[axis]!.reasons.some((x) => x.startsWith(`cross_flight_repeat:${expected}:flights:1:z:`)),
             ).toBe(true);
             // Still one sweep in this log: the within-flight stationarity stays unknown and is said so.
             expect(r.jio.chain[axis]!.reasons).toContain("stationarity_unknown:single_sweep");
         }
-        // Reproducibility between flights is answered; stationarity within a sweep stays asked; band advice remains.
+        // Reproducibility is answered for roll only; stationarity within a sweep stays asked; band advice remains.
         expect(r.jio.requiredMeasurements.some((m) => m.includes("repeated_sweep_for_stationarity"))).toBe(true);
-        expect(r.jio.requiredMeasurements.some((m) => m.includes("repeat_flight_for_reproducibility"))).toBe(false);
+        expect(r.jio.requiredMeasurements).not.toContain(
+            "required_measurement:chirp_roll_repeat_flight_for_reproducibility",
+        );
+        expect(r.jio.requiredMeasurements).toContain(
+            "required_measurement:chirp_pitch_repeat_flight_for_reproducibility",
+        );
+        expect(r.jio.requiredMeasurements).toContain(
+            "required_measurement:chirp_yaw_repeat_flight_for_reproducibility",
+        );
         expect(r.jio.requiredMeasurements.some((m) => m.includes("repeat_flight_consistent"))).toBe(false);
         expect(r.jio.requiredMeasurements).toContain("required_measurement:chirp_roll_band_matched_sweep");
         // The primary's own JIO estimate and the primary route are unchanged by the other log's presence.

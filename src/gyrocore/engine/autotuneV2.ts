@@ -390,6 +390,9 @@ const JIO_REPEAT_KEYS = [
     "iterm_relax",
     "iterm_relax_type",
     "iterm_relax_cutoff",
+    // Logged gain laws that move T without changing the logged PID (review block 3).
+    "iterm_windup",
+    "vbat_sag_compensation",
     "tpa_mode",
     "tpa_rate",
     "tpa_breakpoint",
@@ -1182,7 +1185,8 @@ function jioRequirements(
         // Stationarity during the measurement needs a second sweep in the same flight; a comparable
         // other flight answers a different question (reproducibility between flights) and has its
         // own codes. Neither clears the other.
-        if (a.repeats.count < 2) out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
+        // Only complete usable sweeps count: two incomplete ones that agree are no stationarity evidence.
+        if (a.sweeps.usableComplete < 2) out.add(`required_measurement:chirp_${name}_repeated_sweep_for_stationarity`);
         if (a.repeats.consistency === "inconsistent")
             out.add(`required_measurement:chirp_${name}_repeated_sweep_consistent`);
         const cross = crossFlight.axes[name]?.consistency ?? "unknown";
@@ -1308,7 +1312,7 @@ function runJioRoute(
                     : "stationarity_unknown:single_sweep",
             );
         reasons.push(
-            cross && cross.consistency !== "unknown"
+            cross
                 ? `cross_flight_repeat:${cross.consistency}:flights:${cross.flights}:z:${cross.zMax!.toFixed(2)}:plant_z:${cross.zPlantMax!.toFixed(2)}`
                 : `cross_flight_repeat:none${others.length ? ":see_crossFlight_candidates" : ""}`,
         );
@@ -1339,7 +1343,7 @@ function runJioRoute(
             bandHz: {
                 analysed: a.band?.analysedHz ?? null,
                 supported: a.band?.supportedHz ?? null,
-                reached: a.sweeps.complete === a.sweeps.usable ? null : a.sweeps.reachedHz,
+                reached: a.records.some((r) => r.used && r.incomplete !== null) ? a.sweeps.reachedHz : null,
                 tuningGoal: a.sweepAdvice?.tuningBandHz ?? null,
                 sufficientForTuning: a.sweepAdvice?.bandSufficientForTuning ?? null,
             },
@@ -1451,12 +1455,26 @@ function jioCrossFlight(
             const reasons = [...cmp.reasons];
             if (over(cmp.z)) reasons.push("inconsistent_on:closed_loop_T");
             if (over(cmp.zPlant)) reasons.push("inconsistent_on:plant_G");
+            // An incomplete sweep on either side: a disagreement still counts against the plant, an
+            // agreement over the band it reached is no reproducibility evidence.
+            const incompleteSide = [
+                ...(a.sweeps.usableComplete < a.sweeps.usable ? ["primary"] : []),
+                ...(b.sweeps.usableComplete < b.sweeps.usable ? ["other"] : []),
+            ];
+            if (incompleteSide.length)
+                reasons.push(`incomplete_sweep_on:${incompleteSide.join("_and_")}:no_reproducibility_evidence`);
             cand.axes[name] = {
                 z: cmp.z,
                 zPlant: cmp.zPlant,
                 matchedPoints: cmp.matched,
                 consistency:
-                    cmp.z === null ? "unknown" : over(cmp.z) || over(cmp.zPlant) ? "inconsistent" : "consistent",
+                    cmp.z === null
+                        ? "unknown"
+                        : over(cmp.z) || over(cmp.zPlant)
+                          ? "inconsistent"
+                          : incompleteSide.length
+                            ? "unknown"
+                            : "consistent",
                 reasons,
             };
         }
@@ -1471,7 +1489,11 @@ function jioCrossFlight(
         axes[name] = {
             flights: compared.length,
             // One flight that disagrees is not outvoted by one that agrees.
-            consistency: compared.some((a) => a.consistency === "inconsistent") ? "inconsistent" : "consistent",
+            consistency: compared.some((a) => a.consistency === "inconsistent")
+                ? "inconsistent"
+                : compared.some((a) => a.consistency === "unknown")
+                  ? "unknown"
+                  : "consistent",
             zMax: Math.max(...compared.map((a) => a.z!)),
             zPlantMax: Math.max(...compared.map((a) => a.zPlant ?? 0)),
         };
