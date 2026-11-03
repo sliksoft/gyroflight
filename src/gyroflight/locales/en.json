@@ -1054,6 +1054,10 @@
     "gyroflightV2JioProgressComplete": { "message": "complete" },
     "gyroflightV2JioProgressUsable": { "message": "usable" },
     "gyroflightV2JioProgressExcluded": { "message": "excluded" },
+    "gyroflightV2JioProgressMissing": { "message": "missing" },
+    "gyroflightV2JioPreparation": {
+        "message": "Measurement preparation (software only): the sweep settings below are for a measurement trial that has not been flown; they are the firmware's exponential chirp settings (start, end, time), amplitude unchanged. The required tuning band is never narrowed to make a set pass. No flight, connection, firmware or CLI/MSP change is made here."
+    },
     "gyroflightV2JioProgressReached": { "message": "incomplete sweep, analysed up to" },
     "gyroflightV2JioProgressGoalMet": { "message": "covered" },
     "gyroflightV2JioProgressGoalShort": { "message": "not covered by the supported band" },

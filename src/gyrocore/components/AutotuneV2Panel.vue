@@ -319,6 +319,9 @@
                 <template v-if="jioProgress.length">
                     <p class="text-sm font-bold mt-1">{{ $t("gyroflightV2JioProgressTitle") }}</p>
                     <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioProgressHelp") }}</p>
+                    <p class="text-sm text-dimmed" data-gyrocore="v2-jio-preparation">
+                        {{ $t("gyroflightV2JioPreparation") }}
+                    </p>
                     <ul class="text-sm list-disc pl-5">
                         <li
                             v-for="pr in jioProgress"
@@ -728,7 +731,7 @@ const jioProgress = computed(() => {
                 ? ` (${i18n.getMessage("gyroflightV2JioProgressReached")} ${num(p.bandHz.reached, 0)} Hz)`
                 : "";
         const goal = p.bandHz.tuningGoal
-            ? `${band(p.bandHz.tuningGoal)} Hz: ${p.bandHz.sufficientForTuning ? i18n.getMessage("gyroflightV2JioProgressGoalMet") : i18n.getMessage("gyroflightV2JioProgressGoalShort")}`
+            ? `${band(p.bandHz.tuningGoal)} Hz: ${p.bandHz.sufficientForTuning ? i18n.getMessage("gyroflightV2JioProgressGoalMet") : `${i18n.getMessage("gyroflightV2JioProgressGoalShort")}, ${i18n.getMessage("gyroflightV2JioProgressMissing")} ${band(p.bandHz.missing)} Hz`}`
             : "--";
         const text = i18n.getMessage("gyroflightV2JioProgress", [
             `${sw.present} ${i18n.getMessage("gyroflightV2JioProgressPresent")}, ${sw.complete} ${i18n.getMessage("gyroflightV2JioProgressComplete")}, ${sw.usable} ${i18n.getMessage("gyroflightV2JioProgressUsable")}${excluded}`,

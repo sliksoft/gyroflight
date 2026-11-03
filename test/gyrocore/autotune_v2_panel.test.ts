@@ -214,6 +214,11 @@ describe("AutotuneV2Panel", () => {
         expect(pRoll.textContent).toContain("repeated_sweep_for_stationarity");
         expect(pRoll.textContent).not.toContain("pitch");
         expect(pRoll.getAttribute("data-complete")).toBe("no");
+        // The preparation label: software only, the trial not flown; a goal not covered names the missing band.
+        expect(q(d, '[data-gyrocore="v2-jio-preparation"]')!.textContent).toContain("gyroflightV2JioPreparation");
+        for (const el of progress)
+            if (el.textContent!.includes("gyroflightV2JioProgressGoalShort"))
+                expect(el.textContent).toMatch(/gyroflightV2JioProgressMissing [\d.]+–[\d.]+ Hz/);
         // Keys the synthetic headers do not carry are named as not compared on the candidate line.
         expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("gyroflightV2JioCandidateNotLogged");
         expect(q(d, '[data-gyrocore="v2-jio-cross"]')!.textContent).toContain("anti_gravity_gain");
