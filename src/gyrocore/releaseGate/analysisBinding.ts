@@ -169,12 +169,19 @@ function analysisChanged(since: AnalysisPin): boolean {
  */
 export function analysisBindingIssues(
     proposal: AbsoluteProposal,
-    { recompute, since }: { recompute: boolean; since?: AnalysisPin },
+    {
+        recompute,
+        since,
+        route = "release",
+    }: { recompute: boolean; since?: AnalysisPin; route?: "release" | "experimental" },
 ): string[] {
     const store = useAutotuneV2Store();
     if (store.state !== "done") return [`analysis_not_done:${store.state}`];
-    const current = store.result?.releasableProposal ?? null;
-    if (!current) return ["no_releasable_proposal"];
+    // The experimental route binds to the analysis's experimental proposal, never to the releasable one.
+    const pick = (r: typeof store.result) =>
+        route === "experimental" ? (r?.experimental?.proposal ?? null) : (r?.releasableProposal ?? null);
+    const current = pick(store.result);
+    if (!current) return [route === "experimental" ? "no_experimental_proposal" : "no_releasable_proposal"];
     if (canonicalText(proposal) !== canonicalText(current)) return ["proposal_differs_from_analysis"];
     if (since && analysisChanged(since)) {
         return ["analysis_changed_since_authorization"];
@@ -184,7 +191,7 @@ export function analysisBindingIssues(
     if (!input) return ["analysis_inputs_missing"];
     let fresh: AbsoluteProposal | null;
     try {
-        fresh = runAutotuneV2({ ...input, createdAt: proposal.createdAt }).releasableProposal;
+        fresh = pick(runAutotuneV2({ ...input, createdAt: proposal.createdAt }));
     } catch {
         return ["analysis_recompute_failed"];
     }

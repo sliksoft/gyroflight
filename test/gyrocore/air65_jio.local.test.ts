@@ -120,6 +120,16 @@ function jioSummary(r: AutotuneV2Result) {
         })),
         crossFlight: j.crossFlight,
         progress: j.progress,
+        experimental: r.experimental
+            ? {
+                  status: r.experimental.status,
+                  id: r.experimental.proposal.id,
+                  items: r.experimental.items.map((i) => [i.key, i.from, i.to, i.source, i.evidence]),
+                  withheld: r.experimental.withheld,
+                  limitations: r.experimental.limitations,
+              }
+            : { status: "NONE", withheld: [], reason: "no_computable_value" },
+        primaryCandidates: r.pid.map((p) => [p.axis, p.outcome, p.status, p.changed]),
         chain: Object.values(j.chain).map((c) => ({
             axis: c.axis,
             tuningComputable: c.tuningComputable,
@@ -243,6 +253,22 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
             });
             expect(strip(r)).toEqual(strip(without));
             expect(r.releasableProposal).toBeNull();
+            // Block 5: an experimental proposal exists only where a route computed a value; on these
+            // flights every primary candidate is targets_not_reachable or unchanged (a fact of the data,
+            // recorded in the JSON), so whatever is offered comes from a computable candidate, never invented.
+            const x = r.experimental;
+            for (const p of r.pid) {
+                const offered = x?.items.some((i) => i.key.endsWith(`_${p.axis}`) && i.source === "primary_route");
+                if (offered) expect(["improved", "restores_margins"]).toContain(p.outcome);
+                else if (p.outcome === "targets_not_reachable" || p.outcome === "not_computable")
+                    expect(x?.withheld.some((w) => w.key === `pid_${p.axis}`) ?? true).toBe(true);
+            }
+            if (x) {
+                expect(x.status).toBe("EXPERIMENTAL");
+                expect(x.proposal.id.startsWith("v2x-")).toBe(true);
+                expect(x.hardwareValidated).toBe(false);
+                expect(JSON.stringify(x.items)).not.toContain('"VALIDATED"');
+            }
         },
         300_000,
     );

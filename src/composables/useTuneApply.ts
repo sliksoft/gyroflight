@@ -127,7 +127,10 @@ import {
 } from "@/gyrocore/tuning/absoluteTune";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { assertAbsoluteWriteAuthorized, assertSliderWriteAuthorized } from "@/gyrocore/releaseGate/writeAuthority";
-import { pinAnalysis, plainCopy } from "@/gyrocore/releaseGate/analysisBinding";
+import { assertExperimentalWriteAuthorized } from "@/gyrocore/releaseGate/experimentalAuthority";
+import type { ExperimentalProposal } from "@/gyrocore/engine/experimentalProposal";
+import type { TuneProvenance } from "@/gyrocore/stores/tuneBackup";
+import { canonicalText, pinAnalysis, plainCopy, type AnalysisPin } from "@/gyrocore/releaseGate/analysisBinding";
 import { WriteRefusedError, withFcWriteLock, type WritePermit } from "@/composables/fcWriteGuard";
 
 /**
@@ -308,6 +311,7 @@ function storeBackup(
     compositeId: string | null,
     absolute?: AbsoluteSnapshot,
     stateKnown = true,
+    provenance?: TuneProvenance,
 ): TuneBackup {
     const backup: TuneBackup = {
         id: newBackupId(),
@@ -320,6 +324,7 @@ function storeBackup(
         snapshot,
         ...(absolute ? { absolute } : {}),
         stateKnown,
+        ...(provenance ? { provenance } : {}),
     };
     if (!useTuneBackupStore().save(backup)) {
         throw new ApplyBlockedError(["apply:backup_not_stored"]);
@@ -1211,31 +1216,63 @@ export async function applyAbsoluteTune(
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
 ): Promise<AbsoluteWriteResult> {
-    return transaction("absolute_apply", (tx) => applyAbsoluteTuneOnce(tx, proposal, confirmation));
+    return transaction("absolute_apply", (tx) => applyAbsoluteTuneOnce(tx, proposal, confirmation, null));
+}
+
+/**
+ * Apply an EXPERIMENTAL proposal (engine experimentalProposal.ts): the same route, backup, live
+ * checks, readback and save as the released Apply, under the experimental write authority
+ * (experimentalAuthority.ts: analysis binding, computable items, finite values in range, plausible
+ * step; the release contract, product lock and hardware validation are not required and are named
+ * as waived) and a confirmation of kind "experimental" with the user's acknowledgement.
+ */
+export async function applyExperimentalTune(
+    experimental: ExperimentalProposal,
+    confirmation: string | null | undefined,
+): Promise<AbsoluteWriteResult> {
+    return transaction("absolute_apply", (tx) =>
+        applyAbsoluteTuneOnce(tx, experimental.proposal, confirmation, experimental),
+    );
 }
 
 async function applyAbsoluteTuneOnce(
     tx: Transaction,
     proposal: AbsoluteProposal,
     confirmation: string | null | undefined,
+    experimental: ExperimentalProposal | null,
 ): Promise<AbsoluteWriteResult> {
     // What is authorized, confirmed and written is this copy: plain data the caller can no longer
     // change while the Apply awaits (a getter, a function or a class instance is refused).
     let authorized: AbsoluteProposal;
+    let authorizedExperimental: ExperimentalProposal | null = null;
     try {
         authorized = plainCopy(proposal);
-    } catch {
+        if (experimental) {
+            authorizedExperimental = plainCopy(experimental);
+            // The experimental proposal's own write-shaped proposal is what is written, nothing else.
+            if (canonicalText(authorizedExperimental.proposal) !== canonicalText(authorized)) {
+                throw new ApplyBlockedError(["apply:experimental_proposal_mismatch"]);
+            }
+        }
+    } catch (err) {
+        if (err instanceof ApplyBlockedError) throw err;
         throw new ApplyBlockedError(["apply:proposal_not_plain_data"]);
     }
     // 1. The write authority (the engine recomputed for this proposal, release contract, GyroCore
-    // Safety, product lock) and the user's confirmation, before any MSP.
+    // Safety, product lock — or, experimental, the technical checks only) and the user's
+    // confirmation, before any MSP.
     const since = pinAnalysis();
-    assertAbsoluteWriteAuthorized(authorized, { recompute: true });
-    const confirmed = consumeConfirmation(confirmation, {
-        kind: "absolute",
-        proposalId: authorized.id,
-        change: { ...authorized.change },
-    });
+    const authority = (opts: { recompute: boolean; since?: AnalysisPin }) =>
+        authorizedExperimental
+            ? assertExperimentalWriteAuthorized(authorizedExperimental, opts)
+            : assertAbsoluteWriteAuthorized(authorized, opts);
+    authority({ recompute: true });
+    const confirmed = consumeConfirmation(
+        confirmation,
+        authorizedExperimental
+            ? { kind: "experimental", proposalId: authorized.id, change: { ...authorized.change }, acknowledged: true }
+            : { kind: "absolute", proposalId: authorized.id, change: { ...authorized.change } },
+    );
     assertTransactionStateKnown(logIdentity(authorized.log.headerPairs).uid);
     assertConnectedReal();
 
@@ -1249,9 +1286,34 @@ async function applyAbsoluteTuneOnce(
     // 3. The authority again against the same analysis (the reads above awaited), backup (every
     // firmware-held value), the write with the authority once more right before its first SET,
     // then verify and save.
-    const recheck = () => assertAbsoluteWriteAuthorized(authorized, { recompute: false, since });
+    const recheck = () => authority({ recompute: false, since });
     recheck();
-    const backup = storeBackup("before_absolute_apply", fc, v1Snapshot(), null, before);
+    const provenance: TuneProvenance | undefined = authorizedExperimental
+        ? {
+              route: "experimental",
+              proposalId: authorized.id,
+              log: {
+                  sha256: authorized.log.sha256,
+                  logIndex: authorized.log.logIndex,
+                  firmwareRevision: logIdentity(authorized.log.headerPairs).firmwareRevision ?? null,
+              },
+              method: "autotune_v2_experimental:primary_route+chirp_jio",
+              change: { ...authorized.change },
+              sources: Object.fromEntries(authorizedExperimental.items.map((i) => [i.key, i.source])),
+              limitations: [...authorizedExperimental.limitations],
+              hardwareValidated: false,
+              appliedAt: new Date().toISOString(),
+          }
+        : undefined;
+    const backup = storeBackup(
+        authorizedExperimental ? "before_experimental_apply" : "before_absolute_apply",
+        fc,
+        v1Snapshot(),
+        null,
+        before,
+        true,
+        provenance,
+    );
     tx.begin(uid3(fc.uid), backup.id, [before.pidProfile!]);
     await writeAbsoluteBlocks(before, expected, before, backup.id, tx, false, recheck);
     const verified = await verifyAbsoluteAndSave(expected, before, backup.id, tx);

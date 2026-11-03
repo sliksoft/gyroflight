@@ -54,13 +54,22 @@ export type ConfirmationSubject =
           backupId: string;
           /** restoreHash of the read-only preview the user saw: the craft's tune then and the backup's target. */
           preview: string;
+      }
+    | {
+          /** The experimental route: the user acknowledged an unreleased, not hardware-validated tune. */
+          kind: "experimental";
+          proposalId: string;
+          change: Record<string, number>;
+          acknowledged: true;
+          preview: string;
       };
 
 /** What the route itself knows before it has read the craft: the subject without the preview hash. */
 export type ConfirmationRequest =
     | Omit<Extract<ConfirmationSubject, { kind: "apply" }>, "preview">
     | Omit<Extract<ConfirmationSubject, { kind: "absolute" }>, "preview">
-    | Omit<Extract<ConfirmationSubject, { kind: "restore" }>, "preview">;
+    | Omit<Extract<ConfirmationSubject, { kind: "restore" }>, "preview">
+    | Omit<Extract<ConfirmationSubject, { kind: "experimental" }>, "preview">;
 
 interface Issued {
     subject: ConfirmationSubject;
@@ -80,6 +89,15 @@ function sameSubject(a: ConfirmationSubject, b: ConfirmationRequest): boolean {
     }
     if (a.kind === "restore" && b.kind === "restore") {
         return a.backupId === b.backupId;
+    }
+    if (a.kind === "experimental" && b.kind === "experimental") {
+        const keys = new Set([...Object.keys(a.change), ...Object.keys(b.change)]);
+        return (
+            a.acknowledged === true &&
+            b.acknowledged === true &&
+            a.proposalId === b.proposalId &&
+            [...keys].every((k) => a.change[k] === b.change[k])
+        );
     }
     return false;
 }

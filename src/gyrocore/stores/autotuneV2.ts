@@ -55,6 +55,8 @@ export type AutotuneV2Outcome =
     | {
           status: "verified";
           action: "apply" | "restore";
+          /** "experimental": written through the experimental route (not released, not hardware-validated). */
+          mode?: "released" | "experimental";
           backupId: string;
           expected: AbsoluteSnapshot;
           afterSave: AbsoluteSnapshot;
@@ -64,6 +66,7 @@ export type AutotuneV2Outcome =
     | {
           status: "blocked" | "failed";
           action: "apply" | "restore";
+          mode?: "released" | "experimental";
           reasons: string[];
           stage: string | null;
           saved: string | null;

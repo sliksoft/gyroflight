@@ -94,6 +94,7 @@ import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, PLANT_CONFIG_KEYS, sameFlight } from "./logInput";
+import { buildExperimentalProposal, type ExperimentalProposal } from "./experimentalProposal";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
 import {
     analyzeJioSweeps,
@@ -268,6 +269,13 @@ export interface AutotuneV2Result {
      * `releasableProposal`, the release evidence or the write authority.
      */
     jio: JioRouteResult;
+    /**
+     * EXPERIMENTAL tuning proposal (experimentalProposal.ts): the values the measurement supports
+     * but the release contract cannot release (qualification missing). Its own status; never the
+     * releasableProposal, never VALIDATED; written only through the experimental route with the
+     * user's explicit acknowledgement and every technical check of the absolute route.
+     */
+    experimental: ExperimentalProposal | null;
 }
 
 export interface JioAxisChain {
@@ -1171,6 +1179,13 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         measurementPlan,
         measurementStrategy,
         jio,
+        // EXPERIMENTAL: computable values with their qualification gaps named; nothing invented.
+        experimental: buildExperimentalProposal({
+            primaryItems: items,
+            primaryPid: pid,
+            jio,
+            buildProposal: (selected) => build(selected).proposal,
+        }),
     };
 }
 

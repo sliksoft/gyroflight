@@ -43,8 +43,8 @@ export const TRANSACTION_KEYS_PREFIX = "gyroflight.fcTransactionState.";
 export interface TuneBackup {
     id: string;
     createdAt: string;
-    /** Why it was taken: right before an Apply, or before a Restore (so a Restore can be undone). */
-    reason: "before_apply" | "before_absolute_apply" | "before_restore";
+    /** Why it was taken: right before an Apply (released or experimental), or before a Restore (so a Restore can be undone). */
+    reason: "before_apply" | "before_absolute_apply" | "before_experimental_apply" | "before_restore";
     uid: [number, number, number];
     board: string;
     firmware: string;
@@ -58,6 +58,25 @@ export interface TuneBackup {
      * Missing on backups taken before this was recorded: those are never a Restore target.
      */
     stateKnown?: boolean;
+    /**
+     * Experimental route: what was applied and from which analysis (for the comparison with the next
+     * recording). Memory of this browser only; no log bytes, no identity beyond the craft already named.
+     */
+    provenance?: TuneProvenance;
+}
+
+export interface TuneProvenance {
+    route: "experimental";
+    proposalId: string;
+    /** The log the values were computed from (its hash and index, not its bytes). */
+    log: { sha256: string; logIndex: number; firmwareRevision: string | null };
+    method: string;
+    /** The change written, by CLI name, with its source route per key. */
+    change: Record<string, number>;
+    sources: Record<string, "primary_route" | "jio_route">;
+    limitations: string[];
+    hardwareValidated: false;
+    appliedAt: string;
 }
 
 /**

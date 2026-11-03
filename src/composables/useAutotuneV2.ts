@@ -32,6 +32,7 @@ import { analyzeM4BblFile } from "@/js/blackbox/m4_bbl_integration";
 import { useDialog } from "@/composables/useDialog";
 import {
     applyAbsoluteTune,
+    applyExperimentalTune,
     previewAbsoluteRestore,
     previewAbsoluteTune,
     profileSwitchOf,
@@ -47,6 +48,8 @@ import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { currentAnalysisInput } from "@/gyrocore/releaseGate/analysisBinding";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
+import { experimentalWriteDecision } from "@/gyrocore/releaseGate/experimentalAuthority";
+import type { ExperimentalProposal } from "@/gyrocore/engine/experimentalProposal";
 import { useAutotuneV2Store, type AutotuneV2Outcome } from "@/gyrocore/stores/autotuneV2";
 import type { TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
@@ -135,10 +138,15 @@ function failure(action: "apply" | "restore", err: unknown): AutotuneV2Outcome {
     };
 }
 
-function success(action: "apply" | "restore", r: AbsoluteWriteResult): AutotuneV2Outcome {
+function success(
+    action: "apply" | "restore",
+    r: AbsoluteWriteResult,
+    mode: "released" | "experimental" = "released",
+): AutotuneV2Outcome {
     return {
         status: "verified",
         action,
+        mode,
         backupId: r.backupId,
         expected: r.expected,
         afterSave: r.afterSave,
@@ -259,6 +267,17 @@ export function useAutotuneV2() {
         return p && absoluteWriteDecision(p, { recompute: false }).verdict === "APPLY_ALLOWED" ? p : null;
     }
 
+    /**
+     * The experimental proposal the experimental route may write: the analysis's own, when the
+     * experimental authority's technical checks pass (without the recomputation, which the write runs).
+     */
+    function experimentalProposal(): ExperimentalProposal | null {
+        const x = store.result?.experimental ?? null;
+        return x && experimentalWriteDecision(x, { recompute: false }).verdict === "EXPERIMENTAL_APPLY_ALLOWED"
+            ? x
+            : null;
+    }
+
     /** Read-only: identity, live values, and every value the proposal would change. Writes nothing. */
     async function preview(proposal: AbsoluteProposal | null = store.result?.proposal ?? null) {
         if (!proposal) return null;
@@ -312,6 +331,65 @@ export function useAutotuneV2() {
         }
     }
 
+    /**
+     * Experimental Apply: the user has ticked the acknowledgement (`acknowledged`), sees the live
+     * preview and the experimental wording, confirms, and the write runs under the experimental
+     * authority. Nothing here lifts a technical check of the route.
+     */
+    async function confirmAndApplyExperimental(
+        acknowledged: boolean,
+    ): Promise<"verified" | "cancelled" | "blocked" | "failed"> {
+        const x = experimentalProposal();
+        if (!x || store.busy) return "cancelled";
+        if (!acknowledged) {
+            store.outcome = {
+                ...failure("apply", new ApplyBlockedError(["experimental:not_acknowledged"])),
+                mode: "experimental",
+            };
+            return "blocked";
+        }
+        store.busy = true;
+        try {
+            const p = await preview(x.proposal);
+            if (!p) {
+                store.outcome = {
+                    ...failure("apply", new ApplyBlockedError(store.preview?.reasons ?? ["preview"])),
+                    mode: "experimental",
+                };
+                return "blocked";
+            }
+            const limits = x.limitations.map((l) => `<li>${escapeHtml(l)}</li>`).join("");
+            const confirmed = await dialog.showYesNo(
+                i18n.getMessage("gyroflightV2ExperimentalConfirmTitle"),
+                `<p>${escapeHtml(i18n.getMessage("gyroflightV2ExperimentalConfirmText"))}</p>${profileNote(
+                    p.expected.pidProfile,
+                )}${changesHtml(p.changes, p.expected.pidProfile)}<p>${escapeHtml(
+                    i18n.getMessage("gyroflightV2ExperimentalConfirmLimits"),
+                )}</p><ul>${limits}</ul><p>${escapeHtml(i18n.getMessage("gyroflightV2ApplyProcedure"))}</p>`,
+                {
+                    destructive: true,
+                    yesText: i18n.getMessage("gyroflightV2ExperimentalYes"),
+                    noText: i18n.getMessage("cancel"),
+                },
+            );
+            if (!confirmed) return "cancelled";
+            const token = issueConfirmation({
+                kind: "experimental",
+                proposalId: x.proposal.id,
+                change: { ...x.proposal.change },
+                acknowledged: true,
+                preview: p.hash,
+            });
+            store.outcome = success("apply", await applyExperimentalTune(x, token), "experimental");
+            return "verified";
+        } catch (err) {
+            store.outcome = { ...failure("apply", err), mode: "experimental" };
+            return store.outcome.status === "blocked" ? "blocked" : "failed";
+        } finally {
+            store.busy = false;
+        }
+    }
+
     async function confirmAndRestore(backup: TuneBackup): Promise<"verified" | "cancelled" | "blocked" | "failed"> {
         if (store.busy) return "cancelled";
         store.busy = true;
@@ -336,5 +414,14 @@ export function useAutotuneV2() {
         }
     }
 
-    return { calculate, createVerifiedTune, preview, releasedProposal, confirmAndApply, confirmAndRestore };
+    return {
+        calculate,
+        createVerifiedTune,
+        preview,
+        releasedProposal,
+        experimentalProposal,
+        confirmAndApply,
+        confirmAndApplyExperimental,
+        confirmAndRestore,
+    };
 }
