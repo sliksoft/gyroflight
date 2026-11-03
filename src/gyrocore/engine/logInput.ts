@@ -328,6 +328,22 @@ export function buildLogInputs(
                 end,
                 state: m.state,
                 qualificationReasons: m.apply.blocked.filter((r) => r.startsWith("measurement:")),
+                ...(m.quality?.gates
+                    ? {
+                          qualityGates: m.quality.gates
+                              .filter((g) => g.severity === "blocking")
+                              .map((g) => ({
+                                  code: g.code,
+                                  passed: g.passed,
+                                  value: typeof g.value === "number" && Number.isFinite(g.value) ? g.value : null,
+                                  threshold:
+                                      typeof g.threshold === "number" && Number.isFinite(g.threshold)
+                                          ? g.threshold
+                                          : null,
+                                  detail: g.detail ?? "",
+                              })),
+                      }
+                    : {}),
                 ...(m.segmentSize && m.sampleRate.effectiveRateHz
                     ? {
                           analysis: {

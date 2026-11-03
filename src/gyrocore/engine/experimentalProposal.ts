@@ -37,6 +37,7 @@
 import type { AbsoluteProposal, PartStatus, ProposalItem, ProposalPart } from "@/gyrocore/releaseGate/releaseContract";
 import type { AxisPidProposal } from "@/gyrocore/engine/pidOptimizer";
 import type { JioRouteResult } from "@/gyrocore/engine/autotuneV2";
+import type { DecisionCheck, RouteDecision } from "@/gyrocore/engine/candidateDecision";
 
 export type ExperimentalSource = "primary_route" | "jio_route";
 
@@ -147,6 +148,11 @@ export interface ExperimentalInput {
     primaryItems: ProposalItem[];
     primaryPid: AxisPidProposal[];
     jio: JioRouteResult | null;
+    /**
+     * Per axis the candidate decisions (candidateDecision.ts): a measured-margin candidate where only
+     * the bounds' qualification is missing, and the first decisive check where it is not computable.
+     */
+    decisions?: Partial<Record<"roll" | "pitch" | "yaw", { primary: RouteDecision | null; jio: RouteDecision | null }>>;
     /** Builds the write-shaped proposal (margins, Safety evidence) for a selection: the engine's own. */
     buildProposal: (selected: ProposalItem[]) => AbsoluteProposal | null;
 }
@@ -187,13 +193,19 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
         });
     }
 
-    // PID per axis: the primary candidate when computable, else the JIO candidate, else withheld.
+    // PID per axis, first computable of: the release-route primary candidate, the release-route JIO
+    // candidate, the measured-margin primary candidate, the measured-margin JIO candidate (block 6:
+    // only the bounds' qualification is missing there); else withheld with each route's first cause.
+    const primaryMeasurementOk: Record<string, boolean> = {};
     for (const axis of ["roll", "pitch", "yaw"] as const) {
         const primary = input.primaryPid.find((p) => p.axis === axis) ?? null;
         const jioChain = input.jio?.chain[axis] ?? null;
         const jioCand = jioChain?.candidate ?? null;
+        const dec = input.decisions?.[axis] ?? null;
         // An axis neither route analysed has nothing to offer or withhold (no sweep on it).
-        if (!primary && !jioChain) continue;
+        if (!primary && !jioChain && !dec) continue;
+        primaryMeasurementOk[axis] =
+            dec?.primary?.measurementUsable ?? !primary?.reasons.includes("chirp_measurement_rejected");
         if (primary && pidCandidateComputable(primary)) {
             items.push(...pidItems(primary, "primary_route", [], []));
             if (primary.proposedMargins.evidence?.level !== "VALIDATED")
@@ -204,41 +216,72 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
         }
         // The JIO chain's own blockers (inconsistent repeats, cross-flight disagreement, no usable
         // record) count against its candidate as well, whatever the candidate object carries.
-        if (
-            jioCand &&
-            jioChain &&
-            pidCandidateComputable(jioCand) &&
-            !dataInsufficientReasons(jioChain.reasons).length
-        ) {
-            const jioLimits = [
-                "jio_experimental_plant",
-                "jio_uncertainty_n_eff_not_calibrated",
-                ...jioChain.reasons.filter((r) => /^(stationarity_unknown|cross_flight_repeat)/.test(r)),
-            ];
+        const jioChainOk = !!jioChain && !dataInsufficientReasons(jioChain.reasons).length;
+        const jioLimits = [
+            "jio_experimental_plant",
+            "jio_uncertainty_n_eff_not_calibrated",
+            ...(jioChain?.reasons ?? []).filter((r) => /^(stationarity_unknown|cross_flight_repeat)/.test(r)),
+        ];
+        if (jioCand && jioChainOk && pidCandidateComputable(jioCand)) {
             items.push(...pidItems(jioCand, "jio_route", jioLimits, jioLimits));
             limitations.add(`experimental:${axis}:values_from_jio_route_uncalibrated_uncertainty`);
             continue;
         }
-        const reasons = [
-            ...(primary
-                ? [`primary:${primary.outcome}`, ...dataInsufficientReasons(primary.reasons)]
-                : ["primary:axis_not_analysed"]),
-            ...(jioCand
+        const pm = dec?.primary;
+        if (
+            pm?.status === "candidate_found" &&
+            pm.candidate &&
+            pm.measurementUsable &&
+            pidCandidateComputable(pm.candidate)
+        ) {
+            items.push(
+                ...pidItems(
+                    pm.candidate,
+                    "primary_route",
+                    pm.waived.map((w) => `waived:${w}`),
+                    [],
+                ),
+            );
+            limitations.add(`experimental:${axis}:margins_measured_in_band_not_bounded`);
+            for (const w of pm.waived) limitations.add(`experimental:${axis}:waived:${w}`);
+            continue;
+        }
+        const jm = dec?.jio;
+        if (jm?.status === "candidate_found" && jm.candidate && jioChainOk && pidCandidateComputable(jm.candidate)) {
+            items.push(...pidItems(jm.candidate, "jio_route", jioLimits, jioLimits));
+            limitations.add(`experimental:${axis}:values_from_jio_route_uncalibrated_uncertainty`);
+            limitations.add(`experimental:${axis}:margins_measured_in_band_not_bounded`);
+            continue;
+        }
+        const cause = (c: DecisionCheck | null) =>
+            c
                 ? [
-                      `jio:${jioCand.outcome}`,
-                      ...dataInsufficientReasons([...jioCand.reasons, ...(jioChain?.reasons ?? [])]),
+                      `${c.rule}=${c.value === null ? "unknown" : typeof c.value === "number" ? +c.value.toFixed(3) : c.value}${c.unit ? ` ${c.unit}` : ""} (${c.threshold})`,
                   ]
-                : jioChain
-                  ? [`jio:not_computable`, ...jioChain.reasons]
-                  : ["jio:axis_not_analysed"]),
+                : [];
+        const reasons = [
+            ...(pm
+                ? [`primary:${pm.status}`, ...cause(pm.firstCause)]
+                : primary
+                  ? [`primary:${primary.outcome}`, ...dataInsufficientReasons(primary.reasons)]
+                  : ["primary:axis_not_analysed"]),
+            ...(jm
+                ? [`jio:${jm.status}`, ...cause(jm.firstCause), ...dataInsufficientReasons(jioChain?.reasons ?? [])]
+                : jioCand
+                  ? [
+                        `jio:${jioCand.outcome}`,
+                        ...dataInsufficientReasons([...jioCand.reasons, ...(jioChain?.reasons ?? [])]),
+                    ]
+                  : jioChain
+                    ? [`jio:not_computable`, ...jioChain.reasons]
+                    : ["jio:axis_not_analysed"]),
         ];
-        // An axis without a change on either route is not "withheld": nothing to propose there.
-        // An axis is not "withheld" only when every route that analysed it needs no change.
-        // A JIO chain that analysed the axis but built no candidate (no engine input, controller or
-        // PID) did not say "no change needed": it counts as not computable here.
-        const outcomes = [primary?.outcome, jioCand?.outcome ?? (jioChain ? "not_computable" : undefined)].filter(
-            (o): o is NonNullable<typeof o> => !!o,
-        );
+        // Not "withheld" only when every route that analysed the axis needs no change. A JIO chain
+        // that analysed the axis but built no candidate counts as not computable here.
+        const outcomes = [
+            pm ? pm.status : primary?.outcome,
+            jm ? jm.status : (jioCand?.outcome ?? (jioChain ? "not_computable" : undefined)),
+        ].filter((o): o is NonNullable<typeof o> => !!o);
         const unchanged = outcomes.length > 0 && outcomes.every((o) => o === "no_change_needed");
         if (!unchanged)
             withheld.push({ key: `pid_${axis}`, part: "pid", source: "primary_route", reasons: [...new Set(reasons)] });
@@ -255,7 +298,35 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
     }));
     const built = input.buildProposal(selected);
     if (!built) return { proposal: null, withheld };
-    const proposal: AbsoluteProposal = { ...built, id: built.id.replace(/^v2-/, "v2x-") };
+    // The measurement the experimental proposal rests on, per item source: a primary-route value needs
+    // its axis's primary measurement usable (accepted, or its fixed-band gate waived on a supported
+    // decision band); a JIO value rests on the JIO record, not on the primary qualification; a filter
+    // or feedforward value keeps the engine's own judgement.
+    const axisOf = (key: string) => /_(roll|pitch|yaw)$/.exec(key)?.[1] ?? null;
+    const measurementReasons: string[] = [];
+    for (const it of items) {
+        const axis = axisOf(it.key);
+        if (it.part !== "pid" || !axis) {
+            if (!built.release.measurement.valid) measurementReasons.push(`filter_or_ff_measurement_invalid:${it.key}`);
+        } else if (it.source === "primary_route" && primaryMeasurementOk[axis] === false)
+            measurementReasons.push(`primary_measurement_unusable:${axis}`);
+    }
+    const proposal: AbsoluteProposal = {
+        ...built,
+        id: built.id.replace(/^v2-/, "v2x-"),
+        release: {
+            ...built.release,
+            measurement: {
+                valid: measurementReasons.length === 0,
+                reasons: [
+                    ...measurementReasons,
+                    ...[...new Set(items.filter((i) => i.source === "jio_route").map((i) => axisOf(i.key)))].map(
+                        (a) => `jio_route_measurement_used:${a}`,
+                    ),
+                ],
+            },
+        },
+    };
     return {
         proposal: {
             status: "EXPERIMENTAL",

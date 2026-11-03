@@ -95,6 +95,8 @@ import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
 import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measurementStrategy";
 import { crossLogReferenceIssues, PLANT_CONFIG_KEYS, sameFlight } from "./logInput";
 import { buildExperimentalProposal, type ExperimentalProposal, type WithheldItem } from "./experimentalProposal";
+import { decideAxis, type RouteDecision } from "./candidateDecision";
+import { recordingInstructions, type RecordingInstruction } from "./recordingInstruction";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
 import {
     analyzeJioSweeps,
@@ -119,6 +121,11 @@ export interface ChirpAxisInput {
     state: string;
     /** The qualification's measurement:* reasons (why it was rejected or warned). */
     qualificationReasons?: string[];
+    /**
+     * The qualification's blocking gates with their measured values (chirp/quality.ts), for the
+     * candidate decision trace: code, value, threshold, detail. Absent: not recorded (unknown).
+     */
+    qualityGates?: { code: string; passed: boolean; value: number | null; threshold: number | null; detail: string }[];
     /** Where `tf`'s resolution comes from: Welch segment, sample rate, window and segment count. */
     analysis?: AnalysisProvenance;
     /**
@@ -278,6 +285,13 @@ export interface AutotuneV2Result {
     experimental: ExperimentalProposal | null;
     /** What the experimental route withheld and why (also when no proposal exists at all). */
     experimentalWithheld: WithheldItem[];
+    /**
+     * Per axis and route the candidate decision (candidateDecision.ts): the ordered checks with
+     * value, unit, threshold and consequence, the plant, whether the search ran, and its status.
+     */
+    candidateDecisions: Partial<Record<AxisName, { primary: RouteDecision | null; jio: RouteDecision | null }>>;
+    /** Per axis without a candidate: the recording the failed check asks for (recordingInstruction.ts). */
+    recordingInstructions: RecordingInstruction[];
 }
 
 export interface JioAxisChain {
@@ -291,6 +305,8 @@ export interface JioAxisChain {
     /** Whether margins could be read at all, and why not. */
     tuningComputable: boolean;
     reasons: string[];
+    /** The experimental candidate decision on the JIO plant (candidateDecision.ts). */
+    decision?: RouteDecision;
 }
 
 /** One further log offered as a cross-flight repeat of the primary's JIO plant. */
@@ -1071,10 +1087,31 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         buildMeasurementStrategy(p, { sampleRateHz: p.sampleRateHz }),
     );
 
+    // Per axis the experimental candidate decision of the primary route (the JIO one is in jio.chain).
+    const candidateDecisions: AutotuneV2Result["candidateDecisions"] = {};
+    for (const name of AXES) {
+        const ax = axes[name];
+        const c = log.chirp[name];
+        const p = nums(h, `${name}PID`);
+        const current: PidValues | null = p ? { p: p[0], i: p[1], d: p[2], dMax: dmax[AXES.indexOf(name)] ?? 0 } : null;
+        const primary = c
+            ? decideAxis({
+                  route: "primary",
+                  loop: ax?.loop ?? null,
+                  current,
+                  gate: { state: c.state, gates: c.qualityGates },
+                  noPlantReasons: ax ? [] : ["primary_axis_not_identified"],
+                  requiredBandHz: measurementPlan.find((m) => m.axis === name)?.bandHz.primary ?? null,
+              })
+            : null;
+        const jioDecision = jio.chain[name]?.decision ?? null;
+        if (primary || jioDecision) candidateDecisions[name] = { primary, jio: jioDecision };
+    }
     const experimentalOutcome = buildExperimentalProposal({
         primaryItems: items,
         primaryPid: pid,
         jio,
+        decisions: candidateDecisions,
         buildProposal: (selected) => build(selected).proposal,
     });
 
@@ -1191,6 +1228,12 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         // EXPERIMENTAL: computable values with their qualification gaps named; nothing invented.
         experimental: experimentalOutcome.proposal,
         experimentalWithheld: experimentalOutcome.withheld,
+        candidateDecisions,
+        recordingInstructions: recordingInstructions({
+            decisions: candidateDecisions,
+            headers: h,
+            advice: Object.fromEntries(AXES.map((a) => [a, jio.analysis.axes[a]?.sweepAdvice ?? null])),
+        }),
     };
 }
 
@@ -1287,13 +1330,15 @@ function runJioRoute(
         const cfg = controllers[ai];
         const p = nums(h, `${name}PID`);
         if (!a.engineInput || !cfg || !p) {
+            const r = reasons.length ? reasons : ["jio_engine_input_missing"];
             chain[name] = {
                 axis: name,
                 margins: null,
                 candidate: null,
                 plan: null,
                 tuningComputable: false,
-                reasons: reasons.length ? reasons : ["jio_engine_input_missing"],
+                reasons: r,
+                decision: decideAxis({ route: "jio", loop: null, current: null, noPlantReasons: r }),
             };
             continue;
         }
@@ -1357,7 +1402,15 @@ function runJioRoute(
                 ? `cross_flight_repeat:${cross.consistency}:flights:${cross.flights}:z:${cross.zMax!.toFixed(2)}:plant_z:${cross.zPlantMax!.toFixed(2)}`
                 : `cross_flight_repeat:none${others.length ? ":see_crossFlight_candidates" : ""}`,
         );
-        chain[name] = { axis: name, margins, candidate, plan, tuningComputable: computable, reasons };
+        chain[name] = {
+            axis: name,
+            margins,
+            candidate,
+            plan,
+            tuningComputable: computable,
+            reasons,
+            decision: decideAxis({ route: "jio", loop, current, requiredBandHz: plan.bandHz.primary }),
+        };
     }
     const anyChain = Object.values(chain).some((c) => c?.tuningComputable);
     const requiredMeasurements = jioRequirements(analysis, chain, crossFlight);

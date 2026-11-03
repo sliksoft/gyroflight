@@ -45,9 +45,9 @@ export const PID_TARGETS = Object.freeze({
 });
 /** Largest relative change of P, I or D in one proposal. */
 export const MAX_STEP = 0.3;
-const SCALES = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3];
+export const SCALES = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3];
 /** Proposals that move the crossover by less than this are not worth a flight. */
-const MIN_CROSSOVER_GAIN = 1.03;
+export const MIN_CROSSOVER_GAIN = 1.03;
 
 export interface PidValues {
     p: number;
@@ -98,7 +98,7 @@ function pmKnown(m: LoopMargins): boolean {
     return m.phaseMarginDeg !== null && m.crossoverHz !== null;
 }
 
-function candidateCfg(cfg: DigitalControllerConfig, v: PidValues): DigitalControllerConfig {
+export function candidateCfg(cfg: DigitalControllerConfig, v: PidValues): DigitalControllerConfig {
     return { ...cfg, axis: { ...cfg.axis, p: v.p, i: v.i, d: v.d } };
 }
 
@@ -119,7 +119,7 @@ export interface ValidatedSegment {
 /** Fractions of the validated segment tried by the search. */
 const SEGMENT_STEPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
 
-function* searchGrid(current: PidValues, segment: ValidatedSegment | null): Generator<PidValues> {
+export function* searchGrid(current: PidValues, segment: ValidatedSegment | null): Generator<PidValues> {
     if (segment) {
         const [p, i, d, , dMax] = segment.keys;
         const at = (k: string, t: number) => Math.round(segment.base[k] + t * (segment.cand[k] - segment.base[k]));
