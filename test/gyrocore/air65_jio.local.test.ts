@@ -275,13 +275,33 @@ describe.skipIf(!present)("AIR65 CHIRP + JIO route (local)", () => {
                     }
                 }
                 expect(r.experimentalWithheld.some((w) => w.key === `pid_${axis}`)).toBe(true);
-                // Every axis without a candidate gets a recording instruction tied to its failed check.
-                const ins = r.recordingInstructions.find((i) => i.axis === axis)!;
-                expect(ins.kind).toBe("record");
-                expect(ins.trigger.rule).not.toBeNull();
-                expect(ins.timing!.activationsPerFlight).toBe(6);
-                expect(ins.timing!.generatorTimePerFlightS).toBe(6 * ins.timing!.sweepS);
+                // Block 7: every axis lacks information; the plan names its missing frequencies per route,
+                // and the listed hole bins equal the decision_band_gaps count of that route.
+                const need = r.recordingPlan.axes.find((i) => i.axis === axis)!;
+                expect(need.kind).toBe("record");
+                expect(need.trigger!.rule).not.toBeNull();
+                expect(need.missing.length).toBeGreaterThan(0);
+                for (const d of [dec[axis]!.primary!, dec[axis]!.jio!]) {
+                    const gaps = d.checks.find((c) => c.rule === "decision_band_gaps");
+                    const holes = d.missing.filter((iv) => iv.kind === "decision_band_hole");
+                    if (typeof gaps?.value === "number")
+                        expect(holes.reduce((n, iv) => n + iv.bins!, 0)).toBe(gaps.value);
+                    for (const iv of d.missing) {
+                        expect(iv.toHz).toBeGreaterThanOrEqual(iv.fromHz);
+                        expect(typeof iv.threshold).toBe("string");
+                    }
+                }
             }
+            // One shared sweep configuration (pidProfile_t) covering every planner band, 20 s, amplitudes as logged.
+            const plan = r.recordingPlan;
+            expect(plan.recordingNeeded).toBe(true);
+            expect(plan.timing).toMatchObject({ activations: 6, sweepS: 20, activeExcitationS: 120 });
+            const sw = plan.sweep!;
+            expect(sw.valid).toBe(true);
+            expect(sw.coverage.every((c) => c.covered === true)).toBe(true);
+            expect(sw.cli[4]).toBe("set chirp_time_seconds = 20");
+            expect(sw.amplitudes.every((a) => !a.changed && a.current === a.proposed)).toBe(true);
+            expect(plan.existing.secondFlight.state).toBe("unknown");
             expect(dec.yaw!.primary!.firstCause!.rule).toBe("decision_band_gaps");
             expect(typeof dec.yaw!.primary!.firstCause!.value).toBe("number");
             expect(x).toBeNull();

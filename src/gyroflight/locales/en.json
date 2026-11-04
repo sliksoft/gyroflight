@@ -1053,11 +1053,36 @@
     "gyroflightV2DecisionSearch": { "message": "Search (usable of tried)" },
     "gyroflightV2DecisionStatus": { "message": "Status" },
     "gyroflightV2DecisionCause": { "message": "First decisive check: value; threshold; result; consequence" },
-    "gyroflightV2RecordingTitle": { "message": "recording needed (preparation for a flight not yet made)" },
-    "gyroflightV2RecordingNone": { "message": "no new recording requested" },
-    "gyroflightV2RecordingTiming": {
-        "message": "Time: $1 activations of $2 s per flight: generator time $7 s, activation sequence with lead-in, settle and pause about $3 s per flight; $4 flights, about $5 s of activation sequence in total (take-off and landing on top). Experimental: $6."
+    "gyroflightV2PlanTitle": { "message": "Measurement plan (preparation for a flight not yet made)" },
+    "gyroflightV2PlanAgreement": {
+        "message": "Agreed measurement: two complete CHIRP rounds in one flight, roll → pitch → yaw and again roll → pitch → yaw: six activations of 20 s, 120 s of excitation. A second independent flight is supplementary evidence, not a required step. Per axis below: the frequencies the existing data does not show, with the rule, the measured value and the threshold."
     },
+    "gyroflightV2PlanExisting": { "message": "Existing data (the imported flight)" },
+    "gyroflightV2PlanProposed": { "message": "Proposed settings for the next flight" },
+    "gyroflightV2PlanShared": {
+        "message": "One sweep configuration for all axes: chirp_frequency_start_deci_hz, chirp_frequency_end_deci_hz and chirp_time_seconds are settings of the PID profile, shared by roll, pitch and yaw (firmware 43875a55a); only the amplitudes are per axis and stay unchanged. The app writes none of these: you enter them in the CLI."
+    },
+    "gyroflightV2PlanRounds": { "message": "Complete rounds: $1 of $2 ($3 with every sweep usable) — $4. $5" },
+    "gyroflightV2PlanRounds_complete": { "message": "Both agreed rounds are present." },
+    "gyroflightV2PlanRounds_incomplete": {
+        "message": "Not both agreed rounds are present: stationarity stays unknown for an axis with fewer than two complete sweeps."
+    },
+    "gyroflightV2PlanRounds_none": { "message": "No CHIRP sweep in the imported data." },
+    "gyroflightV2PlanSecondFlight": { "message": "Second flight (supplementary): $1 comparable flight(s); $2. $3" },
+    "gyroflightV2PlanSecondFlight_unknown": {
+        "message": "Cross-flight check unknown: not passed, and not required for the experimental proposal."
+    },
+    "gyroflightV2PlanSecondFlight_consistent": { "message": "The compared flights agree." },
+    "gyroflightV2PlanSecondFlight_inconsistent": {
+        "message": "The compared flights disagree: the JIO candidate of that axis is excluded."
+    },
+    "gyroflightV2PlanCoverage": {
+        "message": "Planner bands: $1. Excitation per octave against the existing sweep: $2 (narrower band, same time, amplitude unchanged). Firmware checks: $3."
+    },
+    "gyroflightV2PlanTiming": {
+        "message": "Time: $1 activations of $2 s = $3 s of excitation (firm). With lead-in, settle and pause about $4 s of activation sequence. Experimental: $5."
+    },
+    "gyroflightV2JioSupplementary": { "message": "Supplementary (optional)" },
     "gyroflightV2RecordingChecks": { "message": "Afterwards the app checks" },
     "gyroflightV2ExperimentalTitle": { "message": "Experimental tuning (not released, not hardware-validated)" },
     "gyroflightV2ExperimentalHelp": {
@@ -1118,7 +1143,7 @@
     "gyroflightV2JioProgressExcluded": { "message": "excluded" },
     "gyroflightV2JioProgressMissing": { "message": "missing" },
     "gyroflightV2JioPreparation": {
-        "message": "Measurement preparation (software only): the sweep settings below are for a measurement trial that has not been flown; they are the firmware's exponential chirp settings (start, end, time), amplitude unchanged. The required tuning band is never narrowed to make a set pass. No flight, connection, firmware or CLI/MSP change is made here."
+        "message": "Measurement preparation (software only): the sweep settings below are for a measurement trial that has not been flown; they are the firmware's exponential chirp settings (start, end, time), amplitude unchanged. The required tuning band is never narrowed to make a set pass. The advice below is per axis (diagnostic); the firmware's frequency settings are shared by all axes, so the one configuration to fly is the combined one in the measurement plan (section 4c). No flight, connection, firmware or CLI/MSP change is made here."
     },
     "gyroflightV2JioProgressReached": { "message": "incomplete sweep, analysed up to" },
     "gyroflightV2JioProgressGoalMet": { "message": "covered" },
@@ -1138,13 +1163,13 @@
     "gyroflightV2Need_chirp_yaw_sweep": { "message": "a yaw CHIRP sweep in the log" },
     "gyroflightV2Need_log_at_pid_rate": { "message": "a log at the PID loop rate (Blackbox P interval 1/1)" },
     "gyroflightV2Need_chirp_roll_repeated_sweep_for_stationarity": {
-        "message": "a second roll sweep in the same flight (stationarity check)"
+        "message": "a second complete roll sweep in the same flight (the second agreed round; stationarity check)"
     },
     "gyroflightV2Need_chirp_pitch_repeated_sweep_for_stationarity": {
-        "message": "a second pitch sweep in the same flight (stationarity check)"
+        "message": "a second complete pitch sweep in the same flight (the second agreed round; stationarity check)"
     },
     "gyroflightV2Need_chirp_yaw_repeated_sweep_for_stationarity": {
-        "message": "a second yaw sweep in the same flight (stationarity check)"
+        "message": "a second complete yaw sweep in the same flight (the second agreed round; stationarity check)"
     },
     "gyroflightV2Need_chirp_roll_repeated_sweep_consistent": {
         "message": "two consistent roll sweeps (the repeats differed)"
@@ -1156,13 +1181,13 @@
         "message": "two consistent yaw sweeps (the repeats differed)"
     },
     "gyroflightV2Need_chirp_roll_repeat_flight_for_reproducibility": {
-        "message": "a second independent flight with a roll sweep, same craft and settings (reproducibility between flights; experimental comparison)"
+        "message": "optional: a second independent flight with a roll sweep, same craft and settings (supplementary reproducibility evidence; absent = unknown, not required)"
     },
     "gyroflightV2Need_chirp_pitch_repeat_flight_for_reproducibility": {
-        "message": "a second independent flight with a pitch sweep, same craft and settings (reproducibility between flights; experimental comparison)"
+        "message": "optional: a second independent flight with a pitch sweep, same craft and settings (supplementary reproducibility evidence; absent = unknown, not required)"
     },
     "gyroflightV2Need_chirp_yaw_repeat_flight_for_reproducibility": {
-        "message": "a second independent flight with a yaw sweep, same craft and settings (reproducibility between flights; experimental comparison)"
+        "message": "optional: a second independent flight with a yaw sweep, same craft and settings (supplementary reproducibility evidence; absent = unknown, not required)"
     },
     "gyroflightV2Need_chirp_roll_repeat_flight_consistent": {
         "message": "roll sweeps of two independent flights that agree (the compared flights differed: closed loop or plant)"

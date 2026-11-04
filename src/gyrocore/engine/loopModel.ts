@@ -1430,6 +1430,56 @@ export interface DecisionBandDrops {
     uncertainty: number;
 }
 
+/** One grid bin that did not reach the loop, with the rule that left it out and its value. */
+export interface MissingBin {
+    frequencyHz: number;
+    reason: keyof DecisionBandDrops;
+    /** γ² for coherence; ±k·ε for uncertainty; null where the rule has no number (status, support). */
+    value: number | null;
+    threshold: string;
+}
+
+/** Why candidateLoop left the plant bin `b` out (its own order of checks; see decisionBandCoherence). */
+export function missingBinOf(loop: AxisLoop, b: AxisLoop["plant"]["bins"][number]): MissingBin {
+    const f = b.frequencyHz;
+    // The plant is extracted with LOOP_MIN_COHERENCE, so a low-coherence bin carries that status.
+    if (b.status === "low_coherence" || (b.status === "ok" && b.G && !(b.coherence >= LOOP_MIN_COHERENCE)))
+        return {
+            frequencyHz: f,
+            reason: "coherence",
+            value: Number.isFinite(b.coherence) ? b.coherence : null,
+            threshold: `γ² ≥ ${LOOP_MIN_COHERENCE}`,
+        };
+    if (b.status !== "ok" || !b.G)
+        return { frequencyHz: f, reason: "plantStatus", value: null, threshold: `plant status ok (is ${b.status})` };
+    if (loop.support?.bins.get(f)?.verdict === "UNSUPPORTED")
+        return { frequencyHz: f, reason: "support", value: null, threshold: "excitation support not UNSUPPORTED" };
+    const err = loop.uncertainty?.relErr?.get(f);
+    if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr)
+        return {
+            frequencyHz: f,
+            reason: "uncertainty",
+            value: UNCERTAINTY.coverage * err,
+            threshold: `±${UNCERTAINTY.coverage}ε < ${UNCERTAINTY.maxCoverageRelErr}`,
+        };
+    return { frequencyHz: f, reason: "plantStatus", value: null, threshold: "kept by candidateLoop" };
+}
+
+/**
+ * The grid bins `supportIssues` counts as unidentified_bins_inside_band (same range: the decision
+ * band from decisionBandStartHz(fc), or the kept bins' own range without a crossing, up to the last
+ * kept bin), each with the rule that left it out. Its length equals that reason's N.
+ */
+export function missingBandBins(loop: AxisLoop, pts: LoopPoint[], fc: number | null): MissingBin[] {
+    if (pts.length < 2) return [];
+    const lo = fc !== null ? decisionBandStartHz(fc) : pts[0].f;
+    const hi = pts[pts.length - 1].f;
+    const kept = new Set(pts.map((p) => p.f));
+    return loop.plant.bins
+        .filter((b) => b.frequencyHz >= lo && b.frequencyHz <= hi && !kept.has(b.frequencyHz))
+        .map((b) => missingBinOf(loop, b));
+}
+
 /** The coherence over the decision band of `loop` around `fc`, up to the last kept bin (audit B2). */
 export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: number): DecisionBandCoherence | null {
     if (pts.length < 2) return null;
@@ -1441,7 +1491,6 @@ export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: numb
     let min = Infinity;
     let sum = 0;
     const dropped: DecisionBandDrops = { plantStatus: 0, coherence: 0, support: 0, uncertainty: 0 };
-    const relErr = loop.uncertainty?.relErr;
     for (const b of loop.plant.bins) {
         if (!(b.frequencyHz >= fromHz) || b.frequencyHz > toHz) continue;
         const g2 = Number.isFinite(b.coherence) ? b.coherence : 0;
@@ -1452,17 +1501,8 @@ export function decisionBandCoherence(loop: AxisLoop, pts: LoopPoint[], fc: numb
             keptBins++;
             continue;
         }
-        // The first reason candidateLoop would leave the bin out for (its own order of checks); the
-        // plant is extracted with LOOP_MIN_COHERENCE, so a low-coherence bin carries that status.
-        if (b.status === "low_coherence" || (b.status === "ok" && b.G && !(b.coherence >= LOOP_MIN_COHERENCE)))
-            dropped.coherence++;
-        else if (b.status !== "ok" || !b.G) dropped.plantStatus++;
-        else if (loop.support?.bins.get(b.frequencyHz)?.verdict === "UNSUPPORTED") dropped.support++;
-        else {
-            const err = relErr?.get(b.frequencyHz);
-            if (err !== undefined && UNCERTAINTY.coverage * err >= UNCERTAINTY.maxCoverageRelErr) dropped.uncertainty++;
-            else dropped.plantStatus++;
-        }
+        // The first reason candidateLoop would leave the bin out for (its own order of checks).
+        dropped[missingBinOf(loop, b).reason]++;
     }
     return gridBins
         ? { fromHz, toHz, gridBins, keptBins, minCoherence: min, meanCoherence: sum / gridBins, dropped }

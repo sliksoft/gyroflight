@@ -33,8 +33,16 @@
  * exist and no grid candidate meets the targets.
  */
 
-import type { AxisLoop, LoopMargins } from "@/gyrocore/engine/loopModel";
-import { LOOP_MIN_COHERENCE, loopMargins, UNCERTAINTY } from "@/gyrocore/engine/loopModel";
+import type { AxisLoop, LoopMargins, MissingBin } from "@/gyrocore/engine/loopModel";
+import {
+    candidateLoop,
+    LOOP_MIN_COHERENCE,
+    loopMargins,
+    missingBandBins,
+    missingBinOf,
+    UNCERTAINTY,
+} from "@/gyrocore/engine/loopModel";
+import { MEAN_COHERENCE_BAND_HZ } from "@/gyrocore/chirp/quality";
 import {
     candidateCfg,
     MAX_STEP,
@@ -77,6 +85,97 @@ export type DecisionStatus =
     | "no_change_needed"
     | "candidate_found";
 
+/**
+ * A frequency interval this route's data does not show, with the rule, the measured value and the
+ * threshold. Adjacent grid bins with the same reason form one interval (from / to are bin centres).
+ *   - decision_band_hole: bins inside the decision band left out of the loop (decision_band_gaps).
+ *   - below_identified_band / above_identified_band: the part of the planner band the identified
+ *     band does not reach (identified_band_top), with the rule of the first bin outside it.
+ *   - quality_gate_band: the primary gate's fixed band when its mean coherence failed and was not waived.
+ */
+export interface MissingInterval {
+    kind: "decision_band_hole" | "below_identified_band" | "above_identified_band" | "quality_gate_band";
+    fromHz: number;
+    toHz: number;
+    /** Grid bins in the interval; null for an interval that is a band, not bins. */
+    bins: number | null;
+    reason: MissingBin["reason"] | "low_mean_coherence";
+    /** The worst value over the interval (lowest γ², largest ±kε); null: the rule has no number or it is unknown. */
+    value: number | null;
+    unit: string;
+    threshold: string;
+}
+
+/** Adjacent missing bins (one grid step apart) with the same reason, as intervals. */
+export function missingIntervals(bins: MissingBin[], stepHz: number | null): MissingInterval[] {
+    const out: MissingInterval[] = [];
+    const worse = (r: MissingBin["reason"], a: number | null, b: number | null) =>
+        a === null ? b : b === null ? a : r === "coherence" ? Math.min(a, b) : Math.max(a, b);
+    for (const b of bins) {
+        const last = out[out.length - 1];
+        const adjacent =
+            last && last.reason === b.reason && stepHz !== null && b.frequencyHz - last.toHz <= 1.5 * stepHz;
+        if (adjacent) {
+            last.toHz = b.frequencyHz;
+            last.bins = (last.bins ?? 0) + 1;
+            last.value = worse(b.reason, last.value, b.value);
+            continue;
+        }
+        out.push({
+            kind: "decision_band_hole",
+            fromHz: b.frequencyHz,
+            toHz: b.frequencyHz,
+            bins: 1,
+            reason: b.reason,
+            value: b.value,
+            unit: b.reason === "coherence" ? "γ²" : b.reason === "uncertainty" ? "±kε" : "",
+            threshold: b.threshold,
+        });
+    }
+    return out;
+}
+
+/** The planner band's parts outside the identified band, with the rule of the first bin outside it. */
+function bandShortfall(
+    loop: AxisLoop,
+    band: [number, number] | null,
+    required: [number, number] | null,
+): MissingInterval[] {
+    if (!required) return [];
+    const bins = loop.plant.bins;
+    const iv = (
+        kind: MissingInterval["kind"],
+        from: number,
+        to: number,
+        b: (typeof bins)[number] | null,
+    ): MissingInterval => {
+        const m = b ? missingBinOf(loop, b) : null;
+        return {
+            kind,
+            fromHz: from,
+            toHz: to,
+            bins: null,
+            reason: m?.reason ?? "plantStatus",
+            value: m?.value ?? null,
+            unit: m?.reason === "coherence" ? "γ²" : m?.reason === "uncertainty" ? "±kε" : "",
+            threshold: m
+                ? `${m.threshold} (first bin outside the identified band: ${b!.frequencyHz.toFixed(1)} Hz)`
+                : "an identified band",
+        };
+    };
+    if (!band) return [iv("above_identified_band", required[0], required[1], null)];
+    const out: MissingInterval[] = [];
+    if (band[0] > required[0] + 1e-9) {
+        const below = [...bins].reverse().find((b) => b.frequencyHz < band[0] - 1e-9) ?? null;
+        out.push(iv("below_identified_band", required[0], band[0], below));
+    }
+    if (band[1] < required[1] - 1e-9) {
+        const above = bins.find((b) => b.frequencyHz > band[1] + 1e-9) ?? null;
+        out.push(iv("above_identified_band", above ? above.frequencyHz : band[1], required[1], above));
+    }
+    return out;
+}
+
 export interface RouteDecision {
     route: "primary" | "jio";
     plant: "present" | "present_with_limitation" | "absent";
@@ -96,6 +195,8 @@ export interface RouteDecision {
     candidate: AxisPidProposal | null;
     /** The measurement this route rests on may be used by the experimental route. */
     measurementUsable: boolean;
+    /** The frequencies this route's data does not show (empty: none found, or no plant to look at). */
+    missing: MissingInterval[];
     /** Qualification gates this route waived for the experimental route (named, not hidden). */
     waived: string[];
 }
@@ -210,6 +311,7 @@ export function decideAxis(o: {
 }): RouteDecision {
     const checks: DecisionCheck[] = [];
     const waived: string[] = [];
+    const missing: MissingInterval[] = [];
     const out = (status: DecisionStatus, extra: Partial<RouteDecision> = {}): RouteDecision => {
         const firstCause = checks.find((c) => c.result === "fail" || c.result === "unknown") ?? null;
         return {
@@ -226,6 +328,7 @@ export function decideAxis(o: {
             firstCause: status === "candidate_found" || status === "no_change_needed" ? null : firstCause,
             candidate: null,
             measurementUsable: false,
+            missing,
             waived,
             ...extra,
         };
@@ -250,6 +353,15 @@ export function decideAxis(o: {
     const loop = o.loop;
     const cur = loopMargins(loop);
     const band = cur.evidence?.bandHz ?? null;
+    // What the data does not show: the holes supportIssues counts (same range, same bins) and the
+    // planner band outside the identified band.
+    const plantStep =
+        loop.analysisStepHz ??
+        (loop.plant.bins.length > 1 ? loop.plant.bins[1].frequencyHz - loop.plant.bins[0].frequencyHz : null);
+    missing.push(
+        ...missingIntervals(missingBandBins(loop, candidateLoop(loop, { cfg: loop.cfg }), cur.crossoverHz), plantStep),
+        ...bandShortfall(loop, band, o.requiredBandHz ?? null),
+    );
 
     // 2. Primary only: the fixed-band coherence gate (chirp/quality.ts MIN_MEAN_BAND_COHERENCE).
     let measurementUsable = true;
@@ -288,6 +400,17 @@ export function decideAxis(o: {
                       ? `release blocked; experimental route uses the decision band ${decision!.fromHz.toFixed(1)}–${decision!.toHz.toFixed(1)} Hz (min γ² ${decision!.minCoherence.toFixed(2)}, no bin dropped for coherence or support)`
                       : `measurement rejected; decision band ${decision ? `${decision.fromHz.toFixed(1)}–${decision.toHz.toFixed(1)} Hz drops ${decision.dropped?.coherence ?? "unknown"} bin(s) for coherence, ${decision.dropped?.support ?? "unknown"} for support` : "unknown"}`,
             });
+            if (failed && !(decisionSupported && !failedOthers.length))
+                missing.push({
+                    kind: "quality_gate_band",
+                    fromHz: MEAN_COHERENCE_BAND_HZ[0],
+                    toHz: MEAN_COHERENCE_BAND_HZ[1],
+                    bins: null,
+                    reason: "low_mean_coherence",
+                    value: coh.value,
+                    unit: "mean γ²",
+                    threshold: `≥ ${coh.threshold ?? 0.6}`,
+                });
             if (failed && decisionSupported && !failedOthers.length)
                 waived.push(
                     `quality_gate:low_coherence:${(coh.value ?? NaN).toFixed(3)}<${coh.threshold ?? 0.6}:5-100Hz`,

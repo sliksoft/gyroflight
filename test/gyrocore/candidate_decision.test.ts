@@ -20,8 +20,9 @@
  */
 
 /*
- * Block 6: the per-axis candidate decision (candidateDecision.ts), the recording instructions it
- * drives (recordingInstruction.ts) and the experimental proposal built from measured in-band
+ * Block 6/7: the per-axis candidate decision (candidateDecision.ts), the agreed recording plan it
+ * drives (recordingInstruction.ts: two CHIRP rounds, one shared sweep configuration, the missing
+ * frequencies per axis) and the experimental proposal built from measured in-band
  * margins. A missing plant, an insufficient band and a real search failure are separate statuses;
  * unknown is never a zero; nothing is fabricated. SIMULATION ONLY.
  */
@@ -33,7 +34,12 @@ import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
 import { decideAxis, metricStates, type RouteDecision } from "../../src/gyrocore/engine/candidateDecision";
-import { recordingInstructions, RECORDING_TIMING } from "../../src/gyrocore/engine/recordingInstruction";
+import {
+    deciHzText,
+    MEASUREMENT_AGREEMENT,
+    recordingPlan,
+    RECORDING_TIMING,
+} from "../../src/gyrocore/engine/recordingInstruction";
 import { buildExperimentalProposal } from "../../src/gyrocore/engine/experimentalProposal";
 import type { LoopMargins } from "../../src/gyrocore/engine/loopModel";
 import type { AxisPidProposal } from "../../src/gyrocore/engine/pidOptimizer";
@@ -220,6 +226,9 @@ describe("measured-margin search and decision_band_gaps on simulated flights (bl
         const store = useAutotuneV2Store();
         store.state = "done";
         store.result = r;
+        // No second flight imported: the cross-flight check is unknown, not passed, and withholds nothing.
+        expect(r.recordingPlan.existing.secondFlight).toMatchObject({ flights: 0, state: "unknown" });
+        expect(r.experimentalWithheld.find((w) => w.key === "pid_roll")).toBeUndefined();
         const decision = experimentalWriteDecision(x, { recompute: false });
         expect(decision.steps.find((st) => st.name === "analysis_binding")!.reasons).toEqual([]);
         expect(decision.steps.find((st) => st.name === "computable_items")!.reasons).toEqual([]);
@@ -240,7 +249,21 @@ describe("measured-margin search and decision_band_gaps on simulated flights (bl
         expect(r.experimentalWithheld.find((w) => w.key === "pid_roll")!.reasons).toContain(
             "primary:plant_band_insufficient",
         );
-        expect(r.recordingInstructions.find((i) => i.axis === "roll")!.kind).toBe("record");
+        // The missing frequencies: the listed bins are exactly the bins the gap rule counts, inside the hole.
+        const roll = r.recordingPlan.axes.find((a) => a.axis === "roll")!;
+        expect(roll.kind).toBe("record");
+        const holes = roll.missing
+            .find((m) => m.route === "primary")!
+            .intervals.filter((iv) => iv.kind === "decision_band_hole");
+        expect(holes.reduce((n, iv) => n + iv.bins!, 0)).toBe(3);
+        expect(d.missing.filter((iv) => iv.kind === "decision_band_hole")).toEqual(holes);
+        for (const iv of holes) {
+            expect(iv.fromHz).toBeGreaterThanOrEqual(9);
+            expect(iv.toHz).toBeLessThanOrEqual(21);
+            expect(iv.threshold).toMatch(/γ² ≥ 0\.8|±2ε < 0\.5|support|plant status/);
+            if (iv.reason === "coherence") expect(iv.value).toBeLessThan(0.8);
+        }
+        expect(r.recordingPlan.sweep!.valid).toBe(true);
     }, 120_000);
 });
 
@@ -248,6 +271,7 @@ const advice = (end: number): JioSweepAdvice => ({
     current: { f0Hz: 0.2, f1Hz: 600, durationS: 20, secondsPerOctave: 1.7, octavesAboveSupport: 3 },
     tuningBandHz: [6, 77],
     bandSufficientForTuning: false,
+    target: { chirp_frequency_start_deci_hz: 20, chirp_frequency_end_deci_hz: end },
     suggested: {
         chirp_frequency_start_deci_hz: 20,
         chirp_frequency_end_deci_hz: end,
@@ -291,67 +315,186 @@ function decision(status: RouteDecision["status"], extra: Partial<RouteDecision>
         firstCause: status === "candidate_found" || status === "no_change_needed" ? null : fail,
         candidate: null,
         measurementUsable: true,
+        missing: [],
         waived: [],
         ...extra,
     };
 }
+const rounds = (roll: number, pitch: number, yaw: number, present = [roll, pitch, yaw]) => ({
+    roll: { present: present[0], complete: roll, usableComplete: roll },
+    pitch: { present: present[1], complete: pitch, usableComplete: pitch },
+    yaw: { present: present[2], complete: yaw, usableComplete: yaw },
+});
+const insufficient = { primary: decision("plant_band_insufficient"), jio: null };
+const plan = (o: Partial<Parameters<typeof recordingPlan>[0]> = {}) =>
+    recordingPlan({
+        decisions: { roll: insufficient, pitch: insufficient, yaw: insufficient },
+        headers: HEADERS,
+        advice: {},
+        plannerBandsHz: {},
+        sweeps: rounds(2, 2, 2),
+        crossFlight: {},
+        ...o,
+    });
 
-describe("recordingInstructions follow the failed check", () => {
-    it("band insufficient: firmware-settable sweep in dHz, debug mode, log rate, axis order, timing; nothing silently changed", () => {
-        const [ins] = recordingInstructions({
-            decisions: { roll: { primary: decision("plant_band_insufficient"), jio: null } },
-            headers: HEADERS,
-            advice: { roll: advice(1200) },
+describe("recordingPlan: the agreed two CHIRP rounds (block 7)", () => {
+    it("one flight, two rounds roll → pitch → yaw, six activations of 20 s = 120 s; the second flight is optional", () => {
+        const p = plan();
+        expect(MEASUREMENT_AGREEMENT).toMatchObject({ rounds: 2, activations: 6, sweepS: 20, activeExcitationS: 120 });
+        expect(p.timing).toMatchObject({ activations: 6, sweepS: 20, activeExcitationS: 120 });
+        const per = RECORDING_TIMING.leadInS + 20 + RECORDING_TIMING.settleS + RECORDING_TIMING.pauseS;
+        expect(p.timing.sequenceS).toBe(6 * per);
+        expect(p.timing).not.toHaveProperty("flights");
+        expect(p.procedure.find((x) => x.startsWith("Round 1"))).toContain("roll, then pitch, then yaw");
+        expect(p.procedure.find((x) => x.startsWith("Round 2"))).toContain("roll, pitch, yaw");
+        expect(p.procedure.join(" ")).toContain("120 s of excitation");
+        expect(p.procedure.join(" ")).not.toMatch(/second, independent flight/i);
+        expect(p.procedure.find((x) => x.startsWith("Switched off early"))).toContain("advances anyway");
+        expect(p.secondFlight).toMatch(/^Optional/);
+        expect(p.secondFlight).toContain("stays unknown");
+        expect(p.secondFlight).toContain("not a pass");
+        expect(p.note).toContain("no guarantee of a tuning proposal");
+    });
+
+    it("one shared sweep configuration: lowest start, highest end over the axes, covering every planner band", () => {
+        const p = plan({
+            advice: { roll: advice(1200), pitch: advice(1500), yaw: null },
+            plannerBandsHz: {
+                roll: [[6, 66], null],
+                pitch: [
+                    [6, 109],
+                    [6, 72],
+                ],
+                yaw: [[5, 180]],
+            },
         });
-        expect(ins.kind).toBe("record");
-        expect(ins.trigger).toMatchObject({
-            route: "primary",
-            status: "plant_band_insufficient",
-            rule: "gain_margin_shown_by_band",
-            value: 2.86,
-        });
-        const s = Object.fromEntries(ins.settings.map((x) => [x.name, x]));
-        expect(s.debug_mode).toMatchObject({ current: "96", changed: false });
-        expect(s.blackbox_sample_rate.changed).toBe(false);
-        expect(s.chirp_frequency_end_deci_hz).toMatchObject({
-            current: 6000,
-            required: 1200,
-            unit: "dHz (0.1 Hz)",
+        const sw = p.sweep!;
+        expect(sw.scope).toBe("pid_profile_shared_by_all_axes");
+        const s = Object.fromEntries(sw.settings.map((x) => [x.name, x]));
+        expect(s.chirp_frequency_start_deci_hz).toMatchObject({
+            current: 2,
+            proposed: 20,
+            unit: "dHz",
+            hz: { current: 0.2, proposed: 2 },
             changed: true,
         });
-        expect(s.chirp_frequency_start_deci_hz).toMatchObject({ current: 2, required: 20, changed: true });
-        expect(s.chirp_time_seconds).toMatchObject({ current: 20, required: 20, changed: false });
-        expect(s.chirp_amplitude_roll).toMatchObject({ current: "230", required: "230", changed: false });
-        expect(ins.procedure.some((p) => p.includes("roll → pitch → yaw → roll"))).toBe(true);
-        const per = RECORDING_TIMING.leadInS + 20 + RECORDING_TIMING.settleS + RECORDING_TIMING.pauseS;
-        expect(ins.timing).toMatchObject({
-            activationsPerFlight: 6,
-            sweepS: 20,
-            perActivationS: per,
-            chirpTimePerFlightS: 6 * per,
-            flights: 2,
-            totalChirpTimeS: 12 * per,
+        // yaw has no advice: its planner top 180 Hz decides the shared end (rounded up to 10 Hz).
+        expect(s.chirp_frequency_end_deci_hz).toMatchObject({
+            current: 6000,
+            proposed: 1800,
+            hz: { current: 600, proposed: 180 },
+            changed: true,
         });
-        expect(ins.timing!.experimental.some((e) => e.includes("not known to the app"))).toBe(true);
-        expect(ins.completionChecks.some((c) => c.includes("γ² ≥ 0.8"))).toBe(true);
-        expect(ins.notChanged.join(" ")).toContain("anti-gravity");
-        expect(ins.note).toContain("no guarantee of a proposal");
+        expect(s.chirp_time_seconds).toMatchObject({ current: 20, proposed: 20, changed: false });
+        expect(sw.amplitudes.map((a) => [a.name, a.current, a.proposed, a.changed])).toEqual([
+            ["chirp_amplitude_roll", 230, 230, false],
+            ["chirp_amplitude_pitch", 230, 230, false],
+            ["chirp_amplitude_yaw", 180, 180, false],
+        ]);
+        expect(sw.cli).toEqual([
+            "set debug_mode = CHIRP",
+            "set blackbox_sample_rate = 1/1",
+            "set chirp_frequency_start_deci_hz = 20",
+            "set chirp_frequency_end_deci_hz = 1800",
+            "set chirp_time_seconds = 20",
+            "save",
+        ]);
+        expect(sw.coverage.map((c) => [c.axis, c.covered])).toEqual([
+            ["roll", true],
+            ["pitch", true],
+            ["yaw", true],
+        ]);
+        expect(sw.coverage.find((c) => c.axis === "pitch")!.plannerBandHz).toEqual([6, 109]);
+        expect(sw.valid).toBe(true);
+        expect(sw.firmwareChecks.every((c) => c.startsWith("ok:"))).toBe(true);
+        // Narrower band, same 20 s: more excitation per octave than the 0.2–600 Hz sweep.
+        expect(sw.excitationGainDb!).toBeGreaterThan(0);
+    });
+
+    it("firmware limits: an end above 1000 Hz is clamped and the axis is named not covered; a time other than 20 s is reset", () => {
+        const p = plan({
+            headers: { ...HEADERS, chirp_time_seconds: "30" },
+            plannerBandsHz: { roll: [[6, 1200]] },
+        });
+        const s = Object.fromEntries(p.sweep!.settings.map((x) => [x.name, x]));
+        expect(s.chirp_frequency_end_deci_hz.proposed).toBe(10000);
+        expect(p.sweep!.coverage.find((c) => c.axis === "roll")!.covered).toBe(false);
+        expect(p.sweep!.coverage.find((c) => c.axis === "pitch")!.covered).toBeNull();
+        expect(p.sweep!.valid).toBe(true);
+        expect(s.chirp_time_seconds).toMatchObject({ current: 30, proposed: 20, changed: true });
     });
 
     it("a wrong debug mode and log rate are named as changes", () => {
-        const [ins] = recordingInstructions({
-            decisions: { pitch: { primary: decision("plant_not_identified"), jio: null } },
-            headers: { ...HEADERS, debug_mode: "0", "P interval": "1/2" },
-            advice: {},
-        });
-        const s = Object.fromEntries(ins.settings.map((x) => [x.name, x]));
-        expect(s.debug_mode.changed).toBe(true);
-        expect(s.blackbox_sample_rate.changed).toBe(true);
-        expect(s.chirp_frequency_end_deci_hz).toMatchObject({ required: 6000, changed: false });
+        const p = plan({ headers: { ...HEADERS, debug_mode: "0", "P interval": "1/2" } });
+        const s = Object.fromEntries(p.sweep!.settings.map((x) => [x.name, x]));
+        expect(s.debug_mode).toMatchObject({ current: "0", proposed: "CHIRP", changed: true });
+        expect(s.blackbox_sample_rate).toMatchObject({ current: "1/2", proposed: "1/1", changed: true });
     });
 
-    it("a search constrained by a Verified Tune segment that moves feedforward asks for no sweep design", () => {
-        const [ins] = recordingInstructions({
+    it("existing data apart: complete, incomplete (five activations, one stopped early) and no rounds", () => {
+        const full = plan();
+        expect(full.existing.rounds).toMatchObject({ required: 2, complete: 2, usable: 2, state: "complete" });
+        const five = plan({ sweeps: rounds(2, 2, 1) });
+        expect(five.existing.rounds).toMatchObject({ complete: 1, state: "incomplete" });
+        const early = plan({ sweeps: rounds(2, 1, 2, [2, 2, 2]) });
+        expect(early.existing.rounds).toMatchObject({ complete: 1, state: "incomplete" });
+        expect(early.existing.rounds.perAxis.find((a) => a.axis === "pitch")).toMatchObject({
+            present: 2,
+            complete: 1,
+        });
+        const none = plan({ sweeps: {} });
+        expect(none.existing.rounds).toMatchObject({ complete: 0, state: "none" });
+        // The existing settings are as logged, with Hz beside dHz; they are not the proposal.
+        const e = Object.fromEntries(full.existing.settings.map((x) => [x.name, x]));
+        expect(e.chirp_frequency_end_deci_hz).toMatchObject({ current: "6000", hz: { current: 600 }, changed: false });
+    });
+
+    it("second flight: absent = unknown (not passed), consistent, inconsistent", () => {
+        expect(plan().existing.secondFlight).toMatchObject({ flights: 0, state: "unknown" });
+        const ok = { flights: 1, consistency: "consistent" as const };
+        expect(plan({ crossFlight: { roll: ok, pitch: ok, yaw: ok } }).existing.secondFlight.state).toBe("consistent");
+        expect(plan({ crossFlight: { roll: ok } }).existing.secondFlight.state).toBe("unknown");
+        expect(
+            plan({ crossFlight: { roll: ok, pitch: { flights: 1, consistency: "inconsistent" } } }).existing
+                .secondFlight.state,
+        ).toBe("inconsistent");
+    });
+
+    it("missing frequencies per axis and route reach the plan; a search limit or a candidate asks for no sweep", () => {
+        const hole = {
+            kind: "decision_band_hole" as const,
+            fromHz: 12.2,
+            toHz: 14.6,
+            bins: 3,
+            reason: "coherence" as const,
+            value: 0.61,
+            unit: "γ²",
+            threshold: "γ² ≥ 0.8",
+        };
+        const p = plan({
+            decisions: {
+                roll: { primary: decision("plant_band_insufficient", { missing: [hole] }), jio: null },
+                pitch: {
+                    primary: decision("measurement_rejected_by_quality_gate"),
+                    jio: decision("search_limit_max_step", {
+                        route: "jio",
+                        searchRan: true,
+                        candidatesTried: 169,
+                        candidatesUsable: 102,
+                    }),
+                },
+                yaw: { primary: decision("candidate_found"), jio: null },
+            },
+        });
+        expect(p.axes.map((a) => [a.axis, a.kind])).toEqual([
+            ["roll", "record"],
+            ["pitch", "search_limit"],
+            ["yaw", "candidate"],
+        ]);
+        expect(p.axes[0].missing).toEqual([{ route: "primary", intervals: [hole] }]);
+        expect(p.axes[1].note).toContain("More data does not lift this");
+        expect(p.recordingNeeded).toBe(true);
+        const none = plan({
             decisions: {
                 pitch: {
                     primary: decision("search_constrained_by_verified_tune", {
@@ -367,35 +510,20 @@ describe("recordingInstructions follow the failed check", () => {
                     }),
                     jio: null,
                 },
+                roll: { primary: decision("candidate_found"), jio: null },
+                yaw: { primary: decision("no_change_needed"), jio: null },
             },
-            headers: HEADERS,
-            advice: {},
         });
-        expect(ins).toMatchObject({ axis: "pitch", kind: "none_search_limit", settings: [], timing: null });
-        expect(ins.note).toContain("gain_change_flight_with_feedforward_unchanged");
-        expect(ins.note).toContain("f_pitch:120->140");
+        expect(none.recordingNeeded).toBe(false);
+        expect(none.sweep).toBeNull();
+        expect(none.procedure).toEqual([]);
+        expect(none.axes[1].note).toContain("gain_change_flight_with_feedforward_unchanged");
     });
 
-    it("a usable plant whose search fails asks for no data; a found candidate needs no instruction", () => {
-        const out = recordingInstructions({
-            decisions: {
-                roll: {
-                    primary: decision("measurement_rejected_by_quality_gate"),
-                    jio: decision("search_limit_max_step", {
-                        route: "jio",
-                        searchRan: true,
-                        candidatesTried: 169,
-                        candidatesUsable: 102,
-                    }),
-                },
-                yaw: { primary: decision("candidate_found"), jio: null },
-            },
-            headers: HEADERS,
-            advice: {},
-        });
-        expect(out).toHaveLength(1);
-        expect(out[0]).toMatchObject({ axis: "roll", kind: "none_search_limit", settings: [], timing: null });
-        expect(out[0].note).toContain("More data does not lift this");
+    it("frequency display: dHz with Hz beside it", () => {
+        expect(deciHzText(1900)).toBe("1900 dHz (190.0 Hz)");
+        expect(deciHzText(20)).toBe("20 dHz (2.0 Hz)");
+        expect(deciHzText(null)).toBe("unknown");
     });
 });
 

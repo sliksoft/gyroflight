@@ -346,12 +346,19 @@
                             <span v-if="pr.next" class="text-dimmed"
                                 >{{ $t("gyroflightV2JioProgressNext") }}: {{ pr.next }}</span
                             >
+                            <span v-if="pr.supplementary" class="text-dimmed" data-gyrocore="v2-jio-supplementary">
+                                {{ $t("gyroflightV2JioSupplementary") }}: {{ pr.supplementary }}</span
+                            >
                         </li>
                     </ul>
                 </template>
                 <p class="text-sm text-dimmed" data-gyrocore="v2-jio-needs">
                     {{ $t("gyroflightV2JioNeeds") }}:
-                    {{ result.jio.requiredMeasurements.map(measurementText).join("; ") || "--" }}
+                    {{ jioNeeds.required.map(measurementText).join("; ") || "--" }}
+                    <template v-if="jioNeeds.supplementary.length">
+                        · {{ $t("gyroflightV2JioSupplementary") }}:
+                        {{ jioNeeds.supplementary.map(measurementText).join("; ") }}
+                    </template>
                 </p>
                 <p v-if="jioMimoText" class="text-sm text-dimmed" data-gyrocore="v2-jio-mimo">{{ jioMimoText }}</p>
             </template>
@@ -648,35 +655,91 @@
                 </tbody>
             </table>
             <div
-                v-for="ins in recordingRows"
-                :key="ins.axis"
+                v-if="plan"
                 class="text-sm mt-2"
-                data-gyrocore="v2-recording-instruction"
-                :data-axis="ins.axis"
-                :data-kind="ins.kind"
+                data-gyrocore="v2-recording-plan"
+                :data-needed="plan.recordingNeeded ? 'yes' : 'no'"
             >
-                <p class="font-bold">{{ ins.axis }}: {{ ins.title }}</p>
-                <p class="text-dimmed">{{ ins.note }}</p>
-                <table v-if="ins.settings.length" class="gyroflight-workflow-table">
-                    <tbody>
-                        <tr
-                            v-for="st in ins.settings"
-                            :key="st.name"
-                            :data-setting="st.name"
-                            :data-changed="st.changed ? 'yes' : 'no'"
+                <p class="font-bold">{{ $t("gyroflightV2PlanTitle") }}</p>
+                <p class="text-dimmed">{{ $t("gyroflightV2PlanAgreement") }}</p>
+                <div
+                    v-for="ax in planAxes"
+                    :key="ax.axis"
+                    class="mt-1"
+                    data-gyrocore="v2-recording-axis"
+                    :data-axis="ax.axis"
+                    :data-kind="ax.kind"
+                >
+                    <p>
+                        <span class="font-bold">{{ ax.axis }}</span
+                        >: {{ ax.note }}
+                    </p>
+                    <ul v-if="ax.missing.length" class="list-disc ps-5">
+                        <li
+                            v-for="(m, i) in ax.missing"
+                            :key="i"
+                            data-gyrocore="v2-missing-interval"
+                            :data-route="m.route"
+                            :data-kind="m.kind"
                         >
+                            {{ m.text }}
+                        </li>
+                    </ul>
+                </div>
+
+                <p class="font-bold mt-2">{{ $t("gyroflightV2PlanExisting") }}</p>
+                <p data-gyrocore="v2-plan-rounds" :data-state="plan.existing.rounds.state">{{ planRoundsText }}</p>
+                <p data-gyrocore="v2-plan-second-flight" :data-state="plan.existing.secondFlight.state">
+                    {{ planSecondFlightText }}
+                </p>
+                <table class="gyroflight-workflow-table" data-gyrocore="v2-plan-existing">
+                    <tbody>
+                        <tr v-for="st in plan.existing.settings" :key="st.name" :data-setting="st.name">
                             <td>{{ st.name }}</td>
-                            <td>{{ st.current ?? "unknown" }}</td>
-                            <td :class="st.changed ? 'font-bold' : ''">{{ st.required }} {{ st.unit }}</td>
-                            <td class="text-dimmed">{{ st.basis }}</td>
+                            <td>{{ settingValue(st.current, st.unit, st.hz?.current ?? null) }}</td>
                         </tr>
                     </tbody>
                 </table>
-                <ol v-if="ins.procedure.length" class="list-decimal ps-5">
-                    <li v-for="(step, i) in ins.procedure" :key="i">{{ step }}</li>
-                </ol>
-                <p v-if="ins.timing" data-gyrocore="v2-recording-timing">{{ ins.timing }}</p>
-                <p v-if="ins.checks" class="text-dimmed">{{ $t("gyroflightV2RecordingChecks") }}: {{ ins.checks }}</p>
+
+                <template v-if="plan.sweep">
+                    <p class="font-bold mt-2">{{ $t("gyroflightV2PlanProposed") }}</p>
+                    <p class="text-dimmed">{{ $t("gyroflightV2PlanShared") }}</p>
+                    <table class="gyroflight-workflow-table" data-gyrocore="v2-plan-settings">
+                        <tbody>
+                            <tr
+                                v-for="st in [...plan.sweep.settings, ...plan.sweep.amplitudes]"
+                                :key="st.name"
+                                :data-setting="st.name"
+                                :data-changed="st.changed ? 'yes' : 'no'"
+                            >
+                                <td>{{ st.name }}</td>
+                                <td>{{ settingValue(st.current, st.unit, st.hz?.current ?? null) }}</td>
+                                <td :class="st.changed ? 'font-bold' : ''">
+                                    {{ settingValue(st.proposed, st.unit, st.hz?.proposed ?? null) }}
+                                </td>
+                                <td class="text-dimmed">{{ st.basis }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <pre class="text-xs" data-gyrocore="v2-plan-cli">{{ plan.sweep.cli.join("\n") }}</pre>
+                    <p
+                        class="text-dimmed"
+                        data-gyrocore="v2-plan-coverage"
+                        :data-valid="plan.sweep.valid ? 'yes' : 'no'"
+                    >
+                        {{ planCoverageText }}
+                    </p>
+                    <ol class="list-decimal ps-5" data-gyrocore="v2-plan-procedure">
+                        <li v-for="(step, i) in plan.procedure" :key="i">{{ step }}</li>
+                    </ol>
+                    <p data-gyrocore="v2-recording-timing">{{ planTimingText }}</p>
+                </template>
+                <p data-gyrocore="v2-plan-second-flight-help">{{ plan.secondFlight }}</p>
+                <p class="text-dimmed">
+                    {{ $t("gyroflightV2RecordingChecks") }}: {{ plan.completionChecks.join(" ") }}
+                </p>
+                <p class="text-dimmed">{{ plan.notChanged.join("; ") }}</p>
+                <p class="text-dimmed" data-gyrocore="v2-plan-note">{{ plan.note }}</p>
             </div>
         </template>
 
@@ -808,6 +871,7 @@ import { useVerifiedTuneStore } from "@/gyrocore/stores/verifiedTunes";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 import { loggedAbsoluteValues } from "@/gyrocore/tuning/absoluteTune";
 import { RESOLVED_FEATURE_BINS, type LoopMargins } from "@/gyrocore/engine/loopModel";
+import { SUPPLEMENTARY_MEASUREMENT } from "@/gyrocore/engine/recordingInstruction";
 
 const v2 = useAutotuneV2Store();
 const connection = useConnectionStore();
@@ -924,6 +988,14 @@ const jioCandidates = computed(() => {
  * flights compared, the bands, and the recordings still missing (this axis's own needs). A set that
  * is complete here is a measurement set, not validation: the route stays diagnostic.
  */
+/** The route's measurement codes, required apart from supplementary (a second flight: block 7 agreement). */
+const jioNeeds = computed(() => {
+    const all = result.value?.jio.requiredMeasurements ?? [];
+    return {
+        required: all.filter((r) => !SUPPLEMENTARY_MEASUREMENT.test(r)),
+        supplementary: all.filter((r) => SUPPLEMENTARY_MEASUREMENT.test(r)),
+    };
+});
 const jioProgress = computed(() => {
     const jio = result.value?.jio;
     if (!jio) return [];
@@ -951,12 +1023,19 @@ const jioProgress = computed(() => {
             `${band(p.bandHz.supported)} Hz${reached}`,
             goal,
         ]);
+        // The agreed plan: two complete rounds in one flight. A second flight is supplementary: its
+        // absence leaves the cross-flight check unknown and does not keep the set incomplete.
         const complete =
-            sw.complete > 0 &&
-            p.withinFlight.consistency === "consistent" &&
-            p.acrossFlights.consistency === "consistent" &&
-            p.bandHz.sufficientForTuning === true;
-        return [{ axis, text, next: p.nextSteps.map(measurementText).join("; "), complete }];
+            sw.complete >= 2 && p.withinFlight.consistency === "consistent" && p.bandHz.sufficientForTuning === true;
+        return [
+            {
+                axis,
+                text,
+                next: p.nextSteps.map(measurementText).join("; "),
+                supplementary: (p.supplementary ?? []).map(measurementText).join("; "),
+                complete,
+            },
+        ];
     });
 });
 /** |G| (dB) over log frequency, filled where supported, with the r→y coherence as a dashed line (0–1 over the plot height). */
@@ -1144,29 +1223,82 @@ const decisionRows = computed(() => {
         }),
     );
 });
-/** The recording each failed check asks for (engine recordingInstruction.ts). */
-const recordingRows = computed(() =>
-    (v2.result?.recordingInstructions ?? []).map((ins) => ({
-        axis: ins.axis,
-        kind: ins.kind,
-        title: i18n.getMessage(ins.kind === "record" ? "gyroflightV2RecordingTitle" : "gyroflightV2RecordingNone"),
-        note: ins.note,
-        settings: ins.settings,
-        procedure: ins.procedure,
-        timing: ins.timing
-            ? i18n.getMessage("gyroflightV2RecordingTiming", [
-                  String(ins.timing.activationsPerFlight),
-                  String(ins.timing.sweepS),
-                  String(Math.round(ins.timing.chirpTimePerFlightS)),
-                  String(ins.timing.flights),
-                  String(Math.round(ins.timing.totalChirpTimeS)),
-                  ins.timing.experimental.join("; "),
-                  String(Math.round(ins.timing.generatorTimePerFlightS)),
-              ])
-            : "",
-        checks: ins.completionChecks.join(" "),
+/** The agreed measurement plan (engine recordingInstruction.ts): missing frequencies, existing data, proposed settings. */
+const plan = computed(() => v2.result?.recordingPlan ?? null);
+/** A setting's value with its unit, and Hz beside a dHz value. */
+function settingValue(v: string | number | null, unit: string, hz: number | null): string {
+    if (v === null) return "unknown";
+    return `${v}${unit ? ` ${unit}` : ""}${hz !== null ? ` (${num(hz, 1)} Hz)` : ""}`;
+}
+const MISSING_KIND: Record<string, string> = {
+    decision_band_hole: "inside the decision band",
+    below_identified_band: "planner band below the identified band",
+    above_identified_band: "planner band above the identified band",
+    quality_gate_band: "quality gate band",
+};
+const planAxes = computed(() =>
+    (plan.value?.axes ?? []).map((ax) => ({
+        axis: ax.axis,
+        kind: ax.kind,
+        note: ax.note,
+        missing: ax.missing.flatMap((m) =>
+            m.intervals.map((iv) => {
+                const at =
+                    iv.fromHz === iv.toHz ? `${num(iv.fromHz, 1)} Hz` : `${num(iv.fromHz, 1)}–${num(iv.toHz, 1)} Hz`;
+                const bins = iv.bins !== null ? ` (${iv.bins} bin${iv.bins === 1 ? "" : "s"})` : "";
+                const value = iv.value === null ? "unknown" : `${num(iv.value, 3)}${iv.unit ? ` ${iv.unit}` : ""}`;
+                return {
+                    route: m.route,
+                    kind: iv.kind,
+                    text: `${m.route}: ${at}${bins}, ${MISSING_KIND[iv.kind]}: ${iv.reason} ${value}; required ${iv.threshold}`,
+                };
+            }),
+        ),
     })),
 );
+const planRoundsText = computed(() => {
+    const r = plan.value?.existing.rounds;
+    if (!r) return "";
+    return i18n.getMessage("gyroflightV2PlanRounds", [
+        String(r.complete),
+        String(r.required),
+        String(r.usable),
+        r.perAxis.map((p) => `${p.axis} ${p.complete} of ${p.present} complete, ${p.usableComplete} usable`).join("; "),
+        i18n.getMessage(`gyroflightV2PlanRounds_${r.state}`),
+    ]);
+});
+const planSecondFlightText = computed(() => {
+    const f = plan.value?.existing.secondFlight;
+    if (!f) return "";
+    return i18n.getMessage("gyroflightV2PlanSecondFlight", [
+        String(f.flights),
+        f.perAxis.map((p) => `${p.axis} ${p.consistency}`).join(", "),
+        i18n.getMessage(`gyroflightV2PlanSecondFlight_${f.state}`),
+    ]);
+});
+const planCoverageText = computed(() => {
+    const sw = plan.value?.sweep;
+    if (!sw) return "";
+    const cov = sw.coverage.map(
+        (c) => `${c.axis}: ${c.covered === null ? "unknown" : c.covered ? "covered" : "not covered"} (${c.basis})`,
+    );
+    const gain =
+        sw.excitationGainDb === null
+            ? "unknown"
+            : `${sw.excitationGainDb >= 0 ? "+" : ""}${num(sw.excitationGainDb, 1)} dB`;
+    return i18n.getMessage("gyroflightV2PlanCoverage", [cov.join("; "), gain, sw.firmwareChecks.join(", ")]);
+});
+const planTimingText = computed(() => {
+    const t = plan.value?.timing;
+    if (!t) return "";
+    return i18n.getMessage("gyroflightV2PlanTiming", [
+        String(t.activations),
+        String(t.sweepS),
+        String(t.activeExcitationS),
+        String(Math.round(t.sequenceS)),
+        t.experimental.join("; "),
+    ]);
+});
 
 /**
  * Which configuration a recording was flown with, from this browser's backups: the reference

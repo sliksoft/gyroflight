@@ -166,6 +166,12 @@ export interface JioSweepAdvice {
      * new log; null without a tuning band.
      */
     bandSufficientForTuning: boolean | null;
+    /**
+     * The band-matched range this axis needs (start and end in dHz), also when the current sweep
+     * already covers it (suggested null). The firmware's frequency settings are shared by all axes
+     * (pidProfile_t), so the recording plan combines these targets into one range.
+     */
+    target: { chirp_frequency_start_deci_hz: number; chirp_frequency_end_deci_hz: number };
     suggested: {
         chirp_frequency_start_deci_hz: number;
         chirp_frequency_end_deci_hz: number;
@@ -705,9 +711,13 @@ export function sweepAdviceFor(
         basis.push(
             `end_capped_by_firmware_max:${FIRMWARE_CHIRP.endDeciHz[1] / 10}Hz_below_tuning_band_top:requirement_in_force`,
         );
+    const target = {
+        chirp_frequency_start_deci_hz: Math.round(10 * f0New),
+        chirp_frequency_end_deci_hz: Math.round(10 * f1New),
+    };
     if (f1New >= f1Hz && f0New <= f0Hz) {
         basis.push("current_sweep_already_band_matched");
-        return { current, tuningBandHz, bandSufficientForTuning, suggested: null, basis };
+        return { current, tuningBandHz, bandSufficientForTuning, target, suggested: null, basis };
     }
     const T = Math.min(Math.max(Math.round(durationS), FIRMWARE_CHIRP.timeS[0]), FIRMWARE_CHIRP.timeS[1]);
     const octavesNew = Math.log2(f1New / f0New);
@@ -715,6 +725,7 @@ export function sweepAdviceFor(
         current,
         tuningBandHz,
         bandSufficientForTuning,
+        target,
         suggested: {
             chirp_frequency_start_deci_hz: Math.round(10 * f0New),
             chirp_frequency_end_deci_hz: Math.round(10 * f1New),

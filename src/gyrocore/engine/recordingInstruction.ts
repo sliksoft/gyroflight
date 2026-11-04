@@ -20,30 +20,57 @@
  */
 
 /*
- * Recording instruction per axis (block 6), generated from the check that stopped the candidate
- * (candidateDecision.ts). Firmware facts at betaflight 43875a55a:
+ * The recording plan (block 7): the agreed AIR65 measurement — two complete CHIRP rounds
+ * roll → pitch → yaw, roll → pitch → yaw in one flight, six activations of chirp_time_seconds 20 s,
+ * 120 s of excitation — with one sweep configuration for all axes, per axis the frequencies the
+ * existing data does not show (candidateDecision.ts missing), and the existing data kept apart from
+ * the proposed settings. Firmware facts at betaflight 43875a55a:
  *   - debug_mode CHIRP (build/debug.c "CHIRP", index 96 in build/debug.h): debug[0] phase,
  *     debug[1] axis, debug[2] frequency in dHz (lrintf(10·fchirp)), debug[3] excitation ×1000.
  *   - blackbox_sample_rate 1/1 (cli/settings.c, BLACKBOX_RATE_ONE): the log at the PID rate
  *     (looptime × pid_process_denom), which the JIO route requires.
+ *   - chirp_frequency_start_deci_hz, chirp_frequency_end_deci_hz and chirp_time_seconds are
+ *     PROFILE_VALUEs of pidProfile_t (cli/settings.c 1293–1295): one value per PID profile, shared
+ *     by all three axes. Only chirp_amplitude_roll/pitch/yaw are per axis.
  *   - flight/pid.c 1149–1170: the generator runs while CHIRP_MODE is on; on the first !CHIRP_MODE after
- *     an activation the axis advances roll → pitch → yaw → roll and the generator resets. chirp.c:
+ *     an activation the axis advances roll → pitch → yaw → roll and the generator resets, also after a
+ *     sweep switched off early. chirpAxis is a static that starts at roll after power-up. chirp.c:
  *     f = f0·(f1/f0)^(t/T), it stops itself after chirp_time_seconds (exc = fchirp = 0).
- *   - cli/settings.c ranges: chirp_frequency_start_deci_hz 1–1000, chirp_frequency_end_deci_hz
- *     1–10000, chirp_time_seconds 1–255, chirp_amplitude_* 0–500 (deg/s).
- * Nothing is changed on the craft here: the instruction lists settings for the user to make.
- * Durations that follow from the sweep design (T, activations) are firm; the lead-in, settle and
- * pause times and the repeat counts are experimental requirements, named as such.
+ *   - cli/settings.c ranges: start 1–1000 dHz, end 1–10000 dHz, chirp_time_seconds 1–255,
+ *     chirp_amplitude_* 0–500 (deg/s).
+ * Nothing is changed on the craft here: the plan lists settings for the user to make. Durations that
+ * follow from the agreement (20 s, six activations) are firm; the lead-in, settle and pause times
+ * are experimental, named as such. A second independent flight is supplementary evidence: without
+ * it the cross-flight check stays unknown, which is neither a pass nor a requirement.
  */
 
 type AxisName = "roll" | "pitch" | "yaw";
-import type { RouteDecision } from "@/gyrocore/engine/candidateDecision";
+import type { MissingInterval, RouteDecision } from "@/gyrocore/engine/candidateDecision";
 import type { JioSweepAdvice } from "@/gyrocore/engine/jioSweep";
-import { JIO_SWEEP } from "@/gyrocore/engine/jioSweep";
+import { FIRMWARE_CHIRP, JIO_SWEEP } from "@/gyrocore/engine/jioSweep";
 import { MEAN_COHERENCE_BAND_HZ, MIN_MEAN_BAND_COHERENCE } from "@/gyrocore/chirp/quality";
 import { LOOP_MIN_COHERENCE } from "@/gyrocore/engine/loopModel";
 
 export const CHIRP_DEBUG_MODE = Object.freeze({ name: "CHIRP", index: 96, firmware: "betaflight 43875a55a" });
+
+/** The agreed measurement (product agreement, block 7): not derived from the data. */
+export const MEASUREMENT_AGREEMENT = Object.freeze({
+    order: Object.freeze(["roll", "pitch", "yaw"] as const),
+    /** Complete rounds roll → pitch → yaw in one flight. */
+    rounds: 2,
+    /** chirp_time_seconds per activation. */
+    sweepS: 20,
+    activations: 6,
+    activeExcitationS: 120,
+    /** A second independent flight: supplementary evidence, not a step the experimental flow requires. */
+    secondFlight: "supplementary" as const,
+});
+
+/**
+ * Measurement codes that are supplementary evidence under the agreement: a second independent
+ * flight. Absent, the cross-flight check stays unknown; it is not a step the experimental flow requires.
+ */
+export const SUPPLEMENTARY_MEASUREMENT = /_repeat_flight_for_reproducibility$/;
 
 /** Experimental timing around each sweep (s): not firmware facts. */
 export const RECORDING_TIMING = Object.freeze({
@@ -53,63 +80,107 @@ export const RECORDING_TIMING = Object.freeze({
     settleS: JIO_SWEEP.tailS,
     /** CHIRP_MODE off before the next activation (separates the segments: debug[1] = −1). */
     pauseS: 1,
-    /** Complete sweeps per axis in one flight (stationarity check; experimental). */
-    sweepsPerAxisPerFlight: 2,
-    /** Independent flights with the same settings (reproducibility; experimental). */
-    flights: 2,
 });
 
-export interface InstructionSetting {
+/** dHz with Hz beside it: "1900 dHz (190.0 Hz)". */
+export function deciHzText(dHz: number | null): string {
+    return dHz === null ? "unknown" : `${dHz} dHz (${(dHz / 10).toFixed(1)} Hz)`;
+}
+
+export interface PlanSetting {
+    /** The exact CLI name. */
     name: string;
+    /** As logged in the existing data (header); null: not logged. */
     current: string | number | null;
-    required: string | number;
+    proposed: string | number;
     unit: string;
+    /** Both values in Hz for a dHz setting. */
+    hz: { current: number | null; proposed: number } | null;
     changed: boolean;
     basis: string;
 }
 
-export interface RecordingInstruction {
+export interface AxisRecordingNeed {
     axis: AxisName;
-    /** The decision that triggered it: route, status and the failing rule. */
+    /** The decision that decides the axis: route, status and the first failing rule. */
     trigger: {
         route: "primary" | "jio";
         status: string;
         rule: string | null;
         value: number | string | null;
         threshold: string | null;
+    } | null;
+    /**
+     * "record": the data lacks information (the missing frequencies below); "search_limit": the plant
+     * is usable and more data does not help; "candidate": a candidate or no change, nothing missing.
+     */
+    kind: "record" | "search_limit" | "candidate";
+    /** Per route, the frequencies the existing data does not show (candidateDecision missing). */
+    missing: { route: "primary" | "jio"; intervals: MissingInterval[] }[];
+    /** The planner bands this axis's data must cover (primary and JIO plans). */
+    plannerBandsHz: [number, number][];
+    note: string;
+}
+
+export interface RecordingPlan {
+    /** Some axis lacks information a new recording can give. */
+    recordingNeeded: boolean;
+    axes: AxisRecordingNeed[];
+    /** What the imported data already contains: kept apart from the proposed settings. */
+    existing: {
+        settings: PlanSetting[];
+        rounds: {
+            required: number;
+            /** Complete rounds flown: the smallest number of complete sweeps over the three axes. */
+            complete: number;
+            /** Complete rounds whose sweeps were also used (not excluded). */
+            usable: number;
+            perAxis: { axis: AxisName; present: number; complete: number; usableComplete: number }[];
+            state: "complete" | "incomplete" | "none";
+        };
+        secondFlight: {
+            flights: number;
+            perAxis: { axis: AxisName; consistency: "unknown" | "consistent" | "inconsistent" }[];
+            /** "unknown" when no comparable flight was imported: not passed, and not required. */
+            state: "unknown" | "consistent" | "inconsistent";
+        };
     };
-    /** "record": new data needed; "none_search_limit": the plant is usable, more data does not help. */
-    kind: "record" | "none_search_limit";
-    settings: InstructionSetting[];
+    /** The one sweep configuration for the next flight; null when no axis needs a recording. */
+    sweep: {
+        scope: "pid_profile_shared_by_all_axes";
+        settings: PlanSetting[];
+        amplitudes: PlanSetting[];
+        cli: string[];
+        coverage: { axis: AxisName; plannerBandHz: [number, number] | null; covered: boolean | null; basis: string }[];
+        /** 10·log10 of the excitation per octave against the existing sweep (same T, amplitude unchanged). */
+        excitationGainDb: number | null;
+        /** Firmware range checks of the combined values; every entry must be "ok:…". */
+        firmwareChecks: string[];
+        valid: boolean;
+    } | null;
     procedure: string[];
     timing: {
         sweepS: number;
-        activationsPerFlight: number;
+        activations: number;
+        activeExcitationS: number;
         perActivationS: number;
-        /** The whole activation sequence per flight: lead-in, sweep, settle and pause for each activation. */
-        chirpTimePerFlightS: number;
-        /** Generator time only: activations × chirp_time_seconds. */
-        generatorTimePerFlightS: number;
-        flights: number;
-        totalChirpTimeS: number;
+        sequenceS: number;
         firm: string[];
         experimental: string[];
-    } | null;
+    };
+    secondFlight: string;
     completionChecks: string[];
     notChanged: string[];
     note: string;
 }
 
-const AXES: readonly AxisName[] = ["roll", "pitch", "yaw"];
+const AXES = MEASUREMENT_AGREEMENT.order;
 
-function header(h: Record<string, string>, k: string): string | null {
-    return h[k] ?? null;
-}
-
-/** Which route decides the axis's instruction: a found candidate needs none; a usable plant whose search failed says so. */
+/** Which route decides the axis: a found candidate needs nothing; a usable plant whose search failed says so. */
 function decisive(d: { primary: RouteDecision | null; jio: RouteDecision | null }): RouteDecision | null {
     const routes = [d.primary, d.jio].filter((r): r is RouteDecision => !!r);
-    if (routes.some((r) => r.status === "candidate_found" || r.status === "no_change_needed")) return null;
+    const found = routes.find((r) => r.status === "candidate_found" || r.status === "no_change_needed");
+    if (found) return found;
     const searchFailed = routes.find(
         (r) =>
             r.status === "search_limit_max_step" ||
@@ -120,170 +191,346 @@ function decisive(d: { primary: RouteDecision | null; jio: RouteDecision | null 
     return d.primary ?? d.jio;
 }
 
-export function recordingInstructions(o: {
-    decisions: Partial<Record<AxisName, { primary: RouteDecision | null; jio: RouteDecision | null }>>;
-    headers: Record<string, string>;
-    advice: Partial<Record<AxisName, JioSweepAdvice | null>>;
-}): RecordingInstruction[] {
-    const h = o.headers;
-    const out: RecordingInstruction[] = [];
-    for (const axis of AXES) {
-        const d = o.decisions[axis];
-        if (!d) continue;
-        const r = decisive(d);
-        if (!r) continue;
-        const fc = r.firstCause;
-        const trigger = {
-            route: r.route,
-            status: r.status,
-            rule: fc?.rule ?? null,
-            value: fc?.value ?? null,
-            threshold: fc?.threshold ?? null,
-        };
-        if (r.status === "search_constrained_by_verified_tune") {
-            out.push({
-                axis,
-                trigger,
-                kind: "none_search_limit",
-                settings: [],
-                procedure: [],
-                timing: null,
-                completionChecks: [],
-                notChanged: [],
-                note: `No new CHIRP sweep design requested for ${axis}: the bound Verified Tune's gain-change flight also moved feedforward (${fc?.value ?? "unknown"}), so the search finds no point on its segment. What is needed is a gain-change flight with feedforward unchanged (release route: required_measurement:gain_change_flight_with_feedforward_unchanged).`,
-            });
-            continue;
-        }
-        if (r.status === "search_limit_max_step" || r.status === "targets_not_reachable") {
-            out.push({
-                axis,
-                trigger,
-                kind: "none_search_limit",
-                settings: [],
-                procedure: [],
-                timing: null,
-                completionChecks: [],
-                notChanged: [],
-                note:
-                    r.status === "search_limit_max_step"
-                        ? `No new recording requested for ${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and the best candidate lies on the ±30 % step edge. More data does not lift this; a change larger than one step is outside this search.`
-                        : `No new recording requested for ${axis}: the ${r.route} plant is usable and no candidate in the search grid meets the targets.`,
-            });
-            continue;
-        }
-        const adv = o.advice[axis] ?? null;
-        const f0 = Number(header(h, "chirp_frequency_start_deci_hz"));
-        const f1 = Number(header(h, "chirp_frequency_end_deci_hz"));
-        const T = Number(header(h, "chirp_time_seconds"));
-        const amp = header(h, `chirp_amplitude_${axis}`);
-        const sg = adv?.suggested ?? null;
-        const newF0 = sg?.chirp_frequency_start_deci_hz ?? (Number.isFinite(f0) ? f0 : null);
-        const newF1 = sg?.chirp_frequency_end_deci_hz ?? (Number.isFinite(f1) ? f1 : null);
-        const newT = sg?.chirp_time_seconds ?? (Number.isFinite(T) ? T : null);
-        const debugMode = header(h, "debug_mode");
-        const pInterval = header(h, "P interval");
-        const settings: InstructionSetting[] = [
-            {
-                name: "debug_mode",
-                current: debugMode,
-                required: `${CHIRP_DEBUG_MODE.name} (index ${CHIRP_DEBUG_MODE.index})`,
-                unit: "",
-                changed: debugMode !== String(CHIRP_DEBUG_MODE.index),
-                basis: "DEBUG_CHIRP channels debug[1..3] (build/debug.h at 43875a55a)",
-            },
-            {
-                name: "blackbox_sample_rate",
-                current: pInterval === null ? null : `P interval ${pInterval}`,
-                required: "1/1 (log at the PID rate)",
-                unit: "",
-                changed: pInterval !== null && pInterval !== "1" && pInterval !== "1/1",
-                basis: "JIO needs the log on the PID grid (jioSweep maxRateMismatch 2 %)",
-            },
-            {
-                name: "chirp_frequency_start_deci_hz",
-                current: Number.isFinite(f0) ? f0 : null,
-                required: newF0 ?? "unknown",
-                unit: "dHz (0.1 Hz)",
-                changed: newF0 !== null && newF0 !== f0,
-                basis: sg ? "band-matched sweep advice (start ≥ 2 Hz analysed)" : "unchanged",
-            },
-            {
-                name: "chirp_frequency_end_deci_hz",
-                current: Number.isFinite(f1) ? f1 : null,
-                required: newF1 ?? "unknown",
-                unit: "dHz (0.1 Hz)",
-                changed: newF1 !== null && newF1 !== f1,
-                basis: sg
-                    ? `band-matched advice: ${adv!.basis.filter((b) => /^(end_|tuning_band|supported_band)/.test(b)).join(", ")}`
-                    : "unchanged (no advice for this axis)",
-            },
-            {
-                name: "chirp_time_seconds",
-                current: Number.isFinite(T) ? T : null,
-                required: newT ?? "unknown",
-                unit: "s",
-                changed: newT !== null && newT !== T,
-                basis: "same duration (more excitation per octave from the narrower band, not a longer sweep)",
-            },
-            {
-                name: `chirp_amplitude_${axis}`,
-                current: amp,
-                required: amp ?? "unchanged",
-                unit: "deg/s",
-                changed: false,
-                basis: "not changed by the app; raising it is your decision and is not assumed to fix the coherence",
-            },
-        ];
-        const sweepS = newT ?? (Number.isFinite(T) ? T : 0);
-        const activations = AXES.length * RECORDING_TIMING.sweepsPerAxisPerFlight;
-        const perActivation = RECORDING_TIMING.leadInS + sweepS + RECORDING_TIMING.settleS + RECORDING_TIMING.pauseS;
-        const perFlight = activations * perActivation;
-        const procedure = [
-            `Set the settings above in the CLI yourself (the app writes none of them); debug_mode = CHIRP and blackbox_sample_rate = 1/1 on every flight.`,
-            `Arm and take off; hover steadily for at least ${RECORDING_TIMING.leadInS} s before the first activation; keep the sticks still during each sweep.`,
-            `Switch CHIRP_MODE on and keep it on for the whole sweep (${sweepS} s); the generator stops itself; keep the mode on ${RECORDING_TIMING.settleS} s longer, then switch it off.`,
-            `Wait at least ${RECORDING_TIMING.pauseS} s with CHIRP_MODE off. Each switch-off advances the axis roll → pitch → yaw → roll (pid.c): the first activation after power-up is roll.`,
-            `Repeat until every axis has ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps in this flight (${activations} activations: roll, pitch, yaw, roll, pitch, yaw). A sweep switched off early is still read in and marked incomplete; it is not one of the complete sweeps.`,
-            `Fly a second, independent flight with exactly the same settings (reproducibility between flights).`,
-            `Import both logs into Autotune and Calculate; the checks below decide whether the axis is complete.`,
-        ];
-        const completionChecks = [
-            `Blocking (the engine excludes the data): debug_mode CHIRP; setpoint, axisP/I/F, debug[1] and debug[3] logged, axisD when D > 0 (jio_channel_missing); log rate equal to the PID rate within 2 % (jio_log_rate_not_pid_rate); debug[2] against the firmware law when logged (debug2_frequency_mismatch).`,
-            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only when every other gate passed and the decision band drops no bin for coherence, support or plant status — bins dropped for uncertainty do not count for the waiver but stop the search through decision_band_gaps); no unidentified bin inside the decision band (decision_band_gaps); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top so the phase crossing and the |S| peak lie inside it (gain_margin_shown_by_band, sensitivity_peak_shown_by_band); two sweeps of the axis that disagree (repeat z > ${JIO_SWEEP.repeatZThreshold}, experimental threshold) or a second flight that disagrees exclude the JIO candidate.`,
-            `Noted, not excluding: a missing debug[2] (frequency_verification_missing); a sweep below ${Math.round(JIO_SWEEP.completeSweepFraction * 100)} % of chirp_time_seconds is ingested and annotated (sweep_incomplete) and asks for a complete sweep; a single sweep leaves stationarity unknown.`,
-            `Experimental (not yet required for a candidate): ${RECORDING_TIMING.sweepsPerAxisPerFlight} complete sweeps per axis in one flight and a second flight; the z threshold ${JIO_SWEEP.repeatZThreshold} itself is not calibrated.`,
-        ];
-        out.push({
+function causeText(r: RouteDecision): string {
+    const fc = r.firstCause;
+    if (!fc) return `${r.route} route: ${r.status}`;
+    const v = fc.value === null ? "unknown" : typeof fc.value === "number" ? +fc.value.toFixed(3) : fc.value;
+    return `${r.route} route: ${r.status} — ${fc.rule} = ${v} ${fc.unit}; required: ${fc.threshold}; ${fc.consequence}`;
+}
+
+function axisNeed(
+    axis: AxisName,
+    d: { primary: RouteDecision | null; jio: RouteDecision | null } | undefined,
+    bands: [number, number][],
+): AxisRecordingNeed {
+    const r = d ? decisive(d) : null;
+    const missing = d
+        ? ([d.primary, d.jio].filter((x): x is RouteDecision => !!x && x.missing.length > 0) as RouteDecision[]).map(
+              (x) => ({ route: x.route, intervals: x.missing }),
+          )
+        : [];
+    const trigger = r
+        ? {
+              route: r.route,
+              status: r.status,
+              rule: r.firstCause?.rule ?? null,
+              value: r.firstCause?.value ?? null,
+              threshold: r.firstCause?.threshold ?? null,
+          }
+        : null;
+    if (!r)
+        return {
             axis,
             trigger,
             kind: "record",
-            settings,
-            procedure,
-            timing: {
-                sweepS,
-                activationsPerFlight: activations,
-                perActivationS: perActivation,
-                chirpTimePerFlightS: perFlight,
-                generatorTimePerFlightS: activations * sweepS,
-                flights: RECORDING_TIMING.flights,
-                totalChirpTimeS: perFlight * RECORDING_TIMING.flights,
-                firm: [
-                    `chirp_time_seconds ${sweepS} s per sweep (generator)`,
-                    `${activations} activations per flight (3 axes × ${RECORDING_TIMING.sweepsPerAxisPerFlight}; the axis advances on every switch-off)`,
-                ],
-                experimental: [
-                    `lead-in ${RECORDING_TIMING.leadInS} s, settle ${RECORDING_TIMING.settleS} s, pause ${RECORDING_TIMING.pauseS} s per activation`,
-                    `${RECORDING_TIMING.sweepsPerAxisPerFlight} sweeps per axis per flight and ${RECORDING_TIMING.flights} flights (repeat checks are experimental)`,
-                    `take-off, climb and landing come on top; whether ${Math.round(perFlight)} s of activation sequence fits one AIR65 pack is not known to the app: if not, split the flights, but keep both sweeps of an axis in the same flight`,
-                ],
-            },
-            completionChecks,
-            notChanged: [
-                "flight mode, anti-gravity, TPA, I-term relax, filters and PIDs: not changed (a change makes the logs incomparable as repeats)",
-                `chirp_amplitude_${axis}: not changed by the app`,
-            ],
-            note: `Triggered by the ${r.route} route: ${r.status}${fc ? ` — ${fc.rule} = ${fc.value === null ? "unknown" : typeof fc.value === "number" ? +fc.value.toFixed(3) : fc.value} ${fc.unit}; required: ${fc.threshold}; ${fc.consequence}` : ""}. A recording of this design is no guarantee of a proposal: the new data must pass these checks.`,
+            missing,
+            plannerBandsHz: bands,
+            note: `No decision for ${axis} in the existing data (no sweep of this axis analysed): the next flight's two rounds measure it.`,
+        };
+    if (r.status === "candidate_found" || r.status === "no_change_needed")
+        return {
+            axis,
+            trigger,
+            kind: "candidate",
+            missing,
+            plannerBandsHz: bands,
+            note: `${axis}: ${r.status} on the ${r.route} route; the existing data is enough for that decision.`,
+        };
+    if (r.status === "search_constrained_by_verified_tune")
+        return {
+            axis,
+            trigger,
+            kind: "search_limit",
+            missing,
+            plannerBandsHz: bands,
+            note: `${axis}: the bound Verified Tune's gain-change flight also moved feedforward (${r.firstCause?.value ?? "unknown"}), so the search finds no point on its segment. A new CHIRP sweep does not lift this; a gain-change flight with feedforward unchanged does (release route: required_measurement:gain_change_flight_with_feedforward_unchanged).`,
+        };
+    if (r.status === "search_limit_max_step" || r.status === "targets_not_reachable")
+        return {
+            axis,
+            trigger,
+            kind: "search_limit",
+            missing,
+            plannerBandsHz: bands,
+            note:
+                r.status === "search_limit_max_step"
+                    ? `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and the best candidate lies on the ±30 % step edge. More data does not lift this; a change larger than one step is outside this search.`
+                    : `${axis}: the ${r.route} plant is usable and no candidate in the search grid meets the targets; more data does not lift this.`,
+        };
+    return {
+        axis,
+        trigger,
+        kind: "record",
+        missing,
+        plannerBandsHz: bands,
+        note: `${causeText(r)}.`,
+    };
+}
+
+const num = (s: string | null) => (s === null || s.trim() === "" || !Number.isFinite(Number(s)) ? null : Number(s));
+
+/**
+ * The one sweep configuration: start, end and time are shared by all axes (pidProfile_t), so the
+ * axes' band-matched targets (jioSweep sweepAdviceFor target) are combined — the lowest start, the
+ * highest end, rounded up to FIRMWARE_CHIRP.endRoundHz — and the end never drops below any axis's
+ * planner band top. chirp_time_seconds is the agreed 20 s; amplitudes stay as logged.
+ */
+function sharedSweep(
+    h: Record<string, string>,
+    advice: Partial<Record<AxisName, JioSweepAdvice | null>>,
+    bands: Record<AxisName, [number, number][]>,
+): NonNullable<RecordingPlan["sweep"]> {
+    const f0 = num(h.chirp_frequency_start_deci_hz ?? null);
+    const f1 = num(h.chirp_frequency_end_deci_hz ?? null);
+    const T = num(h.chirp_time_seconds ?? null);
+    const round = 10 * FIRMWARE_CHIRP.endRoundHz;
+    const starts: number[] = [];
+    const ends: number[] = [];
+    const coverage: NonNullable<RecordingPlan["sweep"]>["coverage"] = [];
+    const basis: string[] = [];
+    for (const axis of AXES) {
+        const adv = advice[axis] ?? null;
+        const b = bands[axis];
+        const top = b.length ? Math.max(...b.map((x) => x[1])) : null;
+        const lo = b.length ? Math.min(...b.map((x) => x[0])) : null;
+        if (adv) {
+            starts.push(adv.target.chirp_frequency_start_deci_hz);
+            ends.push(adv.target.chirp_frequency_end_deci_hz);
+            basis.push(
+                `${axis}: ${deciHzText(adv.target.chirp_frequency_start_deci_hz)}–${deciHzText(adv.target.chirp_frequency_end_deci_hz)}`,
+            );
+        } else basis.push(`${axis}: no band-matched advice (no supported JIO band); planner band used`);
+        if (top !== null) ends.push(Math.ceil((10 * top) / round) * round);
+        // Without advice the start is the analysis's lowest frequency, below any planner band.
+        if (lo !== null && !adv) starts.push(10 * JIO_SWEEP.lowestHz);
+    }
+    const lowest = 10 * JIO_SWEEP.lowestHz;
+    let start = starts.length ? Math.min(...starts) : (f0 ?? lowest);
+    let end = ends.length ? Math.max(...ends) : (f1 ?? FIRMWARE_CHIRP.endDeciHz[1]);
+    start = Math.min(Math.max(start, FIRMWARE_CHIRP.startDeciHz[0]), FIRMWARE_CHIRP.startDeciHz[1]);
+    end = Math.min(Math.max(end, 2 * start), FIRMWARE_CHIRP.endDeciHz[1]);
+    const sweepS = MEASUREMENT_AGREEMENT.sweepS;
+    const firmwareChecks = [
+        start >= FIRMWARE_CHIRP.startDeciHz[0] && start <= FIRMWARE_CHIRP.startDeciHz[1]
+            ? `ok:chirp_frequency_start_deci_hz ${start} in ${FIRMWARE_CHIRP.startDeciHz.join("–")}`
+            : `out_of_range:chirp_frequency_start_deci_hz ${start}`,
+        end >= FIRMWARE_CHIRP.endDeciHz[0] && end <= FIRMWARE_CHIRP.endDeciHz[1]
+            ? `ok:chirp_frequency_end_deci_hz ${end} in ${FIRMWARE_CHIRP.endDeciHz.join("–")}`
+            : `out_of_range:chirp_frequency_end_deci_hz ${end}`,
+        end > start ? `ok:end ${end} above start ${start}` : `end_not_above_start:${end}<=${start}`,
+        sweepS >= FIRMWARE_CHIRP.timeS[0] && sweepS <= FIRMWARE_CHIRP.timeS[1]
+            ? `ok:chirp_time_seconds ${sweepS} in ${FIRMWARE_CHIRP.timeS.join("–")}`
+            : `out_of_range:chirp_time_seconds ${sweepS}`,
+    ];
+    for (const axis of AXES) {
+        const b = bands[axis];
+        if (!b.length) {
+            coverage.push({ axis, plannerBandHz: null, covered: null, basis: "planner band unknown for this axis" });
+            continue;
+        }
+        const need: [number, number] = [Math.min(...b.map((x) => x[0])), Math.max(...b.map((x) => x[1]))];
+        const covered = start <= 10 * need[0] + 1e-9 && end >= 10 * need[1] - 1e-9;
+        coverage.push({
+            axis,
+            plannerBandHz: need,
+            covered,
+            basis: covered
+                ? `${(start / 10).toFixed(1)}–${(end / 10).toFixed(1)} Hz covers ${need[0].toFixed(1)}–${need[1].toFixed(1)} Hz`
+                : `${(start / 10).toFixed(1)}–${(end / 10).toFixed(1)} Hz does not cover ${need[0].toFixed(1)}–${need[1].toFixed(1)} Hz (firmware range)`,
         });
     }
-    return out;
+    const gain =
+        f0 !== null && f1 !== null && T !== null && f1 > f0 && T > 0
+            ? 10 * Math.log10((Math.log(f1 / f0) * sweepS) / (Math.log(end / start) * T))
+            : null;
+    const setting = (name: string, cur: number | null, prop: number, dHz: boolean, why: string): PlanSetting => ({
+        name,
+        current: cur,
+        proposed: prop,
+        unit: dHz ? "dHz" : "s",
+        hz: dHz ? { current: cur === null ? null : cur / 10, proposed: prop / 10 } : null,
+        changed: cur !== prop,
+        basis: why,
+    });
+    const settings: PlanSetting[] = [
+        {
+            name: "debug_mode",
+            current: h.debug_mode ?? null,
+            proposed: CHIRP_DEBUG_MODE.name,
+            unit: "",
+            hz: null,
+            changed: (h.debug_mode ?? null) !== String(CHIRP_DEBUG_MODE.index),
+            basis: `DEBUG_CHIRP (index ${CHIRP_DEBUG_MODE.index}): debug[1] axis, debug[2] frequency, debug[3] excitation`,
+        },
+        {
+            name: "blackbox_sample_rate",
+            current: h["P interval"] ?? null,
+            proposed: "1/1",
+            unit: "",
+            hz: null,
+            changed: !["1", "1/1"].includes(h["P interval"] ?? "1/1"),
+            basis: "log at the PID rate (JIO: log rate within 2 % of the PID rate)",
+        },
+        setting(
+            "chirp_frequency_start_deci_hz",
+            f0,
+            start,
+            true,
+            `lowest axis target; analysis starts at ${JIO_SWEEP.lowestHz} Hz (${basis.join("; ")})`,
+        ),
+        setting(
+            "chirp_frequency_end_deci_hz",
+            f1,
+            end,
+            true,
+            `highest axis target, at least every planner band top, rounded up to ${FIRMWARE_CHIRP.endRoundHz} Hz`,
+        ),
+        setting("chirp_time_seconds", T, sweepS, false, "the agreed 20 s per activation (6 × 20 s = 120 s excitation)"),
+    ];
+    const amplitudes: PlanSetting[] = AXES.map((axis) => {
+        const a = num(h[`chirp_amplitude_${axis}`] ?? null);
+        return {
+            name: `chirp_amplitude_${axis}`,
+            current: a,
+            proposed: a ?? "unchanged",
+            unit: "deg/s",
+            hz: null,
+            changed: false,
+            basis: "not changed by the app; raising it is your decision and is not assumed to fix the coherence",
+        };
+    });
+    const cli = [
+        `set debug_mode = ${CHIRP_DEBUG_MODE.name}`,
+        "set blackbox_sample_rate = 1/1",
+        `set chirp_frequency_start_deci_hz = ${start}`,
+        `set chirp_frequency_end_deci_hz = ${end}`,
+        `set chirp_time_seconds = ${sweepS}`,
+        "save",
+    ];
+    return {
+        scope: "pid_profile_shared_by_all_axes",
+        settings,
+        amplitudes,
+        cli,
+        coverage,
+        excitationGainDb: gain,
+        firmwareChecks,
+        valid: firmwareChecks.every((c) => c.startsWith("ok:")),
+    };
+}
+
+export function recordingPlan(o: {
+    decisions: Partial<Record<AxisName, { primary: RouteDecision | null; jio: RouteDecision | null }>>;
+    headers: Record<string, string>;
+    advice: Partial<Record<AxisName, JioSweepAdvice | null>>;
+    /** The planner bands per axis (primary and JIO measurement plans). */
+    plannerBandsHz: Partial<Record<AxisName, ([number, number] | null)[]>>;
+    /** Sweeps of the imported flight per axis (JIO analysis). */
+    sweeps: Partial<Record<AxisName, { present: number; complete: number; usableComplete: number }>>;
+    /** Comparable independent flights per axis (JIO cross-flight). */
+    crossFlight: Partial<Record<AxisName, { flights: number; consistency: "unknown" | "consistent" | "inconsistent" }>>;
+}): RecordingPlan {
+    const h = o.headers;
+    const bands = Object.fromEntries(
+        AXES.map((a) => [a, (o.plannerBandsHz[a] ?? []).filter((b): b is [number, number] => !!b)]),
+    ) as Record<AxisName, [number, number][]>;
+    const axes = AXES.map((a) => axisNeed(a, o.decisions[a], bands[a]));
+    const recordingNeeded = axes.some((a) => a.kind === "record");
+
+    const perAxis = AXES.map((axis) => ({
+        axis,
+        present: o.sweeps[axis]?.present ?? 0,
+        complete: o.sweeps[axis]?.complete ?? 0,
+        usableComplete: o.sweeps[axis]?.usableComplete ?? 0,
+    }));
+    const required = MEASUREMENT_AGREEMENT.rounds;
+    const complete = Math.min(required, ...perAxis.map((p) => p.complete));
+    const usable = Math.min(required, ...perAxis.map((p) => p.usableComplete));
+    const anySweep = perAxis.some((p) => p.present > 0);
+    const cross = AXES.map((axis) => ({ axis, consistency: o.crossFlight[axis]?.consistency ?? ("unknown" as const) }));
+    const flights = Math.max(0, ...AXES.map((a) => o.crossFlight[a]?.flights ?? 0));
+    const crossState = cross.some((c) => c.consistency === "inconsistent")
+        ? "inconsistent"
+        : flights > 0 && cross.every((c) => c.consistency === "consistent")
+          ? "consistent"
+          : "unknown";
+    const logged = (name: string, unit: string, dHz = false): PlanSetting => {
+        const v = h[name] ?? null;
+        const n = num(v);
+        return {
+            name,
+            current: v,
+            proposed: v ?? "unknown",
+            unit,
+            hz: dHz && n !== null ? { current: n / 10, proposed: n / 10 } : null,
+            changed: false,
+            basis: "as logged in the imported flight",
+        };
+    };
+    const existing: RecordingPlan["existing"] = {
+        settings: [
+            logged("debug_mode", ""),
+            { ...logged("P interval", ""), name: "blackbox_sample_rate (P interval)" },
+            logged("chirp_frequency_start_deci_hz", "dHz", true),
+            logged("chirp_frequency_end_deci_hz", "dHz", true),
+            logged("chirp_time_seconds", "s"),
+            ...AXES.map((a) => logged(`chirp_amplitude_${a}`, "deg/s")),
+        ],
+        rounds: {
+            required,
+            complete,
+            usable,
+            perAxis,
+            state: !anySweep ? "none" : usable >= required ? "complete" : "incomplete",
+        },
+        secondFlight: { flights, perAxis: cross, state: crossState },
+    };
+
+    const sweep = recordingNeeded ? sharedSweep(h, o.advice, bands) : null;
+    const perActivation =
+        RECORDING_TIMING.leadInS + MEASUREMENT_AGREEMENT.sweepS + RECORDING_TIMING.settleS + RECORDING_TIMING.pauseS;
+    const sequence = MEASUREMENT_AGREEMENT.activations * perActivation;
+    const procedure = sweep
+        ? [
+              `In the CLI, in the active PID profile (the chirp frequencies and time are shared by all axes), enter: ${sweep.cli.join(" · ")}. The app writes none of them. save reboots the flight controller; after a reboot the first activation is roll.`,
+              `Arm and take off; hover steadily for at least ${RECORDING_TIMING.leadInS} s before each activation; keep the sticks still during each sweep.`,
+              `Round 1: switch CHIRP_MODE on and leave it on for the whole ${MEASUREMENT_AGREEMENT.sweepS} s sweep (the generator stops itself), ${RECORDING_TIMING.settleS} s longer, then off; wait at least ${RECORDING_TIMING.pauseS} s. Each switch-off advances the axis: roll, then pitch, then yaw.`,
+              `Round 2: the same three activations again: roll, pitch, yaw. Together ${MEASUREMENT_AGREEMENT.activations} complete activations, ${MEASUREMENT_AGREEMENT.activeExcitationS} s of excitation.`,
+              `Switched off early: the axis advances anyway (pid.c) and that sweep is incomplete. Continue the cycle: the same axis comes back after three activations. The app reads the axis of every sweep from debug[1], so extra sweeps do no harm.`,
+              `Land, import the log and Calculate. The app counts the complete rounds and decides per axis.`,
+          ]
+        : [];
+    return {
+        recordingNeeded,
+        axes,
+        existing,
+        sweep,
+        procedure,
+        timing: {
+            sweepS: MEASUREMENT_AGREEMENT.sweepS,
+            activations: MEASUREMENT_AGREEMENT.activations,
+            activeExcitationS: MEASUREMENT_AGREEMENT.activeExcitationS,
+            perActivationS: perActivation,
+            sequenceS: sequence,
+            firm: [
+                `${MEASUREMENT_AGREEMENT.activations} activations × chirp_time_seconds ${MEASUREMENT_AGREEMENT.sweepS} s = ${MEASUREMENT_AGREEMENT.activeExcitationS} s of excitation (2 rounds × 3 axes)`,
+            ],
+            experimental: [
+                `lead-in ${RECORDING_TIMING.leadInS} s, settle ${RECORDING_TIMING.settleS} s and pause ${RECORDING_TIMING.pauseS} s per activation: about ${Math.round(sequence)} s of activation sequence`,
+                `take-off, climb and landing come on top; whether that fits one AIR65 pack is not known to the app`,
+            ],
+        },
+        secondFlight: `Optional: a second, independent flight with the same settings and the same two rounds is supplementary evidence (reproducibility between flights). Without it the cross-flight check stays unknown; that is not a pass, and it does not withhold an experimental proposal. A second flight that disagrees does exclude the JIO candidate.`,
+        completionChecks: [
+            `Blocking (the engine excludes the data): debug_mode CHIRP; setpoint, axisP/I/F, debug[1] and debug[3] logged, axisD when D > 0 (jio_channel_missing); log rate equal to the PID rate within 2 % (jio_log_rate_not_pid_rate); debug[2] against the firmware law when logged (debug2_frequency_mismatch).`,
+            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only when every other gate passed and the decision band drops no bin for coherence, support or plant status); no unidentified bin inside the decision band (decision_band_gaps); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top (gain_margin_shown_by_band, sensitivity_peak_shown_by_band); the two sweeps of an axis that disagree (repeat z > ${JIO_SWEEP.repeatZThreshold}, experimental threshold) exclude the JIO candidate.`,
+            `Rounds: ${required} complete rounds give each axis two sweeps for the stationarity check. Fewer leave stationarity unknown, named as a limitation, not a block; a sweep below ${Math.round(JIO_SWEEP.completeSweepFraction * 100)} % of chirp_time_seconds is read in and marked incomplete (sweep_incomplete).`,
+            `Second flight: supplementary; absent = unknown (not passed, not required); a disagreeing one excludes the JIO candidate.`,
+        ],
+        notChanged: [
+            "flight mode, anti-gravity, TPA, I-term relax, filters and PIDs: not changed (a change makes the sweeps incomparable as repeats)",
+            "chirp_amplitude_roll / pitch / yaw: not changed by the app",
+        ],
+        note: "Existing data and proposed settings are separate: the existing values are what the imported flight logged. A recording with these settings is no guarantee of a tuning proposal: the new data must pass the checks above.",
+    };
 }

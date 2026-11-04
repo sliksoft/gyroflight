@@ -68,6 +68,7 @@ import AutotuneV2Panel from "../../src/gyrocore/components/AutotuneV2Panel.vue";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import { useTuneBackupStore } from "../../src/gyrocore/stores/tuneBackup";
 import { runAutotuneV2, type AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
+import { recordingPlan } from "../../src/gyrocore/engine/recordingInstruction";
 import { resetConfirmations } from "../../src/gyrocore/tuning/applyConfirmation";
 import { useFlightControllerStore } from "../../src/stores/fc";
 import { createFirmwareFc, FIRMWARE_WRITE_CODES } from "./harness/mspFirmware";
@@ -122,7 +123,7 @@ const emptyResult = () => ({
     experimental: null,
     experimentalWithheld: [],
     candidateDecisions: {},
-    recordingInstructions: [],
+    recordingPlan: null,
 });
 
 let unmount: (() => void) | null = null;
@@ -349,7 +350,7 @@ describe("AutotuneV2Panel", () => {
         expect(q(d, `[data-gyrocore="v2-backups"] [data-backup="${backup.id}"]`)).not.toBeNull();
     });
 
-    it("section 4c: per axis the decision with value and threshold, and the recording instruction it triggers", async () => {
+    it("section 4c: per axis the decision, the missing frequencies, existing data apart from the one shared sweep configuration", async () => {
         const fail = {
             rule: "identified_band_top",
             ref: "loopModel",
@@ -358,68 +359,70 @@ describe("AutotuneV2Panel", () => {
             threshold: "≥ 66.0 Hz (planner band 9.8–66.0 Hz); next bin 39.1 Hz: γ² 0.620 < LOOP_MIN_COHERENCE 0.8",
             result: "fail",
             consequence: "record a sweep whose coherence reaches the planner band",
-        };
-        const r = {
-            ...emptyResult(),
-            candidateDecisions: {
-                roll: {
-                    primary: {
-                        route: "primary",
-                        plant: "present_with_limitation",
-                        bandHz: [9.8, 37.1],
-                        metrics: null,
-                        current: null,
-                        checks: [fail],
-                        searchRan: false,
-                        candidatesTried: 0,
-                        candidatesUsable: 0,
-                        status: "plant_band_insufficient",
-                        firstCause: fail,
-                        candidate: null,
-                        measurementUsable: true,
-                        waived: [],
-                    },
-                    jio: null,
-                },
-            },
-            recordingInstructions: [
+        } as const;
+        const primary = {
+            route: "primary" as const,
+            plant: "present_with_limitation" as const,
+            bandHz: [9.8, 37.1] as [number, number],
+            metrics: null,
+            current: null,
+            checks: [fail],
+            searchRan: false,
+            candidatesTried: 0,
+            candidatesUsable: 0,
+            status: "plant_band_insufficient" as const,
+            firstCause: fail,
+            candidate: null,
+            measurementUsable: true,
+            missing: [
                 {
-                    axis: "roll",
-                    trigger: {
-                        route: "primary",
-                        status: "plant_band_insufficient",
-                        rule: "identified_band_top",
-                        value: 37.1,
-                        threshold: "x",
-                    },
-                    kind: "record",
-                    settings: [
-                        {
-                            name: "chirp_frequency_end_deci_hz",
-                            current: 6000,
-                            required: 1200,
-                            unit: "dHz (0.1 Hz)",
-                            changed: true,
-                            basis: "band-matched advice",
-                        },
-                    ],
-                    procedure: ["Switch CHIRP_MODE on …"],
-                    timing: {
-                        sweepS: 20,
-                        activationsPerFlight: 6,
-                        perActivationS: 23.5,
-                        chirpTimePerFlightS: 141,
-                        generatorTimePerFlightS: 120,
-                        flights: 2,
-                        totalChirpTimeS: 282,
-                        firm: [],
-                        experimental: ["lead-in 2 s"],
-                    },
-                    completionChecks: ["Identified band reaches the planner band top."],
-                    notChanged: [],
-                    note: "Triggered by the primary route",
+                    kind: "decision_band_hole" as const,
+                    fromHz: 12.2,
+                    toHz: 14.6,
+                    bins: 3,
+                    reason: "coherence" as const,
+                    value: 0.612,
+                    unit: "γ²",
+                    threshold: "γ² ≥ 0.8",
+                },
+                {
+                    kind: "above_identified_band" as const,
+                    fromHz: 39.1,
+                    toHz: 66,
+                    bins: null,
+                    reason: "coherence" as const,
+                    value: 0.62,
+                    unit: "γ²",
+                    threshold: "γ² ≥ 0.8 (first bin outside the identified band: 39.1 Hz)",
                 },
             ],
+            waived: [],
+        };
+        const decisions = { roll: { primary, jio: null } };
+        const r = {
+            ...emptyResult(),
+            candidateDecisions: decisions,
+            recordingPlan: recordingPlan({
+                decisions,
+                headers: {
+                    debug_mode: "96",
+                    "P interval": "1",
+                    chirp_frequency_start_deci_hz: "2",
+                    chirp_frequency_end_deci_hz: "6000",
+                    chirp_time_seconds: "20",
+                    chirp_amplitude_roll: "230",
+                    chirp_amplitude_pitch: "230",
+                    chirp_amplitude_yaw: "180",
+                },
+                advice: {},
+                plannerBandsHz: { roll: [[9.8, 66]], pitch: [[6, 109]] },
+                sweeps: {
+                    roll: { present: 2, complete: 2, usableComplete: 2 },
+                    pitch: { present: 2, complete: 2, usableComplete: 2 },
+                    yaw: { present: 1, complete: 1, usableComplete: 1 },
+                },
+                crossFlight: {},
+            }),
         } as unknown as AutotuneV2Result;
         const d = mount(r);
         await flush();
@@ -428,12 +431,51 @@ describe("AutotuneV2Panel", () => {
         expect(row.textContent).toContain("identified_band_top: 37.109 Hz");
         expect(row.textContent).toContain("γ² 0.620 < LOOP_MIN_COHERENCE 0.8");
         expect(row.textContent).toContain("not run");
-        const ins = q(d, '[data-gyrocore="v2-recording-instruction"][data-axis="roll"]')!;
-        expect(ins.getAttribute("data-kind")).toBe("record");
-        expect(q(ins, '[data-setting="chirp_frequency_end_deci_hz"]')!.getAttribute("data-changed")).toBe("yes");
-        expect(q(ins, '[data-gyrocore="v2-recording-timing"]')!.textContent).toContain(
-            "gyroflightV2RecordingTiming|6|20|141|2|282|lead-in 2 s|120",
+        const pl = q(d, '[data-gyrocore="v2-recording-plan"]')!;
+        expect(pl.getAttribute("data-needed")).toBe("yes");
+        // Per axis: the exact missing intervals with reason, value and threshold.
+        const roll = q(pl, '[data-gyrocore="v2-recording-axis"][data-axis="roll"]')!;
+        expect(roll.getAttribute("data-kind")).toBe("record");
+        const ivs = [...roll.querySelectorAll('[data-gyrocore="v2-missing-interval"]')].map((e) =>
+            e.textContent!.trim(),
         );
+        expect(ivs[0]).toBe(
+            "primary: 12.2–14.6 Hz (3 bins), inside the decision band: coherence 0.612 γ²; required γ² ≥ 0.8",
+        );
+        expect(ivs[1]).toContain("primary: 39.1–66.0 Hz, planner band above the identified band: coherence 0.620 γ²");
+        // Existing data apart: five activations (yaw once) = one complete round; second flight unknown, not passed.
+        expect(q(pl, '[data-gyrocore="v2-plan-rounds"]')!.getAttribute("data-state")).toBe("incomplete");
+        expect(q(pl, '[data-gyrocore="v2-plan-rounds"]')!.textContent).toContain("gyroflightV2PlanRounds|1|2|1|");
+        expect(q(pl, '[data-gyrocore="v2-plan-second-flight"]')!.getAttribute("data-state")).toBe("unknown");
+        expect(q(pl, '[data-gyrocore="v2-plan-second-flight"]')!.textContent).toContain(
+            "gyroflightV2PlanSecondFlight_unknown",
+        );
+        expect(
+            q(pl, '[data-gyrocore="v2-plan-existing"] [data-setting="chirp_frequency_end_deci_hz"]')!.textContent,
+        ).toContain("6000 dHz (600.0 Hz)");
+        // The one proposed configuration: dHz with Hz, exact CLI lines, 20 s, amplitudes unchanged.
+        const end = q(pl, '[data-gyrocore="v2-plan-settings"] [data-setting="chirp_frequency_end_deci_hz"]')!;
+        expect(end.getAttribute("data-changed")).toBe("yes");
+        expect(end.textContent).toContain("1100 dHz (110.0 Hz)");
+        expect(
+            q(pl, '[data-gyrocore="v2-plan-settings"] [data-setting="chirp_time_seconds"]')!.getAttribute(
+                "data-changed",
+            ),
+        ).toBe("no");
+        expect(
+            q(pl, '[data-gyrocore="v2-plan-settings"] [data-setting="chirp_amplitude_yaw"]')!.getAttribute(
+                "data-changed",
+            ),
+        ).toBe("no");
+        expect(q(pl, '[data-gyrocore="v2-plan-cli"]')!.textContent).toBe(
+            "set debug_mode = CHIRP\nset blackbox_sample_rate = 1/1\nset chirp_frequency_start_deci_hz = 20\nset chirp_frequency_end_deci_hz = 1100\nset chirp_time_seconds = 20\nsave",
+        );
+        expect(q(pl, '[data-gyrocore="v2-plan-coverage"]')!.getAttribute("data-valid")).toBe("yes");
+        expect(q(pl, '[data-gyrocore="v2-recording-timing"]')!.textContent).toContain(
+            "gyroflightV2PlanTiming|6|20|120|141|",
+        );
+        expect(q(pl, '[data-gyrocore="v2-plan-second-flight-help"]')!.textContent).toMatch(/^\s*Optional/);
+        expect(q(pl, '[data-gyrocore="v2-plan-note"]')!.textContent).toContain("no guarantee of a tuning proposal");
     });
 
     it("experimental Apply is refused when the craft is armed, without a write and without a backup", async () => {

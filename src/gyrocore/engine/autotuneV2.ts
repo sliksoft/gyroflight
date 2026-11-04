@@ -96,7 +96,7 @@ import { buildMeasurementStrategy, type AxisMeasurementStrategy } from "./measur
 import { crossLogReferenceIssues, PLANT_CONFIG_KEYS, sameFlight } from "./logInput";
 import { buildExperimentalProposal, type ExperimentalProposal, type WithheldItem } from "./experimentalProposal";
 import { decideAxis, type RouteDecision } from "./candidateDecision";
-import { recordingInstructions, type RecordingInstruction } from "./recordingInstruction";
+import { recordingPlan, SUPPLEMENTARY_MEASUREMENT, type RecordingPlan } from "./recordingInstruction";
 import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
 import {
     analyzeJioSweeps,
@@ -290,8 +290,12 @@ export interface AutotuneV2Result {
      * value, unit, threshold and consequence, the plant, whether the search ran, and its status.
      */
     candidateDecisions: Partial<Record<AxisName, { primary: RouteDecision | null; jio: RouteDecision | null }>>;
-    /** Per axis without a candidate: the recording the failed check asks for (recordingInstruction.ts). */
-    recordingInstructions: RecordingInstruction[];
+    /**
+     * The agreed measurement (two CHIRP rounds, one sweep configuration for all axes), the frequencies
+     * each axis's data does not show, and the existing data apart from the proposed settings
+     * (recordingInstruction.ts).
+     */
+    recordingPlan: RecordingPlan;
 }
 
 export interface JioAxisChain {
@@ -393,8 +397,13 @@ export interface JioAxisProgress {
         /** The parts of the tuning band the supported band does not cover (empty: covered or no goal). */
         missing: [number, number][];
     };
-    /** This axis's required_measurement:* codes, in the order the route lists them. */
+    /**
+     * This axis's required_measurement:* codes, in the order the route lists them, without the
+     * supplementary ones (the agreed plan: a second flight is extra evidence, not a step).
+     */
     nextSteps: string[];
+    /** Supplementary codes (repeat_flight_for_reproducibility): absent evidence stays unknown, not passed. */
+    supplementary: string[];
 }
 
 /**
@@ -1238,10 +1247,31 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         experimental: experimentalOutcome.proposal,
         experimentalWithheld: experimentalOutcome.withheld,
         candidateDecisions,
-        recordingInstructions: recordingInstructions({
+        recordingPlan: recordingPlan({
             decisions: candidateDecisions,
             headers: h,
             advice: Object.fromEntries(AXES.map((a) => [a, jio.analysis.axes[a]?.sweepAdvice ?? null])),
+            plannerBandsHz: Object.fromEntries(
+                AXES.map((a) => [
+                    a,
+                    [
+                        measurementPlan.find((m) => m.axis === a)?.bandHz.primary ?? null,
+                        jio.chain[a]?.plan?.bandHz.primary ?? null,
+                    ],
+                ]),
+            ),
+            sweeps: Object.fromEntries(
+                AXES.flatMap((a) => {
+                    const sw = jio.analysis.axes[a]?.sweeps;
+                    return sw ? [[a, sw]] : [];
+                }),
+            ),
+            crossFlight: Object.fromEntries(
+                AXES.flatMap((a) => {
+                    const c = jio.crossFlight.axes[a];
+                    return c ? [[a, c]] : [];
+                }),
+            ),
         }),
     };
 }
@@ -1451,7 +1481,12 @@ function runJioRoute(
                 sufficientForTuning: a.sweepAdvice?.bandSufficientForTuning ?? null,
                 missing: missingBand(a.band?.supportedHz ?? null, a.sweepAdvice?.tuningBandHz ?? null),
             },
-            nextSteps: requiredMeasurements.filter((r) => r.includes(`chirp_${name}_`)),
+            nextSteps: requiredMeasurements.filter(
+                (r) => r.includes(`chirp_${name}_`) && !SUPPLEMENTARY_MEASUREMENT.test(r),
+            ),
+            supplementary: requiredMeasurements.filter(
+                (r) => r.includes(`chirp_${name}_`) && SUPPLEMENTARY_MEASUREMENT.test(r),
+            ),
         };
     }
     return {
