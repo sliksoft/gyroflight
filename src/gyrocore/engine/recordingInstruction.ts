@@ -136,7 +136,8 @@ export interface RecordingPlan {
             /** Complete rounds whose sweeps were also used (not excluded). */
             usable: number;
             perAxis: { axis: AxisName; present: number; complete: number; usableComplete: number }[];
-            state: "complete" | "incomplete" | "none";
+            /** complete_not_usable: both rounds flown, but a sweep was excluded (not usable). */
+            state: "complete" | "complete_not_usable" | "incomplete" | "none";
         };
         secondFlight: {
             flights: number;
@@ -267,6 +268,10 @@ function axisNeed(
     };
 }
 
+/** The logged debug_mode with its name when it is CHIRP ("96 (CHIRP)"). */
+const debugModeText = (v: string | null) =>
+    v === String(CHIRP_DEBUG_MODE.index) ? `${v} (${CHIRP_DEBUG_MODE.name})` : v;
+
 const num = (s: string | null) => (s === null || s.trim() === "" || !Number.isFinite(Number(s)) ? null : Number(s));
 
 /**
@@ -301,14 +306,17 @@ function sharedSweep(
             );
         } else basis.push(`${axis}: no band-matched advice (no supported JIO band); planner band used`);
         if (top !== null) ends.push(Math.ceil((10 * top) / round) * round);
-        // Without advice the start is the analysis's lowest frequency, below any planner band.
+        // The start never lies above a planner band's low end (rounded down to whole Hz); without
+        // advice it is at most the analysis's lowest frequency.
+        if (lo !== null) starts.push(10 * Math.floor(lo));
         if (lo !== null && !adv) starts.push(10 * JIO_SWEEP.lowestHz);
     }
     const lowest = 10 * JIO_SWEEP.lowestHz;
-    let start = starts.length ? Math.min(...starts) : (f0 ?? lowest);
-    let end = ends.length ? Math.max(...ends) : (f1 ?? FIRMWARE_CHIRP.endDeciHz[1]);
-    start = Math.min(Math.max(start, FIRMWARE_CHIRP.startDeciHz[0]), FIRMWARE_CHIRP.startDeciHz[1]);
-    end = Math.min(Math.max(end, 2 * start), FIRMWARE_CHIRP.endDeciHz[1]);
+    const wantStart = starts.length ? Math.min(...starts) : (f0 ?? lowest);
+    const wantEnd = ends.length ? Math.max(...ends) : (f1 ?? FIRMWARE_CHIRP.endDeciHz[1]);
+    const start = Math.min(Math.max(wantStart, FIRMWARE_CHIRP.startDeciHz[0]), FIRMWARE_CHIRP.startDeciHz[1]);
+    const end = Math.min(Math.max(wantEnd, 2 * start), FIRMWARE_CHIRP.endDeciHz[1]);
+    const clamped = start !== wantStart || end < wantEnd;
     const sweepS = MEASUREMENT_AGREEMENT.sweepS;
     const firmwareChecks = [
         start >= FIRMWARE_CHIRP.startDeciHz[0] && start <= FIRMWARE_CHIRP.startDeciHz[1]
@@ -336,7 +344,7 @@ function sharedSweep(
             covered,
             basis: covered
                 ? `${(start / 10).toFixed(1)}–${(end / 10).toFixed(1)} Hz covers ${need[0].toFixed(1)}–${need[1].toFixed(1)} Hz`
-                : `${(start / 10).toFixed(1)}–${(end / 10).toFixed(1)} Hz does not cover ${need[0].toFixed(1)}–${need[1].toFixed(1)} Hz (firmware range)`,
+                : `${(start / 10).toFixed(1)}–${(end / 10).toFixed(1)} Hz does not cover ${need[0].toFixed(1)}–${need[1].toFixed(1)} Hz (${clamped ? "cut by the firmware range" : "not reached by the combined range"})`,
         });
     }
     const gain =
@@ -355,7 +363,7 @@ function sharedSweep(
     const settings: PlanSetting[] = [
         {
             name: "debug_mode",
-            current: h.debug_mode ?? null,
+            current: debugModeText(h.debug_mode ?? null),
             proposed: CHIRP_DEBUG_MODE.name,
             unit: "",
             hz: null,
@@ -469,7 +477,7 @@ export function recordingPlan(o: {
     };
     const existing: RecordingPlan["existing"] = {
         settings: [
-            logged("debug_mode", ""),
+            { ...logged("debug_mode", ""), current: debugModeText(h.debug_mode ?? null) },
             { ...logged("P interval", ""), name: "blackbox_sample_rate (P interval)" },
             logged("chirp_frequency_start_deci_hz", "dHz", true),
             logged("chirp_frequency_end_deci_hz", "dHz", true),
@@ -481,7 +489,13 @@ export function recordingPlan(o: {
             complete,
             usable,
             perAxis,
-            state: !anySweep ? "none" : usable >= required ? "complete" : "incomplete",
+            state: !anySweep
+                ? "none"
+                : usable >= required
+                  ? "complete"
+                  : complete >= required
+                    ? "complete_not_usable"
+                    : "incomplete",
         },
         secondFlight: { flights, perAxis: cross, state: crossState },
     };

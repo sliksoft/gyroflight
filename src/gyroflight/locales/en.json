@@ -1053,7 +1053,7 @@
     "gyroflightV2DecisionSearch": { "message": "Search (usable of tried)" },
     "gyroflightV2DecisionStatus": { "message": "Status" },
     "gyroflightV2DecisionCause": { "message": "First decisive check: value; threshold; result; consequence" },
-    "gyroflightV2PlanTitle": { "message": "Measurement plan (preparation for a flight not yet made)" },
+    "gyroflightV2RecordingPlanTitle": { "message": "Recording plan (preparation for a flight not yet made)" },
     "gyroflightV2PlanAgreement": {
         "message": "Agreed measurement: two complete CHIRP rounds in one flight, roll → pitch → yaw and again roll → pitch → yaw: six activations of 20 s, 120 s of excitation. A second independent flight is supplementary evidence, not a required step. Per axis below: the frequencies the existing data does not show, with the rule, the measured value and the threshold."
     },
@@ -1064,8 +1064,11 @@
     },
     "gyroflightV2PlanRounds": { "message": "Complete rounds: $1 of $2 ($3 with every sweep usable) — $4. $5" },
     "gyroflightV2PlanRounds_complete": { "message": "Both agreed rounds are present." },
+    "gyroflightV2PlanRounds_complete_not_usable": {
+        "message": "Both agreed rounds were flown, but a sweep was excluded (see the measurement set per axis): stationarity stays unknown for that axis."
+    },
     "gyroflightV2PlanRounds_incomplete": {
-        "message": "Not both agreed rounds are present: stationarity stays unknown for an axis with fewer than two complete sweeps."
+        "message": "Fewer than two complete sweeps on an axis: not both agreed rounds are present, and stationarity stays unknown for that axis."
     },
     "gyroflightV2PlanRounds_none": { "message": "No CHIRP sweep in the imported data." },
     "gyroflightV2PlanSecondFlight": { "message": "Second flight (supplementary): $1 comparable flight(s); $2. $3" },

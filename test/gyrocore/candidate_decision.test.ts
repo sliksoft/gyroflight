@@ -33,7 +33,13 @@ import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
 import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
-import { decideAxis, metricStates, type RouteDecision } from "../../src/gyrocore/engine/candidateDecision";
+import {
+    bandShortfall,
+    decideAxis,
+    metricStates,
+    type RouteDecision,
+} from "../../src/gyrocore/engine/candidateDecision";
+import type { AxisLoop } from "../../src/gyrocore/engine/loopModel";
 import {
     deciHzText,
     MEASUREMENT_AGREEMENT,
@@ -424,6 +430,15 @@ describe("recordingPlan: the agreed two CHIRP rounds (block 7)", () => {
         expect(s.chirp_time_seconds).toMatchObject({ current: 30, proposed: 20, changed: true });
     });
 
+    it("the start follows a planner band low under the advice start; a miss names whether a firmware clamp cut it", () => {
+        const p = plan({ advice: { roll: advice(1200) }, plannerBandsHz: { roll: [[1.5, 66]] } });
+        const s = Object.fromEntries(p.sweep!.settings.map((x) => [x.name, x]));
+        expect(s.chirp_frequency_start_deci_hz.proposed).toBe(10);
+        expect(p.sweep!.coverage.find((c) => c.axis === "roll")!.covered).toBe(true);
+        const cut = plan({ plannerBandsHz: { roll: [[6, 1200]] } });
+        expect(cut.sweep!.coverage.find((c) => c.axis === "roll")!.basis).toContain("cut by the firmware range");
+    });
+
     it("a wrong debug mode and log rate are named as changes", () => {
         const p = plan({ headers: { ...HEADERS, debug_mode: "0", "P interval": "1/2" } });
         const s = Object.fromEntries(p.sweep!.settings.map((x) => [x.name, x]));
@@ -442,6 +457,11 @@ describe("recordingPlan: the agreed two CHIRP rounds (block 7)", () => {
             present: 2,
             complete: 1,
         });
+        // Both rounds flown, one sweep excluded: not "rounds absent".
+        const excluded = plan({
+            sweeps: { ...rounds(2, 2, 2), pitch: { present: 2, complete: 2, usableComplete: 1 } },
+        });
+        expect(excluded.existing.rounds).toMatchObject({ complete: 2, usable: 1, state: "complete_not_usable" });
         const none = plan({ sweeps: {} });
         expect(none.existing.rounds).toMatchObject({ complete: 0, state: "none" });
         // The existing settings are as logged, with Hz beside dHz; they are not the proposal.
@@ -518,6 +538,30 @@ describe("recordingPlan: the agreed two CHIRP rounds (block 7)", () => {
         expect(none.sweep).toBeNull();
         expect(none.procedure).toEqual([]);
         expect(none.axes[1].note).toContain("gain_change_flight_with_feedforward_unchanged");
+    });
+
+    it("band shortfall: never an inverted interval when the first bin outside lies past the planner top", () => {
+        const bin = (f: number, coherence: number) => ({
+            frequencyHz: f,
+            status: "ok",
+            G: { re: 1, im: 0 },
+            coherence,
+        });
+        const loop = {
+            plant: { bins: [bin(60, 0.9), bin(62, 0.9), bin(64, 0.9), bin(66, 0.5)] },
+            support: null,
+            uncertainty: null,
+        } as unknown as AxisLoop;
+        const [iv] = bandShortfall(loop, [60, 64], [60, 65]);
+        expect(iv).toMatchObject({
+            kind: "above_identified_band",
+            fromHz: 64,
+            toHz: 65,
+            reason: "coherence",
+            value: 0.5,
+        });
+        const [wide] = bandShortfall(loop, [60, 62], [60, 70]);
+        expect(wide).toMatchObject({ fromHz: 64, toHz: 70 });
     });
 
     it("frequency display: dHz with Hz beside it", () => {

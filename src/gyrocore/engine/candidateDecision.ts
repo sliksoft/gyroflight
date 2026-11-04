@@ -136,7 +136,7 @@ export function missingIntervals(bins: MissingBin[], stepHz: number | null): Mis
 }
 
 /** The planner band's parts outside the identified band, with the rule of the first bin outside it. */
-function bandShortfall(
+export function bandShortfall(
     loop: AxisLoop,
     band: [number, number] | null,
     required: [number, number] | null,
@@ -167,11 +167,20 @@ function bandShortfall(
     const out: MissingInterval[] = [];
     if (band[0] > required[0] + 1e-9) {
         const below = [...bins].reverse().find((b) => b.frequencyHz < band[0] - 1e-9) ?? null;
-        out.push(iv("below_identified_band", required[0], band[0], below));
+        out.push(
+            iv(
+                "below_identified_band",
+                required[0],
+                below && below.frequencyHz >= required[0] ? below.frequencyHz : band[0],
+                below,
+            ),
+        );
     }
     if (band[1] < required[1] - 1e-9) {
         const above = bins.find((b) => b.frequencyHz > band[1] + 1e-9) ?? null;
-        out.push(iv("above_identified_band", above ? above.frequencyHz : band[1], required[1], above));
+        // The first bin outside may lie past the planner top already: the interval then starts at the band end.
+        const from = above && above.frequencyHz <= required[1] ? above.frequencyHz : band[1];
+        out.push(iv("above_identified_band", from, required[1], above));
     }
     return out;
 }

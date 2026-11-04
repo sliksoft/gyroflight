@@ -660,7 +660,7 @@
                 data-gyrocore="v2-recording-plan"
                 :data-needed="plan.recordingNeeded ? 'yes' : 'no'"
             >
-                <p class="font-bold">{{ $t("gyroflightV2PlanTitle") }}</p>
+                <p class="font-bold">{{ $t("gyroflightV2RecordingPlanTitle") }}</p>
                 <p class="text-dimmed">{{ $t("gyroflightV2PlanAgreement") }}</p>
                 <div
                     v-for="ax in planAxes"
