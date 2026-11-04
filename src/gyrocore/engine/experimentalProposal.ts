@@ -94,9 +94,22 @@ const DATA_INSUFFICIENT = [
     /^jio_no_supported_points/,
 ];
 
+/**
+ * A margin reason that is not a data limit for a PID change: the gyro-chain model is used only to
+ * judge a filter candidate (loopModel candidateLoop: cand.chain); the measured plant of a PID
+ * candidate already contains the real chain. On a filter item the reason is its own, unprefixed.
+ */
+const MARGIN_REASON_NOT_DATA = /^chain_model_not_validated_on_this_log/;
+
 export function dataInsufficientReasons(reasons: readonly string[]): string[] {
-    // A reason carried through from the margins (`margins:<reason>`) counts as the reason itself.
-    return reasons.filter((r) => DATA_INSUFFICIENT.some((re) => re.test(r.replace(/^margins:/, ""))));
+    // A reason carried through from the margins (`margins:<reason>`) counts as the reason itself,
+    // except the chain-model note above.
+    return reasons.filter((r) => {
+        const fromMargins = r.startsWith("margins:");
+        const bare = r.replace(/^margins:/, "");
+        if (fromMargins && MARGIN_REASON_NOT_DATA.test(bare)) return false;
+        return DATA_INSUFFICIENT.some((re) => re.test(bare));
+    });
 }
 
 /** A PID candidate the search really computed (improved / restores margins), with a change. */

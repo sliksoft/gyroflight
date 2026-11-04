@@ -40,6 +40,9 @@ import type { AxisPidProposal } from "../../src/gyrocore/engine/pidOptimizer";
 import type { AbsoluteProposal, ProposalItem } from "../../src/gyrocore/releaseGate/releaseContract";
 import type { JioSweepAdvice } from "../../src/gyrocore/engine/jioSweep";
 import { closedLoopChirpLog, ratePlant } from "./harness/closedLoopBbl";
+import { createPinia, setActivePinia } from "pinia";
+import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
+import { experimentalWriteDecision } from "../../src/gyrocore/releaseGate/experimentalAuthority";
 
 function margins(o: Partial<LoopMargins> & { reasons?: string[] }): LoopMargins {
     return {
@@ -146,6 +149,11 @@ describe("decideAxis on simulated flights: statuses agree with what the search r
             verifiedTune: null,
             createdAt: "2026-11-03T00:00:00Z",
         });
+        // Facts of this fixture (output disturbance through the loop): both routes on both axes stop at the band.
+        for (const axis of ["roll", "pitch"] as const) {
+            expect(r.candidateDecisions[axis]!.primary!.status).toBe("plant_band_insufficient");
+            expect(r.candidateDecisions[axis]!.jio!.status).toBe("plant_band_insufficient");
+        }
         for (const axis of ["roll", "pitch"] as const) {
             const d = r.candidateDecisions[axis]!;
             for (const route of [d.primary, d.jio]) {
@@ -175,6 +183,64 @@ describe("decideAxis on simulated flights: statuses agree with what the search r
         }
         expect(JSON.stringify(r.candidateDecisions)).not.toContain('"VALIDATED"');
         expect(r.releasableProposal).toBeNull();
+    }, 120_000);
+});
+
+describe("measured-margin search and decision_band_gaps on simulated flights (block 6)", () => {
+    const G = ratePlant({ K: 60, motorHz: 40, delayS: 0.002 });
+    const decode = (envelope: (f: number) => number, name: string) => {
+        const bytes = closedLoopChirpLog({ plants: [G, null, null], sweepS: 12, seed: 141, noise: 0.3, envelope });
+        const sha = createHash("sha256").update(bytes).digest("hex");
+        const [log] = buildLogInputs(bytes, sha, qualifyChirpFile(bytes, name, 45, AUTOTUNE_MATH), null);
+        return runAutotuneV2({ primary: log, others: [], verifiedTune: null, createdAt: "2026-11-03T00:00:00Z" });
+    };
+
+    it("only the bounds' qualification missing: the search runs on in-band margins, finds a candidate, and it passes the experimental authority", () => {
+        // A short excitation dip at 30–34 Hz that drops no bin: margins MEASURED (uncertainty unknown), no gaps.
+        const r = decode((f) => (f >= 30 && f <= 34 ? 0 : 1), "clean.bbl");
+        const d = r.candidateDecisions.roll!.primary!;
+        expect(d.checks.find((c) => c.rule === "decision_band_gaps")).toMatchObject({ value: 0, result: "pass" });
+        expect(d.checks.find((c) => c.rule === "margin_bounds_established")).toMatchObject({
+            value: "MEASURED",
+            result: "waived",
+        });
+        expect(d.status).toBe("candidate_found");
+        expect(d.searchRan).toBe(true);
+        expect(d.candidate!.status).toBe("BLOCKED");
+        expect(r.releasableProposal).toBeNull();
+        const x = r.experimental!;
+        const roll = x.items.filter((i) => i.key.endsWith("_roll"));
+        expect(roll.length).toBeGreaterThan(0);
+        expect(roll.every((i) => i.source === "primary_route")).toBe(true);
+        for (const it of roll) {
+            const k = it.key.replace("_roll", "") as "p" | "i" | "d" | "d_max";
+            expect(it.to).toBe(k === "d_max" ? d.candidate!.proposed.dMax : d.candidate!.proposed[k]);
+        }
+        setActivePinia(createPinia());
+        const store = useAutotuneV2Store();
+        store.state = "done";
+        store.result = r;
+        const decision = experimentalWriteDecision(x, { recompute: false });
+        expect(decision.steps.find((st) => st.name === "analysis_binding")!.reasons).toEqual([]);
+        expect(decision.steps.find((st) => st.name === "computable_items")!.reasons).toEqual([]);
+        expect(decision.steps.find((st) => st.name === "values_technical")!.reasons).toEqual([]);
+        expect(decision.verdict).toBe("EXPERIMENTAL_APPLY_ALLOWED");
+    }, 120_000);
+
+    it("a hole inside the decision band stops the search: decision_band_gaps with the bin count, no candidate", () => {
+        const r = decode((f) => (f >= 10 && f <= 20 ? 0 : 1), "hole.bbl");
+        const d = r.candidateDecisions.roll!.primary!;
+        const gaps = d.checks.find((c) => c.rule === "decision_band_gaps")!;
+        expect(gaps.result).toBe("fail");
+        expect(gaps.value).toBe(3);
+        expect(d.status).toBe("plant_band_insufficient");
+        expect(d.searchRan).toBe(false);
+        expect(d.candidate).toBeNull();
+        expect(r.experimental?.items.some((i) => i.key.endsWith("_roll")) ?? false).toBe(false);
+        expect(r.experimentalWithheld.find((w) => w.key === "pid_roll")!.reasons).toContain(
+            "primary:plant_band_insufficient",
+        );
+        expect(r.recordingInstructions.find((i) => i.axis === "roll")!.kind).toBe("record");
     }, 120_000);
 });
 
