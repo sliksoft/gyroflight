@@ -121,9 +121,10 @@
             </table>
         </div>
 
-        <div v-if="qualityCards.length" class="mt-3" data-gyrocore="chirp-quality-v2-list">
+        <div v-if="qualityCards.length" class="mt-3 @container" data-gyrocore="chirp-quality-v2-list">
             <h3 class="text-sm font-bold mb-2">{{ $t("gyrocoreQv2Heading") }}</h3>
-            <div class="grid gap-3 lg:grid-cols-2">
+            <!-- Two cards per row only where each still has room for its table (container width, not the window). -->
+            <div class="grid gap-3 @5xl:grid-cols-2">
                 <ChirpQualityV2Card
                     v-for="m in qualityCards"
                     :key="`${m.id}-${gate.revision}`"

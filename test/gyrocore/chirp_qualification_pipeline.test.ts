@@ -255,6 +255,9 @@ describe("a recommendation requires a usable measurement", () => {
 describe("diagnostic-only banner on the Autotune tab", () => {
     async function mountTab() {
         const { default: AutotuneTab } = await import("../../src/components/tabs/AutotuneTab.vue");
+        const { useAutotuneSectionStore } = await import("../../src/gyroflight/autotune/sections");
+        // The plots live in the Graphs section of the tab.
+        useAutotuneSectionStore().open("graphs");
         const container = document.createElement("div");
         document.body.appendChild(container);
         const app = createApp({ render: () => h(UApp, { portal: false }, { default: () => h(AutotuneTab) }) });

@@ -84,7 +84,7 @@
     "gyrocoreChirpColRate": { "message": "Rate (Hz)" },
     "gyrocoreChirpColCoherence": { "message": "Coherence" },
     "gyrocoreChirpColState": { "message": "Measurement" },
-    "gyrocoreChirpColApply": { "message": "Apply" },
+    "gyrocoreChirpColApply": { "message": "Slider Apply" },
     "gyrocoreChirpApplyAllowed": { "message": "allowed" },
     "gyrocoreChirpApplyBlocked": { "message": "blocked" },
     "gyrocoreChirpReasons": { "message": "Why" },
@@ -684,7 +684,7 @@
     "gyroflightAnalyzeChirp": { "message": "CHIRP qualification" },
     "gyroflightAnalyzeMissing": { "message": "no CHIRP log imported yet (Import Blackbox Log above)" },
     "gyroflightAnalyzeM4": { "message": "Flight metrics (feedforward, D-term, filters, FFT)" },
-    "gyroflightAnalyzeM4Missing": { "message": "not analysed yet (Open BBL for M4 analysis above)" },
+    "gyroflightAnalyzeM4Missing": { "message": "not analysed yet (Open BBL for M4 analysis under Technical details)" },
     "gyroflightAnalyzeChirpSummary": { "message": "$1 measurements, $2 usable, $3 rejected" },
     "gyroflightPart": { "message": "Part" },
     "gyroflightPartState": { "message": "Status" },
@@ -1314,5 +1314,70 @@
     },
     "gyroflightCliExitNotDelivered": {
         "message": "Leaving the CLI failed: the exit command did not reach the flight controller in full, so it may still be in CLI mode. The connection was closed. Power-cycle the flight controller before connecting again."
+    },
+    "gyroflightAutotuneNavLabel": { "message": "Autotune sections" },
+    "gyroflightAutotuneSection_overview": { "message": "Overview" },
+    "gyroflightAutotuneSection_chirp": { "message": "CHIRP quality" },
+    "gyroflightAutotuneSection_graphs": { "message": "Graphs" },
+    "gyroflightAutotuneSection_tuning": { "message": "Tuning and apply" },
+    "gyroflightAutotuneSection_compare": { "message": "Compare flights" },
+    "gyroflightAutotuneSection_plan": { "message": "Measurement plan" },
+    "gyroflightAutotuneSection_technical": { "message": "Technical details" },
+    "gyroflightAutotuneNeedsImport": {
+        "message": "Import a blackbox log above to see the frequency response, phase, sensitivity, step response and spectrograms."
+    },
+    "gyroflightAutotuneNeedsCalculate": {
+        "message": "Not calculated yet. Import a log, then press Calculate under Overview."
+    },
+    "gyroflightAutotuneTuningIntro": {
+        "message": "Two separate routes. Engine v2 computes absolute PID, feedforward and filter values; the slider route below (global tune, gain recommendation, tune workflow) only applies when simplified (slider) PID mode is on. Each proposal shows its own status; nothing is written until you confirm it."
+    },
+    "gyroflightAutotuneTuningV2Title": { "message": "Engine v2: proposed values, apply, verify and restore" },
+    "gyroflightAutotuneCompareV2Title": { "message": "Engine v2: imported flights" },
+    "gyroflightAutotunePlanTitle": {
+        "message": "Measurement plan: what the recording contains and what the next one needs"
+    },
+    "gyroflightAutotuneTechnicalTitle": { "message": "Engine v2: margins, JIO route and model-class qualification" },
+    "gyroflightOverviewTitle": { "message": "Overview" },
+    "gyroflightOverviewNoLog": {
+        "message": "No log imported yet. Use Import Blackbox Log above; every section then reads that log."
+    },
+    "gyroflightOverviewFlight": { "message": "Selected flight" },
+    "gyroflightOverviewChirp": { "message": "CHIRP measurements" },
+    "gyroflightOverviewChirpCount": { "message": "$1 in $2 embedded log(s)" },
+    "gyroflightOverviewSources": { "message": "Flights imported for engine v2" },
+    "gyroflightOverviewColumnsHelp": {
+        "message": "Per axis three separate answers: Measurement says whether the CHIRP sweep is usable (CHIRP quality); Tuning says which values engine v2 computed from it; Apply says which write route those values may take."
+    },
+    "gyroflightOverviewMeasurement": { "message": "Measurement (CHIRP)" },
+    "gyroflightOverviewTuning": { "message": "Tuning result (engine v2)" },
+    "gyroflightOverviewApply": { "message": "Apply" },
+    "gyroflightOverviewNotMeasured": { "message": "no sweep" },
+    "gyroflightOverviewCoherence": { "message": "coherence" },
+    "gyroflightOverviewBand": { "message": "identified band" },
+    "gyroflightOverviewTuningNone": { "message": "not calculated" },
+    "gyroflightOverviewTuningValidated": { "message": "VALIDATED values" },
+    "gyroflightOverviewTuningExperimental": { "message": "EXPERIMENTAL values (not validated)" },
+    "gyroflightOverviewTuningWithheld": { "message": "no value: the measurement does not support one" },
+    "gyroflightOverviewTuningNoChange": { "message": "no change proposed" },
+    "gyroflightOverviewApplyReleased": { "message": "released Apply (after the live checks)" },
+    "gyroflightOverviewApplyExperimental": {
+        "message": "experimental Apply only (acknowledgement and technical checks)"
+    },
+    "gyroflightOverviewApplyNothing": { "message": "nothing to apply" },
+    "gyroflightOverviewReasonTitle": { "message": "Deciding check and next step per axis" },
+    "gyroflightOverviewRequired": { "message": "required" },
+    "gyroflightOverviewNoDecision": { "message": "no decision: no sweep of this axis was analysed" },
+    "gyroflightOverviewNext": { "message": "Next step" },
+    "gyroflightOverviewNextRecord": { "message": "record a new CHIRP flight that covers the missing frequencies" },
+    "gyroflightOverviewNextCandidate": { "message": "review the proposal and its checks" },
+    "gyroflightOverviewOpen_plan": { "message": "Open measurement plan" },
+    "gyroflightOverviewOpen_tuning": { "message": "Open tuning and apply" },
+    "gyroflightOverviewOpen_chirp": { "message": "Open CHIRP quality" },
+    "gyroflightAutotuneCompareHelp": {
+        "message": "Every log imported with Import Another is added to the flights engine v2 compares (repeats of the same craft and configuration); press Calculate again after importing. Choosing Flight A and B from a saved Tune Session is available in expert mode."
+    },
+    "gyroflightOverviewNotCalculated": {
+        "message": "Engine v2 has not calculated this flight yet: press Calculate below."
     }
 }
