@@ -186,6 +186,33 @@ describe("Autotune tab sections", () => {
         second.unmount();
     });
 
+    it("each engine v2 action has one place: Calculate in the overview, the logs and Verified Tune in Compare", async () => {
+        await importLog();
+        const sections = useAutotuneSectionStore();
+        const { container, unmount } = mountComponent(AutotuneTab);
+        await flush();
+        const content = () => container.querySelector('[data-gyroflight="autotune-section"]')!;
+        const count = (sel: string) => content().querySelectorAll(sel).length;
+        expect(count('[data-gyrocore="v2-calculate"]')).toBe(1);
+        expect(count('[data-gyrocore="v2-verified-tune"]')).toBe(0);
+        expect(count('[data-gyrocore="v2-sources"]')).toBe(0);
+        sections.open("compare");
+        await flush();
+        expect(count('[data-gyrocore="v2-calculate"]')).toBe(0);
+        expect(count('[data-gyrocore="v2-verified-tune"]')).toBe(1);
+        expect(count('[data-gyrocore="v2-sources"]')).toBe(1);
+        // Compare points back to the overview for Calculate.
+        (content().querySelector('[data-gyroflight="autotune-compare-open-overview"]') as HTMLButtonElement).click();
+        await flush();
+        expect(sections.active).toBe("overview");
+        for (const section of AUTOTUNE_SECTIONS.filter((s) => s !== "overview" && s !== "compare")) {
+            sections.open(section);
+            await flush();
+            expect(count('[data-gyrocore="v2-calculate"], [data-gyrocore="v2-verified-tune"]'), section).toBe(0);
+        }
+        unmount();
+    });
+
     it("the graphs section asks for an import instead of showing empty plots", async () => {
         useAutotuneSectionStore().open("graphs");
         const { container, unmount } = mountComponent(AutotuneTab);

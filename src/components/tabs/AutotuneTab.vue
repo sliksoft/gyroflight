@@ -11,7 +11,7 @@
 
                     <template v-if="active === 'overview'">
                         <AutotuneOverview @open="sections.open" />
-                        <!-- Gyroflight autotune engine v2: the imported logs and the calculation -->
+                        <!-- Gyroflight autotune engine v2: the calculation (the logs are listed in Compare) -->
                         <AutotuneV2Panel :parts="['analyze']" />
                     </template>
 
@@ -50,9 +50,18 @@
                         <p class="text-sm text-dimmed mt-3">{{ $t("gyroflightAutotuneCompareHelp") }}</p>
                         <!-- Gyroflight: choose Flight A/B from a saved Tune Session (selection only, no tuning) -->
                         <FlightAbSelector />
+                        <UButton
+                            size="xs"
+                            variant="link"
+                            class="p-0 self-start"
+                            data-gyroflight="autotune-compare-open-overview"
+                            @click="sections.open('overview')"
+                        >
+                            {{ $t("gyroflightAutotuneCompareOpenOverview") }}
+                        </UButton>
                         <AutotuneV2Panel
                             :title="$t('gyroflightAutotuneCompareV2Title')"
-                            :parts="['analyze', 'multi']"
+                            :parts="['sources', 'verifiedTune', 'multi']"
                         />
                     </template>
 

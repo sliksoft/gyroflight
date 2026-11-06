@@ -1024,7 +1024,7 @@
     "gyroflightV2JioRepeats": { "message": "Repeats" },
     "gyroflightV2JioBand": { "message": "Supported band" },
     "gyroflightV2JioMissing": { "message": "Unsupported points (reason:count)" },
-    "gyroflightV2JioCandidate": { "message": "Candidate" },
+    "gyroflightV2JioCandidate": { "message": "Release optimiser (bounded margins)" },
     "gyroflightV2JioTuning": { "message": "Tuning from this route" },
     "gyroflightV2JioGapPoints": { "message": "gap points" },
     "gyroflightV2JioCrossFlight": { "message": "Repeats across flights" },
@@ -1373,10 +1373,13 @@
     "gyroflightOverviewNextCandidate": { "message": "review the proposal and its checks" },
     "gyroflightOverviewOpen_plan": { "message": "Open measurement plan" },
     "gyroflightOverviewOpen_tuning": { "message": "Open tuning and apply" },
-    "gyroflightOverviewOpen_chirp": { "message": "Open CHIRP quality" },
     "gyroflightAutotuneCompareHelp": {
-        "message": "Every log imported with Import Another is added to the flights engine v2 compares (repeats of the same craft and configuration); press Calculate again after importing. Choosing Flight A and B from a saved Tune Session is available in expert mode."
+        "message": "Every log imported with Import Another is added to the flights engine v2 compares (repeats of the same craft and configuration); press Calculate in the overview again after importing. Choosing Flight A and B from a saved Tune Session is available in expert mode."
     },
+    "gyroflightAutotuneCompareOpenOverview": { "message": "Open the overview to calculate" },
+    "gyroflightV2JioMeasuredSearch": { "message": "Experimental measured-margin search (section 4c)" },
+    "gyroflightV2JioSearchRan": { "message": "$1 of $2 candidates usable" },
+    "gyroflightV2JioSearchNotRun": { "message": "not run" },
     "gyroflightOverviewNotCalculated": {
         "message": "Engine v2 has not calculated this flight yet: press Calculate below."
     }

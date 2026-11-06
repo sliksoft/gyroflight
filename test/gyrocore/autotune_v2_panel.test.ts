@@ -213,6 +213,20 @@ describe("AutotuneV2Panel", () => {
         expect(roll.textContent).toContain("MEASURED");
         expect(roll.textContent).toContain("gyroflightV2JioDiagnosticOnly");
         expect(roll.textContent).not.toContain("VALIDATED");
+        // Two searches read the JIO route: the release optimiser's line and, apart from it, the measured-margin
+        // search's own status, so "computable" never stands alone next to that search's stop reason.
+        const search = diag.candidateDecisions.roll!.jio!;
+        const measured = q(roll, '[data-gyrocore="v2-jio-measured-search"]')!.textContent!;
+        expect(measured).toContain("gyroflightV2JioMeasuredSearch");
+        expect(measured).toContain(search.status);
+        expect(measured).toContain(
+            search.searchRan
+                ? `gyroflightV2JioSearchRan|${search.candidatesUsable}|${search.candidatesTried}`
+                : "gyroflightV2JioSearchNotRun",
+        );
+        expect(q(roll, '[data-gyrocore="v2-jio-candidate"]')!.textContent).not.toContain(
+            "gyroflightV2JioMeasuredSearch|",
+        );
         // The other flight is a consistent repeat: the row says so and the stationarity need is gone.
         expect(roll.getAttribute("data-cross-flight")).toBe("consistent");
         expect(roll.textContent).toMatch(/1: consistent z=\d/);

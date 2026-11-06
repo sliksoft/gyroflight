@@ -104,7 +104,7 @@ import { useAutotuneV2Store } from "@/gyrocore/stores/autotuneV2";
 type Axis = "roll" | "pitch" | "yaw";
 const AXES: Axis[] = ["roll", "pitch", "yaw"];
 
-const emit = defineEmits<{ open: [section: "tuning" | "plan" | "chirp"] }>();
+const emit = defineEmits<{ open: [section: "tuning" | "plan"] }>();
 
 const autotune = useAutotuneStore();
 const gate = useChirpQualificationStore();

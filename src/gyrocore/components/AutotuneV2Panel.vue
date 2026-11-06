@@ -2,29 +2,32 @@
     <UiBox :title="title ?? $t('gyroflightV2Title')" type="neutral" data-gyrocore="autotune-v2">
         <p v-if="show('analyze')" class="text-sm text-dimmed mb-2">{{ $t("gyroflightV2Intro") }}</p>
 
-        <!-- 1. Analyze -->
-        <template v-if="show('analyze')">
+        <!-- 1. Analyze: the imported logs ("sources"), Calculate ("analyze") and Verified Tune ("verifiedTune") -->
+        <template v-if="show('analyze') || show('sources') || show('verifiedTune')">
             <h4 class="font-bold mt-2" data-step="v2-analyze">1. {{ $t("gyroflightStepAnalyze") }}</h4>
-            <p v-if="!v2.sources.length" class="text-sm text-dimmed" data-gyrocore="v2-no-source">
-                {{ $t("gyroflightV2NoSource") }}
-            </p>
-            <ul v-else class="list-disc ps-5 text-sm" data-gyrocore="v2-sources">
-                <li v-for="s in v2.sources" :key="s.filename" :data-source="s.filename">
-                    {{ s.filename }} · {{ summary(s) }}
-                    <span
-                        v-if="recordingConfig(s)"
-                        class="text-dimmed"
-                        data-gyrocore="v2-recording-config"
-                        :data-role="recordingConfig(s)!.role"
-                    >
-                        · {{ recordingConfig(s)!.text }}
-                    </span>
-                </li>
-            </ul>
-            <p v-if="v2.sources.length || result" class="text-sm text-dimmed" data-gyrocore="v2-compare-loop">
-                {{ $t("gyroflightV2CompareLoop") }}
-            </p>
+            <template v-if="show('sources')">
+                <p v-if="!v2.sources.length" class="text-sm text-dimmed" data-gyrocore="v2-no-source">
+                    {{ $t("gyroflightV2NoSource") }}
+                </p>
+                <ul v-else class="list-disc ps-5 text-sm" data-gyrocore="v2-sources">
+                    <li v-for="s in v2.sources" :key="s.filename" :data-source="s.filename">
+                        {{ s.filename }} · {{ summary(s) }}
+                        <span
+                            v-if="recordingConfig(s)"
+                            class="text-dimmed"
+                            data-gyrocore="v2-recording-config"
+                            :data-role="recordingConfig(s)!.role"
+                        >
+                            · {{ recordingConfig(s)!.text }}
+                        </span>
+                    </li>
+                </ul>
+                <p v-if="v2.sources.length || result" class="text-sm text-dimmed" data-gyrocore="v2-compare-loop">
+                    {{ $t("gyroflightV2CompareLoop") }}
+                </p>
+            </template>
             <UButton
+                v-if="show('analyze')"
                 size="xs"
                 class="mt-1"
                 data-gyrocore="v2-calculate"
@@ -34,33 +37,35 @@
             >
                 {{ $t("gyroflightV2Calculate") }}
             </UButton>
-            <UButton
-                size="xs"
-                variant="outline"
-                class="mt-1 ms-2"
-                data-gyrocore="v2-verified-tune"
-                :disabled="v2.sources.length < 2 || v2.state === 'calculating'"
-                @click="createVerifiedTune"
-            >
-                {{ $t("gyroflightV2CreateVerifiedTune") }}
-            </UButton>
-            <p class="text-sm text-dimmed">{{ $t("gyroflightV2VerifiedTuneHelp") }}</p>
-            <div
-                v-if="v2.verifiedTuneAttempt"
-                class="text-sm"
-                data-gyrocore="v2-verified-tune-result"
-                :data-verdict="v2.verifiedTuneAttempt.verdict"
-            >
-                <span
-                    :class="v2.verifiedTuneAttempt.verdict === 'PASS' ? 'text-green-500' : 'text-red-500'"
-                    class="font-bold"
+            <template v-if="show('verifiedTune')">
+                <UButton
+                    size="xs"
+                    variant="outline"
+                    class="mt-1 ms-2"
+                    data-gyrocore="v2-verified-tune"
+                    :disabled="v2.sources.length < 2 || v2.state === 'calculating'"
+                    @click="createVerifiedTune"
                 >
-                    {{ $t(`gyroflightV2VerifiedTune_${v2.verifiedTuneAttempt.verdict}`) }}
-                </span>
-                <span v-if="v2.verifiedTuneAttempt.reasons.length" class="text-dimmed">
-                    ({{ v2.verifiedTuneAttempt.reasons.join("; ") }})
-                </span>
-            </div>
+                    {{ $t("gyroflightV2CreateVerifiedTune") }}
+                </UButton>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2VerifiedTuneHelp") }}</p>
+                <div
+                    v-if="v2.verifiedTuneAttempt"
+                    class="text-sm"
+                    data-gyrocore="v2-verified-tune-result"
+                    :data-verdict="v2.verifiedTuneAttempt.verdict"
+                >
+                    <span
+                        :class="v2.verifiedTuneAttempt.verdict === 'PASS' ? 'text-green-500' : 'text-red-500'"
+                        class="font-bold"
+                    >
+                        {{ $t(`gyroflightV2VerifiedTune_${v2.verifiedTuneAttempt.verdict}`) }}
+                    </span>
+                    <span v-if="v2.verifiedTuneAttempt.reasons.length" class="text-dimmed">
+                        ({{ v2.verifiedTuneAttempt.reasons.join("; ") }})
+                    </span>
+                </div>
+            </template>
             <p v-if="v2.progressMessage" class="text-sm text-dimmed">{{ v2.progressMessage }}</p>
             <p v-if="v2.state === 'error'" class="text-sm text-red-500" data-gyrocore="v2-error">
                 {{ v2.errorMessage }}
@@ -272,7 +277,12 @@
                                 <td>{{ row.band }}</td>
                                 <td class="text-dimmed">{{ row.missing }}</td>
                                 <td>{{ row.margins }}</td>
-                                <td class="[overflow-wrap:anywhere]">{{ row.candidate }}</td>
+                                <td class="[overflow-wrap:anywhere]" data-gyrocore="v2-jio-candidate">
+                                    {{ row.candidate }}
+                                    <span class="block text-dimmed" data-gyrocore="v2-jio-measured-search">
+                                        {{ $t("gyroflightV2JioMeasuredSearch") }}: {{ row.measuredSearch }}
+                                    </span>
+                                </td>
                                 <td :class="row.computable ? 'text-yellow-500' : 'text-red-500'">{{ row.tuning }}</td>
                             </tr>
                         </tbody>
@@ -922,7 +932,9 @@
 <script lang="ts">
 /** The panel's parts, in template order; the Autotune tab shows each in its own section. */
 export type AutotuneV2Part =
+    | "sources"
     | "analyze"
+    | "verifiedTune"
     | "parts"
     | "margins"
     | "multi"
@@ -1028,7 +1040,10 @@ const jioRows = computed(() => {
                 margins: m
                     ? `${num(m.crossoverHz, 1)} Hz / ${num(m.phaseMarginDeg ?? m.measured.phaseMarginDeg, 0)}° (${m.evidence.level})`
                     : "--",
+                // Two searches read this route: the release optimiser on bounded margins (jio.chain) and the
+                // experimental measured-margin search (candidateDecisions, also in 4c and the overview).
                 candidate: c?.candidate ? `${c.candidate.status}: ${c.candidate.outcome}` : "--",
+                measuredSearch: jioSearchText(result.value?.candidateDecisions[axis]?.jio ?? null),
                 computable: !!c?.tuningComputable,
                 tuning: c
                     ? c.tuningComputable
@@ -1039,6 +1054,16 @@ const jioRows = computed(() => {
         ];
     });
 });
+/** The measured-margin search on the JIO plant (candidateDecision.ts): its status and how far it ran. */
+function jioSearchText(
+    r: { status: string; searchRan: boolean; candidatesTried: number; candidatesUsable: number } | null,
+) {
+    if (!r) return "--";
+    const ran = r.searchRan
+        ? i18n.getMessage("gyroflightV2JioSearchRan", [r.candidatesUsable, r.candidatesTried])
+        : i18n.getMessage("gyroflightV2JioSearchNotRun");
+    return `${r.status} (${ran})`;
+}
 /** The next sweep per axis: the firmware's own exponential sweep with a band-matched end frequency. */
 const jioAdvice = computed(() => {
     const jio = result.value?.jio;
@@ -1272,6 +1297,7 @@ const experimentalWithheld = computed(() => v2.result?.experimentalWithheld ?? [
 const experimentalDecision = computed(() =>
     experimental.value ? experimentalWriteDecision(experimental.value, { recompute: false }) : null,
 );
+// Local on purpose: the acknowledgement is asked again whenever the Tuning and apply section is reopened.
 const experimentalAck = ref(false);
 const experimentalBlocks = computed(() => [
     ...(experimentalDecision.value?.blocks ?? []),
