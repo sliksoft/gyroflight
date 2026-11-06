@@ -121,15 +121,17 @@ beforeEach(() => {
 });
 
 describe("Autotune tab sections", () => {
-    it("lists every section in the navigation and opens the overview first", async () => {
+    it("opens the overview first, with no navigation column of its own (the sections are in the main sidebar)", async () => {
         const { container, unmount } = mountComponent(AutotuneTab);
         await flush();
-        const buttons = [...container.querySelectorAll("[data-autotune-section]")];
-        expect(buttons.map((b) => b.getAttribute("data-autotune-section"))).toEqual([...AUTOTUNE_SECTIONS]);
+        expect(container.querySelector("nav")).toBeNull();
+        expect(container.querySelector("[data-autotune-section]")).toBeNull();
         expect(container.querySelector('[data-gyroflight="autotune-section"]')!.getAttribute("data-section")).toBe(
             "overview",
         );
-        expect(buttons[0].getAttribute("aria-current")).toBe("page");
+        expect(container.querySelector('[data-gyroflight="autotune-section-title"]')!.textContent).toContain(
+            "gyroflightAutotuneSection_overview",
+        );
         expect(container.querySelector('[data-gyrocore="autotune-overview"]')).not.toBeNull();
         unmount();
     });
@@ -156,8 +158,9 @@ describe("Autotune tab sections", () => {
             plan: '[data-gyroflight="autotune-needs-calculate"]',
             technical: '[data-gyrocore="m4-flight-metrics"]',
         };
+        const sections = useAutotuneSectionStore();
         for (const section of AUTOTUNE_SECTIONS) {
-            (container.querySelector(`[data-autotune-section="${section}"]`) as HTMLButtonElement).click();
+            sections.open(section);
             await flush();
             const content = container.querySelector('[data-gyroflight="autotune-section"]')!;
             expect(content.getAttribute("data-section")).toBe(section);
@@ -175,7 +178,7 @@ describe("Autotune tab sections", () => {
     it("the open section survives leaving and reopening the tab", async () => {
         const first = mountComponent(AutotuneTab);
         await flush();
-        (first.container.querySelector('[data-autotune-section="plan"]') as HTMLButtonElement).click();
+        useAutotuneSectionStore().open("plan");
         await flush();
         first.unmount();
         const second = mountComponent(AutotuneTab);

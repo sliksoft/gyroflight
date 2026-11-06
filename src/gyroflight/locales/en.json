@@ -1315,7 +1315,6 @@
     "gyroflightCliExitNotDelivered": {
         "message": "Leaving the CLI failed: the exit command did not reach the flight controller in full, so it may still be in CLI mode. The connection was closed. Power-cycle the flight controller before connecting again."
     },
-    "gyroflightAutotuneNavLabel": { "message": "Autotune sections" },
     "gyroflightAutotuneSection_overview": { "message": "Overview" },
     "gyroflightAutotuneSection_chirp": { "message": "CHIRP quality" },
     "gyroflightAutotuneSection_graphs": { "message": "Graphs" },
