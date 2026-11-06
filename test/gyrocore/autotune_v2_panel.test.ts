@@ -490,6 +490,23 @@ describe("AutotuneV2Panel", () => {
         );
         expect(q(pl, '[data-gyrocore="v2-plan-second-flight-help"]')!.textContent).toMatch(/^\s*Optional/);
         expect(q(pl, '[data-gyrocore="v2-plan-note"]')!.textContent).toContain("no guarantee of a tuning proposal");
+        // Log beside proposal in one table: the changed setting is marked, an unchanged one is not.
+        expect(end.querySelector('[data-gyrocore="v2-plan-changed"]')).not.toBeNull();
+        expect(
+            q(
+                pl,
+                '[data-gyrocore="v2-plan-settings"] [data-setting="chirp_time_seconds"] [data-gyrocore="v2-plan-changed"]',
+            ),
+        ).toBeNull();
+        // The CLI lines sit with the settings, under the note that the app does not write them.
+        const settingsBlock = q(pl, '[data-gyrocore="v2-plan-settings-block"]')!;
+        expect(settingsBlock.querySelector('[data-gyrocore="v2-plan-not-written"]')).not.toBeNull();
+        expect(settingsBlock.querySelector('[data-gyrocore="v2-plan-cli"]')).not.toBeNull();
+        // The next flight with its duration; the frequencies, thresholds and checks behind a toggle.
+        expect(q(pl, '[data-gyrocore="v2-plan-next"] [data-gyrocore="v2-recording-timing"]')).not.toBeNull();
+        expect(q(pl, '[data-gyrocore="v2-plan-technical"]')!.tagName).toBe("DETAILS");
+        expect(q(pl, '[data-gyrocore="v2-plan-technical"] [data-gyrocore="v2-plan-coverage"]')).not.toBeNull();
+        expect(roll.querySelector("details [data-gyrocore='v2-missing-interval']")).not.toBeNull();
     });
 
     it("experimental Apply is refused when the craft is armed, without a write and without a backup", async () => {
@@ -643,7 +660,9 @@ describe("AutotuneV2Panel", () => {
             expect(["MODEL_CONDITIONAL", "MEASURED"]).toContain(row.getAttribute("data-evidence"));
             expect(row.getAttribute("data-state")).toBe("NOT_VALIDATED");
             expect(row.querySelector(".text-green-500")).toBeNull();
-            expect(row.textContent).toContain("gyroflightV2Measured");
+            // Measured values and bounds in their own columns, under their own group headers.
+            expect(row.querySelectorAll('[data-kind="measured"]')).toHaveLength(3);
+            expect(row.querySelectorAll('[data-kind="bound"]')).toHaveLength(3);
         }
         // Pitch proposed stays MODEL_CONDITIONAL (fc still resolved on the 2 Hz rung).
         const pitch = q(c, '[data-gyrocore="v2-margin-evidence"] [data-axis="pitch"]')!;
@@ -653,6 +672,8 @@ describe("AutotuneV2Panel", () => {
             "gyroflightV2EvidenceNeeded|chirp_finer_resolution_model_class_qualification",
         );
         expect(q(c, '[data-gyrocore="v2-evidence-legend"]')).not.toBeNull();
+        expect(q(c, '[data-gyrocore="v2-margins"] thead')!.textContent).toContain("gyroflightV2MarginsMeasuredGroup");
+        expect(q(c, '[data-gyrocore="v2-margins"] thead')!.textContent).toContain("gyroflightV2MarginsBoundGroup");
     });
 
     it("margin evidence: a qualified model shows VALIDATED in green with its qualification (SIMULATION)", async () => {

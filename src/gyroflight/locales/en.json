@@ -374,7 +374,7 @@
         "message": "The connected craft's $1 differs from the analysed log, so the recommendation's baseline no longer holds."
     },
     "gyrocorePerAxisEvidenceNote": {
-        "message": "Per-axis proposals are evidence. Sliders are global, so Apply writes only the Gyroflight global tune shown above, never one axis's column."
+        "message": "Per-axis proposals are evidence. Sliders are global, so Apply writes only the Gyroflight global tune (Tuning and apply, route 3), never one axis's column."
     },
     "gyrocoreQv2Heading": { "message": "CHIRP quality (Quality V2 diagnostics)" },
     "gyrocoreQv2Title": { "message": "CHIRP QUALITY — $1 ($2)" },
@@ -482,7 +482,7 @@
     "gyrocoreAbNotVerifiedTune": {
         "message": "An A/B selection is not a Verified Tune. It does not qualify CHIRPs, prove repeatability, approve PID settings or release Safety, and physical Apply stays locked ($1)."
     },
-    "gyrocoreAbSessionHead": { "message": "Tune Session" },
+    "gyrocoreAbSessionHead": { "message": "1b. Saved Tune Session (this device)" },
     "gyrocoreAbSessionLabel": { "message": "Saved session" },
     "gyrocoreAbSessionNone": { "message": "— choose a session —" },
     "gyrocoreAbSessionOption": { "message": "$1 · $2 Flights · $3 CHIRPs · $4" },
@@ -506,7 +506,7 @@
         "message": "Nothing to save: no log of this analysis has a valid Flight identity. $1"
     },
     "gyrocoreAbSave_error": { "message": "Not saved ($1)." },
-    "gyrocoreAbFlightsHead": { "message": "Flights in this session" },
+    "gyrocoreAbFlightsHead": { "message": "2. Choose Flight A and Flight B: the Flights in this session" },
     "gyrocoreAbFlightsEmpty": { "message": "This session has no Flights." },
     "gyrocoreAbFlightsTooFew": { "message": "Only $1 selectable Flight(s): an A/B pair needs two." },
     "gyrocoreAbFlightOption": { "message": "$1 · Flight $2/$3 · $4 CHIRPs" },
@@ -525,7 +525,7 @@
     "gyrocoreAbAxes": { "message": "Measured axes" },
     "gyrocoreAbAnalysisVersion": { "message": "Analysis version" },
     "gyrocoreAbUnknown": { "message": "unknown" },
-    "gyrocoreAbStatusHead": { "message": "A/B Verification Status" },
+    "gyrocoreAbStatusHead": { "message": "3. Comparability and reasons (A/B verification status)" },
     "gyrocoreAbPair_INCOMPLETE": { "message": "Choose Flight A and Flight B" },
     "gyrocoreAbPair_BLOCKED": { "message": "Not comparable" },
     "gyrocoreAbPair_ELIGIBLE": { "message": "Comparable pair (not a Verified Tune)" },
@@ -541,7 +541,7 @@
     "gyrocoreAbSaveNotOpened": {
         "message": "It was not opened, because another session was opened or closed while saving."
     },
-    "gyrocoreCfcTitle": { "message": "Cross-flight Comparison" },
+    "gyrocoreCfcTitle": { "message": "4. Cross-flight comparison (diagnostic)" },
     "gyrocoreCfcNotVerifiedTune": {
         "message": "Diagnostic comparison only. This is not a Verified Tune: it proves no repeatability, approves no PID or filter values, grants no tuning authorization and releases no Apply ($1 stays in force)."
     },
@@ -865,7 +865,7 @@
     "gyroflightV2Evidence": { "message": "Evidence" },
     "gyroflightV2Measured": { "message": "measured" },
     "gyroflightV2EvidenceLegend": {
-        "message": "PM, GM and |S| are bounds; the line below each is the value measured on the frequency points. MEASURED: read on the frequency points only, not a bound. MODEL_CONDITIONAL: bounds that hold only under the stated model assumptions, not qualified by an independent measurement, so not release evidence. VALIDATED: bounds whose model class an independent, finer CHIRP log qualified."
+        "message": "Evidence levels. MEASURED: read on the frequency points only, not a bound. MODEL_CONDITIONAL: bounds that hold only under the stated model assumptions, not qualified by an independent measurement, so not release evidence. VALIDATED: bounds whose model class an independent, finer CHIRP log qualified."
     },
     "gyroflightV2EvidenceRange": { "message": "$1: valid for $2–$3 Hz, frequency resolution $4 Hz." },
     "gyroflightV2EvidenceConditional": {
@@ -1055,7 +1055,7 @@
     "gyroflightV2DecisionCause": { "message": "First decisive check: value; threshold; result; consequence" },
     "gyroflightV2RecordingPlanTitle": { "message": "Recording plan (preparation for a flight not yet made)" },
     "gyroflightV2PlanAgreement": {
-        "message": "Agreed measurement: two complete CHIRP rounds in one flight, roll → pitch → yaw and again roll → pitch → yaw: six activations of 20 s, 120 s of excitation. A second independent flight is supplementary evidence, not a required step. Per axis below: the frequencies the existing data does not show, with the rule, the measured value and the threshold."
+        "message": "Agreed measurement: two complete CHIRP rounds in one flight, roll → pitch → yaw and again roll → pitch → yaw: six activations of 20 s, 120 s of excitation. A second independent flight is supplementary evidence, not a required step. The frequencies the existing data does not show are listed per axis under Current recording, with the rule, the measured value and the threshold."
     },
     "gyroflightV2PlanExisting": { "message": "Existing data (the imported flight)" },
     "gyroflightV2PlanProposed": { "message": "Proposed settings for the next flight" },
@@ -1331,8 +1331,8 @@
     "gyroflightAutotuneTuningIntro": {
         "message": "Two separate routes. Engine v2 computes absolute PID, feedforward and filter values; the slider route below (global tune, gain recommendation, tune workflow) only applies when simplified (slider) PID mode is on. Each proposal shows its own status; nothing is written until you confirm it."
     },
-    "gyroflightAutotuneTuningV2Title": { "message": "Engine v2: proposed values, apply, verify and restore" },
-    "gyroflightAutotuneCompareV2Title": { "message": "Engine v2: imported flights" },
+    "gyroflightAutotuneTuningV2Title": { "message": "Absolute PID, feedforward and filters: proposal and Apply" },
+    "gyroflightAutotuneCompareV2Title": { "message": "Engine v2: Verified Tune and multi-recording averages" },
     "gyroflightAutotunePlanTitle": {
         "message": "Measurement plan: what the recording contains and what the next one needs"
     },
@@ -1357,7 +1357,7 @@
     "gyroflightOverviewTuningNone": { "message": "not calculated" },
     "gyroflightOverviewTuningValidated": { "message": "VALIDATED values" },
     "gyroflightOverviewTuningExperimental": { "message": "EXPERIMENTAL values (not validated)" },
-    "gyroflightOverviewTuningWithheld": { "message": "no value: the measurement does not support one" },
+    "gyroflightOverviewTuningWithheld": { "message": "no proposal: not enough information for a value" },
     "gyroflightOverviewTuningNoChange": { "message": "no change proposed" },
     "gyroflightOverviewApplyReleased": { "message": "released Apply (after the live checks)" },
     "gyroflightOverviewApplyExperimental": {
@@ -1373,7 +1373,7 @@
     "gyroflightOverviewOpen_plan": { "message": "Open measurement plan" },
     "gyroflightOverviewOpen_tuning": { "message": "Open tuning and apply" },
     "gyroflightAutotuneCompareHelp": {
-        "message": "Every log imported with Import Another is added to the flights engine v2 compares (repeats of the same craft and configuration); press Calculate in the overview again after importing. Choosing Flight A and B from a saved Tune Session is available in expert mode."
+        "message": "Order of this page: 1. the imported logs and the saved session, 2. choose Flight A and Flight B, 3. whether they are comparable and why, 4. the comparison itself. Engine v2's Verified Tune and multi-recording averages follow at the end."
     },
     "gyroflightAutotuneCompareOpenOverview": { "message": "Open the overview to calculate" },
     "gyroflightV2JioMeasuredSearch": { "message": "Experimental measured-margin search (section 4c)" },
@@ -1381,5 +1381,144 @@
     "gyroflightV2JioSearchNotRun": { "message": "not run" },
     "gyroflightOverviewNotCalculated": {
         "message": "Engine v2 has not calculated this flight yet: press Calculate below."
-    }
+    },
+    "gyroflightOverviewTwoAssessments": {
+        "message": "Measurement quality and a tuning proposal are two separate assessments. A CHIRP measurement can be usable while it still does not hold enough information for a tuning proposal: for example when frequencies the decision needs are missing, or when the candidate search finds no suitable value within its limits."
+    },
+    "gyroflightTechnicalReason": { "message": "Technical reason" },
+    "gyroflightAxisSummaryRecord": {
+        "message": "The tuning decision needs frequencies this recording does not show clearly enough, so there is not yet enough information for a tuning proposal."
+    },
+    "gyroflightAxisSummarySearchLimit": {
+        "message": "The current candidate search found no suitable value within its limits. This does not rule out that new data changes the assessment."
+    },
+    "gyroflightAxisSummaryVerifiedTune": {
+        "message": "The candidate search is constrained by the bound Verified Tune: its gain-change flight also changed feedforward."
+    },
+    "gyroflightAxisSummaryCandidate": { "message": "A candidate value was found; review it with its checks." },
+    "gyroflightAxisSummaryNoChange": { "message": "According to the current data no change is needed." },
+    "gyroflightOverviewNextSearchLimit": {
+        "message": "a change larger than one step is outside this search; the candidate searches are explained under Technical details"
+    },
+    "gyroflightOverviewOpen_technical": { "message": "Open technical details" },
+    "gyrocoreChirpScopeSeparate": {
+        "message": "This page judges the quality of each CHIRP measurement. Whether a tuning proposal can be made is a separate assessment (Overview and Tuning and apply): a usable measurement does not always hold enough information for a proposal."
+    },
+    "gyrocoreChirpScopeSlider": {
+        "message": "The Slider Apply column concerns only the slider route (simplified tuning sliders). Absolute PID tuning and experimental PID tuning have their own assessment under Tuning and apply."
+    },
+    "gyroflightAutotuneCompareLogsTitle": { "message": "1. Imported logs (this browser tab)" },
+    "gyroflightV2SourcesHeading": { "message": "Imported logs" },
+    "gyroflightV2SourcesHelp": {
+        "message": "Every log you import (Import Blackbox Log, Import Another) is listed here for engine v2: Calculate in the Overview reads all of them. They stay while you switch sections or tabs, but they are not saved: they are gone after a reload. A saved Tune Session (below) is a separate, stored copy."
+    },
+    "gyroflightV2VerifiedTuneHeading": { "message": "Verified Tune (engine v2)" },
+    "gyroflightV2VerifiedTuneNotAb": {
+        "message": "A Verified Tune is created from the imported logs above and has its own conditions. It is not the same as the diagnostic A/B comparison of saved Flights."
+    },
+    "gyrocoreAbLogsVsSessions": {
+        "message": "Imported logs and saved sessions are not the same. Imported logs (list 1) live in this browser tab and feed Calculate. A saved Tune Session is stored on this device; Flight A and Flight B can only be chosen from a saved session. Importing a log does not add it to a session."
+    },
+    "gyrocoreAbHowToAdd": {
+        "message": "To add a log to a session: open the session below, make sure that log is the one open in the import box (import it again with Import Another if needed), then press Add analysis to open session. The buttons save only the CHIRP analysis that is open now, so each imported log is added separately. Importing a log again resets the engine v2 result; press Calculate in the Overview again."
+    },
+    "gyrocoreAbSaveSource": { "message": "The save buttons below store the analysis of: $1" },
+    "gyrocoreAbDateUnknown": { "message": "Date unknown (the flight controller logged no date: no real-time clock)" },
+    "gyrocoreAbApiUnknown": {
+        "message": "API version unknown: the log does not name the MSP API version. Flight A/B requires every firmware field to match, so a pair with this Flight stays Not comparable (firmware_unknown:apiVersion). The Flight can still be saved and viewed. Calculate does not read this field from the log; at Apply the connected flight controller's own API version is checked."
+    },
+    "gyroflightTuningStatusTitle": { "message": "Proposal status" },
+    "gyroflightTuningStatusNotCalculated": {
+        "message": "Engine v2 has not calculated this flight yet, so there is no proposal to review."
+    },
+    "gyroflightTuningStatus_available": { "message": "PROPOSAL AVAILABLE" },
+    "gyroflightTuningStatus_partial": { "message": "PARTLY AVAILABLE" },
+    "gyroflightTuningStatus_none": { "message": "NO PROPOSAL" },
+    "gyroflightTuningStatusText_available": {
+        "message": "A validated proposal covers every axis. Apply still runs all its own checks when you click it."
+    },
+    "gyroflightTuningStatusText_partial": {
+        "message": "There are proposed values, but only on some routes or for some axes (for example only experimental values). The axes without a value and the main reason are listed below."
+    },
+    "gyroflightTuningStatusText_none": {
+        "message": "No route has a proposed value for this flight. The main reason per axis is listed below."
+    },
+    "gyroflightTuningStatusOpenTechnical": { "message": "Candidate searches and measurement gaps (Technical details)" },
+    "gyroflightTuningStatusRoute": { "message": "Route" },
+    "gyroflightTuningRouteName_absolute": { "message": "absolute PID (validated)" },
+    "gyroflightTuningRouteName_experimental": { "message": "experimental (not validated)" },
+    "gyroflightTuningRouteName_slider": { "message": "slider (global tune)" },
+    "gyroflightTuningStatusRoutesHelp": {
+        "message": "Three separate routes follow, each with its own status, checks, preview and Apply: absolute PID tuning, experimental tuning and slider tuning. Nothing is written until you confirm it."
+    },
+    "gyroflightTuningRouteHeading_absolute": { "message": "Route 1 · Absolute PID tuning (engine v2)" },
+    "gyroflightTuningRouteHeading_experimental": { "message": "Route 2 · Experimental PID tuning (engine v2)" },
+    "gyroflightTuningRouteHeading_slider": { "message": "Route 3 · Slider tuning (simplified tuning sliders)" },
+    "gyroflightAutotuneTuningExperimentalTitle": {
+        "message": "Experimental tuning: values, acknowledgement, preview and Apply"
+    },
+    "gyroflightAutotuneTuningVerifyTitle": { "message": "Routes 1 and 2: verification, backups and restore" },
+    "gyroflightSliderRouteOff": {
+        "message": "Slider mode is off in this log (simplified PID mode OFF): the sliders do not set the PIDs of this flight, so the slider route gives no proposal here. Use route 1 or 2 above. The slider panels, their checks and buttons are kept below for flights flown with slider mode on."
+    },
+    "gyroflightSliderRouteShow": { "message": "Show the slider route (global tune, Safety and tune workflow)" },
+    "gyroflightSliderRouteIntro": {
+        "message": "The global slider set that the slider workflow may write, with its own Safety check, preview, Apply, verification and restore."
+    },
+    "gyroflightGraphsBodeHelp": {
+        "message": "Frequency response of the selected CHIRP sweep per axis: magnitude and phase of the closed loop, the sensitivity |S| (peaks above the 6 dB line mean little robustness) and the step response derived from it."
+    },
+    "gyroflightGraphsSpectrogramHelp": {
+        "message": "Gyro spectrogram per axis: frequency over time during the sweep. The rising band is the CHIRP excitation; steady horizontal lines are noise or resonances."
+    },
+    "gyroflightGraphsGainNote": {
+        "message": "Gain Recommendation below: the per-axis slider calculations are analysis of these plots, not an applicable proposal. Sliders are global; only the global tune under Tuning and apply (route 3) can be applied, after its own checks."
+    },
+    "gyroflightV2MarginsColumnsHelp": {
+        "message": "Per axis, now → proposed: the values read on the measured frequency points, the bounds the evidence supports (unknown when the data cannot bound them), and the validation status."
+    },
+    "gyroflightV2MarginsMeasuredGroup": { "message": "Measured on the frequency points" },
+    "gyroflightV2MarginsBoundGroup": { "message": "Bounds (unknown = not bounded)" },
+    "gyroflightV2MarginsValidationGroup": { "message": "Validation" },
+    "gyroflightV2BoundUnknown": { "message": "unknown" },
+    "gyroflightV2MarginsDetails": { "message": "Per axis: band, assumptions and what is still needed" },
+    "gyroflightV2JioSearchesHelp": {
+        "message": "Two candidate searches read this route and are shown in separate columns: 1. the release optimiser on bounded margins, 2. the experimental measured-margin search (the same search as in the per-axis decision table above, route jio). The last column is what this route may give for tuning."
+    },
+    "gyroflightV2JioAbout": { "message": "About this route: method, firmware and limitations" },
+    "gyroflightV2JioPlotHelp": {
+        "message": "Per axis: |G| in dB (dots; filled = supported by the data, open = not supported) over frequency in Hz on a log scale, and the r→y coherence from 0 to 1 as a dashed line with its scale on the right."
+    },
+    "gyroflightV2JioAxisHz": { "message": "Frequency (Hz)" },
+    "gyroflightV2JioAxisDb": { "message": "|G| (dB)" },
+    "gyroflightV2JioAxisCoherence": { "message": "coherence" },
+    "gyroflightV2JioAdviceTitle": { "message": "Sweep advice per axis (diagnostic)" },
+    "gyroflightV2JioOtherFlightsTitle": { "message": "Other flights as repeats and 3×3 coupling (diagnostic)" },
+    "gyroflightV2ExperimentalAbout": { "message": "About this route" },
+    "gyroflightV2ExperimentalWithheldToggle": {
+        "message": "Withheld: $1 — why (the candidate searches are explained under Technical details)"
+    },
+    "gyroflightV2PlanCurrentTitle": {
+        "message": "Current recording: complete sweeps and missing information per axis"
+    },
+    "gyroflightV2PlanMissingToggle": { "message": "Missing frequencies ($1): rule, measured value and threshold" },
+    "gyroflightV2PlanSettingsTitle": { "message": "Settings: from the log and proposed" },
+    "gyroflightV2PlanNotWritten": {
+        "message": "These are proposed settings. The app does not write them to the flight controller: you enter them yourself in the CLI."
+    },
+    "gyroflightV2PlanFromLog": { "message": "From the log" },
+    "gyroflightV2PlanProposedValue": { "message": "Proposed" },
+    "gyroflightV2PlanBasis": { "message": "Why" },
+    "gyroflightV2PlanChanged": { "message": "changed" },
+    "gyroflightV2PlanCliHelp": { "message": "CLI lines for the proposed settings (to enter yourself):" },
+    "gyroflightV2PlanNextTitle": { "message": "Next flight: two complete CHIRP rounds" },
+    "gyroflightV2PlanTechnicalTitle": {
+        "message": "Technical basis: frequencies, measured values, thresholds and tables"
+    },
+    "gyroflightTechnicalMarginsTitle": { "message": "Loop margins per axis" },
+    "gyroflightTechnicalSearchesTitle": { "message": "Candidate searches: CHIRP loop and CHIRP + JIO" },
+    "gyroflightTechnicalSetTitle": { "message": "Measurement set and repeats per axis (CHIRP + JIO)" },
+    "gyroflightTechnicalQualificationTitle": { "message": "Model-class qualification" },
+    "gyroflightTechnicalPlotsTitle": { "message": "CHIRP + JIO plots per axis" },
+    "gyroflightTechnicalJioTitle": { "message": "CHIRP + JIO route (experimental): both candidate searches per axis" }
 }

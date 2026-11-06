@@ -22,10 +22,24 @@
 
                 <template v-else-if="active === 'graphs'">
                     <template v-if="store.analysisState === 'done' && store.analysisResult">
-                        <!-- Gyroflight: rejected measurements are plotted as diagnostics only -->
+                        <p class="text-sm text-dimmed mt-3" data-gyroflight="autotune-graphs-bode-help">
+                            {{ $t("gyroflightGraphsBodeHelp") }}
+                        </p>
+                        <!-- Gyroflight: rejected measurements are plotted as diagnostics only (right above the plots) -->
                         <DiagnosticOnlyBanner />
                         <BodePlot />
+                        <p class="text-sm text-dimmed mt-3" data-gyroflight="autotune-graphs-spectrogram-help">
+                            {{ $t("gyroflightGraphsSpectrogramHelp") }}
+                        </p>
                         <SpectrogramPlot />
+                        <!-- Gyroflight: the per-axis slider calculation sits with the plots it is read from -->
+                        <p
+                            class="text-sm font-bold mt-3 rounded-md border border-default p-2"
+                            data-gyroflight="autotune-graphs-gain-note"
+                        >
+                            {{ $t("gyroflightGraphsGainNote") }}
+                        </p>
+                        <GainRecommendation />
                     </template>
                     <p v-else class="text-sm text-dimmed mt-3" data-gyroflight="autotune-needs-import">
                         {{ $t("gyroflightAutotuneNeedsImport") }}
@@ -33,25 +47,41 @@
                 </template>
 
                 <template v-else-if="active === 'tuning'">
-                    <p class="text-sm text-dimmed mt-3">{{ $t("gyroflightAutotuneTuningIntro") }}</p>
-                    <!-- Gyroflight autotune engine v2: absolute PID / feedforward / filter values -->
-                    <AutotuneV2Panel
-                        :title="$t('gyroflightAutotuneTuningV2Title')"
-                        :parts="['parts', 'compare', 'apply', 'experimental', 'decisions', 'verify', 'restore']"
-                    />
-                    <template v-if="store.analysisState === 'done' && store.analysisResult">
-                        <!-- Gyroflight: the one global slider set Apply may write -->
-                        <GlobalTunePanel />
-                        <GainRecommendation />
+                    <!-- Gyroflight: first whether there is a proposal, then the three routes, each with its own checks -->
+                    <TuningStatusPanel @open="sections.open" />
+                    <template v-if="v2.result">
+                        <h3 class="text-base font-bold mt-3" data-gyrocore="route-heading" data-route="absolute">
+                            {{ $t("gyroflightTuningRouteHeading_absolute") }}
+                        </h3>
+                        <AutotuneV2Panel
+                            :title="$t('gyroflightAutotuneTuningV2Title')"
+                            :parts="['parts', 'compare', 'apply']"
+                        />
+                        <h3 class="text-base font-bold mt-3" data-gyrocore="route-heading" data-route="experimental">
+                            {{ $t("gyroflightTuningRouteHeading_experimental") }}
+                        </h3>
+                        <AutotuneV2Panel
+                            :title="$t('gyroflightAutotuneTuningExperimentalTitle')"
+                            :parts="['experimental']"
+                        />
                     </template>
-                    <!-- Gyroflight: analyze -> calculate -> compare -> apply -> verify -> restore (sliders) -->
-                    <TuneWorkflowPanel />
+                    <AutotuneV2Panel
+                        :title="$t('gyroflightAutotuneTuningVerifyTitle')"
+                        :parts="['verify', 'restore']"
+                    />
+                    <!-- Gyroflight: the slider route (global tune, workflow); folded when the log's slider mode is off -->
+                    <SliderRoutePanel>
+                        <!-- Gyroflight: the one global slider set Apply may write -->
+                        <GlobalTunePanel v-if="store.analysisState === 'done' && store.analysisResult" />
+                        <!-- Gyroflight: analyze -> calculate -> compare -> apply -> verify -> restore (sliders) -->
+                        <TuneWorkflowPanel />
+                    </SliderRoutePanel>
                 </template>
 
                 <template v-else-if="active === 'compare'">
                     <p class="text-sm text-dimmed mt-3">{{ $t("gyroflightAutotuneCompareHelp") }}</p>
-                    <!-- Gyroflight: choose Flight A/B from a saved Tune Session (selection only, no tuning) -->
-                    <FlightAbSelector />
+                    <!-- Gyroflight: 1. the imported logs (this browser) apart from the saved Tune Sessions (this device) -->
+                    <AutotuneV2Panel :title="$t('gyroflightAutotuneCompareLogsTitle')" :parts="['sources']" />
                     <UButton
                         size="xs"
                         variant="link"
@@ -61,9 +91,11 @@
                     >
                         {{ $t("gyroflightAutotuneCompareOpenOverview") }}
                     </UButton>
+                    <!-- Gyroflight: saved session, Flight A/B, comparability and the diagnostic comparison (no tuning) -->
+                    <FlightAbSelector />
                     <AutotuneV2Panel
                         :title="$t('gyroflightAutotuneCompareV2Title')"
-                        :parts="['sources', 'verifiedTune', 'multi']"
+                        :parts="['verifiedTune', 'multi']"
                     />
                 </template>
 
@@ -79,11 +111,34 @@
                 </template>
 
                 <template v-else-if="active === 'technical'">
-                    <AutotuneV2Panel
-                        v-if="v2.result"
-                        :title="$t('gyroflightAutotuneTechnicalTitle')"
-                        :parts="['margins', 'jio', 'qualification']"
-                    />
+                    <template v-if="v2.result">
+                        <AutotuneV2Panel :title="$t('gyroflightTechnicalMarginsTitle')" :parts="['margins']" />
+                        <AutotuneV2Panel
+                            v-if="Object.keys(v2.result.candidateDecisions ?? {}).length"
+                            :title="$t('gyroflightTechnicalSearchesTitle')"
+                            :parts="['decisions']"
+                        />
+                        <AutotuneV2Panel
+                            v-if="v2.result.jio"
+                            :title="$t('gyroflightTechnicalJioTitle')"
+                            :parts="['jio']"
+                        />
+                        <AutotuneV2Panel
+                            v-if="v2.result.jio"
+                            :title="$t('gyroflightTechnicalSetTitle')"
+                            :parts="['jioSet']"
+                        />
+                        <AutotuneV2Panel
+                            v-if="v2.result.jio"
+                            :title="$t('gyroflightTechnicalPlotsTitle')"
+                            :parts="['jioPlots']"
+                        />
+                        <AutotuneV2Panel
+                            v-if="v2.qualification"
+                            :title="$t('gyroflightTechnicalQualificationTitle')"
+                            :parts="['qualification']"
+                        />
+                    </template>
                     <p v-else class="text-sm text-dimmed mt-3" data-gyroflight="autotune-needs-calculate">
                         {{ $t("gyroflightAutotuneNeedsCalculate") }}
                     </p>
@@ -110,6 +165,8 @@ import M4FlightMetricsPanel from "@/gyrocore/components/M4FlightMetricsPanel.vue
 import TuneWorkflowPanel from "@/gyrocore/components/TuneWorkflowPanel.vue";
 import AutotuneV2Panel from "@/gyrocore/components/AutotuneV2Panel.vue";
 import AutotuneOverview from "@/gyrocore/components/AutotuneOverview.vue";
+import TuningStatusPanel from "@/gyrocore/components/TuningStatusPanel.vue";
+import SliderRoutePanel from "@/gyrocore/components/SliderRoutePanel.vue";
 import { AUTOTUNE_SECTION_ICONS, useAutotuneSectionStore } from "@/gyroflight/autotune/sections";
 import { useAutotuneStore } from "@/stores/autotune";
 import { useAutotuneV2Store } from "@/gyrocore/stores/autotuneV2";

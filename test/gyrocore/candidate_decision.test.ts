@@ -512,7 +512,9 @@ describe("recordingPlan: the agreed two CHIRP rounds (block 7)", () => {
             ["yaw", "candidate"],
         ]);
         expect(p.axes[0].missing).toEqual([{ route: "primary", intervals: [hole] }]);
-        expect(p.axes[1].note).toContain("More data does not lift this");
+        expect(p.axes[1].note).toContain("found no suitable candidate within its limits");
+        expect(p.axes[1].note).toContain("new data can still change this assessment");
+        expect(p.axes[1].note).not.toMatch(/more data does not lift/i);
         expect(p.recordingNeeded).toBe(true);
         const none = plan({
             decisions: {

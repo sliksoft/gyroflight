@@ -417,7 +417,10 @@ describe("qualification panel", () => {
         const row = container.querySelector('[data-measurement="log1-seg1"]');
         expect(row?.getAttribute("data-state")).toBe("rejected");
         expect(row?.getAttribute("data-apply")).toBe("blocked");
-        expect(row?.querySelector('[data-reason="measurement:low_coherence"]')).not.toBeNull();
+        // The reasons sit in a full-width row right under their measurement.
+        const reasons = container.querySelector('[data-measurement-reasons="log1-seg1"]');
+        expect(row?.nextElementSibling).toBe(reasons);
+        expect(reasons?.querySelector('[data-reason="measurement:low_coherence"]')).not.toBeNull();
         app.unmount();
         container.remove();
     });

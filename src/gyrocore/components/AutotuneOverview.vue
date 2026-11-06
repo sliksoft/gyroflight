@@ -58,14 +58,19 @@
             </table>
         </div>
 
-        <!-- Per axis: the check that decides, and what moves the axis on. -->
+        <!-- A usable measurement is not yet a proposal: two separate assessments. -->
+        <p class="text-sm mt-2 rounded-md border border-default p-2" data-gyrocore="overview-two-assessments">
+            {{ $t("gyroflightOverviewTwoAssessments") }}
+        </p>
+
+        <!-- Per axis: why there is (no) proposal in one sentence, the next step, and the deciding check behind a toggle. -->
         <template v-if="result">
-            <p class="text-sm font-bold mt-2">{{ $t("gyroflightOverviewReasonTitle") }}</p>
+            <p class="text-sm font-bold mt-3">{{ $t("gyroflightOverviewReasonTitle") }}</p>
             <ul class="text-sm flex flex-col gap-2" data-gyrocore="overview-reasons">
                 <li v-for="r in reasons" :key="r.axis" :data-axis="r.axis" :data-kind="r.kind">
                     <span class="font-bold">{{ axisLabel(r.axis) }}:</span>
-                    {{ r.reason }}
-                    <span class="block">
+                    {{ r.summary }}
+                    <span v-if="r.next" class="block">
                         <span class="text-dimmed">{{ $t("gyroflightOverviewNext") }}:</span>
                         {{ r.next }}
                         <UButton
@@ -79,6 +84,11 @@
                             {{ $t(`gyroflightOverviewOpen_${r.section}`) }}
                         </UButton>
                     </span>
+                    <details v-if="r.technical || r.note" class="mt-0.5" data-gyrocore="overview-reason-details">
+                        <summary class="cursor-pointer text-dimmed">{{ $t("gyroflightTechnicalReason") }}</summary>
+                        <span v-if="r.technical" class="block [overflow-wrap:anywhere]">{{ r.technical }}</span>
+                        <span v-if="r.note" class="block text-dimmed [overflow-wrap:anywhere]">{{ r.note }}</span>
+                    </details>
                 </li>
             </ul>
         </template>
@@ -100,11 +110,10 @@ import { i18n } from "@/js/localization";
 import { useAutotuneStore } from "@/stores/autotune";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { useAutotuneV2Store } from "@/gyrocore/stores/autotuneV2";
+import { AXES, axisDecisionTexts, type Axis } from "@/gyroflight/autotune/axisDecision";
+import type { AutotuneSection } from "@/gyroflight/autotune/sections";
 
-type Axis = "roll" | "pitch" | "yaw";
-const AXES: Axis[] = ["roll", "pitch", "yaw"];
-
-const emit = defineEmits<{ open: [section: "tuning" | "plan"] }>();
+const emit = defineEmits<{ open: [section: AutotuneSection] }>();
 
 const autotune = useAutotuneStore();
 const gate = useChirpQualificationStore();
@@ -195,27 +204,6 @@ const rows = computed(() =>
     }),
 );
 
-/** The recording plan's per-axis decision (recordingInstruction.ts): the deciding check and the kind of next step. */
-const reasons = computed(() =>
-    AXES.map((axis) => {
-        const ax = result.value?.recordingPlan?.axes.find((a) => a.axis === axis) ?? null;
-        if (!ax) {
-            return { axis, kind: "none", reason: t("gyroflightOverviewNoDecision"), next: "", section: null };
-        }
-        const tr = ax.trigger;
-        const value = tr?.value === null || tr?.value === undefined ? "unknown" : String(tr.value);
-        // Assembled here, not through i18n parameters: those are HTML-escaped ("P/I/D" would show as "P&#x2F;I…").
-        const reason = tr?.rule
-            ? `${tr.route} · ${tr.status} — ${tr.rule}: ${value}; ${t("gyroflightOverviewRequired")} ${tr.threshold ?? "--"}`
-            : ax.note;
-        const next =
-            ax.kind === "record"
-                ? t("gyroflightOverviewNextRecord")
-                : ax.kind === "search_limit"
-                  ? ax.note.replace(new RegExp(`^${axis}: `), "")
-                  : t("gyroflightOverviewNextCandidate");
-        const section = ax.kind === "record" ? ("plan" as const) : ax.kind === "candidate" ? ("tuning" as const) : null;
-        return { axis, kind: ax.kind, reason, next, section };
-    }),
-);
+/** The recording plan's per-axis decision (recordingInstruction.ts), in words, with the deciding check apart. */
+const reasons = computed(() => axisDecisionTexts(result.value, t));
 </script>

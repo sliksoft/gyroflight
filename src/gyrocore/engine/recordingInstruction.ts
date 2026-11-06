@@ -255,8 +255,8 @@ function axisNeed(
             plannerBandsHz: bands,
             note:
                 r.status === "search_limit_max_step"
-                    ? `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and the best candidate lies on the ±30 % step edge. More data does not lift this; a change larger than one step is outside this search.`
-                    : `${axis}: the ${r.route} plant is usable and no candidate in the search grid meets the targets; more data does not lift this.`,
+                    ? `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and the best candidate lies on the ±30 % step edge. The current search found no suitable candidate within its limits (one step of at most ±30 %); new data can still change this assessment.`
+                    : `${axis}: the ${r.route} plant is usable and no candidate in the search grid meets the targets. The current search found no suitable candidate within its limits; new data can still change this assessment.`,
         };
     return {
         axis,

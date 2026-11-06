@@ -52,13 +52,14 @@ import UApp from "@nuxt/ui/components/App.vue";
 import AutotuneTab from "../../src/components/tabs/AutotuneTab.vue";
 import AutotuneV2Panel from "../../src/gyrocore/components/AutotuneV2Panel.vue";
 import AutotuneOverview from "../../src/gyrocore/components/AutotuneOverview.vue";
+import TuningStatusPanel from "../../src/gyrocore/components/TuningStatusPanel.vue";
 import { useAutotune } from "../../src/composables/useAutotune";
 import { useAutotuneStore } from "../../src/stores/autotune";
 import { useAutotuneV2Store } from "../../src/gyrocore/stores/autotuneV2";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { AUTOTUNE_SECTIONS, useAutotuneSectionStore } from "../../src/gyroflight/autotune/sections";
 import type { AutotuneV2Result } from "../../src/gyrocore/engine/autotuneV2";
-import { encodeChirpLog, simulateChirp } from "./harness/chirpSim";
+import { encodeChirpLog, FULL_TUNE_HEADERS, simulateChirp } from "./harness/chirpSim";
 import { experimentalFixture } from "./harness/experimentalFixture";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -75,8 +76,8 @@ function mountComponent(component: Component, props: Record<string, unknown> = {
     return { container, unmount: () => (app.unmount(), container.remove()) };
 }
 
-async function importLog() {
-    picked.bytes = encodeChirpLog(simulateChirp());
+async function importLog(headers: string[] = FULL_TUNE_HEADERS) {
+    picked.bytes = encodeChirpLog(simulateChirp(), headers);
     picked.name = "air65.bbl";
     await useAutotune().importAndAnalyze();
 }
@@ -429,6 +430,245 @@ describe("Autotune overview", () => {
         expect(yaw.getAttribute("data-tuning")).toBe("validated");
         expect(yaw.getAttribute("data-apply")).toBe("released");
         expect(yaw.textContent).toContain("p_yaw 56 → 50");
+        unmount();
+    });
+});
+
+describe("RED-53 layout: each page in its agreed order", () => {
+    const sliderOff = FULL_TUNE_HEADERS.map((h) =>
+        h.startsWith("simplified_pids_mode:") ? "simplified_pids_mode:0" : h,
+    );
+    const content = (c: HTMLElement) => c.querySelector('[data-gyroflight="autotune-section"]')!;
+    const gainBox = (c: HTMLElement) =>
+        [...content(c).querySelectorAll("*")].some(
+            (e) => e.childElementCount === 0 && e.textContent === "autotuneGainTitle",
+        );
+
+    it("Gain Recommendation sits with the graphs, marked as analysis; Tuning and apply no longer shows it", async () => {
+        await importLog();
+        const sections = useAutotuneSectionStore();
+        const { container, unmount } = mountComponent(AutotuneTab);
+        sections.open("graphs");
+        await flush();
+        expect(content(container).querySelector('[data-gyroflight="autotune-graphs-gain-note"]')).not.toBeNull();
+        expect(gainBox(container)).toBe(true);
+        // The diagnostic banner stays right above the plots; the plot help comes before it.
+        expect(content(container).querySelector('[data-gyroflight="autotune-graphs-bode-help"]')).not.toBeNull();
+        sections.open("tuning");
+        await flush();
+        expect(gainBox(container)).toBe(false);
+        expect(content(container).querySelector('[data-gyrocore="tuning-status"]')).not.toBeNull();
+        unmount();
+    });
+
+    it("Tuning and apply: status first, then the three routes in order, each named", async () => {
+        await importLog();
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({ experimental: experimentalFixture() });
+        v2.state = "done";
+        useAutotuneSectionStore().open("tuning");
+        const { container, unmount } = mountComponent(AutotuneTab);
+        await flush();
+        const c = content(container);
+        const order = [...c.querySelectorAll('[data-gyrocore="tuning-status"], [data-gyrocore="route-heading"]')].map(
+            (e) => e.getAttribute("data-route") ?? "status",
+        );
+        expect(order).toEqual(["status", "absolute", "experimental", "slider"]);
+        // Candidate searches and measurement gaps moved to Technical details.
+        expect(c.querySelector('[data-gyrocore="v2-decisions"]')).toBeNull();
+        unmount();
+    });
+
+    it("slider mode on in the log: the slider route is shown in full", async () => {
+        await importLog();
+        useAutotuneSectionStore().open("tuning");
+        const { container, unmount } = mountComponent(AutotuneTab);
+        await flush();
+        const route = content(container).querySelector('[data-gyrocore="slider-route"]')!;
+        expect(route.getAttribute("data-mode")).not.toBe("OFF");
+        expect(route.querySelector('[data-gyrocore="slider-route-off"]')).toBeNull();
+        const workflow = route.querySelector('[data-gyrocore="tune-workflow"]')!;
+        expect(workflow).not.toBeNull();
+        expect(workflow.closest("details")).toBeNull();
+        unmount();
+    });
+
+    it("slider mode off in the log: the slider route is compact with the reason, its panels kept behind a toggle", async () => {
+        await importLog(sliderOff);
+        useAutotuneSectionStore().open("tuning");
+        const { container, unmount } = mountComponent(AutotuneTab);
+        await flush();
+        const route = content(container).querySelector('[data-gyrocore="slider-route"]')!;
+        expect(route.getAttribute("data-mode")).toBe("OFF");
+        expect(route.querySelector('[data-gyrocore="slider-route-off"]')).not.toBeNull();
+        const details = route.querySelector('[data-gyrocore="slider-route-details"]') as HTMLDetailsElement;
+        expect(details.open).toBe(false);
+        // Nothing removed: the global tune and the workflow (with its buttons) are inside the toggle.
+        expect(details.querySelector('[data-gyrocore="tune-workflow"]')).not.toBeNull();
+        expect(details.querySelector('[data-gyrocore="global-tune"]')).not.toBeNull();
+        unmount();
+    });
+
+    it("Technical details: margins, both candidate searches, the measurement set and the plots each in their own box", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({
+            candidateDecisions: {
+                roll: {
+                    primary: {
+                        route: "primary",
+                        plant: "present",
+                        bandHz: [5, 50],
+                        checks: [],
+                        searchRan: false,
+                        candidatesTried: 0,
+                        candidatesUsable: 0,
+                        status: "plant_band_insufficient",
+                        firstCause: null,
+                    },
+                    jio: null,
+                },
+            },
+        });
+        v2.state = "done";
+        useAutotuneSectionStore().open("technical");
+        const { container, unmount } = mountComponent(AutotuneTab);
+        await flush();
+        const c = content(container);
+        expect(c.querySelector('[data-gyrocore="v2-margins"]')).not.toBeNull();
+        expect(c.querySelector('[data-gyrocore="v2-decisions"]')).not.toBeNull();
+        expect(c.querySelector('[data-gyrocore="m4-flight-metrics"]')).not.toBeNull();
+        unmount();
+    });
+});
+
+describe("Tuning status (first on Tuning and apply)", () => {
+    const status = (c: HTMLElement) => c.querySelector('[data-gyrocore="tuning-status"]')!.getAttribute("data-status");
+    const recordAll = {
+        axes: (["roll", "pitch", "yaw"] as const).map((axis) =>
+            planAxis(axis, "record", { route: "primary", status: "s", rule: "r", value: 1, threshold: "t" }, "n"),
+        ),
+    };
+
+    it("without a calculation: says so and points to the overview", async () => {
+        const opened: string[] = [];
+        const { container, unmount } = mountComponent(TuningStatusPanel, { onOpen: (s: string) => opened.push(s) });
+        await flush();
+        expect(status(container)).toBe("not_calculated");
+        (container.querySelector('[data-gyrocore="tuning-status-open-overview"]') as HTMLButtonElement).click();
+        await flush();
+        expect(opened).toEqual(["overview"]);
+        unmount();
+    });
+
+    it("no value on any route: NO PROPOSAL, the reason per axis, and links to the technical details and the plan", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({ recordingPlan: recordAll });
+        const opened: string[] = [];
+        const { container, unmount } = mountComponent(TuningStatusPanel, { onOpen: (s: string) => opened.push(s) });
+        await flush();
+        expect(status(container)).toBe("none");
+        const reasons = [...container.querySelectorAll('[data-gyrocore="tuning-status-reasons"] li')];
+        expect(reasons.map((r) => r.getAttribute("data-axis"))).toEqual(["roll", "pitch", "yaw"]);
+        expect(reasons[0].textContent).toContain("gyroflightAxisSummaryRecord");
+        expect(container.querySelector('[data-gyrocore="tuning-status-values"]')).toBeNull();
+        (container.querySelector('[data-gyrocore="tuning-status-open-technical"]') as HTMLButtonElement).click();
+        (container.querySelector('[data-gyrocore="tuning-status-open-plan"]') as HTMLButtonElement).click();
+        await flush();
+        expect(opened).toEqual(["technical", "plan"]);
+        unmount();
+    });
+
+    it("experimental values only: PARTLY AVAILABLE, never AVAILABLE, with current and proposed side by side", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({ experimental: experimentalFixture(), recordingPlan: recordAll });
+        const { container, unmount } = mountComponent(TuningStatusPanel);
+        await flush();
+        expect(status(container)).toBe("partial");
+        const rows = [...container.querySelectorAll('[data-gyrocore="tuning-status-values"] tbody tr')];
+        expect(rows.length).toBe(experimentalFixture().items.length);
+        expect(rows.every((r) => r.getAttribute("data-route") === "experimental")).toBe(true);
+        const first = experimentalFixture().items[0];
+        expect(rows[0].textContent).toContain(String(first.from));
+        expect(rows[0].textContent).toContain(String(first.to));
+        // The fixture proposes roll only: pitch and yaw keep their reason.
+        const axes = [...container.querySelectorAll('[data-gyrocore="tuning-status-reasons"] li')].map((r) =>
+            r.getAttribute("data-axis"),
+        );
+        expect(axes).toEqual(["pitch", "yaw"]);
+        unmount();
+    });
+
+    it("a released value for one axis while another needs a recording is PARTLY AVAILABLE, not AVAILABLE", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({
+            releasableProposal: { items: [{ key: "p_roll", from: 50, to: 55, status: "VALIDATED", reasons: [] }] },
+            recordingPlan: recordAll,
+        });
+        const { container, unmount } = mountComponent(TuningStatusPanel);
+        await flush();
+        expect(status(container)).toBe("partial");
+        unmount();
+    });
+
+    it("released values on every axis: AVAILABLE, on the absolute route", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({
+            releasableProposal: {
+                items: (["roll", "pitch", "yaw"] as const).map((a) => ({
+                    key: `p_${a}`,
+                    from: 50,
+                    to: 52,
+                    status: "VALIDATED",
+                    reasons: [],
+                })),
+            },
+        });
+        const { container, unmount } = mountComponent(TuningStatusPanel);
+        await flush();
+        expect(status(container)).toBe("available");
+        const rows = [...container.querySelectorAll('[data-gyrocore="tuning-status-values"] tbody tr')];
+        expect(rows.map((r) => r.getAttribute("data-route"))).toEqual(["absolute", "absolute", "absolute"]);
+        expect(container.querySelector('[data-gyrocore="tuning-status-reasons"]')).toBeNull();
+        unmount();
+    });
+});
+
+describe("Overview reasons (RED-53)", () => {
+    it("a search limit reads as a limit of the current search, keeps the engine's check behind a toggle and points to the technical details", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({
+            recordingPlan: {
+                axes: [
+                    planAxis(
+                        "roll",
+                        "search_limit",
+                        {
+                            route: "primary",
+                            status: "search_limit_max_step",
+                            rule: "candidate_search_measured_margins",
+                            value: "best PM 26°",
+                            threshold: "PM ≥ 45°",
+                        },
+                        "roll: the primary plant is usable and the best candidate lies on the ±30 % step edge.",
+                    ),
+                ],
+            },
+        });
+        v2.state = "done";
+        const opened: string[] = [];
+        const { container, unmount } = mountComponent(AutotuneOverview, { onOpen: (s: string) => opened.push(s) });
+        await flush();
+        const roll = container.querySelector('[data-gyrocore="overview-reasons"] [data-axis="roll"]')!;
+        expect(roll.textContent).toContain("gyroflightAxisSummarySearchLimit");
+        expect(roll.textContent).not.toMatch(/more data does not lift/i);
+        const details = roll.querySelector('[data-gyrocore="overview-reason-details"]') as HTMLDetailsElement;
+        expect(details.tagName).toBe("DETAILS");
+        expect(details.textContent).toContain("candidate_search_measured_margins: best PM 26°");
+        (roll.querySelector('[data-gyrocore="overview-open-technical"]') as HTMLButtonElement).click();
+        await flush();
+        expect(opened).toEqual(["technical"]);
+        // Measurement and proposal are explained as two separate assessments.
+        expect(container.querySelector('[data-gyrocore="overview-two-assessments"]')).not.toBeNull();
         unmount();
     });
 });

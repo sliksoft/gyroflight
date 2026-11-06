@@ -14,6 +14,14 @@
         <!-- Tune Session -->
         <section class="mb-3" data-gyrocore="ab-session">
             <h4 class="text-sm font-bold mb-1">{{ $t("gyrocoreAbSessionHead") }}</h4>
+            <!-- Gyroflight: imported logs (this browser tab) are not a saved session (this device). -->
+            <div class="text-sm rounded-md border border-default p-2 mb-2" data-gyrocore="ab-logs-vs-sessions">
+                <p>{{ $t("gyrocoreAbLogsVsSessions") }}</p>
+                <p class="mt-1">{{ $t("gyrocoreAbHowToAdd") }}</p>
+                <p v-if="gate.report" class="mt-1 text-dimmed" data-gyrocore="ab-save-source">
+                    {{ t("gyrocoreAbSaveSource", [gate.report.filename]) }}
+                </p>
+            </div>
             <p v-if="sel.listState.value === 'loading'" class="text-sm text-dimmed" data-gyrocore="ab-sessions-loading">
                 {{ $t("gyrocoreAbSessionsLoading") }}
             </p>
@@ -207,9 +215,17 @@
                         <dt>{{ $t("gyrocoreAbFlightNumber") }}</dt>
                         <dd data-field="flight">{{ chosen[side]!.logNumber }} / {{ chosen[side]!.logCount }}</dd>
                         <dt>{{ $t("gyrocoreAbLogStart") }}</dt>
-                        <dd data-field="logStart">{{ chosen[side]!.logStart ?? $t("gyrocoreAbUnknown") }}</dd>
+                        <dd data-field="logStart">{{ logStartLabel(chosen[side]!.logStart) }}</dd>
                         <dt>{{ $t("gyrocoreAbFirmware") }}</dt>
-                        <dd data-field="firmware">{{ firmwareLabel(chosen[side]!) }}</dd>
+                        <dd data-field="firmware">
+                            {{ firmwareLabel(chosen[side]!) }}
+                            <span
+                                v-if="chosen[side]!.firmware.apiVersion === null"
+                                class="block text-warning"
+                                data-gyrocore="ab-api-unknown"
+                                >{{ $t("gyrocoreAbApiUnknown") }}</span
+                            >
+                        </dd>
                         <dt>{{ $t("gyrocoreAbBoard") }}</dt>
                         <dd data-field="board">
                             {{ chosen[side]!.firmware.boardInformation ?? $t("gyrocoreAbUnknown") }}
@@ -410,6 +426,15 @@ function firmwareLabel(o: FlightOption) {
     const f = o.firmware;
     const unknown = i18n.getMessage("gyrocoreAbUnknown");
     return `${f.firmwareRevision ?? unknown} · API ${f.apiVersion ?? unknown}`;
+}
+
+/**
+ * The header's start time as logged. Year 0000 is the firmware's placeholder without a real-time
+ * clock (as logInput.ts logStartDatetime reads it): no date was logged, so it says so.
+ */
+function logStartLabel(raw: string | null) {
+    if (raw === null) return i18n.getMessage("gyrocoreAbUnknown");
+    return /^0000-/.test(raw.trim()) ? i18n.getMessage("gyrocoreAbDateUnknown") : raw;
 }
 
 function axesLabel(o: FlightOption) {

@@ -4,8 +4,12 @@
 
         <!-- 1. Analyze: the imported logs ("sources"), Calculate ("analyze") and Verified Tune ("verifiedTune") -->
         <template v-if="show('analyze') || show('sources') || show('verifiedTune')">
-            <h4 class="font-bold mt-2" data-step="v2-analyze">1. {{ $t("gyroflightStepAnalyze") }}</h4>
+            <h4 v-if="show('analyze')" class="font-bold mt-2" data-step="v2-analyze">
+                1. {{ $t("gyroflightStepAnalyze") }}
+            </h4>
             <template v-if="show('sources')">
+                <h4 class="font-bold mt-2" data-step="v2-sources">{{ $t("gyroflightV2SourcesHeading") }}</h4>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2SourcesHelp") }}</p>
                 <p v-if="!v2.sources.length" class="text-sm text-dimmed" data-gyrocore="v2-no-source">
                     {{ $t("gyroflightV2NoSource") }}
                 </p>
@@ -38,10 +42,12 @@
                 {{ $t("gyroflightV2Calculate") }}
             </UButton>
             <template v-if="show('verifiedTune')">
+                <h4 class="font-bold mt-3" data-step="v2-verified-tune">{{ $t("gyroflightV2VerifiedTuneHeading") }}</h4>
+                <p class="text-sm" data-gyrocore="v2-verified-tune-not-ab">{{ $t("gyroflightV2VerifiedTuneNotAb") }}</p>
                 <UButton
                     size="xs"
                     variant="outline"
-                    class="mt-1 ms-2"
+                    class="mt-1"
                     data-gyrocore="v2-verified-tune"
                     :disabled="v2.sources.length < 2 || v2.state === 'calculating'"
                     @click="createVerifiedTune"
@@ -66,8 +72,15 @@
                     </span>
                 </div>
             </template>
-            <p v-if="v2.progressMessage" class="text-sm text-dimmed">{{ v2.progressMessage }}</p>
-            <p v-if="v2.state === 'error'" class="text-sm text-red-500" data-gyrocore="v2-error">
+            <!-- Once per section: with Calculate or Verified Tune, not again beside the log list. -->
+            <p v-if="v2.progressMessage && (show('analyze') || show('verifiedTune'))" class="text-sm text-dimmed">
+                {{ v2.progressMessage }}
+            </p>
+            <p
+                v-if="v2.state === 'error' && (show('analyze') || show('verifiedTune'))"
+                class="text-sm text-red-500"
+                data-gyrocore="v2-error"
+            >
                 {{ v2.errorMessage }}
             </p>
         </template>
@@ -104,13 +117,22 @@
 
             <template v-if="show('margins')">
                 <p class="text-sm font-bold mt-2">{{ $t("gyroflightV2Margins") }}</p>
+                <p class="text-sm text-dimmed">{{ $t("gyroflightV2MarginsColumnsHelp") }}</p>
                 <div class="overflow-x-auto max-w-full [&_td.text-dimmed]:[overflow-wrap:anywhere]">
                     <table class="gyroflight-workflow-table text-sm" data-gyrocore="v2-margins">
                         <thead>
                             <tr>
-                                <th>{{ $t("gyroflightV2Axis") }}</th>
-                                <th>{{ $t("gyroflightV2ChainFit") }}</th>
-                                <th>{{ $t("gyroflightV2Crossover") }}</th>
+                                <th rowspan="2">{{ $t("gyroflightV2Axis") }}</th>
+                                <th rowspan="2">{{ $t("gyroflightV2ChainFit") }}</th>
+                                <th rowspan="2">{{ $t("gyroflightV2Crossover") }}</th>
+                                <th colspan="3" class="text-center">{{ $t("gyroflightV2MarginsMeasuredGroup") }}</th>
+                                <th colspan="3" class="text-center">{{ $t("gyroflightV2MarginsBoundGroup") }}</th>
+                                <th colspan="3" class="text-center">{{ $t("gyroflightV2MarginsValidationGroup") }}</th>
+                            </tr>
+                            <tr>
+                                <th>PM</th>
+                                <th>GM</th>
+                                <th>|S|</th>
                                 <th>PM</th>
                                 <th>GM</th>
                                 <th>|S|</th>
@@ -130,21 +152,12 @@
                                 <td>{{ row.axis }}</td>
                                 <td>{{ row.chain }}</td>
                                 <td>{{ row.fc }}</td>
-                                <td>
-                                    {{ row.pm }}<br /><span class="text-dimmed"
-                                        >{{ $t("gyroflightV2Measured") }} {{ row.pmMeasured }}</span
-                                    >
-                                </td>
-                                <td>
-                                    {{ row.gm }}<br /><span class="text-dimmed"
-                                        >{{ $t("gyroflightV2Measured") }} {{ row.gmMeasured }}</span
-                                    >
-                                </td>
-                                <td>
-                                    {{ row.s }}<br /><span class="text-dimmed"
-                                        >{{ $t("gyroflightV2Measured") }} {{ row.sMeasured }}</span
-                                    >
-                                </td>
+                                <td data-kind="measured">{{ row.pmMeasured }}</td>
+                                <td data-kind="measured">{{ row.gmMeasured }}</td>
+                                <td data-kind="measured">{{ row.sMeasured }}</td>
+                                <td data-kind="bound">{{ boundText(row.pm) }}</td>
+                                <td data-kind="bound">{{ boundText(row.gm) }}</td>
+                                <td data-kind="bound">{{ boundText(row.s) }}</td>
                                 <td>{{ row.resolution }}</td>
                                 <td :class="evidenceClass(row.evidence)" class="font-bold">{{ row.evidence }}</td>
                                 <td :class="row.validated ? 'text-green-500' : 'text-yellow-500'">
@@ -157,11 +170,19 @@
                 <p class="text-sm text-dimmed" data-gyrocore="v2-evidence-legend">
                     {{ $t("gyroflightV2EvidenceLegend") }}
                 </p>
-                <ul class="text-sm" data-gyrocore="v2-margin-evidence">
-                    <li v-for="row in marginRows" :key="row.axis" :data-axis="row.axis" :data-evidence="row.evidence">
-                        <span v-for="(line, k) in row.details" :key="k" class="block">{{ line }}</span>
-                    </li>
-                </ul>
+                <details class="mt-1">
+                    <summary class="cursor-pointer text-sm font-bold">{{ $t("gyroflightV2MarginsDetails") }}</summary>
+                    <ul class="text-sm flex flex-col gap-1" data-gyrocore="v2-margin-evidence">
+                        <li
+                            v-for="row in marginRows"
+                            :key="row.axis"
+                            :data-axis="row.axis"
+                            :data-evidence="row.evidence"
+                        >
+                            <span v-for="(line, k) in row.details" :key="k" class="block">{{ line }}</span>
+                        </li>
+                    </ul>
+                </details>
             </template>
             <template v-if="show('multi') && result.multiRecording">
                 <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2MultiRecordingTitle") }}</p>
@@ -180,46 +201,14 @@
                 </p>
             </template>
 
-            <template v-if="show('measurementPlan') && result.measurementPlan?.length">
+            <!-- The planner table on its own, when the recording plan is not shown beside it. -->
+            <template v-if="show('measurementPlan') && !planShown && result.measurementPlan?.length">
                 <p class="font-bold text-sm mt-2">{{ $t("gyroflightV2PlanTitle") }}</p>
                 <p class="text-sm text-dimmed">{{ $t("gyroflightV2PlanHelp") }}</p>
-                <div class="overflow-x-auto max-w-full [&_td.text-dimmed]:[overflow-wrap:anywhere]">
-                    <table class="gyroflight-workflow-table text-sm" data-gyrocore="v2-measurement-plan">
-                        <thead>
-                            <tr>
-                                <th>{{ $t("gyroflightV2PlanAxis") }}</th>
-                                <th>{{ $t("gyroflightV2PlanBand") }}</th>
-                                <th>{{ $t("gyroflightV2PlanResolution") }}</th>
-                                <th>{{ $t("gyroflightV2PlanSegment") }}</th>
-                                <th>{{ $t("gyroflightV2PlanAverages") }}</th>
-                                <th>{{ $t("gyroflightV2PlanSweep") }}</th>
-                                <th>{{ $t("gyroflightV2PlanDiagnostics") }}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="p in result.measurementPlan" :key="p.axis" :data-axis="p.axis">
-                                <td>{{ p.axis }}</td>
-                                <td>{{ band(p.bandHz.primary) }}</td>
-                                <td>
-                                    {{ num(p.resolutionHz.now, 2) }} / {{ num(p.resolutionHz.primary, 2) }} /
-                                    {{ num(p.resolutionHz.qualification, 3) }}
-                                </td>
-                                <td>
-                                    {{ p.segmentSamples.primary ?? "--" }} /
-                                    {{ p.segmentSamples.qualification ?? "--" }}
-                                </td>
-                                <td>{{ p.averages.now ?? "--" }} / {{ p.averages.needed ?? "--" }}</td>
-                                <td>
-                                    {{ p.sweep ? num(p.sweep.durationS, 0) : "--" }};
-                                    {{ p.qualificationSweep ? num(p.qualificationSweep.durationS, 0) : "--" }}
-                                </td>
-                                <td class="[overflow-wrap:anywhere]">{{ p.diagnostics.join(", ") || "--" }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <MeasurementPlanTable :plan="result.measurementPlan" />
             </template>
 
+            <!-- CHIRP + JIO (experimental): the route's table, with the two candidate searches in their own columns. -->
             <template v-if="show('jio') && result.jio">
                 <p class="font-bold text-sm mt-2" data-gyrocore="v2-jio-title">
                     {{ $t("gyroflightV2JioTitle") }}
@@ -230,12 +219,7 @@
                         {{ result.jio.status }}
                     </span>
                 </p>
-                <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioHelp") }}</p>
-                <p class="text-sm text-dimmed" data-gyrocore="v2-jio-method">
-                    {{ $t("gyroflightV2JioMethod") }}: {{ result.jio.analysis.method }};
-                    {{ $t("gyroflightV2JioFirmware") }}: {{ result.jio.analysis.firmwareRevision ?? "--" }};
-                    {{ $t("gyroflightV2JioLimitations") }}: {{ result.jio.analysis.limitations.join(", ") }}
-                </p>
+                <p class="text-sm">{{ $t("gyroflightV2JioSearchesHelp") }}</p>
                 <p
                     v-if="result.jio.analysis.blockers.length"
                     class="text-sm text-red-500"
@@ -257,7 +241,8 @@
                                 <th>{{ $t("gyroflightV2JioBand") }}</th>
                                 <th>{{ $t("gyroflightV2JioMissing") }}</th>
                                 <th>{{ $t("gyroflightV2Crossover") }} / PM</th>
-                                <th>{{ $t("gyroflightV2JioCandidate") }}</th>
+                                <th>1. {{ $t("gyroflightV2JioCandidate") }}</th>
+                                <th>2. {{ $t("gyroflightV2JioMeasuredSearch") }}</th>
                                 <th>{{ $t("gyroflightV2JioTuning") }}</th>
                             </tr>
                         </thead>
@@ -279,8 +264,11 @@
                                 <td>{{ row.margins }}</td>
                                 <td class="[overflow-wrap:anywhere]" data-gyrocore="v2-jio-candidate">
                                     {{ row.candidate }}
-                                    <span class="block text-dimmed" data-gyrocore="v2-jio-measured-search">
-                                        {{ $t("gyroflightV2JioMeasuredSearch") }}: {{ row.measuredSearch }}
+                                </td>
+                                <td class="[overflow-wrap:anywhere]">
+                                    <span data-gyrocore="v2-jio-measured-search">
+                                        <span class="sr-only">{{ $t("gyroflightV2JioMeasuredSearch") }}: </span
+                                        >{{ row.measuredSearch }}
                                     </span>
                                 </td>
                                 <td :class="row.computable ? 'text-yellow-500' : 'text-red-500'">{{ row.tuning }}</td>
@@ -288,17 +276,79 @@
                         </tbody>
                     </table>
                 </div>
-                <div v-if="jioPlots.length" class="flex flex-wrap gap-3 max-w-full">
+                <details class="text-sm mt-1">
+                    <summary class="cursor-pointer font-bold">{{ $t("gyroflightV2JioAbout") }}</summary>
+                    <p class="text-dimmed">{{ $t("gyroflightV2JioHelp") }}</p>
+                    <p class="text-dimmed" data-gyrocore="v2-jio-method">
+                        {{ $t("gyroflightV2JioMethod") }}: {{ result.jio.analysis.method }};
+                        {{ $t("gyroflightV2JioFirmware") }}: {{ result.jio.analysis.firmwareRevision ?? "--" }};
+                        {{ $t("gyroflightV2JioLimitations") }}: {{ result.jio.analysis.limitations.join(", ") }}
+                    </p>
+                </details>
+            </template>
+
+            <!-- The measurement set per axis: sweeps, repeats within this flight, flights compared, what is missing. -->
+            <template v-if="show('jioSet') && result.jio">
+                <template v-if="jioProgress.length">
+                    <p class="text-sm font-bold mt-1">{{ $t("gyroflightV2JioProgressTitle") }}</p>
+                    <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioProgressHelp") }}</p>
+                    <ul class="text-sm list-disc pl-5 flex flex-col gap-1">
+                        <li
+                            v-for="pr in jioProgress"
+                            :key="pr.axis"
+                            data-gyrocore="v2-jio-progress"
+                            :data-axis="pr.axis"
+                            :data-complete="pr.complete ? 'yes' : 'no'"
+                        >
+                            <span class="font-bold">{{ pr.axis }}</span
+                            >: {{ pr.text }}
+                            <span v-if="pr.next" class="block text-dimmed"
+                                >{{ $t("gyroflightV2JioProgressNext") }}: {{ pr.next }}</span
+                            >
+                            <span
+                                v-if="pr.supplementary"
+                                class="block text-dimmed"
+                                data-gyrocore="v2-jio-supplementary"
+                            >
+                                {{ $t("gyroflightV2JioSupplementary") }}: {{ pr.supplementary }}</span
+                            >
+                        </li>
+                    </ul>
+                </template>
+                <details class="text-sm mt-1">
+                    <summary class="cursor-pointer font-bold">{{ $t("gyroflightV2JioNeeds") }}</summary>
+                    <p class="text-dimmed" data-gyrocore="v2-jio-needs">
+                        {{ $t("gyroflightV2JioNeeds") }}:
+                        {{ jioNeeds.required.map(measurementText).join("; ") || "--" }}
+                        <template v-if="jioNeeds.supplementary.length">
+                            · {{ $t("gyroflightV2JioSupplementary") }}:
+                            {{ jioNeeds.supplementary.map(measurementText).join("; ") }}
+                        </template>
+                    </p>
+                </details>
+            </template>
+
+            <!-- The JIO plots, then the sweep advice, the other flights and the 3×3 coupling (diagnostic). -->
+            <template v-if="show('jioPlots') && result.jio">
+                <p v-if="jioPlots.length" class="text-sm text-dimmed">{{ $t("gyroflightV2JioPlotHelp") }}</p>
+                <div v-if="jioPlots.length" class="grid gap-3 max-w-full @3xl:grid-cols-2 @7xl:grid-cols-3">
                     <figure
                         v-for="pl in jioPlots"
                         :key="pl.axis"
-                        class="text-xs text-dimmed"
+                        class="text-xs min-w-0"
                         data-gyrocore="v2-jio-plot"
                         :data-axis="pl.axis"
                         :data-points="pl.dots.length"
                     >
-                        <figcaption>{{ pl.axis }}: {{ $t("gyroflightV2JioPlot") }}</figcaption>
-                        <svg :viewBox="`0 0 ${pl.w} ${pl.h}`" :width="pl.w" :height="pl.h" class="block">
+                        <figcaption class="font-bold text-sm">
+                            {{ pl.axis }}: {{ $t("gyroflightV2JioPlot") }}
+                        </figcaption>
+                        <svg
+                            :viewBox="`0 0 ${pl.w} ${pl.h}`"
+                            class="block w-full h-auto max-w-[560px]"
+                            role="img"
+                            :aria-label="`${pl.axis}: ${$t('gyroflightV2JioPlot')}`"
+                        >
                             <rect
                                 :x="pl.x0"
                                 :y="pl.y0"
@@ -306,26 +356,76 @@
                                 :height="pl.ph"
                                 fill="none"
                                 stroke="currentColor"
-                                opacity="0.25"
+                                opacity="0.35"
                             />
-                            <template v-for="t in pl.ticks" :key="t.hz">
+                            <template v-for="tk in pl.ticks" :key="tk.hz">
                                 <line
-                                    :x1="t.x"
-                                    :x2="t.x"
+                                    :x1="tk.x"
+                                    :x2="tk.x"
                                     :y1="pl.y0"
                                     :y2="pl.y0 + pl.ph"
                                     stroke="currentColor"
-                                    opacity="0.12"
+                                    opacity="0.15"
                                 />
-                                <text :x="t.x" :y="pl.h - 3" font-size="8" text-anchor="middle" fill="currentColor">
-                                    {{ t.hz }}
+                                <text
+                                    :x="tk.x"
+                                    :y="pl.y0 + pl.ph + 13"
+                                    font-size="11"
+                                    text-anchor="middle"
+                                    fill="currentColor"
+                                >
+                                    {{ tk.hz }}
                                 </text>
                             </template>
-                            <text :x="pl.x0 - 2" :y="pl.y0 + 7" font-size="8" text-anchor="end" fill="currentColor">
-                                {{ pl.dbMax }}
+                            <template v-for="tk in pl.dbTicks" :key="`db${tk.v}`">
+                                <line
+                                    :x1="pl.x0"
+                                    :x2="pl.x0 + pl.pw"
+                                    :y1="tk.y"
+                                    :y2="tk.y"
+                                    stroke="currentColor"
+                                    opacity="0.1"
+                                />
+                                <text :x="pl.x0 - 4" :y="tk.y + 4" font-size="11" text-anchor="end" fill="currentColor">
+                                    {{ tk.v }}
+                                </text>
+                            </template>
+                            <text
+                                v-for="tk in pl.cohTicks"
+                                :key="`c${tk.v}`"
+                                :x="pl.x0 + pl.pw + 4"
+                                :y="tk.y + 4"
+                                font-size="11"
+                                fill="currentColor"
+                                opacity="0.7"
+                            >
+                                {{ tk.v }}
                             </text>
-                            <text :x="pl.x0 - 2" :y="pl.y0 + pl.ph" font-size="8" text-anchor="end" fill="currentColor">
-                                {{ pl.dbMin }}
+                            <text
+                                :x="pl.x0 + pl.pw / 2"
+                                :y="pl.h - 3"
+                                font-size="11"
+                                text-anchor="middle"
+                                fill="currentColor"
+                            >
+                                {{ $t("gyroflightV2JioAxisHz") }}
+                            </text>
+                            <text
+                                :transform="`translate(11 ${pl.y0 + pl.ph / 2}) rotate(-90)`"
+                                font-size="11"
+                                text-anchor="middle"
+                                fill="currentColor"
+                            >
+                                {{ $t("gyroflightV2JioAxisDb") }}
+                            </text>
+                            <text
+                                :transform="`translate(${pl.w - 6} ${pl.y0 + pl.ph / 2}) rotate(90)`"
+                                font-size="11"
+                                text-anchor="middle"
+                                fill="currentColor"
+                                opacity="0.7"
+                            >
+                                {{ $t("gyroflightV2JioAxisCoherence") }}
                             </text>
                             <polyline
                                 :points="pl.coherence"
@@ -339,7 +439,7 @@
                                 :key="i"
                                 :cx="d.x"
                                 :cy="d.y"
-                                r="1.6"
+                                r="2"
                                 :fill="d.sup ? 'currentColor' : 'none'"
                                 stroke="currentColor"
                                 :opacity="d.sup ? 0.9 : 0.3"
@@ -347,52 +447,28 @@
                         </svg>
                     </figure>
                 </div>
-                <p v-if="jioAdvice.length" class="text-sm text-dimmed" data-gyrocore="v2-jio-preparation">
-                    {{ $t("gyroflightV2JioPreparation") }}
-                </p>
-                <p
-                    v-for="adv in jioAdvice"
-                    :key="adv.axis"
-                    class="text-sm text-dimmed"
-                    data-gyrocore="v2-jio-advice"
-                    :data-axis="adv.axis"
-                >
-                    {{ adv.text }}
-                </p>
-                <p v-if="jioCandidates.length" class="text-sm text-dimmed" data-gyrocore="v2-jio-cross">
-                    {{ $t("gyroflightV2JioCandidates") }}: {{ jioCandidates.join(" | ") }}
-                </p>
-                <template v-if="jioProgress.length">
-                    <p class="text-sm font-bold mt-1">{{ $t("gyroflightV2JioProgressTitle") }}</p>
-                    <p class="text-sm text-dimmed">{{ $t("gyroflightV2JioProgressHelp") }}</p>
-                    <ul class="text-sm list-disc pl-5">
-                        <li
-                            v-for="pr in jioProgress"
-                            :key="pr.axis"
-                            data-gyrocore="v2-jio-progress"
-                            :data-axis="pr.axis"
-                            :data-complete="pr.complete ? 'yes' : 'no'"
-                        >
-                            <span class="font-bold">{{ pr.axis }}</span
-                            >: {{ pr.text }}
-                            <span v-if="pr.next" class="text-dimmed"
-                                >{{ $t("gyroflightV2JioProgressNext") }}: {{ pr.next }}</span
-                            >
-                            <span v-if="pr.supplementary" class="text-dimmed" data-gyrocore="v2-jio-supplementary">
-                                {{ $t("gyroflightV2JioSupplementary") }}: {{ pr.supplementary }}</span
-                            >
-                        </li>
-                    </ul>
-                </template>
-                <p class="text-sm text-dimmed" data-gyrocore="v2-jio-needs">
-                    {{ $t("gyroflightV2JioNeeds") }}:
-                    {{ jioNeeds.required.map(measurementText).join("; ") || "--" }}
-                    <template v-if="jioNeeds.supplementary.length">
-                        · {{ $t("gyroflightV2JioSupplementary") }}:
-                        {{ jioNeeds.supplementary.map(measurementText).join("; ") }}
-                    </template>
-                </p>
-                <p v-if="jioMimoText" class="text-sm text-dimmed" data-gyrocore="v2-jio-mimo">{{ jioMimoText }}</p>
+                <details v-if="jioAdvice.length" class="text-sm mt-2">
+                    <summary class="cursor-pointer font-bold">{{ $t("gyroflightV2JioAdviceTitle") }}</summary>
+                    <p class="text-dimmed" data-gyrocore="v2-jio-preparation">
+                        {{ $t("gyroflightV2JioPreparation") }}
+                    </p>
+                    <p
+                        v-for="adv in jioAdvice"
+                        :key="adv.axis"
+                        class="text-dimmed"
+                        data-gyrocore="v2-jio-advice"
+                        :data-axis="adv.axis"
+                    >
+                        {{ adv.text }}
+                    </p>
+                </details>
+                <details v-if="jioCandidates.length || jioMimoText" class="text-sm mt-1">
+                    <summary class="cursor-pointer font-bold">{{ $t("gyroflightV2JioOtherFlightsTitle") }}</summary>
+                    <p v-if="jioCandidates.length" class="text-dimmed" data-gyrocore="v2-jio-cross">
+                        {{ $t("gyroflightV2JioCandidates") }}: {{ jioCandidates.join(" | ") }}
+                    </p>
+                    <p v-if="jioMimoText" class="text-dimmed" data-gyrocore="v2-jio-mimo">{{ jioMimoText }}</p>
+                </details>
             </template>
 
             <template v-if="show('qualification') && v2.qualification">
@@ -564,7 +640,10 @@
         <!-- 4b. Experimental tuning: the values the measurement supports, written only on an explicit acknowledgement. -->
         <template v-if="show('experimental') && result">
             <h4 class="font-bold mt-3" data-step="v2-experimental">4b. {{ $t("gyroflightV2ExperimentalTitle") }}</h4>
-            <p class="text-sm text-dimmed">{{ $t("gyroflightV2ExperimentalHelp") }}</p>
+            <details class="text-sm">
+                <summary class="cursor-pointer text-dimmed">{{ $t("gyroflightV2ExperimentalAbout") }}</summary>
+                <p class="text-dimmed">{{ $t("gyroflightV2ExperimentalHelp") }}</p>
+            </details>
             <p
                 v-if="!experimental"
                 class="text-sm"
@@ -609,15 +688,18 @@
                     </table>
                 </div>
             </template>
-            <ul
-                v-if="experimentalWithheld.length"
-                class="text-sm list-disc ps-5"
-                data-gyrocore="v2-experimental-withheld"
-            >
-                <li v-for="w in experimentalWithheld" :key="w.key" :data-key="w.key">
-                    {{ w.key }}: {{ $t("gyroflightV2ExperimentalWithheld") }} ({{ w.reasons.join("; ") }})
-                </li>
-            </ul>
+            <details v-if="experimentalWithheld.length" class="text-sm mt-1">
+                <summary class="cursor-pointer">
+                    {{
+                        t("gyroflightV2ExperimentalWithheldToggle", [experimentalWithheld.map((w) => w.key).join(", ")])
+                    }}
+                </summary>
+                <ul class="list-disc ps-5 [overflow-wrap:anywhere]" data-gyrocore="v2-experimental-withheld">
+                    <li v-for="w in experimentalWithheld" :key="w.key" :data-key="w.key">
+                        {{ w.key }}: {{ $t("gyroflightV2ExperimentalWithheld") }} ({{ w.reasons.join("; ") }})
+                    </li>
+                </ul>
+            </details>
             <template v-if="experimental">
                 <p class="text-sm text-dimmed" data-gyrocore="v2-experimental-limits">
                     {{ $t("gyroflightV2ExperimentalLimits") }}: {{ experimental.limitations.join(", ") }}
@@ -717,96 +799,137 @@
             </template>
             <div
                 v-if="show('recordingPlan') && plan"
-                class="text-sm mt-2"
+                class="text-sm mt-2 flex flex-col gap-3"
                 data-gyrocore="v2-recording-plan"
                 :data-needed="plan.recordingNeeded ? 'yes' : 'no'"
             >
-                <p class="font-bold">{{ $t("gyroflightV2RecordingPlanTitle") }}</p>
-                <p class="text-dimmed">{{ $t("gyroflightV2PlanAgreement") }}</p>
-                <div
-                    v-for="ax in planAxes"
-                    :key="ax.axis"
-                    class="mt-1"
-                    data-gyrocore="v2-recording-axis"
-                    :data-axis="ax.axis"
-                    :data-kind="ax.kind"
-                >
-                    <p>
-                        <span class="font-bold">{{ ax.axis }}</span
-                        >: {{ ax.note }}
+                <!-- A. The imported recording: complete sweeps and, per axis, the information still missing. -->
+                <section data-gyrocore="v2-plan-current">
+                    <h4 class="font-bold">{{ $t("gyroflightV2PlanCurrentTitle") }}</h4>
+                    <p data-gyrocore="v2-plan-rounds" :data-state="plan.existing.rounds.state">{{ planRoundsText }}</p>
+                    <p data-gyrocore="v2-plan-second-flight" :data-state="plan.existing.secondFlight.state">
+                        {{ planSecondFlightText }}
                     </p>
-                    <ul v-if="ax.missing.length" class="list-disc ps-5">
-                        <li
-                            v-for="(m, i) in ax.missing"
-                            :key="i"
-                            data-gyrocore="v2-missing-interval"
-                            :data-route="m.route"
-                            :data-kind="m.kind"
-                        >
-                            {{ m.text }}
-                        </li>
-                    </ul>
-                </div>
-
-                <p class="font-bold mt-2">{{ $t("gyroflightV2PlanExisting") }}</p>
-                <p data-gyrocore="v2-plan-rounds" :data-state="plan.existing.rounds.state">{{ planRoundsText }}</p>
-                <p data-gyrocore="v2-plan-second-flight" :data-state="plan.existing.secondFlight.state">
-                    {{ planSecondFlightText }}
-                </p>
-                <div class="overflow-x-auto max-w-full [&_td.text-dimmed]:[overflow-wrap:anywhere]">
-                    <table class="gyroflight-workflow-table" data-gyrocore="v2-plan-existing">
-                        <tbody>
-                            <tr v-for="st in plan.existing.settings" :key="st.name" :data-setting="st.name">
-                                <td>{{ st.name }}</td>
-                                <td>{{ settingValue(st.current, st.unit, st.hz?.current ?? null) }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <template v-if="plan.sweep">
-                    <p class="font-bold mt-2">{{ $t("gyroflightV2PlanProposed") }}</p>
-                    <p class="text-dimmed">{{ $t("gyroflightV2PlanShared") }}</p>
-                    <div class="overflow-x-auto max-w-full [&_td.text-dimmed]:[overflow-wrap:anywhere]">
-                        <table class="gyroflight-workflow-table" data-gyrocore="v2-plan-settings">
-                            <tbody>
-                                <tr
-                                    v-for="st in [...plan.sweep.settings, ...plan.sweep.amplitudes]"
-                                    :key="st.name"
-                                    :data-setting="st.name"
-                                    :data-changed="st.changed ? 'yes' : 'no'"
+                    <div
+                        v-for="ax in planAxes"
+                        :key="ax.axis"
+                        class="mt-1"
+                        data-gyrocore="v2-recording-axis"
+                        :data-axis="ax.axis"
+                        :data-kind="ax.kind"
+                    >
+                        <p>
+                            <span class="font-bold">{{ ax.axis }}</span
+                            >: {{ ax.note }}
+                        </p>
+                        <details v-if="ax.missing.length">
+                            <summary class="cursor-pointer text-dimmed">
+                                {{ t("gyroflightV2PlanMissingToggle", [ax.missing.length]) }}
+                            </summary>
+                            <ul class="list-disc ps-5">
+                                <li
+                                    v-for="(m, i) in ax.missing"
+                                    :key="i"
+                                    data-gyrocore="v2-missing-interval"
+                                    :data-route="m.route"
+                                    :data-kind="m.kind"
                                 >
-                                    <td>{{ st.name }}</td>
-                                    <td>{{ settingValue(st.current, st.unit, st.hz?.current ?? null) }}</td>
-                                    <td :class="st.changed ? 'font-bold' : ''">
-                                        {{ settingValue(st.proposed, st.unit, st.hz?.proposed ?? null) }}
+                                    {{ m.text }}
+                                </li>
+                            </ul>
+                        </details>
+                    </div>
+                </section>
+
+                <!-- B. Settings: what the log holds beside what the next flight should use. -->
+                <section data-gyrocore="v2-plan-settings-block">
+                    <h4 class="font-bold">{{ $t("gyroflightV2PlanSettingsTitle") }}</h4>
+                    <p class="font-bold" data-gyrocore="v2-plan-not-written">{{ $t("gyroflightV2PlanNotWritten") }}</p>
+                    <p v-if="plan.sweep" class="text-dimmed">{{ $t("gyroflightV2PlanShared") }}</p>
+                    <div class="overflow-x-auto max-w-full [&_td.text-dimmed]:[overflow-wrap:anywhere]">
+                        <table
+                            class="gyroflight-workflow-table"
+                            :data-gyrocore="plan.sweep ? 'v2-plan-settings' : undefined"
+                        >
+                            <thead>
+                                <tr>
+                                    <th>{{ $t("gyroflightCompareSetting") }}</th>
+                                    <th>{{ $t("gyroflightV2PlanFromLog") }}</th>
+                                    <th v-if="plan.sweep">{{ $t("gyroflightV2PlanProposedValue") }}</th>
+                                    <th v-if="plan.sweep">{{ $t("gyroflightV2PlanBasis") }}</th>
+                                </tr>
+                            </thead>
+                            <tbody data-gyrocore="v2-plan-existing">
+                                <tr
+                                    v-for="row in planSettingRows"
+                                    :key="row.name"
+                                    :data-setting="row.name"
+                                    :data-changed="row.proposed ? (row.proposed.changed ? 'yes' : 'no') : undefined"
+                                    :class="row.proposed?.changed ? 'bg-yellow-500/10' : ''"
+                                >
+                                    <td>{{ row.label }}</td>
+                                    <td>{{ row.current }}</td>
+                                    <td v-if="plan.sweep" :class="row.proposed?.changed ? 'font-bold' : ''">
+                                        {{ row.proposed ? row.proposed.text : "--" }}
+                                        <UBadge
+                                            v-if="row.proposed?.changed"
+                                            color="warning"
+                                            variant="subtle"
+                                            size="sm"
+                                            class="ms-1"
+                                            data-gyrocore="v2-plan-changed"
+                                            >{{ $t("gyroflightV2PlanChanged") }}</UBadge
+                                        >
                                     </td>
-                                    <td class="text-dimmed">{{ st.basis }}</td>
+                                    <td v-if="plan.sweep" class="text-dimmed">{{ row.proposed?.basis ?? "" }}</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
-                    <pre class="text-xs overflow-x-auto max-w-full" data-gyrocore="v2-plan-cli">{{
-                        plan.sweep.cli.join("\n")
-                    }}</pre>
+                    <template v-if="plan.sweep">
+                        <p class="mt-2">{{ $t("gyroflightV2PlanCliHelp") }}</p>
+                        <pre
+                            class="text-xs overflow-x-auto max-w-full rounded-md border border-default p-2"
+                            data-gyrocore="v2-plan-cli"
+                            >{{ plan.sweep.cli.join("\n") }}</pre>
+                    </template>
+                </section>
+
+                <!-- C. The next flight: the agreed two complete CHIRP rounds, with the time it takes. -->
+                <section data-gyrocore="v2-plan-next">
+                    <h4 class="font-bold">{{ $t("gyroflightV2PlanNextTitle") }}</h4>
+                    <p>{{ $t("gyroflightV2PlanAgreement") }}</p>
+                    <template v-if="plan.sweep">
+                        <p class="font-bold" data-gyrocore="v2-recording-timing">{{ planTimingText }}</p>
+                        <ol class="list-decimal ps-5" data-gyrocore="v2-plan-procedure">
+                            <li v-for="(step, i) in plan.procedure" :key="i">{{ step }}</li>
+                        </ol>
+                    </template>
+                    <p data-gyrocore="v2-plan-second-flight-help">{{ plan.secondFlight }}</p>
+                </section>
+
+                <!-- D. Technical basis: frequencies, measured values, thresholds and tables. -->
+                <details data-gyrocore="v2-plan-technical">
+                    <summary class="cursor-pointer font-bold">{{ $t("gyroflightV2PlanTechnicalTitle") }}</summary>
+                    <template v-if="show('measurementPlan') && result?.measurementPlan?.length">
+                        <p class="font-bold mt-2">{{ $t("gyroflightV2PlanTitle") }}</p>
+                        <p class="text-dimmed">{{ $t("gyroflightV2PlanHelp") }}</p>
+                        <MeasurementPlanTable :plan="result.measurementPlan" />
+                    </template>
                     <p
-                        class="text-dimmed"
+                        v-if="plan.sweep"
+                        class="text-dimmed mt-2"
                         data-gyrocore="v2-plan-coverage"
                         :data-valid="plan.sweep.valid ? 'yes' : 'no'"
                     >
                         {{ planCoverageText }}
                     </p>
-                    <ol class="list-decimal ps-5" data-gyrocore="v2-plan-procedure">
-                        <li v-for="(step, i) in plan.procedure" :key="i">{{ step }}</li>
-                    </ol>
-                    <p data-gyrocore="v2-recording-timing">{{ planTimingText }}</p>
-                </template>
-                <p data-gyrocore="v2-plan-second-flight-help">{{ plan.secondFlight }}</p>
-                <p class="text-dimmed">
-                    {{ $t("gyroflightV2RecordingChecks") }}: {{ plan.completionChecks.join(" ") }}
-                </p>
-                <p class="text-dimmed">{{ plan.notChanged.join("; ") }}</p>
-                <p class="text-dimmed" data-gyrocore="v2-plan-note">{{ plan.note }}</p>
+                    <p class="text-dimmed mt-2">
+                        {{ $t("gyroflightV2RecordingChecks") }}: {{ plan.completionChecks.join(" ") }}
+                    </p>
+                    <p class="text-dimmed">{{ plan.notChanged.join("; ") }}</p>
+                    <p class="text-dimmed" data-gyrocore="v2-plan-note">{{ plan.note }}</p>
+                </details>
             </div>
         </template>
 
@@ -940,6 +1063,8 @@ export type AutotuneV2Part =
     | "multi"
     | "measurementPlan"
     | "jio"
+    | "jioSet"
+    | "jioPlots"
     | "qualification"
     | "compare"
     | "apply"
@@ -967,6 +1092,7 @@ import { useAutotuneV2Store, type AutotuneV2Source } from "@/gyrocore/stores/aut
 import { restoreTargetIssue, useTuneBackupStore, type TuneBackup } from "@/gyrocore/stores/tuneBackup";
 import { useFcTransactionStore } from "@/gyrocore/stores/fcTransactionState";
 import UncertainStateNotice from "@/gyrocore/components/UncertainStateNotice.vue";
+import MeasurementPlanTable from "@/gyrocore/components/MeasurementPlanTable.vue";
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
 import { experimentalWriteDecision } from "@/gyrocore/releaseGate/experimentalAuthority";
@@ -1005,6 +1131,7 @@ const {
 } = useAutotuneV2();
 
 const result = computed(() => v2.result);
+const t = (key: string, params?: (string | number)[]) => i18n.getMessage(key, params?.map(String));
 const num = (x: number | null | undefined, digits: number) =>
     x == null || !Number.isFinite(x) ? "--" : x.toFixed(digits);
 const band = (b: [number, number] | null) => (b ? `${num(b[0], 1)}–${num(b[1], 1)}` : "--");
@@ -1165,16 +1292,19 @@ const jioProgress = computed(() => {
         ];
     });
 });
-/** |G| (dB) over log frequency, filled where supported, with the r→y coherence as a dashed line (0–1 over the plot height). */
+/**
+ * |G| (dB) over log frequency, filled where supported, with the r→y coherence as a dashed line
+ * (0–1 over the plot height, scale on the right). Axis titles and tick labels sit outside the plot.
+ */
 const jioPlots = computed(() => {
     const jio = result.value?.jio;
     if (!jio) return [];
-    const w = 320;
-    const h = 110;
-    const x0 = 30;
-    const y0 = 6;
-    const pw = w - x0 - 8;
-    const ph = h - y0 - 16;
+    const w = 520;
+    const h = 230;
+    const x0 = 52;
+    const y0 = 8;
+    const pw = w - x0 - 40;
+    const ph = h - y0 - 38;
     return (["roll", "pitch", "yaw"] as const).flatMap((axis) => {
         const a = jio.analysis.axes[axis];
         const pts = a?.points;
@@ -1210,9 +1340,18 @@ const jioPlots = computed(() => {
         const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500]
             .filter((f) => f >= band[0] && f <= band[1])
             .map((hz) => ({ hz, x: +x(hz).toFixed(1) }));
-        return [{ axis, w, h, x0, y0, pw, ph, dbMin, dbMax, dots, coherence: coh.join(" "), ticks }];
+        const step = niceStep((dbMax - dbMin) / 5);
+        const dbTicks: { v: number; y: number }[] = [];
+        for (let v = Math.ceil(dbMin / step) * step; v <= dbMax; v += step) dbTicks.push({ v, y: +y(v).toFixed(1) });
+        const cohTicks = [0, 0.5, 1].map((v) => ({ v, y: +(y0 + ph * (1 - v)).toFixed(1) }));
+        return [{ axis, w, h, x0, y0, pw, ph, dbMin, dbMax, dots, coherence: coh.join(" "), ticks, dbTicks, cohTicks }];
     });
 });
+/** A 1-2-5 step at or above `raw`, for the dB scale. */
+function niceStep(raw: number): number {
+    const p = 10 ** Math.floor(Math.log10(Math.max(raw, 1e-9)));
+    return [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) ?? 10 * p;
+}
 const jioMimoText = computed(() => {
     const m = result.value?.jio?.analysis.mimo;
     return m
@@ -1358,6 +1497,46 @@ function settingValue(v: string | number | null, unit: string, hz: number | null
     if (v === null) return "unknown";
     return `${v}${unit ? ` ${unit}` : ""}${hz !== null ? ` (${num(hz, 1)} Hz)` : ""}`;
 }
+/** The recording plan is rendered (it sits with the decisions, so it needs them); it then carries the planner table. */
+const planShown = computed(() => show("recordingPlan") && !!plan.value && decisionRows.value.length > 0);
+/**
+ * One row per setting: the value the imported flight logged beside the proposed one. The proposed
+ * sweep names blackbox_sample_rate by its CLI name; the log names it by its header field.
+ */
+const planSettingRows = computed(() => {
+    const p = plan.value;
+    if (!p) return [];
+    const proposed = p.sweep ? [...p.sweep.settings, ...p.sweep.amplitudes] : [];
+    const cliName = (name: string) => name.replace(/ \(P interval\)$/, "");
+    const rows = p.existing.settings.map((st) => {
+        const prop = proposed.find((x) => x.name === cliName(st.name)) ?? null;
+        return {
+            name: prop?.name ?? st.name,
+            label: st.name,
+            current: settingValue(st.current, st.unit, st.hz?.current ?? null),
+            proposed: prop
+                ? {
+                      text: settingValue(prop.proposed, prop.unit, prop.hz?.proposed ?? null),
+                      changed: prop.changed,
+                      basis: prop.basis,
+                  }
+                : null,
+        };
+    });
+    const extra = proposed
+        .filter((x) => !rows.some((r) => r.name === x.name))
+        .map((x) => ({
+            name: x.name,
+            label: x.name,
+            current: settingValue(x.current, x.unit, x.hz?.current ?? null),
+            proposed: {
+                text: settingValue(x.proposed, x.unit, x.hz?.proposed ?? null),
+                changed: x.changed,
+                basis: x.basis,
+            },
+        }));
+    return [...rows, ...extra];
+});
 const MISSING_KIND: Record<string, string> = {
     decision_band_hole: "inside the decision band",
     below_identified_band: "planner band below the identified band",
@@ -1470,6 +1649,8 @@ const fmtMargin = (v: number | null | undefined, qualified: boolean, unit: strin
     // Unqualified: whole degrees / dB so the UI does not imply measurement precision it lacks.
     return `~${Math.round(v)}${unit}`;
 };
+/** A bound the evidence cannot give shows "?" in the row text; here it says unknown. */
+const boundText = (v: string) => v.replace(/\?/g, i18n.getMessage("gyroflightV2BoundUnknown"));
 const shortId = (id: string) => (id.includes(":") ? `${id.slice(0, 8)}…:${id.split(":").pop()}` : id.slice(0, 12));
 
 const marginRows = computed(() => {

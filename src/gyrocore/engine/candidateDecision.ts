@@ -676,8 +676,8 @@ export function decideAxis(o: {
             "fail",
             shortfall,
             atEdge
-                ? `search limit: the best candidate lies on the ±${Math.round(MAX_STEP * 100)} % step edge; a larger change than one step is needed (not more data)`
-                : "targets not reachable with this plant inside the search grid (not more data)",
+                ? `search limit: the best candidate lies on the ±${Math.round(MAX_STEP * 100)} % step edge; the current search found no suitable candidate within its limits (new data can still change this)`
+                : "targets not reachable with this plant inside the search grid (the current search found no suitable candidate within its limits; new data can still change this)",
         ),
     );
     return out(atEdge ? "search_limit_max_step" : "targets_not_reachable", {
