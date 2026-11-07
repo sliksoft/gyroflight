@@ -191,9 +191,10 @@
                     {{ $t("gyroflightV2MultiRecordingContributors") }}:
                     {{ result.multiRecording.contributors.map(shortId).join(", ") || "--" }}
                 </p>
+                <!-- Gyroflight: rejected entries carry long ids without spaces; wrap them in a narrow window. -->
                 <p
                     v-if="result.multiRecording.rejected.length"
-                    class="text-sm text-dimmed"
+                    class="text-sm text-dimmed [overflow-wrap:anywhere]"
                     data-gyrocore="v2-multi-recording-rejected"
                 >
                     {{ $t("gyroflightV2MultiRecordingRejected") }}:
