@@ -22,6 +22,8 @@
 /*
  * TEST ONLY: a released Safety step, so a test can exercise the write path
  * behind it (composite gate, live recheck, exact MSP payload) with mocked MSP.
+ * Both routes: the composite's Safety and the absolute route's
+ * (absoluteSafetyAuthorization), each bound to exactly what it is asked about.
  * It does not fabricate analysis evidence: it replaces the Safety module's
  * verdict with PASS for the exact composite it is asked about, and is labelled
  * so in the result. Production has no way to do this. Use, in a test file:
@@ -49,8 +51,15 @@ export async function releasedSafety() {
             authorized: true,
         };
     };
+    const releasedAbsolute = (...args: Parameters<typeof actual.absoluteSafetyAuthorization>) => ({
+        ...actual.absoluteSafetyAuthorization(...args),
+        status: "PASS" as const,
+        blocks: [],
+        authorized: true,
+    });
     return {
         ...actual,
+        absoluteSafetyAuthorization: releasedAbsolute,
         safetyForComposite: released,
         assertSafetyAuthorized: (state: Args[0], composite: NonNullable<Args[1]>) => released(state, composite),
     };

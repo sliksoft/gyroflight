@@ -31,10 +31,7 @@ export function clearPhaseMarginFromComposite(composite: CompositeRecommendation
  * computed composite matches what authorizeCompositeApply rebuilds (id hash
  * includes blocked[]).
  */
-export function clearPhaseMarginForGate(gate: {
-    report: ChirpQualificationReport | null;
-    touch: () => void;
-}): void {
+export function clearPhaseMarginForGate(gate: { report: ChirpQualificationReport | null; touch: () => void }): void {
     if (gate.report) {
         clearPhaseMarginFromReport(gate.report);
     }

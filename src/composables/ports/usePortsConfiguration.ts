@@ -151,15 +151,36 @@ export function usePortsConfiguration(
         updateFeatures();
 
         const saveEeprom = () => {
-            void saveAndReboot().then(() => gui_log(i18n.getMessage("portsEepromSave")));
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F04): an unconfirmed save is shown.
+            void saveAndReboot().then(
+                () => gui_log(i18n.getMessage("portsEepromSave")),
+                (err: unknown) => {
+                    console.error("Ports save failed:", err);
+                    const tagged = (err as { saveFailureMessage?: string } | null)?.saveFailureMessage;
+                    gui_log(tagged ?? i18n.getMessage("configurationSaveFailed"));
+                },
+            );
         };
 
-        mspHelper.sendSerialConfig(() => {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8 review round 3): each SET must be
+        // answered and not refused before the next step; a legacy callback also runs, without an
+        // answer, when the link is down.
+        const accepted = (reply: unknown) => {
+            const r = reply as { crcError?: boolean; unsupported?: number; ambiguous?: boolean } | undefined;
+            if (r && !r.crcError && !r.unsupported && !r.ambiguous) return true;
+            console.error("Ports save stopped: a SET was not acknowledged", r);
+            gui_log(i18n.getMessage("configurationSaveFailed"));
+            return false;
+        };
+        mspHelper.sendSerialConfig((serialReply?: unknown) => {
+            if (!accepted(serialReply)) return;
             MSP.send_message(
                 MSPCodes.MSP_SET_FEATURE_CONFIG,
                 mspHelper.crunch(MSPCodes.MSP_SET_FEATURE_CONFIG),
                 false,
-                saveEeprom,
+                (featureReply) => {
+                    if (accepted(featureReply)) saveEeprom();
+                },
             );
         });
     };

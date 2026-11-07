@@ -340,6 +340,8 @@ describe("the panel with every gate released (test harnesses)", () => {
             firmware: "2026.6.2",
             compositeId: null,
             snapshot,
+            // Taken while the state was known, as storeBackup records it (WP8: provenance required).
+            stateKnown: true,
         };
         backups.save({ ...base, id: "bk-mine", uid: [1, 2, 3] });
         backups.save({ ...base, id: "bk-other", uid: [7, 8, 9] });
@@ -364,11 +366,27 @@ describe("the panel with every gate released (test harnesses)", () => {
         expect(c.querySelector('[data-gyrocore="workflow-verified"]')).not.toBeNull();
     });
 
-    it("the read-only preview is offered while Apply is blocked and shows now/after", async () => {
+    // Audit P2 (2026-10-23): the preview's firmware calculation runs in the shared FC store, so it
+    // needs Apply's authority; offered while Apply is blocked it could only ever be refused.
+    it("the preview is not offered while Apply is blocked, and the panel says why", async () => {
         const { c } = await mountReleased(["phase_margin_not_validated"]);
         expect(button(c).disabled).toBe(true);
         const preview = c.querySelector('[data-gyrocore="workflow-preview"]') as HTMLButtonElement;
+        expect(preview.disabled).toBe(true);
+        expect(c.querySelector('[data-gyrocore="workflow-preview-needs-release"]')?.textContent).toContain(
+            "gyroflightPreviewNeedsRelease",
+        );
+        preview.click();
+        await flush();
+        expect(mocks.previewTune).not.toHaveBeenCalled();
+    });
+
+    it("the read-only preview is offered exactly when Apply is and shows now/after", async () => {
+        const { c } = await mountReleased();
+        expect(button(c).disabled).toBe(false);
+        const preview = c.querySelector('[data-gyrocore="workflow-preview"]') as HTMLButtonElement;
         expect(preview.disabled).toBe(false);
+        expect(c.querySelector('[data-gyrocore="workflow-preview-needs-release"]')).toBeNull();
         preview.click();
         await flush();
         await flush();

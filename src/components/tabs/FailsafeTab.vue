@@ -1,377 +1,390 @@
 <template>
     <BaseTab tab-name="failsafe">
         <div class="content_wrapper">
-            <div class="tab_title" v-html="$t('tabFailsafe')"></div>
-            <WikiButton docUrl="failsafe" />
+            <!-- Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F06 review): no edits while saving;
+                 the save sends the values it took when it started and then reboots. `inert` also stops
+                 the custom pointer handlers (selects, number steppers) that `disabled` does not. -->
+            <fieldset
+                :disabled="isSaving"
+                :inert="isSaving || undefined"
+                class="contents"
+                data-gyrocore="failsafe-fields"
+            >
+                <div class="tab_title" v-html="$t('tabFailsafe')"></div>
+                <WikiButton docUrl="failsafe" />
 
-            <UiBox type="warning" highlight class="mb-4">
-                <p class="text-sm" v-html="$t('failsafeFeaturesHelpNew')"></p>
-            </UiBox>
+                <UiBox type="warning" highlight class="mb-4">
+                    <p class="text-sm" v-html="$t('failsafeFeaturesHelpNew')"></p>
+                </UiBox>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <!-- Left Column -->
-                <div class="flex flex-col gap-4">
-                    <!-- Pulse Range Settings -->
-                    <UiBox :title="$t('failsafePulsrangeTitle')" type="neutral" collapsible>
-                        <SettingRow :label="$t('failsafeRxMinUsecItem')">
-                            <UInputNumber
-                                v-model="rxConfig.rx_min_usec"
-                                :min="750"
-                                :max="2250"
-                                :step="1"
-                                size="xs"
-                                orientation="vertical"
-                                :format-options="{ useGrouping: false }"
-                                class="w-20"
-                            />
-                        </SettingRow>
-                        <SettingRow :label="$t('failsafeRxMaxUsecItem')">
-                            <UInputNumber
-                                v-model="rxConfig.rx_max_usec"
-                                :min="750"
-                                :max="2250"
-                                :step="1"
-                                size="xs"
-                                orientation="vertical"
-                                :format-options="{ useGrouping: false }"
-                                class="w-20"
-                            />
-                        </SettingRow>
-                    </UiBox>
-
-                    <!-- Channel Fallback Settings -->
-                    <UiBox :title="$t('failsafeChannelFallbackSettingsTitle')" type="neutral" collapsible>
-                        <div class="grid grid-cols-[minmax(10rem,1fr)_7rem_5rem] gap-x-3 gap-y-1.5 items-center">
-                            <template v-for="(channel, index) in activeChannels" :key="index">
-                                <div>
-                                    <span class="font-semibold text-sm">{{ channel.name }}</span>
-                                    <span v-if="channel.assignments?.length" class="ml-1 inline-flex flex-wrap gap-0.5">
-                                        <UBadge
-                                            v-for="(badge, i) in channel.assignments"
-                                            :key="i"
-                                            :label="badge.label"
-                                            color="neutral"
-                                            variant="subtle"
-                                        />
-                                    </span>
-                                </div>
-                                <USelect
-                                    v-model="rxFailConfig[index].mode"
-                                    :items="channelModeItems(index)"
-                                    size="xs"
-                                />
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <!-- Left Column -->
+                    <div class="flex flex-col gap-4">
+                        <!-- Pulse Range Settings -->
+                        <UiBox :title="$t('failsafePulsrangeTitle')" type="neutral" collapsible>
+                            <SettingRow :label="$t('failsafeRxMinUsecItem')">
                                 <UInputNumber
-                                    v-if="rxFailConfig[index].mode === 2"
-                                    v-model="rxFailConfig[index].value"
+                                    v-model="rxConfig.rx_min_usec"
                                     :min="750"
                                     :max="2250"
-                                    :step="25"
+                                    :step="1"
                                     size="xs"
                                     orientation="vertical"
                                     :format-options="{ useGrouping: false }"
-                                    class="w-full"
+                                    class="w-20"
                                 />
-                                <div v-else />
-                            </template>
-                        </div>
-                    </UiBox>
-                </div>
+                            </SettingRow>
+                            <SettingRow :label="$t('failsafeRxMaxUsecItem')">
+                                <UInputNumber
+                                    v-model="rxConfig.rx_max_usec"
+                                    :min="750"
+                                    :max="2250"
+                                    :step="1"
+                                    size="xs"
+                                    orientation="vertical"
+                                    :format-options="{ useGrouping: false }"
+                                    class="w-20"
+                                />
+                            </SettingRow>
+                        </UiBox>
 
-                <!-- Right Column -->
-                <div class="flex flex-col gap-4">
-                    <!-- Failsafe Switch -->
-                    <UiBox :title="$t('failsafeSwitchTitle')" type="neutral" collapsible>
-                        <SettingRow :label="$t('failsafeSwitchModeItem')" :help="$t('failsafeSwitchModeHelp')">
-                            <USelect
-                                v-model="failsafeConfig.failsafe_switch_mode"
-                                :items="switchModeItems"
-                                class="min-w-32"
-                            />
-                        </SettingRow>
-                    </UiBox>
-
-                    <!-- Stage 2 Settings -->
-                    <UiBox :title="$t('failsafeStageTwoSettingsTitle')" type="neutral" collapsible>
-                        <SettingRow :label="$t('failsafeDelayItem')" :help="$t('failsafeDelayHelp')">
-                            <UInputNumber
-                                v-model="failsafeDelay"
-                                :min="1"
-                                :max="20"
-                                :step="0.1"
-                                size="xs"
-                                orientation="vertical"
-                                :format-options="{ useGrouping: false }"
-                                class="w-16"
-                            />
-                        </SettingRow>
-                        <SettingRow :label="$t('failsafeThrottleLowItem')" :help="$t('failsafeThrottleLowHelp')">
-                            <UInputNumber
-                                v-model="failsafeThrottleLowDelay"
-                                :min="0"
-                                :max="30"
-                                :step="0.1"
-                                size="xs"
-                                orientation="vertical"
-                                :format-options="{ useGrouping: false }"
-                                class="w-16"
-                            />
-                        </SettingRow>
-
-                        <!-- Procedure selector -->
-                        <div class="mt-4 pt-4 border-t border-(--ui-border)">
-                            <div class="text-sm font-semibold mb-2" v-html="$t('failsafeSubTitle1')"></div>
-                            <USelect
-                                v-model="failsafeConfig.failsafe_procedure"
-                                :items="procedureItems"
-                                class="min-w-40 mb-3"
-                            />
-
-                            <img
-                                v-if="procedureImage"
-                                :src="procedureImage"
-                                alt=""
-                                aria-hidden="true"
-                                class="h-24 opacity-70 mb-3"
-                            />
-
-                            <!-- Land settings -->
-                            <div v-if="failsafeConfig.failsafe_procedure === 0" class="flex flex-col gap-2">
-                                <SettingRow :label="$t('failsafeThrottleItem')">
-                                    <UInputNumber
-                                        v-model="failsafeConfig.failsafe_throttle"
-                                        :min="0"
-                                        :max="2000"
-                                        :step="1"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-20"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeOffDelayItem')" :help="$t('failsafeOffDelayHelp')">
-                                    <UInputNumber
-                                        v-model="failsafeOffDelay"
-                                        :min="limits.offDelay.min"
-                                        :max="limits.offDelay.max"
-                                        :step="offDelayStep"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                            </div>
-
-                            <!-- GPS Rescue settings -->
-                            <div v-if="showGpsRescue" class="flex flex-col gap-2">
-                                <SettingRow :label="$t('failsafeGpsRescueItemAltitudeMode')">
+                        <!-- Channel Fallback Settings -->
+                        <UiBox :title="$t('failsafeChannelFallbackSettingsTitle')" type="neutral" collapsible>
+                            <div class="grid grid-cols-[minmax(10rem,1fr)_7rem_5rem] gap-x-3 gap-y-1.5 items-center">
+                                <template v-for="(channel, index) in activeChannels" :key="index">
+                                    <div>
+                                        <span class="font-semibold text-sm">{{ channel.name }}</span>
+                                        <span
+                                            v-if="channel.assignments?.length"
+                                            class="ml-1 inline-flex flex-wrap gap-0.5"
+                                        >
+                                            <UBadge
+                                                v-for="(badge, i) in channel.assignments"
+                                                :key="i"
+                                                :label="badge.label"
+                                                color="neutral"
+                                                variant="subtle"
+                                            />
+                                        </span>
+                                    </div>
                                     <USelect
-                                        v-model="gpsRescue.altitudeMode"
-                                        :items="altitudeModeItems"
-                                        :disabled="isGpsSettingsDisabled"
-                                        class="min-w-32"
+                                        v-model="rxFailConfig[index].mode"
+                                        :items="channelModeItems(index)"
                                         size="xs"
                                     />
-                                </SettingRow>
-                                <SettingRow
-                                    v-if="gpsRescue.altitudeMode === 1"
-                                    :label="$t('failsafeGpsRescueItemReturnAltitude')"
-                                >
                                     <UInputNumber
-                                        v-model="gpsRescue.returnAltitudeM"
-                                        :min="limits.returnAltitude.min"
-                                        :max="limits.returnAltitude.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
+                                        v-if="rxFailConfig[index].mode === 2"
+                                        v-model="rxFailConfig[index].value"
+                                        :min="750"
+                                        :max="2250"
+                                        :step="25"
                                         size="xs"
                                         orientation="vertical"
                                         :format-options="{ useGrouping: false }"
-                                        class="w-16"
+                                        class="w-full"
                                     />
-                                </SettingRow>
-                                <SettingRow
-                                    v-if="showInitialClimb"
-                                    :label="$t('failsafeGpsRescueInitialClimb')"
-                                    :help="$t('failsafeGpsRescueInitialClimbHelp')"
-                                >
-                                    <UInputNumber
-                                        v-model="gpsRescue.initialClimbM"
-                                        :min="limits.initialClimb.min"
-                                        :max="limits.initialClimb.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemAscendRate')">
-                                    <UInputNumber
-                                        v-model="gpsRescueAscendRate"
-                                        :min="limits.ascendRate.min"
-                                        :max="limits.ascendRate.max"
-                                        :step="0.1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemGroundSpeed')">
-                                    <UInputNumber
-                                        v-model="gpsRescueGroundSpeed"
-                                        :min="limits.groundSpeed.min"
-                                        :max="limits.groundSpeed.max"
-                                        :step="0.1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow
-                                    :label="$t('failsafeGpsRescueItemAngle')"
-                                    :help="$t('failsafeGpsRescueAngleHelp')"
-                                >
-                                    <UInputNumber
-                                        v-model="gpsRescue.angle"
-                                        :min="limits.angle.min"
-                                        :max="limits.angle.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemDescentDistance')">
-                                    <UInputNumber
-                                        v-model="gpsRescue.descentDistanceM"
-                                        :min="limits.descentDistance.min"
-                                        :max="limits.descentDistance.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow
-                                    :label="$t('failsafeGpsRescueItemDescendRate')"
-                                    :help="$t('failsafeGpsRescueDescendRateHelp')"
-                                >
-                                    <UInputNumber
-                                        v-model="gpsRescueDescendRate"
-                                        :min="limits.descendRate.min"
-                                        :max="limits.descendRate.max"
-                                        :step="0.05"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemThrottleMin')">
-                                    <UInputNumber
-                                        v-model="gpsRescue.throttleMin"
-                                        :min="limits.throttleMin.min"
-                                        :max="limits.throttleMin.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-20"
-                                    />
-                                </SettingRow>
-                                <SettingRow
-                                    :label="$t('failsafeGpsRescueItemThrottleMax')"
-                                    :help="$t('failsafeGpsRescueThrottleMaxHelp')"
-                                >
-                                    <UInputNumber
-                                        v-model="gpsRescue.throttleMax"
-                                        :min="limits.throttleMax.min"
-                                        :max="limits.throttleMax.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-20"
-                                    />
-                                </SettingRow>
-                                <SettingRow
-                                    :label="$t('failsafeGpsRescueItemThrottleHover')"
-                                    :help="$t('failsafeGpsRescueThrottleHoverHelp')"
-                                >
-                                    <UInputNumber
-                                        v-model="gpsRescue.throttleHover"
-                                        :min="limits.throttleHover.min"
-                                        :max="limits.throttleHover.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-20"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemMinDth')" :help="minStartDistHelp">
-                                    <UInputNumber
-                                        v-model="gpsRescue.minStartDistM"
-                                        :min="limits.minStartDist.min"
-                                        :max="limits.minStartDist.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-20"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemMinSats')">
-                                    <UInputNumber
-                                        v-model="gpsRescue.minSats"
-                                        :min="limits.minSats.min"
-                                        :max="limits.minSats.max"
-                                        :step="1"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                        orientation="vertical"
-                                        :format-options="{ useGrouping: false }"
-                                        class="w-16"
-                                    />
-                                </SettingRow>
-                                <SettingRow
-                                    :label="$t('failsafeGpsRescueItemAllowArmingWithoutFix')"
-                                    :help="$t('failsafeGpsRescueArmWithoutFixHelp')"
-                                >
-                                    <USwitch
-                                        v-model="gpsRescueAllowArmingWithoutFix"
-                                        :disabled="isGpsSettingsDisabled"
-                                        size="xs"
-                                    />
-                                </SettingRow>
-                                <SettingRow :label="$t('failsafeGpsRescueItemSanityChecks')">
-                                    <USelect
-                                        v-model="gpsRescue.sanityChecks"
-                                        :items="sanityCheckItems"
-                                        :disabled="isGpsSettingsDisabled"
-                                        class="min-w-28"
-                                        size="xs"
-                                    />
-                                </SettingRow>
+                                    <div v-else />
+                                </template>
                             </div>
-                        </div>
-                    </UiBox>
+                        </UiBox>
+                    </div>
+
+                    <!-- Right Column -->
+                    <div class="flex flex-col gap-4">
+                        <!-- Failsafe Switch -->
+                        <UiBox :title="$t('failsafeSwitchTitle')" type="neutral" collapsible>
+                            <SettingRow :label="$t('failsafeSwitchModeItem')" :help="$t('failsafeSwitchModeHelp')">
+                                <USelect
+                                    v-model="failsafeConfig.failsafe_switch_mode"
+                                    :items="switchModeItems"
+                                    class="min-w-32"
+                                />
+                            </SettingRow>
+                        </UiBox>
+
+                        <!-- Stage 2 Settings -->
+                        <UiBox :title="$t('failsafeStageTwoSettingsTitle')" type="neutral" collapsible>
+                            <SettingRow :label="$t('failsafeDelayItem')" :help="$t('failsafeDelayHelp')">
+                                <UInputNumber
+                                    v-model="failsafeDelay"
+                                    :min="1"
+                                    :max="20"
+                                    :step="0.1"
+                                    size="xs"
+                                    orientation="vertical"
+                                    :format-options="{ useGrouping: false }"
+                                    class="w-16"
+                                />
+                            </SettingRow>
+                            <SettingRow :label="$t('failsafeThrottleLowItem')" :help="$t('failsafeThrottleLowHelp')">
+                                <UInputNumber
+                                    v-model="failsafeThrottleLowDelay"
+                                    :min="0"
+                                    :max="30"
+                                    :step="0.1"
+                                    size="xs"
+                                    orientation="vertical"
+                                    :format-options="{ useGrouping: false }"
+                                    class="w-16"
+                                />
+                            </SettingRow>
+
+                            <!-- Procedure selector -->
+                            <div class="mt-4 pt-4 border-t border-(--ui-border)">
+                                <div class="text-sm font-semibold mb-2" v-html="$t('failsafeSubTitle1')"></div>
+                                <USelect
+                                    v-model="failsafeConfig.failsafe_procedure"
+                                    :items="procedureItems"
+                                    class="min-w-40 mb-3"
+                                />
+
+                                <img
+                                    v-if="procedureImage"
+                                    :src="procedureImage"
+                                    alt=""
+                                    aria-hidden="true"
+                                    class="h-24 opacity-70 mb-3"
+                                />
+
+                                <!-- Land settings -->
+                                <div v-if="failsafeConfig.failsafe_procedure === 0" class="flex flex-col gap-2">
+                                    <SettingRow :label="$t('failsafeThrottleItem')">
+                                        <UInputNumber
+                                            v-model="failsafeConfig.failsafe_throttle"
+                                            :min="0"
+                                            :max="2000"
+                                            :step="1"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-20"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeOffDelayItem')" :help="$t('failsafeOffDelayHelp')">
+                                        <UInputNumber
+                                            v-model="failsafeOffDelay"
+                                            :min="limits.offDelay.min"
+                                            :max="limits.offDelay.max"
+                                            :step="offDelayStep"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                </div>
+
+                                <!-- GPS Rescue settings -->
+                                <div v-if="showGpsRescue" class="flex flex-col gap-2">
+                                    <SettingRow :label="$t('failsafeGpsRescueItemAltitudeMode')">
+                                        <USelect
+                                            v-model="gpsRescue.altitudeMode"
+                                            :items="altitudeModeItems"
+                                            :disabled="isGpsSettingsDisabled"
+                                            class="min-w-32"
+                                            size="xs"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        v-if="gpsRescue.altitudeMode === 1"
+                                        :label="$t('failsafeGpsRescueItemReturnAltitude')"
+                                    >
+                                        <UInputNumber
+                                            v-model="gpsRescue.returnAltitudeM"
+                                            :min="limits.returnAltitude.min"
+                                            :max="limits.returnAltitude.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        v-if="showInitialClimb"
+                                        :label="$t('failsafeGpsRescueInitialClimb')"
+                                        :help="$t('failsafeGpsRescueInitialClimbHelp')"
+                                    >
+                                        <UInputNumber
+                                            v-model="gpsRescue.initialClimbM"
+                                            :min="limits.initialClimb.min"
+                                            :max="limits.initialClimb.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemAscendRate')">
+                                        <UInputNumber
+                                            v-model="gpsRescueAscendRate"
+                                            :min="limits.ascendRate.min"
+                                            :max="limits.ascendRate.max"
+                                            :step="0.1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemGroundSpeed')">
+                                        <UInputNumber
+                                            v-model="gpsRescueGroundSpeed"
+                                            :min="limits.groundSpeed.min"
+                                            :max="limits.groundSpeed.max"
+                                            :step="0.1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        :label="$t('failsafeGpsRescueItemAngle')"
+                                        :help="$t('failsafeGpsRescueAngleHelp')"
+                                    >
+                                        <UInputNumber
+                                            v-model="gpsRescue.angle"
+                                            :min="limits.angle.min"
+                                            :max="limits.angle.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemDescentDistance')">
+                                        <UInputNumber
+                                            v-model="gpsRescue.descentDistanceM"
+                                            :min="limits.descentDistance.min"
+                                            :max="limits.descentDistance.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        :label="$t('failsafeGpsRescueItemDescendRate')"
+                                        :help="$t('failsafeGpsRescueDescendRateHelp')"
+                                    >
+                                        <UInputNumber
+                                            v-model="gpsRescueDescendRate"
+                                            :min="limits.descendRate.min"
+                                            :max="limits.descendRate.max"
+                                            :step="0.05"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemThrottleMin')">
+                                        <UInputNumber
+                                            v-model="gpsRescue.throttleMin"
+                                            :min="limits.throttleMin.min"
+                                            :max="limits.throttleMin.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-20"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        :label="$t('failsafeGpsRescueItemThrottleMax')"
+                                        :help="$t('failsafeGpsRescueThrottleMaxHelp')"
+                                    >
+                                        <UInputNumber
+                                            v-model="gpsRescue.throttleMax"
+                                            :min="limits.throttleMax.min"
+                                            :max="limits.throttleMax.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-20"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        :label="$t('failsafeGpsRescueItemThrottleHover')"
+                                        :help="$t('failsafeGpsRescueThrottleHoverHelp')"
+                                    >
+                                        <UInputNumber
+                                            v-model="gpsRescue.throttleHover"
+                                            :min="limits.throttleHover.min"
+                                            :max="limits.throttleHover.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-20"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemMinDth')" :help="minStartDistHelp">
+                                        <UInputNumber
+                                            v-model="gpsRescue.minStartDistM"
+                                            :min="limits.minStartDist.min"
+                                            :max="limits.minStartDist.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-20"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemMinSats')">
+                                        <UInputNumber
+                                            v-model="gpsRescue.minSats"
+                                            :min="limits.minSats.min"
+                                            :max="limits.minSats.max"
+                                            :step="1"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                            orientation="vertical"
+                                            :format-options="{ useGrouping: false }"
+                                            class="w-16"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow
+                                        :label="$t('failsafeGpsRescueItemAllowArmingWithoutFix')"
+                                        :help="$t('failsafeGpsRescueArmWithoutFixHelp')"
+                                    >
+                                        <USwitch
+                                            v-model="gpsRescueAllowArmingWithoutFix"
+                                            :disabled="isGpsSettingsDisabled"
+                                            size="xs"
+                                        />
+                                    </SettingRow>
+                                    <SettingRow :label="$t('failsafeGpsRescueItemSanityChecks')">
+                                        <USelect
+                                            v-model="gpsRescue.sanityChecks"
+                                            :items="sanityCheckItems"
+                                            :disabled="isGpsSettingsDisabled"
+                                            class="min-w-28"
+                                            size="xs"
+                                        />
+                                    </SettingRow>
+                                </div>
+                            </div>
+                        </UiBox>
+                    </div>
                 </div>
-            </div>
+            </fieldset>
         </div>
 
         <div class="content_toolbar toolbar_fixed_bottom">
@@ -443,14 +456,24 @@ const configDefaults = ref<Record<string, string | null>>({});
 const configChanges = ref<Record<string, string | null>>({});
 const configHasChanged = computed(() => Object.keys(configChanges.value).length > 0);
 
-const initializeDefaults = () => {
-    configDefaults.value = {
-        rxConfig: JSON.stringify({ rx_min_usec: rxConfig.value.rx_min_usec, rx_max_usec: rxConfig.value.rx_max_usec }),
-        failsafeConfig: JSON.stringify(failsafeConfig.value),
-        gpsRescue: gpsRescue.value ? JSON.stringify(gpsRescue.value) : null,
-        rxFailConfig: JSON.stringify(rxFailConfig.value),
-    };
-    configChanges.value = {};
+const currentConfig = (): Record<string, string | null> => ({
+    rxConfig: JSON.stringify({ rx_min_usec: rxConfig.value.rx_min_usec, rx_max_usec: rxConfig.value.rx_max_usec }),
+    failsafeConfig: JSON.stringify(failsafeConfig.value),
+    gpsRescue: gpsRescue.value ? JSON.stringify(gpsRescue.value) : null,
+    rxFailConfig: JSON.stringify(rxFailConfig.value),
+});
+
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F06): the baseline can be values taken
+// earlier (what a save sent); a field edited since stays changed.
+const initializeDefaults = (baseline: Record<string, string | null> = currentConfig()) => {
+    configDefaults.value = baseline;
+    const now = currentConfig();
+    configChanges.value = Object.fromEntries(Object.entries(now).filter(([key, value]) => value !== baseline[key]));
+};
+
+const captureBaseline = () => {
+    const sent = currentConfig();
+    return () => initializeDefaults(sent);
 };
 
 const trackChange = (key: string, newValue: string | null) => {
@@ -744,7 +767,7 @@ const gpsRescueAllowArmingWithoutFix = computed({
 
 // --- Save ---
 
-const { saveConfig } = useFailsafeSave(initializeDefaults);
+const { saveConfig, isSaving } = useFailsafeSave(captureBaseline);
 
 onMounted(async () => {
     await loadConfig();

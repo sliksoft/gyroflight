@@ -28,6 +28,9 @@ import { MspCancelledError, MspTimeoutError, MspCrcError } from "../../src/js/ms
 import { useConnectionStore } from "../../src/stores/connection";
 
 const EEPROM_WRITE_CODE = MSPCodes.MSP_EEPROM_WRITE;
+// Gyroflight (audit WP8 integration review): identical requests share one transmission only when
+// they read; a write always goes out itself. The generic dedup mechanics are shown on a read code.
+const READ_CODE = MSPCodes.MSP_SERVO_MIX_RULES;
 
 function xorChecksum(bytes: number[]) {
     return bytes.reduce((acc, byte) => acc ^ byte, 0);
@@ -62,12 +65,18 @@ describe("MSP promise semantics", () => {
     beforeEach(() => {
         const connectionStore = useConnectionStore();
         vi.useFakeTimers();
-        serialSendSpy = vi.spyOn(serial, "send").mockImplementation(async () => ({ bytesSent: 0 }));
+        // Like the facade: the request is asked whether it still wants out right before the transport
+        // (Gyroflight: a write is answered only after that, audit WP8 integration review).
+        serialSendSpy = vi.spyOn(serial, "send").mockImplementation(async (_data, _cb, opts) => {
+            opts?.stillWanted?.();
+            return { bytesSent: 0 };
+        });
         setProtocolConnected(true);
         connectionStore.virtualMode = false;
 
         MSP.callbacks = [];
         MSP.parked.clear();
+        MSP.write_transmissions.clear();
         MSP.state = MSP.decoder_states.IDLE;
 
         MSP.listeners = [];
@@ -246,17 +255,17 @@ describe("MSP promise semantics", () => {
             // _transmit only skips the resend when `data` is falsy (`if (data || !requestExists)`),
             // so true wire-level dedup only happens for no-payload requests; a truthy payload
             // always resends even when the buffer already matches an in-flight entry.
-            const firstPromise = MSP.promise(EEPROM_WRITE_CODE);
-            const secondPromise = MSP.promise(EEPROM_WRITE_CODE);
+            const firstPromise = MSP.promise(READ_CODE);
+            const secondPromise = MSP.promise(READ_CODE);
 
             expect(serialSendSpy).toHaveBeenCalledTimes(1);
             expect(MSP.parked.size).toBe(0);
-            expect(MSP.callbacks.filter((entry) => entry.code === EEPROM_WRITE_CODE)).toHaveLength(2);
+            expect(MSP.callbacks.filter((entry) => entry.code === READ_CODE)).toHaveLength(2);
 
-            readFrame(v1ResponseFrame(EEPROM_WRITE_CODE));
+            readFrame(v1ResponseFrame(READ_CODE));
 
-            await expect(firstPromise).resolves.toMatchObject({ command: EEPROM_WRITE_CODE });
-            await expect(secondPromise).resolves.toMatchObject({ command: EEPROM_WRITE_CODE });
+            await expect(firstPromise).resolves.toMatchObject({ command: READ_CODE });
+            await expect(secondPromise).resolves.toMatchObject({ command: READ_CODE });
             expect(MSP.callbacks).toHaveLength(0);
         });
 
@@ -290,19 +299,19 @@ describe("MSP promise semantics", () => {
             // not by request buffer, so a single incoming frame resolves every same-code entry
             // still queued — legacy and errorAware alike — regardless of which payload it was for.
             let legacyCallbackArg;
-            MSP.send_message(EEPROM_WRITE_CODE, [1], false, (result) => {
+            MSP.send_message(READ_CODE, [1], false, (result) => {
                 legacyCallbackArg = result;
             });
             expect(serialSendSpy).toHaveBeenCalledTimes(1);
 
-            const promiseResult = MSP.promise(EEPROM_WRITE_CODE, [2]);
+            const promiseResult = MSP.promise(READ_CODE, [2]);
             expect(serialSendSpy).toHaveBeenCalledTimes(2);
             expect(MSP.parked.size).toBe(0);
 
-            readFrame(v1ResponseFrame(EEPROM_WRITE_CODE, [2]));
+            readFrame(v1ResponseFrame(READ_CODE, [2]));
 
-            await expect(promiseResult).resolves.toMatchObject({ command: EEPROM_WRITE_CODE });
-            expect(legacyCallbackArg).toMatchObject({ command: EEPROM_WRITE_CODE });
+            await expect(promiseResult).resolves.toMatchObject({ command: READ_CODE });
+            expect(legacyCallbackArg).toMatchObject({ command: READ_CODE });
             expect(MSP.callbacks).toHaveLength(0);
         });
 
@@ -332,10 +341,10 @@ describe("MSP promise semantics", () => {
     describe("deduped errorAware awaiter", () => {
         it("still times out even though it was deduped onto a legacy in-flight request", async () => {
             const legacyCallback = vi.fn();
-            MSP.send_message(EEPROM_WRITE_CODE, undefined, false, legacyCallback);
+            MSP.send_message(READ_CODE, undefined, false, legacyCallback);
             expect(serialSendSpy).toHaveBeenCalledTimes(1);
 
-            const rejection = expect(MSP.promise(EEPROM_WRITE_CODE)).rejects.toBeInstanceOf(MspTimeoutError);
+            const rejection = expect(MSP.promise(READ_CODE)).rejects.toBeInstanceOf(MspTimeoutError);
 
             // deduped: no additional wire send at attach time
             expect(serialSendSpy).toHaveBeenCalledTimes(1);
@@ -344,7 +353,31 @@ describe("MSP promise semantics", () => {
             await rejection;
 
             expect(legacyCallback).not.toHaveBeenCalled();
-            expect(MSP.callbacks.some((entry) => entry.errorAware && entry.code === EEPROM_WRITE_CODE)).toBe(false);
+            expect(MSP.callbacks.some((entry) => entry.errorAware && entry.code === READ_CODE)).toBe(false);
+        });
+    });
+
+    // Gyroflight (audit WP8 integration review): MSP answers carry no request id.
+    describe("writes and the answers that cannot be told apart", () => {
+        it("a second identical write goes out itself; one answer resolves the first and leaves the second ambiguous", async () => {
+            const first = MSP.promise(EEPROM_WRITE_CODE);
+            const second = MSP.promise(EEPROM_WRITE_CODE).catch((e: unknown) => e);
+            expect(serialSendSpy).toHaveBeenCalledTimes(2);
+            readFrame(v1ResponseFrame(EEPROM_WRITE_CODE));
+            await expect(first).resolves.toMatchObject({ command: EEPROM_WRITE_CODE });
+            expect(((await second) as Error).name).toBe("MspAmbiguousAnswerError");
+        });
+
+        it("a write the transport has not taken yet is not settled by an answer (it is not its own)", async () => {
+            serialSendSpy.mockImplementation(() => new Promise(() => {})); // held: stillWanted not asked yet
+            let settled = false;
+            void MSP.promise(EEPROM_WRITE_CODE).then(
+                () => (settled = true),
+                () => (settled = true),
+            );
+            readFrame(v1ResponseFrame(EEPROM_WRITE_CODE));
+            await vi.advanceTimersByTimeAsync(0);
+            expect(settled).toBe(false);
         });
     });
 });

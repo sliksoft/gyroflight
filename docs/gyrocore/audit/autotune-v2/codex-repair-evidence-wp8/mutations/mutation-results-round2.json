@@ -1,0 +1,153 @@
+[
+ {
+  "id": "M129",
+  "finding": "R2 firmware refusal rejects",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_review_transport.test.ts",
+   "test/gyrocore/wp8_repair_failsafe_save.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M130",
+  "finding": "R2 unknown direction",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_eeprom_save.test.ts"
+  ],
+  "summary": "Tests  1 failed | 14 passed (15)"
+ },
+ {
+  "id": "M131",
+  "finding": "R2 attempts over waiters",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_eeprom_save.test.ts"
+  ],
+  "summary": "Tests  1 failed | 14 passed (15)"
+ },
+ {
+  "id": "M132",
+  "finding": "R2 exhausted legacy",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_review_transport.test.ts"
+  ],
+  "summary": "Tests  1 failed | 12 passed (13)"
+ },
+ {
+  "id": "M133",
+  "finding": "R2 CLI uncertain at wire",
+  "file": "src/js/msp.ts",
+  "status": "SURVIVED",
+  "tests": [
+   "test/gyrocore/wp8_repair_review_transport.test.ts"
+  ],
+  "summary": "Tests  13 passed (13)"
+ },
+ {
+  "id": "M134",
+  "finding": "R2 batch bound to writer",
+  "file": "src/js/protocols/WebSerial.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/js/webserial_send_queue.test.ts"
+  ],
+  "summary": "Tests  1 failed | 5 passed (6)"
+ },
+ {
+  "id": "M135",
+  "finding": "R2 F02 pendingSends",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_write_lease.test.ts"
+  ],
+  "summary": "Tests  1 failed | 14 passed (15)"
+ },
+ {
+  "id": "M136",
+  "finding": "R2 F02 repeat yield",
+  "file": "src/composables/fcWriteLease.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_write_lease.test.ts"
+  ],
+  "summary": "Tests  1 failed | 14 passed (15)"
+ },
+ {
+  "id": "M137",
+  "finding": "R2 F10 connection",
+  "file": "src/composables/useCli.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_cli_exit.test.ts"
+  ],
+  "summary": "Tests  1 failed | 9 passed (10)"
+ },
+ {
+  "id": "M138",
+  "finding": "R2 F06 fieldset",
+  "file": "src/components/tabs/FailsafeTab.vue",
+  "status": "KILLED",
+  "tests": [
+   "test/components/FailsafeTab.test.ts"
+  ],
+  "summary": "Tests  1 failed | 4 passed (5)"
+ },
+ {
+  "id": "M139",
+  "finding": "R2 F08 recheck",
+  "file": "src/composables/useTuneApply.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_p0_closure_routes.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M140",
+  "finding": "R2 F07 profile match",
+  "file": "src/gyrocore/recovery/transactionDiagnosis.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M141",
+  "finding": "R2 F07 one profile for check",
+  "file": "src/gyrocore/recovery/transactionDiagnosis.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M142",
+  "finding": "R2 F07 read-only",
+  "file": "src/gyrocore/components/UncertainStateNotice.vue",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M143",
+  "finding": "R2 F07 stale",
+  "file": "src/gyrocore/components/UncertainStateNotice.vue",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ }
+]

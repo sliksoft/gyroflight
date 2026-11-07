@@ -255,6 +255,9 @@ describe("a recommendation requires a usable measurement", () => {
 describe("diagnostic-only banner on the Autotune tab", () => {
     async function mountTab() {
         const { default: AutotuneTab } = await import("../../src/components/tabs/AutotuneTab.vue");
+        const { useAutotuneSectionStore } = await import("../../src/gyroflight/autotune/sections");
+        // The plots live in the Graphs section of the tab.
+        useAutotuneSectionStore().open("graphs");
         const container = document.createElement("div");
         document.body.appendChild(container);
         const app = createApp({ render: () => h(UApp, { portal: false }, { default: () => h(AutotuneTab) }) });
@@ -414,7 +417,10 @@ describe("qualification panel", () => {
         const row = container.querySelector('[data-measurement="log1-seg1"]');
         expect(row?.getAttribute("data-state")).toBe("rejected");
         expect(row?.getAttribute("data-apply")).toBe("blocked");
-        expect(row?.querySelector('[data-reason="measurement:low_coherence"]')).not.toBeNull();
+        // The reasons sit in a full-width row right under their measurement.
+        const reasons = container.querySelector('[data-measurement-reasons="log1-seg1"]');
+        expect(row?.nextElementSibling).toBe(reasons);
+        expect(reasons?.querySelector('[data-reason="measurement:low_coherence"]')).not.toBeNull();
         app.unmount();
         container.remove();
     });

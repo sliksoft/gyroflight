@@ -1,0 +1,21 @@
+FAIL@354 | (1) the write hangs and the port closes: the send no longer counts, and the other tab gets the lease
+FAIL@364 | (2) the write hangs and the close fails: false, the send still counts, the other tab is refused; a later close releases it
+FAIL@400 | (3) two disconnects at once both wait for the one close and get its outcome
+PASS | (4) a send waiting behind the stuck one when the link closes never reaches a port, not even the next one
+PASS | (4b) an MSP retry that falls due during the teardown is not handed to the closing port
+PASS | (5) a reconnect before the old write returns: the old send's late end changes nothing on the new link
+FAIL@484 | (10) the page closes during a write (pagehide → forceClose): the write counts until the close is proven
+FAIL@498 | (10b) forceClose whose close succeeds proves the link closed
+FAIL@516 | (3) a second disconnect waits for the first teardown; nothing is reported closed before GATT is
+FAIL@539 | a write made while the teardown runs is refused (the link is still up during stopNotifications)
+FAIL@559 | (6) a write queued behind a stuck one never goes out on the next connection
+FAIL@577 | a teardown whose GATT stays connected is a failure, not proof; closing another transport does not clear it
+FAIL@597 | a failed teardown is run again by the next disconnect, which then proves the close
+FAIL@613 | stopNotifications that never answers does not keep the link from closing
+FAIL@636 | (7) a CLOSED socket with bytes still reported buffered does not count
+FAIL@649 | (8) a CLOSING socket with buffered bytes counts, also after a reconnect superseded it
+PASS | an OPEN socket's buffer counts, and a socket in a state this code does not know counts too
+FAIL@672 | a buffering WebSocket counts after the facade switched to another transport
+PASS | (9) while this tab's write is stuck on an open link the other tab's transaction is refused; once it ends, it runs
+PASS | (11) the other tab asks while the port is still closing: refused; after the close is proven: granted
+PASS | (11b) while the other tab's transaction runs after the yield, this tab's stuck old write cannot be resumed

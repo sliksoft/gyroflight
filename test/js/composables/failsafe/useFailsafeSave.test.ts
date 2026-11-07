@@ -10,7 +10,16 @@ import { useFailsafeSave } from "../../../../src/composables/failsafe/useFailsaf
 const saveAndReboot = vi.fn();
 
 vi.mock("../../../../src/js/msp", () => ({ default: { promise: vi.fn() } }));
-vi.mock("../../../../src/js/msp/MSPHelper", () => ({ mspHelper: { crunch: vi.fn(), sendRxFailConfig: vi.fn() } }));
+vi.mock("../../../../src/js/msp/MSPHelper", async () => {
+    const { default: MSP } = await import("../../../../src/js/msp");
+    return {
+        mspHelper: { crunch: vi.fn(), sendRxFailConfig: vi.fn() },
+        // An acknowledged write is the (mocked) MSP.promise resolving.
+        confirmedWrite: async (code: number, data: number[]) => {
+            await MSP.promise(code, data);
+        },
+    };
+});
 vi.mock("../../../../src/composables/useReboot", () => ({ useReboot: () => ({ saveAndReboot }) }));
 vi.mock("../../../../src/js/gui_log", () => ({ gui_log: vi.fn() }));
 vi.mock("../../../../src/js/localization", () => ({ i18n: { getMessage: (key: string) => key } }));
@@ -44,12 +53,15 @@ describe("useFailsafeSave", () => {
         initializeDefaults = vi.fn(() => {
             steps.push("defaults");
         });
-        saveAndReboot.mockImplementation(async () => {
+        // The firmware acknowledged the EEPROM save: the baseline is reset there (audit WP8-F06).
+        saveAndReboot.mockImplementation(async ({ onSaved }: { onSaved?: () => void } = {}) => {
+            onSaved?.();
             steps.push("reboot");
         });
     });
 
-    const save = () => useFailsafeSave(initializeDefaults).saveConfig();
+    // The baseline commit useFailsafeSave applies after the EEPROM ACK (captureBaseline returns it).
+    const save = () => useFailsafeSave(() => initializeDefaults).saveConfig();
 
     it("sends every section with its crunched payload, then resets the baseline, then reboots", async () => {
         await save();
@@ -104,7 +116,7 @@ describe("useFailsafeSave", () => {
     it("stays saving until the save-and-reboot settles", async () => {
         let rebooted!: () => void;
         saveAndReboot.mockImplementation(() => new Promise<void>((resolve) => (rebooted = resolve)));
-        const { saveConfig, isSaving } = useFailsafeSave(initializeDefaults);
+        const { saveConfig, isSaving } = useFailsafeSave(() => initializeDefaults);
 
         const saving = saveConfig();
         await flushPromises();
@@ -115,10 +127,23 @@ describe("useFailsafeSave", () => {
         expect(isSaving.value).toBe(false);
     });
 
+    // Gyroflight (audit WP8-F06): writes acknowledged, EEPROM save refused or unconfirmed.
+    it("leaves the baseline alone when the EEPROM save fails after every write went through", async () => {
+        saveAndReboot.mockRejectedValue(new Error("EEPROM save not confirmed (not_saved)"));
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        const { saveConfig, isSaving } = useFailsafeSave(() => initializeDefaults);
+
+        await saveConfig();
+
+        expect(saveAndReboot).toHaveBeenCalledTimes(1);
+        expect(initializeDefaults).not.toHaveBeenCalled();
+        expect(isSaving.value).toBe(false);
+    });
+
     it("leaves the baseline alone and does not reboot when a write fails", async () => {
         vi.mocked(MSP.promise).mockRejectedValueOnce(new Error("MSP timeout"));
         vi.spyOn(console, "error").mockImplementation(() => {});
-        const { saveConfig, isSaving } = useFailsafeSave(initializeDefaults);
+        const { saveConfig, isSaving } = useFailsafeSave(() => initializeDefaults);
 
         await saveConfig();
 

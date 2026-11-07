@@ -7,6 +7,11 @@
         data-gyrocore="chirp-qualification"
     >
         <p class="text-sm text-dimmed mb-2">{{ $t("gyrocoreChirpIntro") }}</p>
+        <!-- Gyroflight: what this page decides, and what it does not. -->
+        <ul class="text-sm list-disc ps-5 mb-3 rounded-md border border-default p-2" data-gyrocore="chirp-scope">
+            <li>{{ $t("gyrocoreChirpScopeSeparate") }}</li>
+            <li>{{ $t("gyrocoreChirpScopeSlider") }}</li>
+        </ul>
 
         <div class="flex items-center gap-3 mb-3" :data-state="report.state">
             <UBadge :color="stateColor(report.state)" variant="solid" size="lg" data-gyrocore="overall-state">
@@ -53,77 +58,88 @@
                         <th scope="col">{{ $t("gyrocoreChirpColRate") }}</th>
                         <th scope="col">{{ $t("gyrocoreChirpColCoherence") }}</th>
                         <th scope="col">{{ $t("gyrocoreChirpColState") }}</th>
-                        <th scope="col">{{ $t("gyrocoreChirpColApply") }}</th>
-                        <th scope="col">{{ $t("gyrocoreChirpReasons") }}</th>
+                        <th scope="col" :title="$t('gyrocoreChirpScopeSlider')">{{ $t("gyrocoreChirpColApply") }}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr
-                        v-for="m in report.measurements"
-                        :key="m.id"
-                        :data-measurement="m.id"
-                        :data-state="m.state"
-                        :data-apply="m.apply.allowed ? 'allowed' : 'blocked'"
-                    >
-                        <td>
-                            <input
-                                type="radio"
-                                :name="`gyrocore-chirp-${m.axisName}`"
-                                :checked="gate.selection[m.axisName] === m.id"
-                                :disabled="!m.diagnostics"
-                                :aria-label="`${m.id}`"
-                                @click="gate.selectMeasurement(m.id, true)"
-                            />
-                        </td>
-                        <td>{{ m.logIndex + 1 }}</td>
-                        <td>{{ axisLabel(m.axisName) }} #{{ m.axisOccurrence }}</td>
-                        <td>
-                            {{ seconds(m.startTimeUs) }}–{{ seconds(m.endTimeUs) }} ({{ m.durationS.toFixed(2) }} s)
-                            <div
-                                v-if="m.modeDurationS - m.durationS > 0.05"
-                                class="text-[10px] text-dimmed"
-                                data-mode-duration
-                            >
-                                {{
-                                    i18n.getMessage("gyrocoreQv2DetailModeDuration", [
-                                        m.modeDurationS.toFixed(2),
-                                        m.modeSampleCount,
-                                    ])
-                                }}
-                            </div>
-                        </td>
-                        <td>{{ m.sampleCount }}</td>
-                        <td>{{ m.sampleRate.effectiveRateHz ? Math.round(m.sampleRate.effectiveRateHz) : "--" }}</td>
-                        <td>{{ coherence(m.quality.meanBandCoherence) }}</td>
-                        <td>
-                            <UBadge :color="stateColor(m.state)" variant="subtle">{{ stateLabel(m.state) }}</UBadge>
-                            <div v-if="m.state === 'rejected' && m.diagnostics" class="text-[10px] text-dimmed">
-                                {{ $t("gyrocoreChirpDiagnosticOnly") }}
-                            </div>
-                        </td>
-                        <td :class="m.apply.allowed ? 'text-green-500 font-bold' : 'text-red-500 font-bold'">
-                            {{ $t(m.apply.allowed ? "gyrocoreChirpApplyAllowed" : "gyrocoreChirpApplyBlocked") }}
-                        </td>
-                        <td>
-                            <ul class="list-disc ps-4">
-                                <li v-for="code in m.apply.blocked" :key="code" :data-reason="code">
-                                    {{ describeReason(code, m) }}
-                                </li>
-                            </ul>
-                            <ul v-if="m.apply.warnings.length" class="list-disc ps-4 text-dimmed">
-                                <li v-for="code in m.apply.warnings" :key="code" :data-warning="code">
-                                    {{ describeReason(code, m) }}
-                                </li>
-                            </ul>
-                        </td>
-                    </tr>
+                    <template v-for="m in report.measurements" :key="m.id">
+                        <tr
+                            :data-measurement="m.id"
+                            :data-state="m.state"
+                            :data-apply="m.apply.allowed ? 'allowed' : 'blocked'"
+                        >
+                            <td>
+                                <input
+                                    type="radio"
+                                    :name="`gyrocore-chirp-${m.axisName}`"
+                                    :checked="gate.selection[m.axisName] === m.id"
+                                    :disabled="!m.diagnostics"
+                                    :aria-label="`${m.id}`"
+                                    @click="gate.selectMeasurement(m.id, true)"
+                                />
+                            </td>
+                            <td>{{ m.logIndex + 1 }}</td>
+                            <td>{{ axisLabel(m.axisName) }} #{{ m.axisOccurrence }}</td>
+                            <td>
+                                {{ seconds(m.startTimeUs) }}–{{ seconds(m.endTimeUs) }} ({{ m.durationS.toFixed(2) }} s)
+                                <div
+                                    v-if="m.modeDurationS - m.durationS > 0.05"
+                                    class="text-[10px] text-dimmed"
+                                    data-mode-duration
+                                >
+                                    {{
+                                        i18n.getMessage("gyrocoreQv2DetailModeDuration", [
+                                            m.modeDurationS.toFixed(2),
+                                            m.modeSampleCount,
+                                        ])
+                                    }}
+                                </div>
+                            </td>
+                            <td>{{ m.sampleCount }}</td>
+                            <td>
+                                {{ m.sampleRate.effectiveRateHz ? Math.round(m.sampleRate.effectiveRateHz) : "--" }}
+                            </td>
+                            <td>{{ coherence(m.quality.meanBandCoherence) }}</td>
+                            <td>
+                                <UBadge :color="stateColor(m.state)" variant="subtle">{{ stateLabel(m.state) }}</UBadge>
+                                <div v-if="m.state === 'rejected' && m.diagnostics" class="text-[10px] text-dimmed">
+                                    {{ $t("gyrocoreChirpDiagnosticOnly") }}
+                                </div>
+                            </td>
+                            <td :class="m.apply.allowed ? 'text-green-500 font-bold' : 'text-red-500 font-bold'">
+                                {{ $t(m.apply.allowed ? "gyrocoreChirpApplyAllowed" : "gyrocoreChirpApplyBlocked") }}
+                            </td>
+                        </tr>
+                        <!-- The reasons span the full width under their measurement, so a narrow window keeps them readable. -->
+                        <tr
+                            v-if="m.apply.blocked.length || m.apply.warnings.length"
+                            :data-measurement-reasons="m.id"
+                            class="[&>td]:!pt-0"
+                        >
+                            <td></td>
+                            <td colspan="8" class="text-sm">
+                                <span class="text-dimmed">{{ $t("gyrocoreChirpReasons") }}:</span>
+                                <ul class="list-disc ps-4">
+                                    <li v-for="code in m.apply.blocked" :key="code" :data-reason="code">
+                                        {{ describeReason(code, m) }}
+                                    </li>
+                                </ul>
+                                <ul v-if="m.apply.warnings.length" class="list-disc ps-4 text-dimmed">
+                                    <li v-for="code in m.apply.warnings" :key="code" :data-warning="code">
+                                        {{ describeReason(code, m) }}
+                                    </li>
+                                </ul>
+                            </td>
+                        </tr>
+                    </template>
                 </tbody>
             </table>
         </div>
 
-        <div v-if="qualityCards.length" class="mt-3" data-gyrocore="chirp-quality-v2-list">
+        <div v-if="qualityCards.length" class="mt-3 @container" data-gyrocore="chirp-quality-v2-list">
             <h3 class="text-sm font-bold mb-2">{{ $t("gyrocoreQv2Heading") }}</h3>
-            <div class="grid gap-3 lg:grid-cols-2">
+            <!-- Two cards per row only where each still has room for its table (container width, not the window). -->
+            <div class="grid gap-3 @5xl:grid-cols-2">
                 <ChirpQualityV2Card
                     v-for="m in qualityCards"
                     :key="`${m.id}-${gate.revision}`"

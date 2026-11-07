@@ -26,17 +26,25 @@ import MspHelper from "../msp/MSPHelper";
 import MSP from "../msp";
 import MSPCodes from "../msp/MSPCodes";
 import { serial } from "../serial";
-import { MIN_FC_VERSION_FOR_MSP_CLI, isMspCliSupported } from "../../composables/useMspCliSession";
+import {
+    MIN_FC_VERSION_FOR_MSP_CLI,
+    cliSaveConfirmed,
+    isMspCliSupported,
+    type CliSavePersistence,
+} from "../../composables/useMspCliSession";
 import semver from "semver";
 import { useFlightControllerStore } from "../../stores/fc";
 import { addTimeout, removeTimeout } from "../timers";
 import { useConnectionStore } from "../../stores/connection";
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md): a refused save is a failed restore.
+import { WriteRefusedError } from "../../composables/fcWriteGuard";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 2000;
 const CONNECT_TIMEOUT_MS = 10000;
 const TIMEOUT_NAME = "msp_restore_timeout";
-// Time to let the `save` command flush to the FC before we tear down the connection.
-const SAVE_FLUSH_MS = 500;
+// Gyroflight (audit WP8-F01): how long a `save` that went out whole gets to show its outcome (the
+// firmware's "# saving" / "Rebooting", the reboot's disconnect) before the restore ends unverified.
+const SAVE_OUTCOME_WAIT_MS = 3000;
 
 interface CliError {
     command: string;
@@ -44,11 +52,14 @@ interface CliError {
 }
 
 export interface AutoRestoreResult {
+    /** Gyroflight: true only when the firmware confirmed the save (persistence "confirmed"). */
     success: boolean;
     /** The failure message, or null on success. */
     errors: string | null;
     /** CLI lines the FC rejected; absent when the restore never connected. */
     skipped?: number;
+    /** Gyroflight (audit WP8-F01): what is known of the final save; absent when it was never reached. */
+    persistence?: CliSavePersistence;
 }
 
 type AutoRestoreCallback = (result: AutoRestoreResult) => void;
@@ -62,9 +73,16 @@ class AutoRestore {
     private _cliLines: string[] | null = null;
     // Count of CLI lines that returned an error (rejected/###ERROR) during restore.
     private _skipped = 0;
-    // True while the `save` command is in flight. A `save` reboots the FC, so the
-    // resulting disconnect/timeout is expected success, not a failure.
-    private _saving = false;
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): where the final `save` is. "queued":
+    // asked for, not yet left the queue; "sent": left it, its bytes not yet reported; "delivered":
+    // the transport took all of them; "cut": it did not. A disconnect is the save's reboot only on
+    // the firmware's own evidence.
+    private _save: "none" | "queued" | "sent" | "delivered" | "cut" = "none";
+    private _saveTimer: ReturnType<typeof setTimeout> | null = null;
+    private _whenCleanedUp: (() => void) | null = null;
+    // Gyroflight (audit WP8 integration review): the restore run the command loop belongs to; it
+    // changes when the run ends, and a loop of an ended run stops before its next command.
+    private _run = 0;
 
     canAttemptConnection(): boolean {
         const connectionStore = useConnectionStore();
@@ -93,10 +111,9 @@ class AutoRestore {
     }
 
     handleDisconnect() {
-        // A disconnect while saving means the FC rebooted after a successful save —
-        // that is the expected success path, not a failure.
-        if (this._saving) {
-            this._cleanup(true, null);
+        // Gyroflight: after `save` left the queue, judge it on what came back before the port closed.
+        if (this._save !== "none") {
+            this._endSave(this._save === "queued" ? [] : (MSP.cliInFlightOutput() ?? []), false);
             return;
         }
         // An unexpected disconnect before save is a restore failure; use the
@@ -195,6 +212,11 @@ class AutoRestore {
                 { timeoutMs: DEFAULT_COMMAND_TIMEOUT_MS },
             );
         }).catch((error) => {
+            // Gyroflight: not sent (refused, closed link, uncertain session) or cut by the link
+            // closing: the restore cannot go on line by line, it ends as failed.
+            if (Reflect.get(Object(error), "notSent") === true || Reflect.get(Object(error), "connectionClosed")) {
+                throw error;
+            }
             const message = String(error?.message ?? error);
             errors.push({ command, error: message });
             gui_log(`CLI command failed: ${command} — ${message}`);
@@ -204,9 +226,11 @@ class AutoRestore {
     async _sendCliCommands() {
         const cliLines = this._cliLines!;
         const errors: CliError[] = [];
+        const run = this._run;
 
         try {
             for (const line of cliLines) {
+                if (run !== this._run) return;
                 const trimmed = line.trim();
                 if (!trimmed || trimmed.startsWith("#")) {
                     continue;
@@ -239,6 +263,7 @@ class AutoRestore {
             }
 
             // Backup did not contain a `save` line — persist explicitly.
+            if (run !== this._run) return;
             await this._finishWithSave(errors);
         } catch (error) {
             console.error("AutoRestore: CLI command execution failed:", error);
@@ -247,9 +272,11 @@ class AutoRestore {
     }
 
     /**
-     * Issue `save` (which reboots the FC) and report success. Per-line CLI errors are
-     * logged but never fail the restore; only a connection loss BEFORE save (reported via
-     * handleDisconnect with _saving=false) is a failure.
+     * Issue `save` (which reboots the FC) and report its outcome. Per-line CLI errors are logged
+     * but never fail the restore. Gyroflight (audit WP8-F01): success only when the firmware's
+     * output shows it wrote EEPROM (cliSaveConfirmed); a `save` that went out whole without that is
+     * "not_verified", one that was refused, never sent or answered without saving is "not_saved",
+     * one the transport did not take whole is "unknown".
      */
     async _finishWithSave(errors: CliError[]) {
         // Record skipped lines before save so this path and the save-reboot disconnect
@@ -259,22 +286,82 @@ class AutoRestore {
             console.warn(`AutoRestore: restore applied with ${errors.length} ignored CLI error(s)`, errors);
         }
 
+        if (!this._callback) return; // the run already ended
         gui_log(i18n.getMessage("buttonSaving"));
-        this._saving = true;
-        MSP.send_cli_command("save");
-        await new Promise((resolve) => setTimeout(resolve, SAVE_FLUSH_MS));
-
-        this._cleanup(true, null);
+        const cleanedUp = new Promise<void>((resolve) => {
+            this._whenCleanedUp = resolve;
+        });
+        this._save = "queued";
+        MSP.send_cli_command(
+            "save",
+            (lines, error) => {
+                if (!error) {
+                    // The firmware answered (ETX) instead of resetting.
+                    this._endSave(lines, true);
+                } else if (this._save === "queued") {
+                    // Refused by the write check (uncertain FC state) or never left the queue.
+                    this._cleanup(
+                        false,
+                        error instanceof WriteRefusedError ? error.message : String(error),
+                        "not_saved",
+                    );
+                } else {
+                    const output = Reflect.get(error, "output");
+                    this._endSave(Array.isArray(output) ? output : [], false);
+                }
+            },
+            {
+                onSent: () => {
+                    this._save = "sent";
+                    // Also ends a send the transport never reports on (unknown, not success).
+                    this._saveTimer = setTimeout(
+                        () => this._endSave(MSP.cliInFlightOutput() ?? [], false),
+                        SAVE_OUTCOME_WAIT_MS,
+                    );
+                },
+                onDelivery: (delivered) => {
+                    if (this._save === "sent") this._save = delivered ? "delivered" : "cut";
+                },
+            },
+        );
+        await cleanedUp;
     }
 
-    _cleanup(success: boolean, errorMsg: string | null) {
+    /**
+     * The final `save` ended: the port closed or the wait ran out (`answered` false), or the firmware
+     * answered with its ETX instead of resetting (true): report it.
+     */
+    _endSave(output: string[], answered: boolean) {
+        if (cliSaveConfirmed(output)) {
+            this._cleanup(true, null, "confirmed");
+        } else if (answered) {
+            this._cleanup(false, i18n.getMessage("gyroflightRestoreSaveNotSaved"), "not_saved");
+        } else if (this._save === "delivered") {
+            this._cleanup(false, i18n.getMessage("gyroflightRestoreSaveNotVerified"), "not_verified");
+        } else if (this._save === "sent" || this._save === "cut") {
+            this._cleanup(false, i18n.getMessage("gyroflightRestoreSaveNotDelivered"), "unknown");
+        } else {
+            this._cleanup(false, i18n.getMessage("gyroflightRestoreSaveNotSaved"), "not_saved");
+        }
+    }
+
+    _cleanup(success: boolean, errorMsg: string | null, persistence?: CliSavePersistence) {
+        // Gyroflight: the run ends here, whatever still awaits it is released.
+        this._run++;
+        const released = this._whenCleanedUp;
+        this._whenCleanedUp = null;
         // Guard against double-invocation (e.g. timeout + disconnect)
         if (!this._callback) {
+            released?.();
             return;
         }
         const callback = this._callback;
         this._callback = null;
-        this._saving = false;
+        this._save = "none";
+        if (this._saveTimer) {
+            clearTimeout(this._saveTimer);
+            this._saveTimer = null;
+        }
 
         // serial.disconnect() is async; _cleanup is not, so handle any rejection with
         // .catch() rather than a (useless) synchronous try/catch.
@@ -292,7 +379,11 @@ class AutoRestore {
 
         removeTimeout(TIMEOUT_NAME);
 
-        callback({ success, errors: errorMsg, skipped: this._skipped });
+        try {
+            callback({ success, errors: errorMsg, skipped: this._skipped, ...(persistence ? { persistence } : {}) });
+        } finally {
+            released?.();
+        }
     }
 
     async execute(cliLines: string[], callback: AutoRestoreCallback) {
@@ -303,7 +394,8 @@ class AutoRestore {
 
         this._cliLines = cliLines;
         this._callback = callback;
-        this._saving = false;
+        this._run++;
+        this._save = "none";
         this._skipped = 0;
 
         // The board is already booted and the port is available when restore is invoked,

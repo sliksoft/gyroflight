@@ -138,169 +138,177 @@ describe.skipIf(!air65)("AIR65 Betaflight Autotune qualification (local only)", 
         expect(sha256(bytes)).toBe(AIR65_SHA256);
     });
 
-    it("records what Betaflight Autotune shows the user and compares it with GyroCore", async () => {
-        // 1. Every log and segment through the same upstream functions.
-        const logs = analyzeAllLogs(bytes);
-        const appLog = logs.find((l) => Object.keys(l.appSelected).length > 0);
+    // The comparison needs GyroCore's reference outputs for these bytes (GYROFLIGHT_AIR65_REF_DIR);
+    // without them it has nothing to compare and is skipped, not failed (release gate P3).
+    it.skipIf(!air65?.refDir)(
+        "records what Betaflight Autotune shows the user and compares it with GyroCore",
+        async () => {
+            // 1. Every log and segment through the same upstream functions.
+            const logs = analyzeAllLogs(bytes);
+            const appLog = logs.find((l) => Object.keys(l.appSelected).length > 0);
 
-        // Since WU2 the app no longer runs this path (its input is the Viewer decode and
-        // GyroCore gates it, air65_qualification.local.test.ts); the mirror records
-        // upstream Autotune as shipped, including the log upstream would show.
-        expect(appLog).toBeDefined();
+            // Since WU2 the app no longer runs this path (its input is the Viewer decode and
+            // GyroCore gates it, air65_qualification.local.test.ts); the mirror records
+            // upstream Autotune as shipped, including the log upstream would show.
+            expect(appLog).toBeDefined();
 
-        // 2. GyroCore reference outputs, if provided.
-        const refDir = air65?.refDir;
-        const gcRec: GcRecommendation[] | null =
-            refDir && existsSync(join(refDir, "gc_recommend.json"))
-                ? readJsonFile<GcRecommendation[]>(join(refDir, "gc_recommend.json"))
-                : null;
+            // 2. GyroCore reference outputs, if provided.
+            const refDir = air65?.refDir;
+            const gcRec: GcRecommendation[] | null =
+                refDir && existsSync(join(refDir, "gc_recommend.json"))
+                    ? readJsonFile<GcRecommendation[]>(join(refDir, "gc_recommend.json"))
+                    : null;
 
-        const perLog = logs.map((log) => {
-            const goldenPath = refDir ? join(refDir, `golden_log${log.logIndex}.json.gz`) : null;
-            const gold = goldenPath && existsSync(goldenPath) ? readJsonFile<GoldenLog>(goldenPath) : null;
-            if (gold) {
-                expect(gold.bbl_sha256).toBe(AIR65_SHA256);
-                expect(gold.log_index).toBe(log.logIndex);
-            }
-            const gc = gold?.result;
-            const rec = gcRec?.find((r) => r.log_index === log.logIndex);
-            const samples = viewerSamples(bytes, log.logIndex);
-            const decodeParity = Object.fromEntries(
-                (["setpoint", "gyro", "debug"] as const).flatMap((field) =>
-                    samples[field].map((arr, i) => [
-                        `${field}[${i}]`,
-                        sampleDiff(log.chirpData![field][i], arr, samples.iterations),
-                    ]),
-                ),
-            );
-            const onViewer = analyzeOnViewerSamples(log, samples);
-            return {
-                logIndex: log.logIndex,
-                error: log.error,
-                sampleRate: log.sampleRate,
-                segmentSize: log.segmentSize,
-                sampleCount: log.chirpData?.sampleCount,
-                totalFrames: log.chirpData?.totalFrames,
-                corruptFrames: log.chirpData?.corruptFrames,
-                chirpHeaders: log.sysConfig && {
-                    start_hz: log.sysConfig.chirp_frequency_start_deci_hz / 10,
-                    end_hz: log.sysConfig.chirp_frequency_end_deci_hz / 10,
-                    seconds: log.sysConfig.chirp_time_seconds,
-                },
-                frameIntervalI: (log.sysConfig as unknown as Record<string, number>)?.frameIntervalI,
-                decodeParity,
-                gyrocore: gc && {
-                    status: gc.status,
-                    errors: gc.errors,
-                    warnings: gc.warnings,
-                    sampleCount: gc.extraction?.sample_count,
-                    totalFrames: gc.extraction?.total_frames,
-                },
-                segments: log.segments.map((seg, segIndex) => {
-                    const gcAxis = gc?.axes?.[seg.axisName];
-                    const viewerSeg = onViewer[segIndex];
-                    const viewerProposed = viewerSeg.recommendation?.proposed ?? null;
-                    const gcRecAxis = rec?.axes?.[String(seg.axis)];
-                    const bfProposed = seg.recommendation?.proposed ?? null;
-                    const gcProposed = gcRecAxis?.ungated_recommendation_for_parity_only?.proposed ?? null;
-                    return {
-                        axis: seg.axisName,
-                        startIdx: seg.startIdx,
-                        endIdx: seg.endIdx,
-                        samples: seg.length,
-                        seconds: log.sampleRate ? seg.length / log.sampleRate : null,
-                        shownByApp: log === appLog && appLog.appSelected[seg.axisName] === seg.index,
-                        judgment: judgment(seg, gcAxis),
-                        betaflightAnalysis: seg.recommendation && {
-                            ...seg.recommendation.analysis,
-                            overshootPct: seg.stepResponse?.overshootPct,
-                            riseTimeMs: seg.stepResponse?.riseTimeMs,
-                            settlingTimeMs: seg.stepResponse?.settlingTimeMs,
-                            sensitivityPeakDb: seg.sensitivity?.peakDb,
-                        },
-                        // (c) shipped Betaflight (its own decoder) vs GyroCore.
-                        numerics:
-                            gcAxis && seg.transferFunction
-                                ? compareSegment(seg, gcAxis, log.sampleRate!, log.segmentSize!)
-                                : null,
-                        // (b) Betaflight's spectral code on correctly decoded samples vs GyroCore.
-                        numericsOnViewerSamples:
-                            gcAxis && viewerSeg.transferFunction
-                                ? compareSegment(viewerSeg, gcAxis, log.sampleRate!, log.segmentSize!)
-                                : null,
-                        judgmentOnViewerSamples: judgment(viewerSeg, gcAxis).betaflight,
-                        gyrocoreRecommendation: gcRecAxis && {
-                            status: gcRecAxis.status,
-                            blocked: gcRecAxis.blocked,
-                            proposedGated: gcRecAxis.proposed_gated,
-                        },
-                        recommendationParityOnViewerSamples:
-                            viewerProposed && gcProposed
-                                ? {
-                                      betaflight: SLIDER_KEYS.map((k) => (viewerProposed as Record<string, number>)[k]),
-                                      gyrocoreUngated: SLIDER_KEYS.map((k) => gcProposed[k]),
-                                      same: SLIDER_KEYS.every(
-                                          (k) => (viewerProposed as Record<string, number>)[k] === gcProposed[k],
-                                      ),
-                                  }
-                                : null,
-                        recommendationParity:
-                            bfProposed && gcProposed
-                                ? {
-                                      betaflight: SLIDER_KEYS.map((k) => (bfProposed as Record<string, number>)[k]),
-                                      gyrocoreUngated: SLIDER_KEYS.map((k) => gcProposed[k]),
-                                      same: SLIDER_KEYS.every(
-                                          (k) => (bfProposed as Record<string, number>)[k] === gcProposed[k],
-                                      ),
-                                  }
-                                : null,
-                    };
-                }),
-            };
-        });
-
-        writeReport("air65_autotune", { appLogIndex: appLog?.logIndex ?? null, logs: perLog });
-
-        let shippedDiverges = false;
-        for (const log of perLog) {
-            // Extraction: exactly the samples and segments GyroCore extracts.
-            if (log.gyrocore) {
-                expect(log.sampleCount).toBe(log.gyrocore.sampleCount);
-                expect(log.totalFrames).toBe(log.gyrocore.totalFrames);
-            }
-            // (a) Autotune's decoder vs the Viewer decoder: setpoint exact; gyro wrong from the
-            // first P-frame after an I-frame (chirp_parser_history.test.ts).
-            for (const axis of [0, 1, 2]) {
-                expect(log.decodeParity[`setpoint[${axis}]`].mismatches).toBe(0);
-                const gyro = log.decodeParity[`gyro[${axis}]`];
-                expect(gyro.mismatches).toBeGreaterThan(0);
-                expect(gyro.firstIteration! % log.frameIntervalI!).toBe(1);
-            }
-            for (const seg of log.segments) {
-                // (b) Same algorithm on the same samples: float64 noise and identical sliders.
-                const n = seg.numericsOnViewerSamples!;
-                expect(n.segment.same).toBe(true);
-                expect(n.sampleRate.betaflight).toBe(n.sampleRate.gyrocore);
-                expect(n.hRelative!.maxAbs).toBeLessThan(1e-9);
-                expect(n.magnitudeDb!.maxAbs).toBeLessThan(1e-8);
-                expect(n.phaseDeg!.maxAbs).toBeLessThan(1e-6);
-                expect(n.coherence!.maxAbs).toBeLessThan(1e-10);
-                expect(n.sensitivityPeakDb.diff).toBeLessThan(1e-8);
-                expect(n.step!.maxMetricDiff).toBeLessThan(1e-6);
-                if (seg.recommendationParityOnViewerSamples) {
-                    expect(seg.recommendationParityOnViewerSamples.same).toBe(true);
+            const perLog = logs.map((log) => {
+                const goldenPath = refDir ? join(refDir, `golden_log${log.logIndex}.json.gz`) : null;
+                const gold = goldenPath && existsSync(goldenPath) ? readJsonFile<GoldenLog>(goldenPath) : null;
+                if (gold) {
+                    expect(gold.bbl_sha256).toBe(AIR65_SHA256);
+                    expect(gold.log_index).toBe(log.logIndex);
                 }
-                // (c) The shipped pipeline differs only through the decoder bug.
-                if ((seg.numerics?.magnitudeDb?.maxAbs ?? 0) > 1) {
-                    shippedDiverges = true;
+                const gc = gold?.result;
+                const rec = gcRec?.find((r) => r.log_index === log.logIndex);
+                const samples = viewerSamples(bytes, log.logIndex);
+                const decodeParity = Object.fromEntries(
+                    (["setpoint", "gyro", "debug"] as const).flatMap((field) =>
+                        samples[field].map((arr, i) => [
+                            `${field}[${i}]`,
+                            sampleDiff(log.chirpData![field][i], arr, samples.iterations),
+                        ]),
+                    ),
+                );
+                const onViewer = analyzeOnViewerSamples(log, samples);
+                return {
+                    logIndex: log.logIndex,
+                    error: log.error,
+                    sampleRate: log.sampleRate,
+                    segmentSize: log.segmentSize,
+                    sampleCount: log.chirpData?.sampleCount,
+                    totalFrames: log.chirpData?.totalFrames,
+                    corruptFrames: log.chirpData?.corruptFrames,
+                    chirpHeaders: log.sysConfig && {
+                        start_hz: log.sysConfig.chirp_frequency_start_deci_hz / 10,
+                        end_hz: log.sysConfig.chirp_frequency_end_deci_hz / 10,
+                        seconds: log.sysConfig.chirp_time_seconds,
+                    },
+                    frameIntervalI: (log.sysConfig as unknown as Record<string, number>)?.frameIntervalI,
+                    decodeParity,
+                    gyrocore: gc && {
+                        status: gc.status,
+                        errors: gc.errors,
+                        warnings: gc.warnings,
+                        sampleCount: gc.extraction?.sample_count,
+                        totalFrames: gc.extraction?.total_frames,
+                    },
+                    segments: log.segments.map((seg, segIndex) => {
+                        const gcAxis = gc?.axes?.[seg.axisName];
+                        const viewerSeg = onViewer[segIndex];
+                        const viewerProposed = viewerSeg.recommendation?.proposed ?? null;
+                        const gcRecAxis = rec?.axes?.[String(seg.axis)];
+                        const bfProposed = seg.recommendation?.proposed ?? null;
+                        const gcProposed = gcRecAxis?.ungated_recommendation_for_parity_only?.proposed ?? null;
+                        return {
+                            axis: seg.axisName,
+                            startIdx: seg.startIdx,
+                            endIdx: seg.endIdx,
+                            samples: seg.length,
+                            seconds: log.sampleRate ? seg.length / log.sampleRate : null,
+                            shownByApp: log === appLog && appLog.appSelected[seg.axisName] === seg.index,
+                            judgment: judgment(seg, gcAxis),
+                            betaflightAnalysis: seg.recommendation && {
+                                ...seg.recommendation.analysis,
+                                overshootPct: seg.stepResponse?.overshootPct,
+                                riseTimeMs: seg.stepResponse?.riseTimeMs,
+                                settlingTimeMs: seg.stepResponse?.settlingTimeMs,
+                                sensitivityPeakDb: seg.sensitivity?.peakDb,
+                            },
+                            // (c) shipped Betaflight (its own decoder) vs GyroCore.
+                            numerics:
+                                gcAxis && seg.transferFunction
+                                    ? compareSegment(seg, gcAxis, log.sampleRate!, log.segmentSize!)
+                                    : null,
+                            // (b) Betaflight's spectral code on correctly decoded samples vs GyroCore.
+                            numericsOnViewerSamples:
+                                gcAxis && viewerSeg.transferFunction
+                                    ? compareSegment(viewerSeg, gcAxis, log.sampleRate!, log.segmentSize!)
+                                    : null,
+                            judgmentOnViewerSamples: judgment(viewerSeg, gcAxis).betaflight,
+                            gyrocoreRecommendation: gcRecAxis && {
+                                status: gcRecAxis.status,
+                                blocked: gcRecAxis.blocked,
+                                proposedGated: gcRecAxis.proposed_gated,
+                            },
+                            recommendationParityOnViewerSamples:
+                                viewerProposed && gcProposed
+                                    ? {
+                                          betaflight: SLIDER_KEYS.map(
+                                              (k) => (viewerProposed as Record<string, number>)[k],
+                                          ),
+                                          gyrocoreUngated: SLIDER_KEYS.map((k) => gcProposed[k]),
+                                          same: SLIDER_KEYS.every(
+                                              (k) => (viewerProposed as Record<string, number>)[k] === gcProposed[k],
+                                          ),
+                                      }
+                                    : null,
+                            recommendationParity:
+                                bfProposed && gcProposed
+                                    ? {
+                                          betaflight: SLIDER_KEYS.map((k) => (bfProposed as Record<string, number>)[k]),
+                                          gyrocoreUngated: SLIDER_KEYS.map((k) => gcProposed[k]),
+                                          same: SLIDER_KEYS.every(
+                                              (k) => (bfProposed as Record<string, number>)[k] === gcProposed[k],
+                                          ),
+                                      }
+                                    : null,
+                        };
+                    }),
+                };
+            });
+
+            writeReport("air65_autotune", { appLogIndex: appLog?.logIndex ?? null, logs: perLog });
+
+            let shippedDiverges = false;
+            for (const log of perLog) {
+                // Extraction: exactly the samples and segments GyroCore extracts.
+                if (log.gyrocore) {
+                    expect(log.sampleCount).toBe(log.gyrocore.sampleCount);
+                    expect(log.totalFrames).toBe(log.gyrocore.totalFrames);
                 }
-                // Judgment: Betaflight would recommend from every segment; GyroCore blocks every one.
-                expect(seg.judgment.betaflight?.producesRecommendation).toBe(true);
-                expect(seg.judgmentOnViewerSamples?.producesRecommendation).toBe(true);
-                expect(seg.judgment.gyrocore?.usable).toBe(false);
-                expect(seg.gyrocoreRecommendation?.status).toBe("blocked");
+                // (a) Autotune's decoder vs the Viewer decoder: setpoint exact; gyro wrong from the
+                // first P-frame after an I-frame (chirp_parser_history.test.ts).
+                for (const axis of [0, 1, 2]) {
+                    expect(log.decodeParity[`setpoint[${axis}]`].mismatches).toBe(0);
+                    const gyro = log.decodeParity[`gyro[${axis}]`];
+                    expect(gyro.mismatches).toBeGreaterThan(0);
+                    expect(gyro.firstIteration! % log.frameIntervalI!).toBe(1);
+                }
+                for (const seg of log.segments) {
+                    // (b) Same algorithm on the same samples: float64 noise and identical sliders.
+                    const n = seg.numericsOnViewerSamples!;
+                    expect(n.segment.same).toBe(true);
+                    expect(n.sampleRate.betaflight).toBe(n.sampleRate.gyrocore);
+                    expect(n.hRelative!.maxAbs).toBeLessThan(1e-9);
+                    expect(n.magnitudeDb!.maxAbs).toBeLessThan(1e-8);
+                    expect(n.phaseDeg!.maxAbs).toBeLessThan(1e-6);
+                    expect(n.coherence!.maxAbs).toBeLessThan(1e-10);
+                    expect(n.sensitivityPeakDb.diff).toBeLessThan(1e-8);
+                    expect(n.step!.maxMetricDiff).toBeLessThan(1e-6);
+                    if (seg.recommendationParityOnViewerSamples) {
+                        expect(seg.recommendationParityOnViewerSamples.same).toBe(true);
+                    }
+                    // (c) The shipped pipeline differs only through the decoder bug.
+                    if ((seg.numerics?.magnitudeDb?.maxAbs ?? 0) > 1) {
+                        shippedDiverges = true;
+                    }
+                    // Judgment: Betaflight would recommend from every segment; GyroCore blocks every one.
+                    expect(seg.judgment.betaflight?.producesRecommendation).toBe(true);
+                    expect(seg.judgmentOnViewerSamples?.producesRecommendation).toBe(true);
+                    expect(seg.judgment.gyrocore?.usable).toBe(false);
+                    expect(seg.gyrocoreRecommendation?.status).toBe("blocked");
+                }
             }
-        }
-        expect(shippedDiverges).toBe(true);
-    }, 600_000);
+            expect(shippedDiverges).toBe(true);
+        },
+        600_000,
+    );
 });

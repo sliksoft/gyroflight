@@ -1,0 +1,11 @@
+Severity rule (fixed before this review; apply it literally):
+- P0: a path that writes to a flight controller without the documented gates, or that defeats Absolute Apply's block.
+- P1: a false safety or correctness claim that a user or reviewer would act on: a test that passes while not checking what its name/header claims for safety-relevant behaviour, a procedure step that would make an operator write to the FC when it says read-only, or a code change that alters production behaviour beyond what the commit message says.
+- P2: a concrete, reproducible defect in the changed lines whose effect is user-visible or evidence-relevant (wrong message, wrong claim in a document about what the code does, a test assertion that is vacuous), with a cited line.
+- P3 (non-blocking, list separately): coverage wishes, style, naming, additional cases, anything pre-existing outside the changed lines.
+A finding without a cited file:line in the reviewed commit and a concrete scenario is P3 at most.
+Do not run tests, do not modify files, no network. End with exactly:
+P0_OPEN=<n>
+P1_OPEN=<n>
+P2_OPEN=<n>
+VERDICT=APPROVE|REQUEST_CHANGES

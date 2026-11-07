@@ -37,6 +37,8 @@ const route = vi.hoisted(() => ({
     craft: undefined as unknown as Craft,
     change: null as null | Record<string, number>,
     picked: new Uint8Array() as Uint8Array,
+    /** Runs before each MSP request reaches the craft (the state changing while Apply awaits). */
+    onCall: null as null | ((code: number) => void),
 }));
 
 // The Apply route checks the craft against the log's DeviceUID / board: give these logs one.
@@ -57,9 +59,10 @@ vi.mock("../../src/js/localization", async (importOriginal) => ({
 }));
 vi.mock("../../src/js/msp", () => ({
     default: {
-        promise: vi.fn(async (code: number, data?: number[]) =>
-            (await import("./harness/mspCraft")).craftPromise(route.craft, code, data),
-        ),
+        promise: vi.fn(async (code: number, data?: number[]) => {
+            route.onCall?.(code);
+            return (await import("./harness/mspCraft")).craftPromise(route.craft, code, data);
+        }),
     },
 }));
 vi.mock("@/gyrocore/productLock/productApply", async () =>
@@ -91,8 +94,10 @@ vi.mock("@/gyrocore/tuning/authorize", async () => {
 
 import MSPCodes from "../../src/js/msp/MSPCodes";
 import { useConnectionStore } from "../../src/stores/connection";
-import { useAutotune } from "../../src/composables/useAutotune";
+import { useFlightControllerStore } from "../../src/stores/fc";
+import { useAutotune, type ProposedSliders } from "../../src/composables/useAutotune";
 import { previewRestore, previewTune, restoreTune, TuneWriteError } from "../../src/composables/useTuneApply";
+import { FAULT_FREE_CRAFT, previewedHash, UNREAD_PREVIEW } from "./harness/previewConfirmation";
 import { ApplyBlockedError } from "../../src/gyrocore/chirp/applyGate";
 import { useChirpQualificationStore } from "../../src/gyrocore/stores/chirpQualification";
 import { useTuneBackupStore, BACKUP_STORAGE_KEY } from "../../src/gyrocore/stores/tuneBackup";
@@ -101,6 +106,7 @@ import {
     issueConfirmation,
     resetConfirmations,
 } from "../../src/gyrocore/tuning/applyConfirmation";
+
 import { clearPhaseMarginForGate } from "./harness/clearPhaseMarginBlock";
 import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { FULL_TUNE_HEADERS, simulateChirpSequence } from "./harness/chirpSim";
@@ -133,12 +139,30 @@ async function load(bytes: Uint8Array = MERGE_E2E_CASES.three_axis_agree()) {
     return gate.composite!;
 }
 
-function confirmApply(id: string, sliders: Record<string, number> = CHANGE) {
-    return issueConfirmation({ kind: "apply", compositeId: id, sliders: { ...sliders } });
+/** The read-only preview hash now, with the faults and hooks a test arranged for the write paused. */
+async function previewHashNow(preview: () => Promise<{ hash: string }>) {
+    const hook = route.onCall;
+    route.onCall = null;
+    try {
+        return await previewedHash(route.craft, FAULT_FREE_CRAFT(), preview);
+    } finally {
+        route.onCall = hook;
+    }
 }
 
-async function apply(id: string, token: string | null = confirmApply(id)) {
-    return useAutotune().applyGains(CHANGE, id, token);
+/** The user's confirmation of `sliders`, bound to the preview of the craft as it is now. */
+async function confirmApply(id: string, sliders: Record<string, number> = CHANGE) {
+    const preview = await previewHashNow(() => previewTune(sliders as ProposedSliders, id));
+    return issueConfirmation({ kind: "apply", compositeId: id, sliders: { ...sliders }, preview });
+}
+
+async function apply(id: string, token?: string | null) {
+    return useAutotune().applyGains(CHANGE, id, token === undefined ? await confirmApply(id) : token);
+}
+
+async function confirmRestoreToken(backupId: string) {
+    const preview = await previewHashNow(() => previewRestore(backupId));
+    return issueConfirmation({ kind: "restore", backupId, preview });
 }
 
 async function failure(p: Promise<unknown>) {
@@ -154,6 +178,7 @@ beforeEach(() => {
     resetConfirmations();
     route.craft = createCraft();
     route.change = { ...CHANGE };
+    route.onCall = null;
 });
 
 describe("the user's confirmation", () => {
@@ -166,23 +191,23 @@ describe("the user's confirmation", () => {
 
     it("must confirm exactly this change, once, and recently", async () => {
         const c = await load();
-        const other = confirmApply(c.id, { ...CHANGE, slider_pi_gain: 120 });
+        const other = await confirmApply(c.id, { ...CHANGE, slider_pi_gain: 120 });
         expect(((await failure(apply(c.id, other))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_mismatch",
         ]);
-        const restoreToken = issueConfirmation({ kind: "restore", backupId: "x" });
+        const restoreToken = issueConfirmation({ kind: "restore", backupId: "x", preview: UNREAD_PREVIEW });
         expect(((await failure(apply(c.id, restoreToken))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_mismatch",
         ]);
         const old = issueConfirmation(
-            { kind: "apply", compositeId: c.id, sliders: { ...CHANGE } },
+            { kind: "apply", compositeId: c.id, sliders: { ...CHANGE }, preview: UNREAD_PREVIEW },
             Date.now() - CONFIRMATION_TTL_MS - 1,
         );
         expect(((await failure(apply(c.id, old))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_expired",
         ]);
         expect(codes()).toEqual([]);
-        const ok = confirmApply(c.id);
+        const ok = await confirmApply(c.id);
         await apply(c.id, ok);
         expect(((await failure(apply(c.id, ok))) as ApplyBlockedError).reasons).toEqual([
             "apply:confirmation_unknown_or_used",
@@ -275,6 +300,41 @@ describe("backup before the write", () => {
     });
 });
 
+describe("the gates again, right before the write", () => {
+    it("a composite that changes during the live reads stops the Apply before the backup and the SET", async () => {
+        const c = await load();
+        route.onCall = (code) => {
+            // Another recommendation by the time the reads return (selection or analysis changed).
+            if (code === MSPCodes.MSP_PID) route.change = { ...CHANGE, slider_pi_gain: 120 };
+        };
+        const err = await failure(apply(c.id));
+        expect((err as ApplyBlockedError).reasons).toEqual(["apply:sliders_differ_from_composite"]);
+        expect(codes()).toContain(MSPCodes.MSP_PID);
+        expect(writes()).toEqual([]);
+        expect(useTuneBackupStore().backups).toEqual([]);
+    });
+});
+
+describe("Preview leaves no proposal in the shared FC store (the PID tab's Save writes that store)", () => {
+    it.each([
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_PID,
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_DTERM,
+        MSPCodes.MSP_CALCULATE_SIMPLIFIED_GYRO,
+    ])("a firmware calculation that fails (code %i) puts the live values back", async (failing) => {
+        const c = await load();
+        expect(route.craft.sliders.slider_pi_gain).not.toBe(CHANGE.slider_pi_gain);
+        route.craft.faults[failing] = "timeout";
+        expect(await failure(previewTune(CHANGE, c.id))).toBeInstanceOf(Error);
+        expect(writes()).toEqual([]);
+        const fc = useFlightControllerStore();
+        expect(fc.tuningSliders.slider_pi_gain).toBe(route.craft.sliders.slider_pi_gain);
+        expect(fc.tuningSliders.slider_d_gain).toBe(route.craft.sliders.slider_d_gain);
+        expect(fc.pids.slice(0, 3).map((r) => r.slice(0, 3).map(Number))).toEqual(
+            route.craft.pids.slice(0, 3).map((r) => r.slice(0, 3)),
+        );
+    });
+});
+
 describe("write, read back, verify, save", () => {
     it("a verified write: exact sequence, payload, firmware-calculated values, EEPROM saved", async () => {
         const c = await load();
@@ -325,6 +385,25 @@ describe("write, read back, verify, save", () => {
             "eeprom",
             "unknown",
         ],
+        // Audit F-03: the save's own answer decides what is reported, never "verified" without it.
+        [
+            "the firmware refuses the save",
+            (k) => (k.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "unsupported"),
+            "eeprom",
+            "no",
+        ],
+        [
+            "the save's answer is corrupt",
+            (k) => (k.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "crc"),
+            "eeprom",
+            "unknown",
+        ],
+        [
+            "no answer to the save",
+            (k) => (k.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "noreply"),
+            "eeprom",
+            "unknown",
+        ],
     ];
     for (const [name, mutate, stage, saved] of failures) {
         it(`${name}: reported as a failed write (${stage}), never as success`, async () => {
@@ -343,6 +422,23 @@ describe("write, read back, verify, save", () => {
             }
         });
     }
+
+    it("a write that ended unverified blocks the next Apply on that craft until a verified Restore", async () => {
+        const c = await load();
+        route.craft.faultsAfterWrite[MSPCodes.MSP_EEPROM_WRITE] = "crc";
+        const err = (await failure(apply(c.id))) as TuneWriteError;
+        expect(err).toMatchObject({ stage: "eeprom", saved: "unknown" });
+        route.craft.faultsAfterWrite = {};
+        route.craft.calls = [];
+        const next = (await failure(apply(c.id))) as ApplyBlockedError;
+        expect(next.reasons).toEqual([`fc:transaction_state_uncertain:${err.backupId}:eeprom:unknown`]);
+        expect(writes()).toEqual([]);
+        // The slider route does not re-check the PID profile while it writes: which profile the SET
+        // reached is unknown, so no Restore covers it (its save would persist that profile's RAM).
+        const refused = (await failure(previewRestore(err.backupId))) as ApplyBlockedError;
+        expect(refused.reasons).toContain(`restore:uncertain_state_not_covered:${err.backupId}:eeprom:unknown`);
+        expect(writes()).toEqual([]);
+    });
 
     it("gyro filter Hz the sliders recompute on SET are expected from MSP_CALCULATE_SIMPLIFIED_GYRO", async () => {
         const c = await load();
@@ -402,17 +498,13 @@ describe("read-only preview, and the confirmation bound to it", () => {
 });
 
 describe("Restore", () => {
-    function confirmRestore(backupId: string) {
-        return issueConfirmation({ kind: "restore", backupId });
-    }
-
     it("puts the backed-up tune back on the same craft, verified and saved, after its own backup", async () => {
         const c = await load();
         const before = route.craft.pids.map((r) => [...r]);
         const applied = await apply(c.id);
         expect(route.craft.pids[0]).not.toEqual(before[0]);
         route.craft.calls = [];
-        const restored = await restoreTune(applied.backupId, confirmRestore(applied.backupId));
+        const restored = await restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId));
         expect(restored.status).toBe("verified");
         expect(route.craft.pids.slice(0, 3)).toEqual(before.slice(0, 3));
         expect(route.craft.sliders.slider_pi_gain).toBe(100);
@@ -440,9 +532,12 @@ describe("Restore", () => {
             firmware: "2026.6.2",
             compositeId: null,
             snapshot,
+            // Taken while the craft's state was known, as storeBackup records it (WP8: no
+            // backup without its provenance is a Restore target).
+            stateKnown: true,
         };
         expect(store.save(backup)).toBe(true);
-        await restoreTune("bk-manual", confirmRestore("bk-manual"));
+        await restoreTune("bk-manual", await confirmRestoreToken("bk-manual"));
         expect(route.craft.pids[2]).toEqual([52, 90, 6]);
         expect(codes()).toContain(MSPCodes.MSP_SET_PID);
         expect(route.craft.eeprom?.pids[2]).toEqual([52, 90, 6]);
@@ -456,18 +551,25 @@ describe("Restore", () => {
             "apply:confirmation_missing",
         ]);
         expect(
-            ((await failure(restoreTune("bk-nope", confirmRestore("bk-nope")))) as ApplyBlockedError).reasons,
+            ((await failure(restoreTune("bk-nope", await confirmRestoreToken("bk-nope")))) as ApplyBlockedError)
+                .reasons,
         ).toEqual(["restore:backup_not_found"]);
         route.craft.uid = [9, 9, 9];
         expect(
-            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
-                .reasons,
+            (
+                (await failure(
+                    restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)),
+                )) as ApplyBlockedError
+            ).reasons,
         ).toEqual(["restore:different_craft"]);
         route.craft.uid = createCraft().uid;
         route.craft.armed = true;
         expect(
-            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
-                .reasons,
+            (
+                (await failure(
+                    restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)),
+                )) as ApplyBlockedError
+            ).reasons,
         ).toEqual(["fc:armed"]);
         expect(writes()).toEqual([]);
     });
@@ -483,14 +585,20 @@ describe("Restore", () => {
         expect(
             (
                 (await failure(
-                    restoreTune("bk-corrupt", issueConfirmation({ kind: "restore", backupId: "bk-corrupt" })),
+                    restoreTune(
+                        "bk-corrupt",
+                        issueConfirmation({ kind: "restore", backupId: "bk-corrupt", preview: UNREAD_PREVIEW }),
+                    ),
                 )) as ApplyBlockedError
             ).reasons,
         ).toEqual(["restore:backup_invalid"]);
         route.craft.version = "2026.6.3";
         expect(
-            ((await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)))) as ApplyBlockedError)
-                .reasons,
+            (
+                (await failure(
+                    restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)),
+                )) as ApplyBlockedError
+            ).reasons,
         ).toEqual(["restore:firmware_changed"]);
         expect(writes()).toEqual([]);
     });
@@ -516,7 +624,7 @@ describe("Restore", () => {
         route.craft.eeprom = null;
         route.craft.written = false;
         route.craft.ignoreWrites = true;
-        const err = await failure(restoreTune(applied.backupId, confirmRestore(applied.backupId)));
+        const err = await failure(restoreTune(applied.backupId, await confirmRestoreToken(applied.backupId)));
         expect(err).toBeInstanceOf(TuneWriteError);
         expect(route.craft.eeprom).toBeNull();
     });

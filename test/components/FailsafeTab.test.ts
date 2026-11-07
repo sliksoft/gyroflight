@@ -10,9 +10,16 @@ import { useFlightControllerStore } from "../../src/stores/fc";
 const saveAndReboot = vi.fn();
 
 vi.mock("../../src/js/msp", () => ({ default: { promise: vi.fn() } }));
-vi.mock("../../src/js/msp/MSPHelper", () => ({
-    mspHelper: { crunch: () => [], sendRxFailConfig: (callback: () => void) => callback() },
-}));
+vi.mock("../../src/js/msp/MSPHelper", async () => {
+    const { default: MSP } = await import("../../src/js/msp");
+    return {
+        mspHelper: { crunch: () => [], sendRxFailConfig: (callback: () => void) => callback() },
+        // An acknowledged write is the (mocked) MSP.promise resolving.
+        confirmedWrite: async (code: number, data: number[]) => {
+            await MSP.promise(code, data);
+        },
+    };
+});
 vi.mock("../../src/composables/useReboot", () => ({ useReboot: () => ({ saveAndReboot }) }));
 vi.mock("../../src/js/localization", () => ({ i18n: { getMessage: (key: string) => key } }));
 
@@ -33,7 +40,8 @@ describe("Failsafe MSP wiring", () => {
         setActivePinia(createPinia());
         useFlightControllerStore().config.apiVersion = "1.47.0";
         vi.mocked(MSP.promise).mockResolvedValue(undefined);
-        saveAndReboot.mockResolvedValue(undefined);
+        // The firmware acknowledged the EEPROM save: onSaved runs (audit WP8-F06).
+        saveAndReboot.mockImplementation(async ({ onSaved }: { onSaved?: () => void } = {}) => onSaved?.());
     });
 
     afterEach(() => {
@@ -64,5 +72,74 @@ describe("Failsafe MSP wiring", () => {
 
         expect(saveAndReboot).toHaveBeenCalledOnce();
         expect(vm.configHasChanged).toBe(false);
+    });
+
+    // Codex review of F06: an edit made while the save runs was never sent; it stays pending.
+    it("keeps an edit made during the save pending after the save is confirmed", async () => {
+        let finish!: () => void;
+        saveAndReboot.mockImplementation(
+            ({ onSaved }: { onSaved?: () => void } = {}) =>
+                new Promise<void>((resolve) => {
+                    finish = () => {
+                        onSaved?.();
+                        resolve();
+                    };
+                }),
+        );
+        wrapper = mountTab();
+        await flushPromises();
+        const fcStore = useFlightControllerStore();
+        const vm = wrapper.vm as unknown as { configHasChanged: boolean; saveConfig: () => Promise<void> };
+
+        fcStore.failsafeConfig.failsafe_delay += 1;
+        await nextTick();
+        const saving = vm.saveConfig();
+        await flushPromises();
+        fcStore.failsafeConfig.failsafe_delay += 1; // after the values were taken for this save
+        await nextTick();
+        finish();
+        await saving;
+        await nextTick();
+
+        expect(vm.configHasChanged).toBe(true);
+    });
+
+    // Codex review round 2 of F06: a save reboots, so an edit made meanwhile would be lost: none can be made.
+    it("locks the fields while the save runs", async () => {
+        let finish!: () => void;
+        saveAndReboot.mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+        wrapper = mountTab();
+        await flushPromises();
+        const vm = wrapper.vm as unknown as { saveConfig: () => Promise<void> };
+        const fields = () => wrapper.find("[data-gyrocore='failsafe-fields']").element as HTMLFieldSetElement;
+        expect(fields().disabled).toBe(false);
+        const saving = vm.saveConfig();
+        await flushPromises();
+        expect(fields().disabled).toBe(true);
+        // Codex review round 3: `inert` also stops custom pointer handlers (selects, steppers).
+        expect(fields().hasAttribute("inert")).toBe(true);
+        finish();
+        await saving;
+        await nextTick();
+        expect(fields().disabled).toBe(false);
+        expect(fields().hasAttribute("inert")).toBe(false);
+    });
+
+    // Gyroflight (audit WP8-F06): the RAM may hold the values, EEPROM does not; Save stays enabled.
+    it("keeps the changes pending when the EEPROM save is not confirmed", async () => {
+        saveAndReboot.mockRejectedValue(new Error("EEPROM save not confirmed (unknown)"));
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        wrapper = mountTab();
+        await flushPromises();
+        const fcStore = useFlightControllerStore();
+        const vm = wrapper.vm as unknown as { configHasChanged: boolean; saveConfig: () => Promise<void> };
+
+        fcStore.failsafeConfig.failsafe_delay += 1;
+        await nextTick();
+        await vm.saveConfig();
+        await nextTick();
+
+        expect(saveAndReboot).toHaveBeenCalledOnce();
+        expect(vm.configHasChanged).toBe(true);
     });
 });

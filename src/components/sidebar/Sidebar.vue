@@ -94,6 +94,8 @@ import OptionsDialog from "@/components/dialogs/OptionsDialog.vue";
 import LogDialog from "@/components/dialogs/LogDialog.vue";
 import SettingsSearch from "@/components/settings-search/SettingsSearch.vue";
 import type { SettingsSearchEntry } from "virtual:settings-search-index";
+import { useAutotuneSectionStore } from "@/gyroflight/autotune/sections";
+import { withAutotuneSections } from "@/gyroflight/autotune/sidebarSections";
 
 const { t } = useTranslation();
 const settingsSearchOpen = ref(false);
@@ -115,8 +117,10 @@ const navMenuUi = computed(() => {
 });
 const activeItems = useVisibleTabs();
 
-const visibleItems = computed(() =>
-    activeItems.value.map((item) => ({
+const autotuneSections = useAutotuneSectionStore();
+
+const visibleItems = computed(() => {
+    const items = activeItems.value.map((item) => ({
         label: t(item.i18n),
         icon: item.icon,
         active: vueTabState.activeTabName === (item.tab ?? item.key),
@@ -126,8 +130,21 @@ const visibleItems = computed(() =>
             switchTab(item.tab ?? item.key, { mode: item.mode, label: t(item.i18n) });
             closeMobileSidebar();
         },
-    })),
-);
+    }));
+    // Gyroflight: the Autotune sections sit in this menu, under Autotune, while that tab is open.
+    return withAutotuneSections(
+        items,
+        activeItems.value.map((item) => item.tab ?? item.key),
+        {
+            activeTab: vueTabState.activeTabName,
+            activeSection: autotuneSections.active,
+            t,
+            openSection: autotuneSections.open,
+            indent: !isCompact.value,
+            closeMobileSidebar,
+        },
+    );
+});
 
 // Options dialog
 const optionsOpen = ref(false);

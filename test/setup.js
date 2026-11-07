@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { vi } from "vitest";
 import { MspCancelledError } from "../src/js/msp/mspErrors";
+import { installWebLocks } from "./gyrocore/harness/webLocks";
 
 globalThis.addEventListener?.("unhandledrejection", (event) => {
     if (event.reason instanceof MspCancelledError) {
@@ -36,3 +37,6 @@ if (globalThis.HTMLDialogElement && !globalThis.HTMLDialogElement.prototype.clos
         this.dispatchEvent(new Event("close"));
     };
 }
+
+// Gyroflight: the Web Locks API its write transactions use; jsdom has none (see the shim's header).
+installWebLocks();

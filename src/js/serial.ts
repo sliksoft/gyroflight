@@ -30,6 +30,7 @@ import CapacitorTcp from "./protocols/CapacitorTcp";
 import TauriSerial from "./protocols/TauriSerial";
 import TauriTcp from "./protocols/TauriTcp";
 import TauriBle from "./protocols/TauriBle";
+import type { TransportLink, TransportLinkState } from "./protocols/TransportLink";
 
 // A host name, an IPv4 address, or an IPv6 address in brackets, with an optional port.
 // The pattern permits the underscore. mDNS host names can contain an underscore, for example
@@ -71,6 +72,22 @@ export interface SerialSendResult {
     bytesSent: number;
 }
 
+/** Gyroflight (audit WP8-F03): options of one send. */
+export interface SerialSendOptions {
+    /**
+     * Asked right before the bytes go to the transport, once every earlier send has finished; false
+     * drops them (bytesSent 0). A request that timed out meanwhile, or that the write check would
+     * now refuse, must not go out late.
+     */
+    stillWanted?: () => boolean;
+    /**
+     * Told the transport's result before the next send may start (audit WP8 integration review):
+     * what the caller concludes from it (a failed CLI command closes its session) holds for the
+     * next send's stillWanted.
+     */
+    onResult?: (result: SerialSendResult) => void;
+}
+
 /** A device as a transport lists it. Bluetooth ids are strings ("unknown" for the vendor). */
 export interface SerialDevice {
     path: string;
@@ -91,6 +108,14 @@ export interface SerialProtocol extends EventTarget {
     /** Unset on Android when the native plugin is missing: the constructor returns early. */
     connected?: boolean;
     connectionId?: string | false | null;
+    /** Gyroflight: bytes a transport accepted but has not sent yet (WebSocket); absent elsewhere. */
+    readonly bufferedAmount?: number;
+    /**
+     * Gyroflight (audit WP8 transport closure): the current connection, on a transport that can prove
+     * a connection closed (WebSerial, WebBluetooth); null while none is open. Absent elsewhere: an
+     * unfinished send there counts until the transport finishes it (SendLinkState DELIVERY_UNKNOWN).
+     */
+    readonly link?: TransportLink | null;
     /** Traffic counters, read by port_usage. */
     bitrate?: number;
     bytesSent?: number;
@@ -112,6 +137,26 @@ export interface SerialProtocol extends EventTarget {
     shouldBypassCrc?(expectedChecksum: number, computedChecksum: number): boolean;
 }
 
+/**
+ * Gyroflight (audit WP8 transport closure): what is known of the connection an unfinished send was
+ * handed to. DELIVERY_UNKNOWN: the transport reports no link, so nothing proves it closed.
+ */
+export type SendLinkState = TransportLinkState | "DELIVERY_UNKNOWN";
+
+/** A send this facade has not finished yet. */
+interface PendingSend {
+    /** The connection generation it was made in; it is handed to the transport only in that one. */
+    readonly generation: number;
+    handed: boolean;
+    /** The link it was handed to; undefined for a transport without links. */
+    link?: TransportLink | null;
+}
+
+/** What is known of the connection an unfinished send was handed to. */
+export function sendLinkState(link: TransportLink | null | undefined): SendLinkState {
+    return link?.state ?? "DELIVERY_UNKNOWN";
+}
+
 interface ProtocolSlot {
     name: SerialProtocolName;
     instance: SerialProtocol;
@@ -131,6 +176,13 @@ class Serial extends EventTarget {
     logHead: string;
     _hasRawTcp: boolean;
     _protocols: ProtocolSlot[];
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F03): one send at a time, in call order,
+    // per connection (a new connection starts a new queue: a send stuck on the old one blocks
+    // nothing after it).
+    #sendQueue: Promise<unknown> = Promise.resolve();
+    #sendGeneration = 0;
+    /** Sends made and not yet finished by the transport (queued or being written). */
+    readonly #pendingSends = new Set<PendingSend>();
 
     constructor() {
         super();
@@ -301,6 +353,7 @@ class Serial extends EventTarget {
         options?: SerialConnectOptions,
         callback?: (result: boolean | void) => void,
     ): Promise<boolean | void> {
+        this.#newSendQueue();
         // Select the appropriate protocol based directly on the port path
         let result: boolean | void = false;
         try {
@@ -323,6 +376,7 @@ class Serial extends EventTarget {
      * @returns Promise resolving to true if disconnection was successful
      */
     async disconnect(callback?: (result: boolean | void) => void): Promise<boolean | void> {
+        this.#newSendQueue();
         let result: boolean | void = false;
         try {
             result = (await this._protocol?.disconnect()) ?? false;
@@ -339,18 +393,93 @@ class Serial extends EventTarget {
      * The callback is invoked here and only here. Protocols must not be handed
      * it, or every transport that fires it internally would deliver it twice.
      */
-    async send(data: SerialPayload, callback?: (result: SerialSendResult) => void): Promise<SerialSendResult> {
-        let result: SerialSendResult;
-        try {
-            // Guard the method too: virtual mode has no send(), and that is a
-            // normal path, not an error to log.
-            result = (await this._protocol?.send?.(data)) ?? { bytesSent: 0 };
-        } catch (error) {
-            result = { bytesSent: 0 };
-            console.error(`${this.logHead} Error sending data:`, error);
-        }
+    async send(
+        data: SerialPayload,
+        callback?: (result: SerialSendResult) => void,
+        options?: SerialSendOptions,
+    ): Promise<SerialSendResult> {
+        const generation = this.#sendGeneration;
+        const pending: PendingSend = { generation, handed: false };
+        const attempt = async (): Promise<SerialSendResult> => {
+            if (generation !== this.#sendGeneration) return { bytesSent: 0 };
+            const protocol = this._protocol;
+            // A transport with links takes bytes only while its connection is open (audit WP8
+            // transport closure): not during a teardown, a failed close or a connect.
+            const link = Serial.#linkOf(protocol);
+            if ((link !== undefined && link?.state !== "OPEN") || options?.stillWanted?.() === false) {
+                return { bytesSent: 0 };
+            }
+            pending.handed = true;
+            pending.link = link;
+            try {
+                // Guard the method too: virtual mode has no send(), and that is a
+                // normal path, not an error to log.
+                return (await protocol?.send?.(data)) ?? { bytesSent: 0 };
+            } catch (error) {
+                console.error(`${this.logHead} Error sending data:`, error);
+                return { bytesSent: 0 };
+            }
+        };
+        const run = async (): Promise<SerialSendResult> => {
+            const result = await attempt();
+            try {
+                options?.onResult?.(result);
+            } catch (error) {
+                console.error(`${this.logHead} send result handler threw:`, error);
+            }
+            return result;
+        };
+        this.#pendingSends.add(pending);
+        const queued = this.#sendQueue.then(run).finally(() => this.#pendingSends.delete(pending));
+        this.#sendQueue = queued.catch(() => undefined);
+        const result = await queued;
         callback?.(result);
         return result;
+    }
+
+    /**
+     * Gyroflight (audit WP8-F02 review, WP8 transport closure): unfinished sends that may still put
+     * bytes on a connection, including ones a transport still holds after their MSP request gave up,
+     * plus one while any transport that resolves early (WebSocket) still buffers bytes on a socket
+     * that is not closed; a page does not yield the write lease meanwhile. A send stuck on a
+     * connection its transport proved closed no longer counts: it can send nothing more. Its
+     * delivery stays unknown and it never reports "not sent". A transport whose own driver or OS
+     * buffers bytes after resolving (USB serial, native TCP) cannot report them: that remainder is
+     * not covered.
+     */
+    get pendingSends(): number {
+        let count = 0;
+        for (const pending of this.#pendingSends) {
+            if (this.#mayStillSend(pending)) count++;
+        }
+        const transports = new Set([this._protocol, ...this._protocols.map(({ instance }) => instance)]);
+        const buffering = [...transports].some((transport) => (transport?.bufferedAmount ?? 0) > 0);
+        return count + (buffering ? 1 : 0);
+    }
+
+    #mayStillSend(pending: PendingSend): boolean {
+        if (pending.handed) return sendLinkState(pending.link) !== "CLOSED_CONFIRMED";
+        // Not handed over yet: it can be only in its own generation, and on a transport with links
+        // only to an open link. A link that is no longer open never opens again, and a new one
+        // comes only with a connect, which starts a new generation.
+        if (pending.generation !== this.#sendGeneration) return false;
+        const link = Serial.#linkOf(this._protocol);
+        return link === undefined || link === null || link.state === "OPEN";
+    }
+
+    /** The transport's current link; undefined for a transport that has none. */
+    static #linkOf(protocol: SerialProtocol | null | undefined): TransportLink | null | undefined {
+        return protocol && "link" in protocol ? protocol.link : undefined;
+    }
+
+    /** Gyroflight (audit WP8-F10 review): changes on every connect and disconnect. */
+    get connectionGeneration(): number {
+        return this.#sendGeneration;
+    }
+
+    #newSendQueue(): void {
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
     }
 
     /**

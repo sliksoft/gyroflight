@@ -21,6 +21,7 @@
 
 import { webSerialDevices, vendorIdNames } from "./devices";
 import { useAppInfoStore } from "../../stores/appInfo";
+import { TransportLink } from "./TransportLink";
 
 const logHead = "[WEBSERIAL]";
 
@@ -148,6 +149,21 @@ class WebSerial extends EventTarget {
     reading: boolean;
 
     isNeedBatchWrite = false;
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F03): one logical send at a time, so the
+    // chunks of a batched frame are never split by another send and sends reach the port in order.
+    #sendQueue: Promise<unknown> = Promise.resolve();
+    // A new connection starts a new queue: a write stuck on the old port blocks nothing after it.
+    #sendGeneration = 0;
+    /**
+     * Gyroflight hook (audit WP8 transport closure): the port this transport opened, until its close
+     * is proven (port.close() resolved), and its link. A port whose close failed stays here, so the
+     * next disconnect() closes it again and no new port opens meanwhile.
+     */
+    link: TransportLink | null = null;
+    /** The teardown in progress; every disconnect() meanwhile waits for it and gets its outcome. */
+    #closing: Promise<boolean> | null = null;
+    /** port.open() in progress (settles, never rejects): a disconnect meanwhile cancels the open. */
+    #opening: Promise<unknown> | null = null;
 
     constructor() {
         super();
@@ -308,13 +324,26 @@ class WebSerial extends EventTarget {
     }
 
     async connect(path: string, options: WebSerialOptions = DEFAULT_CONNECT_OPTIONS): Promise<boolean> {
+        // Gyroflight (audit WP8 transport closure): never open while an earlier port's close is still
+        // running or failed; that port could still send. A failed one is closed again first, quietly
+        // (no "disconnect" event into the connect that is starting).
+        // An open still running (another connect, or one being cancelled) comes first too.
+        while (this.#closing || this.#opening) await (this.#closing ?? this.#opening);
+        if (!this.connected && this.port && !(await this.#close(false))) {
+            console.error(`${logHead} An earlier port could not be closed, not opening another`);
+            this.dispatchEvent(new CustomEvent("connect", { detail: false }));
+            return false;
+        }
         // Prevent double connections
         if (this.connected) {
             console.log(`${logHead} Already connected, not connecting again`);
             return true;
         }
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
 
         this.openRequested = true;
+        this.openCanceled = false;
         this.closeRequested = false;
 
         try {
@@ -325,9 +354,17 @@ class WebSerial extends EventTarget {
                 return false;
             }
 
-            this.port = device.port;
-
-            await this.port.open(options);
+            const port = device.port;
+            const opening = port.open(options);
+            this.#opening = opening.catch(() => undefined);
+            try {
+                await opening;
+            } finally {
+                this.#opening = null;
+            }
+            // Held from the moment it is open: a failed setup below must still be closed.
+            this.port = port;
+            this.link = new TransportLink();
 
             const connectionInfo = this.port.getInfo();
             this.connectionInfo = connectionInfo;
@@ -361,16 +398,11 @@ class WebSerial extends EventTarget {
                 return true;
             } else if (connectionInfo && this.openCanceled) {
                 this.connectionId = path;
+                this.openRequested = false;
 
+                // The disconnect that cancelled the open closes the port (audit WP8 transport closure).
                 console.log(`${logHead} Connection opened with ID: ${path}, but request was canceled, disconnecting`);
-                // some bluetooth dongles/dongle drivers really doesn't like to be closed instantly, adding a small delay
-                setTimeout(() => {
-                    this.openRequested = false;
-                    this.openCanceled = false;
-                    void this.disconnect();
-                    this.dispatchEvent(new CustomEvent("connect", { detail: false }));
-                }, 150);
-
+                this.dispatchEvent(new CustomEvent("connect", { detail: false }));
                 return false;
             } else {
                 this.openRequested = false;
@@ -401,26 +433,61 @@ class WebSerial extends EventTarget {
         }
     }
 
-    // Update disconnect method
-    async disconnect(): Promise<boolean> {
-        // If already disconnected, just return
-        if (!this.connected) {
+    /**
+     * Closes the port. true only once port.close() resolved: by the Web Serial specification that
+     * aborts the writable (a pending write returns, the transmit buffers are discarded) and closes
+     * the port, so nothing this connection was handed can go out any more. A close that fails is
+     * false, and the port is kept to close again. A call during a teardown waits for it and gets
+     * its outcome (audit WP8 transport closure).
+     */
+    disconnect(): Promise<boolean> {
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
+        // During port.open(): cancel the open, wait for it, and close the port it opened, so the
+        // open cannot bring the connection back afterwards; nothing is reported closed before that.
+        // That is the teardown in progress from now on: a connect or disconnect meanwhile waits for it.
+        const opening = this.#opening;
+        if (opening && !this.#closing) {
+            this.openCanceled = true;
+            // some bluetooth dongles/dongle drivers really doesn't like to be closed instantly, adding a small delay
+            this.#closing = opening
+                .then(() => new Promise((resolve) => setTimeout(resolve, 150)))
+                .then(() => this.#teardown(true))
+                .finally(() => {
+                    this.#closing = null;
+                });
+        }
+        return this.#close(true);
+    }
+
+    #close(announce: boolean): Promise<boolean> {
+        this.#closing ??= this.#teardown(announce).finally(() => {
+            this.#closing = null;
+        });
+        return this.#closing;
+    }
+
+    async #teardown(announce: boolean): Promise<boolean> {
+        const port = this.port;
+        const link = this.link;
+        // Nothing open: every port this transport opened was closed with proof (a cancelled open
+        // that failed opened nothing).
+        if (!port) {
+            this.connected = false;
+            this.openCanceled = false;
             return true;
         }
-
+        // Only the teardown that ends a reported connection tells serial_backend.
+        const wasConnected = this.connected;
         // Mark as disconnected immediately to prevent race conditions
         this.connected = false;
         this.transmitting = false;
-
         // Signal the read loop to stop BEFORE attempting cleanup
         this.reading = false;
-
-        // If already closing, don't do it again
-        if (this.closeRequested) {
-            return true;
-        }
-
         this.closeRequested = true;
+        link?.closing();
+        const reader = this.reader;
+        const writer = this.writer;
 
         try {
             // Remove event listeners first
@@ -429,38 +496,38 @@ class WebSerial extends EventTarget {
             // Small delay to allow ongoing operations to notice connection state change
             await new Promise((resolve) => setTimeout(resolve, 50));
 
-            // Cancel reader first if it exists - this doesn't release the lock
-            if (this.reader) {
+            if (reader) {
                 try {
-                    await this.reader.cancel();
+                    await reader.cancel();
                 } catch (e) {
                     console.warn(`${logHead} Reader cancel error (can be ignored):`, e);
                 }
+                // close() refuses a locked stream. The read loop releases the lock too, but maybe
+                // not before close() runs; releasing a released reader does nothing.
+                try {
+                    reader.releaseLock();
+                } catch (e) {
+                    console.warn(`${logHead} Reader release error (can be ignored):`, e);
+                }
             }
-
-            // Don't try to release the reader lock - streamAsyncIterable will handle it
             this.reader = null;
 
-            // Release writer lock if it exists
-            if (this.writer) {
+            // Release writer lock if it exists. A write still pending goes on in the stream, and
+            // close() below aborts it.
+            if (writer) {
                 try {
-                    this.writer.releaseLock();
+                    writer.releaseLock();
                 } catch (e) {
                     console.warn(`${logHead} Writer release error (can be ignored):`, e);
                 }
-                this.writer = null;
             }
+            this.writer = null;
 
-            // Close the port
-            if (this.port) {
-                this.port.removeEventListener("disconnect", this.handleDisconnect);
-                try {
-                    await this.port.close();
-                } catch (e) {
-                    console.warn(`${logHead} Port already closed or error during close:`, e);
-                }
-                this.port = null;
-            }
+            port.removeEventListener("disconnect", this.handleDisconnect);
+            // Not caught here: a failed close is no proof the port is closed.
+            await port.close();
+            this.port = null;
+            link?.closed();
 
             console.log(
                 `${logHead} Connection with ID: ${this.connectionId} closed, Sent: ${this.bytesSent} bytes, Received: ${this.bytesReceived} bytes`,
@@ -471,14 +538,15 @@ class WebSerial extends EventTarget {
             this.connectionInfo = null; // Reset connectionInfo
             this.closeRequested = false;
 
-            this.dispatchEvent(new CustomEvent("disconnect", { detail: true }));
+            if (announce && wasConnected) this.dispatchEvent(new CustomEvent("disconnect", { detail: true }));
             return true;
         } catch (error) {
             console.error(`${logHead} Error disconnecting:`, error);
+            link?.closeFailed();
             this.closeRequested = false;
             // Ensure connectionInfo is reset even on error if port was potentially open
             this.connectionInfo = null;
-            this.dispatchEvent(new CustomEvent("disconnect", { detail: false }));
+            if (announce && wasConnected) this.dispatchEvent(new CustomEvent("disconnect", { detail: false }));
             return false;
         } finally {
             if (this.openCanceled) {
@@ -488,11 +556,26 @@ class WebSerial extends EventTarget {
     }
 
     forceClose(): void {
+        this.#sendGeneration++;
+        this.#sendQueue = Promise.resolve();
         // Best-effort teardown for page-unload (pagehide / beforeunload).
         // Instance refs are nulled immediately so the rest of the class sees a
         // disconnected state; the actual async teardown runs in a Promise chain
         // that Chrome typically drains before destroying the JS context.
-        if (!this.port && !this.reader && !this.writer) {
+        // A teardown already running owns the port; an open still running is cancelled and its
+        // port closed once it is open (audit WP8 transport closure).
+        if (this.#opening && !this.port) {
+            if (!this.#closing) {
+                this.openCanceled = true;
+                this.#closing = this.#opening
+                    .then(() => this.#teardown(false))
+                    .finally(() => {
+                        this.#closing = null;
+                    });
+            }
+            return;
+        }
+        if (this.#closing || (!this.port && !this.reader && !this.writer)) {
             return;
         }
 
@@ -505,6 +588,8 @@ class WebSerial extends EventTarget {
         const reader = this.reader;
         const writer = this.writer;
         const port = this.port;
+        const link = this.link;
+        link?.closing();
         this.reader = null;
         this.writer = null;
         this.port = null;
@@ -514,13 +599,16 @@ class WebSerial extends EventTarget {
         }
 
         // Mirrors the disconnect() sequence but without awaiting at call-site.
-        // Every step catches its own failure, so the chain never rejects.
-        void (async () => {
+        // Every step catches its own failure, so the chain never rejects. The link is closed
+        // only on a close() that resolved; a page that survives the unload can still close a
+        // port whose close failed with disconnect().
+        this.#closing = (async () => {
             // 1. Cancel reader — resolves the pending read in streamAsyncIterable,
             //    whose finally block will call releaseLock() on the readable side.
             if (reader) {
                 try {
                     await reader.cancel();
+                    reader.releaseLock();
                 } catch (error) {
                     console.debug(`${logHead} forceClose: reader.cancel() failed during unload`, error);
                 }
@@ -534,16 +622,20 @@ class WebSerial extends EventTarget {
                 }
             }
 
-            // Close port — Chrome allows this after reader.cancel() even if the
-            // reader lock is still technically held (streamAsyncIterable cleans up).
-            if (port) {
-                try {
-                    await port.close();
-                } catch (error) {
-                    console.debug(`${logHead} forceClose: port.close() failed during unload`, error);
-                }
+            if (!port) return true;
+            try {
+                await port.close();
+                link?.closed();
+                return true;
+            } catch (error) {
+                console.debug(`${logHead} forceClose: port.close() failed during unload`, error);
+                link?.closeFailed();
+                this.port ??= port;
+                return false;
             }
-        })();
+        })().finally(() => {
+            this.#closing = null;
+        });
 
         this.closeRequested = false;
         this.connectionInfo = null;
@@ -556,56 +648,69 @@ class WebSerial extends EventTarget {
         return isMac && vendorId !== undefined && vendorIdNames[vendorId] === "AT32";
     }
 
-    async batchWrite(data: WebSerialPayload): Promise<void> {
-        // send() only calls this with a writer. this.writer is read per chunk, not captured,
-        // so a disconnect mid-frame fails the next chunk rather than writing to a released lock.
+    /**
+     * Writes `data` in chunks; returns the bytes that went out before a chunk failed or the port
+     * closed. Every chunk goes to the writer, and the connection, the frame started on: a frame cut
+     * by a disconnect never continues on the next connection (audit WP8 review round 2).
+     */
+    async batchWrite(data: WebSerialPayload, generation = this.#sendGeneration): Promise<number> {
         // AT32 on macOS requires smaller chunks (63 bytes) to work correctly due to
         // USB buffer size limitations in the macOS implementation
         const batchWriteSize = 63;
-        let remainingData = data;
-        while (remainingData.byteLength > batchWriteSize) {
-            const sliceData = remainingData.slice(0, batchWriteSize);
-            remainingData = remainingData.slice(batchWriteSize);
+        const writer = this.writer;
+        let written = 0;
+        while (written < data.byteLength) {
+            const chunk = data.slice(written, written + batchWriteSize);
+            if (!this.connected || !writer || this.writer !== writer || generation !== this.#sendGeneration) {
+                return written;
+            }
             try {
                 // The chunks are one frame, so they must reach the port in order.
-                await this.writer!.write(sliceData); // NOSONAR: sequential by design
+                await writer.write(chunk); // NOSONAR: sequential by design
             } catch (error) {
                 console.error(`${logHead} Error writing batch chunk:`, error);
-                throw error; // Re-throw to be caught by the send method
+                return written;
             }
+            written += chunk.byteLength;
         }
-        await this.writer!.write(remainingData);
+        return written;
     }
 
-    async send(data: WebSerialPayload, callback?: (result: WebSerialSendResult) => void): Promise<WebSerialSendResult> {
+    /**
+     * Sends `data` once every earlier send has finished. bytesSent is what went out: 0 when the port
+     * was not open, less than the payload when it failed in the middle (the receiver got a cut frame).
+     */
+    send(data: WebSerialPayload, callback?: (result: WebSerialSendResult) => void): Promise<WebSerialSendResult> {
+        const generation = this.#sendGeneration;
+        const result = this.#sendQueue.then(() =>
+            generation === this.#sendGeneration ? this.#sendNow(data, generation) : { bytesSent: 0 },
+        );
+        this.#sendQueue = result.catch(() => undefined);
+        if (callback) {
+            result.then(callback).catch((error) => console.error(`${logHead} send callback threw:`, error));
+        }
+        return result;
+    }
+
+    async #sendNow(data: WebSerialPayload, generation: number): Promise<WebSerialSendResult> {
         if (!this.connected || !this.writer) {
             console.error(`${logHead} Failed to send data, serial port not open`);
-            if (callback) {
-                callback({ bytesSent: 0 });
-            }
             return { bytesSent: 0 };
         }
 
-        try {
-            if (this.isNeedBatchWrite) {
-                await this.batchWrite(data);
-            } else {
+        let bytesSent = 0;
+        if (this.isNeedBatchWrite) {
+            bytesSent = await this.batchWrite(data, generation);
+        } else {
+            try {
                 await this.writer.write(data);
+                bytesSent = data.byteLength;
+            } catch (error) {
+                console.error(`${logHead} Error sending data:`, error);
             }
-            this.bytesSent += data.byteLength;
-
-            const result = { bytesSent: data.byteLength };
-            if (callback) {
-                callback(result);
-            }
-            return result;
-        } catch (error) {
-            console.error(`${logHead} Error sending data:`, error);
-            if (callback) {
-                callback({ bytesSent: 0 });
-            }
-            return { bytesSent: 0 };
         }
+        this.bytesSent += bytesSent;
+        return { bytesSent };
     }
 }
 

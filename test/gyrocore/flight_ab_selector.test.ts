@@ -1047,7 +1047,54 @@ describe("the component", () => {
         expect(q(container, '[data-row="firmware"]')?.dataset.status).toBe("UNKNOWN");
         expect(q(container, '[data-row="missing"] [data-reason="firmware_unknown:apiVersion"]')).not.toBeNull();
         expect(q(container, '[data-gyrocore="ab-status"]')?.dataset.status).toBe("BLOCKED");
+        // The unknown API version is explained beside the firmware line of each chosen Flight.
+        expect(q(container, '[data-gyrocore="ab-flight-a"] [data-gyrocore="ab-api-unknown"]')?.textContent).toContain(
+            "gyrocoreAbApiUnknown",
+        );
         unmount();
+    });
+
+    it("a logged API version gets no unknown-API note", async () => {
+        const s = store();
+        const one = await s.create("one", [flightA, flightB]);
+        const { container, unmount } = await mount(s);
+        await choose(container, '[data-gyrocore="ab-session-select"]', one.id);
+        await choose(container, '[data-gyrocore="ab-select-a"]', flightA.key);
+        expect(q(container, '[data-gyrocore="ab-flight-a"] [data-field="firmware"]')?.textContent).toContain(
+            "API 1.48.0",
+        );
+        expect(q(container, '[data-gyrocore="ab-api-unknown"]')).toBeNull();
+        unmount();
+    });
+
+    it("a year-0000 log start (no real-time clock) reads Date unknown; a real date is shown as logged", async () => {
+        const [noClock] = await flightsOf(log(43, FW_HEADERS, "0000-01-01T00:00:00.000+00:00"), "rtc.bbl");
+        expect(noClock.ref.header.fields["Log start datetime"]).toMatch(/^0000-01-01/);
+        const s = store();
+        const one = await s.create("clock", [noClock, flightA]);
+        const { container, unmount } = await mount(s);
+        await choose(container, '[data-gyrocore="ab-session-select"]', one.id);
+        await choose(container, '[data-gyrocore="ab-select-a"]', noClock.key);
+        await choose(container, '[data-gyrocore="ab-select-b"]', flightA.key);
+        const a = q(container, '[data-gyrocore="ab-flight-a"] [data-field="logStart"]')!.textContent!.trim();
+        const b = q(container, '[data-gyrocore="ab-flight-b"] [data-field="logStart"]')!.textContent!.trim();
+        expect(a).toBe("gyrocoreAbDateUnknown");
+        expect(a).not.toContain("0000");
+        expect(b).toBe("2026-10-10T12:00:00.000+00:00");
+        unmount();
+    });
+
+    it("explains imported logs against saved sessions, and names the analysis the save buttons store", async () => {
+        const s = store();
+        const gate = useChirpQualificationStore();
+        const { container, unmount } = await mount(s);
+        expect(q(container, '[data-gyrocore="ab-logs-vs-sessions"]')?.textContent).toContain("gyrocoreAbHowToAdd");
+        expect(q(container, '[data-gyrocore="ab-save-source"]')).toBeNull();
+        unmount();
+        gate.setReport((await report(base, "a.bbl")) as never);
+        const again = await mount(s);
+        expect(q(again.container, '[data-gyrocore="ab-save-source"]')?.textContent).toContain("a.bbl");
+        again.unmount();
     });
 
     it("shows that a Flight is already in the open session and saves nothing", async () => {
