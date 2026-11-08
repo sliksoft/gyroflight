@@ -73,6 +73,8 @@ const FIELDS = [
     "axisF[0]",
     "axisF[1]",
     "axisF[2]",
+    // The logged rcModeActivationMask (blackbox.c): ANGLE_MODE per sample, for the I relax in force.
+    "flightModeFlags",
 ] as const;
 /** Rejected measurements still carry a transfer function: kept as diagnostics only (no proposal). */
 const STATE_RANK: Record<string, number> = { usable: 3, usable_with_warnings: 2, rejected: 1 };
@@ -410,6 +412,7 @@ export function buildLogInputs(
                       ]
                     : null,
                 motors: ex.motors?.every((c) => c.length === t.length) ? ex.motors : null,
+                rcModeMask: aligned(ch.flightModeFlags),
                 jio,
             },
             chirp,

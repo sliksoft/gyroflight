@@ -113,9 +113,11 @@ export function verifiedTuneFromLogs(logs: readonly AutotuneLogInput[], createdA
         if (!b || !c) return;
         const rep = repeat?.chirp[name];
         axes[name] = {
-            plant: buildAxisLoop(axis, cb.tf, b.cfg, null, false, false).plant,
-            baselineCfg: b.cfg,
-            candidateCfg: c.cfg,
+            plant: buildAxisLoop(axis, cb.tf, b.cfg, null, false, false, null, { sweepCfg: b.sweepCfg }).plant,
+            // Both T were measured during sweeps: predicted and extracted with the controllers in force
+            // then (block 9: I relaxed on the swept setpoint), so like is compared with like.
+            baselineCfg: b.sweepCfg,
+            candidateCfg: c.sweepCfg,
             candidateT: cc.tf,
             ...(rep && rep.state !== "rejected" ? { baselineRepeatT: rep.tf } : {}),
         };

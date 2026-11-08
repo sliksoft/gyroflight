@@ -351,7 +351,7 @@ export function planMeasurement(
         if (!used.has(own.frequencyHz)) return { binHz: p.f, needed: null };
         const bin = own;
         const g2 = bin?.coherence;
-        const kappa = bin?.T ? loopErrorGain(bin.T, loop.cfg, p.f) : Infinity;
+        const kappa = bin?.T ? loopErrorGain(bin.T, loop.sweepCfg ?? loop.cfg, p.f) : Infinity;
         if (!(typeof g2 === "number" && g2 > 0 && g2 <= 1) || !Number.isFinite(kappa))
             return { binHz: p.f, needed: null };
         if (g2 >= 1) return { binHz: p.f, needed: 1 };

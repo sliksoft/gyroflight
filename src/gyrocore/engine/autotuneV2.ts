@@ -36,6 +36,7 @@
  */
 
 import type { DigitalControllerConfig } from "@/js/blackbox/betaflight_digital_controller";
+import { itermRelaxForSweep, type ItermRelaxInForce } from "@/js/blackbox/betaflight_iterm_relax";
 import {
     dtermConfigFromHeaders,
     dtermFitAccepted,
@@ -172,6 +173,11 @@ export interface AutotuneLogInput {
         axisD: [ArrayLike<number> | null, ArrayLike<number> | null, ArrayLike<number> | null] | null;
         motors: ArrayLike<number>[] | null;
         /**
+         * Logged rcModeActivationMask (BBL "flightModeFlags"; BOXANGLE = bit 1): which modes were
+         * active per sample, for the I relax in force (betaflight_iterm_relax.ts). Absent: unknown.
+         */
+        rcModeMask?: ArrayLike<number> | null;
+        /**
          * The channels of the experimental CHIRP + JIO route (jioSweep.ts): setpoint, the logged
          * P/I/F terms, DEBUG_CHIRP debug[1] and debug[3]. Absent or null: that route is blocked, named.
          */
@@ -253,6 +259,12 @@ export interface PartReport {
 export interface AutotuneV2Result {
     chain: { config: GyroChainConfig | null; validation: ChainValidation[]; notes: string[] };
     dterm: { axis: AxisName; accepted: boolean; nrmse: number | null }[];
+    /**
+     * The I term in force during each axis's sweep (block 9, betaflight_iterm_relax.ts): the plant is
+     * extracted with Ki × meanFactor when the reconstruction reproduces the logged axisI; otherwise
+     * with the headers' I, and the reasons say why.
+     */
+    itermRelax: ({ axis: AxisName } & ItermRelaxInForce)[];
     margins: Partial<Record<AxisName, { current: LoopMargins; proposed: LoopMargins }>>;
     pid: AxisPidProposal[];
     filters: FilterGroupResult[];
@@ -569,7 +581,15 @@ export function analyzeAxisController(
     axis: 0 | 1 | 2,
     chirp: ChirpAxisInput,
     mask: Uint8Array,
-): { cfg: DigitalControllerConfig; dterm: DtermDynamicConfig | null; accepted: boolean; nrmse: number | null } | null {
+): {
+    cfg: DigitalControllerConfig;
+    /** The controller in force during the sweep: `cfg` with the I relax the log shows (block 9). */
+    sweepCfg: DigitalControllerConfig;
+    itermRelax: ItermRelaxInForce;
+    dterm: DtermDynamicConfig | null;
+    accepted: boolean;
+    nrmse: number | null;
+} | null {
     const base = controllerConfigFromHeaders(h, axis);
     if (!base) return null;
     let cfg = base;
@@ -594,7 +614,30 @@ export function analyzeAxisController(
         const eff = effectiveDtermOverWindow(sim, chirp.start, chirp.end);
         if (eff) cfg = withEffectiveDterm(cfg, eff);
     }
-    return { cfg, dterm, accepted, nrmse };
+    // pid.c relaxes I on the swept setpoint: the plant is extracted with the I in force during the
+    // sweep (reconstructed and checked against the logged axisI), the margins keep the I of flight.
+    // Not reconstructable: the headers' I, as before, with the reason named.
+    const jio = log.channels.jio;
+    const itermRelax = itermRelaxForSweep(
+        h,
+        axis,
+        base.pidDt,
+        jio?.setpoint && jio.axisI && jio.axisP
+            ? {
+                  setpoint: jio.setpoint[axis],
+                  gyro: log.channels.gyroAdc[axis],
+                  loggedI: jio.axisI[axis],
+                  loggedP: jio.axisP[axis],
+                  modeMask: log.channels.rcModeMask ?? null,
+              }
+            : null,
+        { start: chirp.start, end: chirp.end },
+    );
+    const sweepCfg =
+        itermRelax.status === "reconstructed"
+            ? { ...cfg, axis: { ...cfg.axis, i: cfg.axis.i * itermRelax.meanFactor } }
+            : cfg;
+    return { cfg, sweepCfg, itermRelax, dterm, accepted, nrmse };
 }
 
 function statusOf(items: { status: PartStatus }[]): Exclude<ReportStatus, "IMPLEMENTED"> {
@@ -693,6 +736,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             ? {
                   tf: rung.tf,
                   cfg: qctl.cfg,
+                  sweepCfg: qctl.sweepCfg,
                   source: { sha256: qLog.sha256, logIndex: qLog.logIndex },
                   sweep: sweepFromHeaders(qh),
                   // The window the analysis claims must lie in the qualification's own samples.
@@ -705,6 +749,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     // 2-3. Controller in force, D path, plant per axis with a CHIRP measurement.
     const axes: Partial<Record<AxisName, AxisAnalysis>> = {};
     const dtermReport: AutotuneV2Result["dterm"] = [];
+    const itermRelaxReport: AutotuneV2Result["itermRelax"] = [];
     const multiRecordingContributors: string[] = [];
     const multiRecordingRejected: string[] = [];
     AXES.forEach((name, ai) => {
@@ -714,6 +759,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         const ctl = analyzeAxisController(log, h, axis, c, mask);
         if (!ctl) return;
         if (ctl.dterm) dtermReport.push({ axis: name, accepted: ctl.accepted, nrmse: ctl.nrmse });
+        itermRelaxReport.push({ axis: name, ...ctl.itermRelax });
         const eff = sim && chainCfg ? effectiveChainFrf(sim, chainCfg, axis, c.start, c.end) : null;
         // Adaptive resolution (adaptiveResolution.ts, H1): from the standard analysis's crossover, the
         // rung of the ladder whose bin spacing suits it, checked against the next finer rung of the
@@ -736,6 +782,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                     sweep,
                     analysis: r.analysis,
                     support: r.support ?? null,
+                    sweepCfg: ctl.sweepCfg,
                 });
                 rungLoops.set(r, loop);
             }
@@ -765,6 +812,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             support: chosen.support,
             resolution,
             resolutionFor,
+            sweepCfg: ctl.sweepCfg,
         });
         // The release loop above rests on the primary's own measurement only: its uncertainty counts the
         // averages of the data it reads, never another flight's average counts without that flight's
@@ -821,6 +869,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                   resolution,
                   resolutionFor,
                   combinedAveragesByHz: combination?.averagesByHz ?? null,
+                  sweepCfg: ctl.sweepCfg,
               })
             : loop;
         axes[name] = {
@@ -972,7 +1021,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             }
             const ctl = analyzeAxisController(other, oh, ai, oc, flightMask(other.channels.rcThrottle));
             if (!ctl) continue;
-            const otherLoop = buildAxisLoop(ai, oc.tf, ctl.cfg, null, false, false);
+            const otherLoop = buildAxisLoop(ai, oc.tf, ctl.cfg, null, false, false, null, { sweepCfg: ctl.sweepCfg });
             const cmp = assessCrossLogPlantReproducibility(axes[name]!.loop.plant, otherLoop.plant);
             // Two independent flights never identify the same plant to the last bit: an exact
             // match is the same measurement again (a copy the window identity did not catch).
@@ -1290,6 +1339,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     return {
         chain: { config: chainCfg, validation, notes: chainNotes },
         dterm: dtermReport,
+        itermRelax: itermRelaxReport,
         margins,
         pid,
         filters,

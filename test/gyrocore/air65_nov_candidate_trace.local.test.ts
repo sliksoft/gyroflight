@@ -144,6 +144,8 @@ function trace(
         jioProgress: r.jio.progress,
         experimental: r.experimental,
         experimentalWithheld: r.experimentalWithheld,
+        itermRelax: r.itermRelax,
+        dterm: r.dterm,
     };
 }
 

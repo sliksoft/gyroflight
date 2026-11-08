@@ -992,7 +992,13 @@ export function validateChain(
 export interface AxisLoop {
     axis: 0 | 1 | 2;
     plant: IdentifiedPlant;
+    /** The controller the margins and candidates are read with (the one in normal flight). */
     cfg: DigitalControllerConfig;
+    /**
+     * The controller in force during the sweep, which the plant was extracted with (block 9: pid.c
+     * relaxes I on the swept setpoint, betaflight_iterm_relax.ts). Absent: the same as `cfg`.
+     */
+    sweepCfg?: DigitalControllerConfig;
     chain: EffectiveChain | null;
     chainValidated: boolean;
     /** A Verified Tune for this craft / firmware passed (the only attestation). */
@@ -1144,6 +1150,8 @@ export function buildAxisLoop(
     qualification: {
         tf: TransferFunction;
         cfg?: DigitalControllerConfig;
+        /** The controller in force during that sweep (default: its `cfg`, then the loop's sweep controller). */
+        sweepCfg?: DigitalControllerConfig;
         source: { sha256: string; logIndex: number };
         sweep?: SweepInfo | null;
         /** Where the finer resolution comes from; without it the qualification is not shown finer. */
@@ -1165,6 +1173,12 @@ export function buildAxisLoop(
         resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
         combinedAveragesByHz?: ReadonlyMap<number, number> | null;
         /**
+         * The controller in force during the sweep (block 9): T was measured under it, so the plant is
+         * extracted and its uncertainty propagated with it; `cfg` stays the controller the margins
+         * and candidates are read with. Absent: `cfg` (the headers' controller was in force).
+         */
+        sweepCfg?: DigitalControllerConfig | null;
+        /**
          * A plant measured directly (jioSweep.ts: G = H_ry / H_ru from the logged pidSum) instead of
          * the one inferred from `tf` through the controller model. Its bins must lie on `tf`'s grid.
          * The margins then rest on that measurement; `tf` still carries the coherence and the
@@ -1175,15 +1189,18 @@ export function buildAxisLoop(
 ): AxisLoop {
     const missing = chainValidated ? [] : ["dyn_notch_centres_unknown", "rpm_filter_schedule_unknown"];
     const opts = { missingFilterInfo: missing, coherenceMin: LOOP_MIN_COHERENCE };
-    const plant = measurement.plant ?? extractPlantFromClosedLoop(tf, cfg, opts);
+    const sweepCfg = measurement.sweepCfg ?? cfg;
+    const plant = measurement.plant ?? extractPlantFromClosedLoop(tf, sweepCfg, opts);
+    const qSweepCfg = qualification ? (qualification.sweepCfg ?? qualification.cfg ?? sweepCfg) : null;
     return {
         axis,
         plant,
         cfg,
+        ...(sweepCfg !== cfg ? { sweepCfg } : {}),
         chain,
         chainValidated,
         attested,
-        uncertainty: loopUncertainty(tf, cfg, measurement),
+        uncertainty: loopUncertainty(tf, sweepCfg, measurement),
         support: measurement.support ?? null,
         sweep: measurement.sweep ?? null,
         resolution: measurement.resolution ?? null,
@@ -1191,14 +1208,9 @@ export function buildAxisLoop(
         analysisStepHz: analysisStep(measurement.analysis, tf),
         qualification: qualification
             ? {
-                  plant: extractPlantFromClosedLoop(qualification.tf, qualification.cfg ?? cfg, opts),
+                  plant: extractPlantFromClosedLoop(qualification.tf, qSweepCfg!, opts),
                   source: { ...qualification.source },
-                  uncertainty: loopUncertainty(
-                      qualification.tf,
-                      qualification.cfg ?? cfg,
-                      qualification,
-                      "qualification",
-                  ),
+                  uncertainty: loopUncertainty(qualification.tf, qSweepCfg!, qualification, "qualification"),
                   provenanceIssues: provenanceIssues(qualification.tf, qualification.analysis ?? null),
                   support: qualification.support ?? null,
                   sweep: qualification.sweep ?? null,
