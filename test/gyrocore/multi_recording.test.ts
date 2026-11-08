@@ -28,7 +28,7 @@ import { describe, expect, it } from "vitest";
 import {
     aggregateAverageClaims,
     averageClaimAt,
-    collectMultiRecordingAverages,
+    eligibleRecordings,
     multiRecordingIssues,
     transferFunctionValuesIdentical,
     type RecordingAverageClaim,
@@ -89,10 +89,13 @@ const DWELL = {
     welch: { segments: 16, windowS: 30 },
     sweep: { f0Hz: 2, f1Hz: 200, durationS: 30 },
 } as const;
-const SW = DWELL.sweep;
-const sumExtra = (m: Map<number, number>) => [...m.values()].reduce((a, b) => a + b, 0);
-const ledgerOf = (p: ReturnType<typeof syntheticLogInput>, others: ReturnType<typeof syntheticLogInput>[]) =>
-    collectMultiRecordingAverages(p, others, "roll", p.chirp.roll!.tf.frequencies, p.chirp.roll!.analysis!, SW);
+// Which other flights may stand beside the primary (multiRecording.ts eligibleRecordings): the one gate
+// before any flight's values are combined (combineRecordings). Since block 8 no route counts another
+// flight's averages without its values, so the same support counting once means: eligible once.
+const ledgerOf = (p: ReturnType<typeof syntheticLogInput>, others: ReturnType<typeof syntheticLogInput>[]) => {
+    const r = eligibleRecordings(p, others, "roll");
+    return { contributors: r.eligible.map((l) => `${l.sha256}:${l.logIndex}`), rejected: r.rejected };
+};
 
 /** Re-export of `src` under another hash; optional closed-loop FRF scale (1 = bit-identical). */
 function reexport(
@@ -117,7 +120,7 @@ function reexport(
 }
 
 describe("identical closed-loop measurement", () => {
-    it("bit-identical FRF values are detected; a shared TF does not add multi-recording averages", () => {
+    it("bit-identical FRF values are detected; a shared TF is not another flight", () => {
         const primary = syntheticLogInput("a1".repeat(32), DWELL);
         const channels = structuredClone(primary.channels);
         for (const g of channels.gyroAdc as unknown as Float64Array[]) {
@@ -131,10 +134,9 @@ describe("identical closed-loop measurement", () => {
         const ledger = ledgerOf(primary, [copy]);
         expect(ledger.contributors).toEqual([]);
         expect(ledger.rejected.some((r) => r.startsWith("multi_recording_identical_measurement:"))).toBe(true);
-        expect(ledger.extraAveragesByHz.size).toBe(0);
     });
 
-    it("sub-ulp H rescale of the primary TF still adds no extras (Grokbot P1b)", () => {
+    it("sub-ulp H rescale of the primary TF is still not another flight (Grokbot P1b)", () => {
         // External harness: gyro ×1.37, time +3 s, TF ×(1+1e-12) under a new hash — not a new flight.
         const primary = syntheticLogInput("a1".repeat(32), DWELL);
         const channels = structuredClone(primary.channels);
@@ -157,7 +159,7 @@ describe("identical closed-loop measurement", () => {
         expect(transferFunctionValuesIdentical(tf, scaled)).toBe(true);
         expect(multiRecordingIssues(primary, copy)).toEqual([]);
         const ledger = ledgerOf(primary, [copy]);
-        expect(sumExtra(ledger.extraAveragesByHz)).toBe(0);
+        expect(ledger.contributors).toEqual([]);
         expect(ledger.rejected.some((r) => r.startsWith("multi_recording_identical_measurement:"))).toBe(true);
         // A real plant change (1 %) is not float round-trip identity and may still contribute.
         const changed = {
@@ -170,7 +172,7 @@ describe("identical closed-loop measurement", () => {
 });
 
 describe("P1 peer duplicates among others (Grokbot local review)", () => {
-    it("A+B stacks once; A+B+B′ (same flight as B, other hash) does not double extras", () => {
+    it("A+B stacks once; A+B+B′ (same flight as B, other hash) counts B once", () => {
         const A = syntheticLogInput("a1".repeat(32), DWELL);
         const B = syntheticLogInput("b1".repeat(32), DWELL);
         const Bp = reexport(B, "b2".repeat(32), 1);
@@ -179,10 +181,8 @@ describe("P1 peer duplicates among others (Grokbot local review)", () => {
         const onlyB = ledgerOf(A, [B]);
         const both = ledgerOf(A, [B, Bp]);
         const reversed = ledgerOf(A, [Bp, B]);
-        expect(sumExtra(onlyB.extraAveragesByHz)).toBeGreaterThan(0);
-        // Pre-fix defect: 229 → 458; same support must count once.
-        expect(sumExtra(both.extraAveragesByHz)).toBe(sumExtra(onlyB.extraAveragesByHz));
-        expect(sumExtra(reversed.extraAveragesByHz)).toBe(sumExtra(onlyB.extraAveragesByHz));
+        expect(onlyB.contributors).toHaveLength(1);
+        // Pre-fix defect: B's support counted twice; the same support must count once.
         expect(both.contributors).toHaveLength(1);
         expect(reversed.contributors).toHaveLength(1);
         expect(
@@ -194,7 +194,7 @@ describe("P1 peer duplicates among others (Grokbot local review)", () => {
         ).toBe(true);
     });
 
-    it("two truly independent others both contribute; order does not change the extra total", () => {
+    it("two truly independent others both stand beside the primary, in either order", () => {
         const A = syntheticLogInput("a1".repeat(32), DWELL);
         const B = syntheticLogInput("b1".repeat(32), DWELL);
         const C = syntheticLogInput("c1".repeat(32), DWELL);
@@ -202,8 +202,7 @@ describe("P1 peer duplicates among others (Grokbot local review)", () => {
         const cb = ledgerOf(A, [C, B]);
         expect(bc.contributors).toHaveLength(2);
         expect(cb.contributors).toHaveLength(2);
-        expect(sumExtra(bc.extraAveragesByHz)).toBe(sumExtra(cb.extraAveragesByHz));
-        expect(sumExtra(bc.extraAveragesByHz)).toBe(2 * sumExtra(ledgerOf(A, [B]).extraAveragesByHz));
+        expect(bc.contributors).toEqual(cb.contributors);
     });
 
     it("bit-identical peer FRFs under different hashes do not stack even when windows diverge", () => {

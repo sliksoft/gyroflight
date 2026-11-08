@@ -20,13 +20,14 @@
  */
 
 /*
- * Multi-recording average aggregation (completion program 2026-10-28, phase 4).
+ * Multi-recording combination (completion program 2026-10-28, phase 4; block 8).
  *
- * Independent CHIRP recordings of the same craft / firmware / configuration may contribute
- * whole-segment averages at the same decision frequencies. They are never concatenated across
- * discontinuities: each recording keeps its own sweep, window and noise assessment; only the
- * integer average counts are summed. A duplicated recording (same content) must not increase the
- * count. Mismatched identity or configuration fails closed and improves nothing.
+ * Independent CHIRP recordings of the same craft / firmware / configuration may stand beside the
+ * primary flight (eligibleRecordings). They are never concatenated across discontinuities: each
+ * recording keeps its own sweep, window and noise assessment. Since block 8 another flight's
+ * averages count only together with its measured values, where those agree (combineRecordings, the
+ * experimental decision); no route sums average counts alone. A duplicated recording (same content)
+ * never counts twice. Mismatched identity or configuration fails closed and improves nothing.
  */
 
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
@@ -218,64 +219,6 @@ export function eligibleRecordings(
     return { eligible, rejected };
 }
 
-export interface MultiRecordingLedger {
-    /** Extra whole-segment averages at each Hz (beyond the primary's own count). */
-    extraAveragesByHz: Map<number, number>;
-    contributors: string[];
-    rejected: string[];
-}
-
-/**
- * Collect independent recordings' whole-segment averages at the primary's decision frequencies.
- * Does not concatenate time series. Only adds counts when `multiRecordingIssues` is empty and the
- * other log has a usable chirp + analysis on `axis`. Primary bins with no whole-segment dwell stay
- * at zero extras (never invent support).
- */
-export function collectMultiRecordingAverages(
-    primary: AutotuneLogInput,
-    others: readonly AutotuneLogInput[],
-    axis: "roll" | "pitch" | "yaw",
-    frequenciesHz: ArrayLike<number>,
-    primaryAnalysis: AnalysisProvenance | null,
-    primarySweep: SweepInfo | null,
-): MultiRecordingLedger {
-    const extraAveragesByHz = new Map<number, number>();
-    const contributors: string[] = [];
-    const rejected: string[] = [];
-    if (!primaryAnalysis || !primarySweep || !frequenciesHz.length) {
-        return { extraAveragesByHz, contributors, rejected };
-    }
-    const { eligible, rejected: notEligible } = eligibleRecordings(primary, others, axis);
-    rejected.push(...notEligible);
-    for (let i = 0; i < frequenciesHz.length; i++) {
-        const hz = frequenciesHz[i]!;
-        if (!(hz > 0)) continue;
-        const primaryClaim = averageClaimAt(primary, hz, primaryAnalysis, primarySweep);
-        if (!primaryClaim) continue; // no whole-segment primary dwell: do not invent extras alone
-        const claims: RecordingAverageClaim[] = [primaryClaim];
-        for (const other of eligible) {
-            const chirp = other.chirp[axis]!;
-            const sweep = otherSweep(other);
-            if (!sweep) {
-                rejected.push(`multi_recording_sweep_unknown:${other.sha256}:${other.logIndex}`);
-                continue;
-            }
-            const claim = averageClaimAt(other, hz, chirp.analysis!, sweep);
-            if (claim) claims.push(claim);
-        }
-        const agg = aggregateAverageClaims(hz, claims);
-        rejected.push(...agg.rejected);
-        const extra = Math.max(0, agg.averages - primaryClaim.averages);
-        if (extra > 0) {
-            extraAveragesByHz.set(hz, extra);
-            for (const id of agg.contributors) {
-                if (id !== primaryClaim.id && !contributors.includes(id)) contributors.push(id);
-            }
-        }
-    }
-    return { extraAveragesByHz, contributors, rejected: [...new Set(rejected)] };
-}
-
 /** Sweep from Betaflight chirp headers (deci-Hz start/end + duration), same contract as the engine. */
 export function otherSweep(log: AutotuneLogInput): SweepInfo | null {
     const h = new Map(log.headerPairs);
@@ -300,22 +243,34 @@ export const RECORDING_AGREEMENT = Object.freeze({ maxBinZ: 2, maxAxisMedianZ: 2
 
 /** How one bin of the combined estimate was formed. */
 export type CombinedBinUse =
-    /** Both flights identify the bin and agree: averages of both, values weighted by their averages. */
+    /** The primary and the other flights that agree with it there: values weighted by their averages, averages summed. */
     | "pooled"
-    /** Only the other flight identifies the bin (the primary's γ² is below the loop minimum): its values. */
+    /**
+     * The primary has no testable estimate (γ² below the loop minimum, or no whole-segment averages) and
+     * the other flights that identify the bin agree among themselves: their values, pooled by averages.
+     */
     | "other_flight"
-    /** Both identify the bin but disagree beyond maxBinZ: the primary's values and averages only. */
+    /** The primary identifies the bin with its averages and every other flight there disagrees: the primary's values. */
     | "disagree_primary_kept"
-    /** The primary is below the loop minimum and the other flight disagrees or is not usable there. */
+    /**
+     * The primary has no testable estimate and the other flights that identify the bin disagree among
+     * themselves or cannot be compared (an average count unknown): nothing taken, the primary's values.
+     */
+    | "others_disagree"
+    /** The primary is below the loop minimum and no consistent other flight identifies the bin. */
     | "not_filled";
 
 export interface CombinedBin {
     frequencyHz: number;
     use: CombinedBinUse;
-    /** γ² of the primary and of the other flight at this bin. */
+    /** γ² of the primary and the lowest γ² of the other flights at this bin. */
     coherence: [number, number];
-    /** The agreement statistic (null where one of the two has no usable estimate). */
+    /** The largest agreement statistic computed at this bin (null where none could be computed). */
     z: number | null;
+    /** The other flights whose values are in this bin ("sha256:logIndex"). */
+    flights: string[];
+    /** The other flights that disagreed here (or could not be compared) and are not in it. */
+    disagreeing: string[];
 }
 
 export interface RecordingCombination {
@@ -342,9 +297,9 @@ export interface RecordingCombination {
     bins: CombinedBin[];
     /** The combined estimate on the primary's grid (null when nothing was combined). */
     tf: TransferFunction | null;
-    /** Whole-segment averages behind each changed bin (pooled: both; other_flight: the other's). */
+    /** Whole-segment averages behind each changed bin (every estimate pooled into it). */
     averagesByHz: Map<number, number>;
-    /** The primary's per-bin support with each bin taken from the other flight carrying that flight's own. */
+    /** The primary's per-bin support; a bin taken from other flights carries their most conservative verdict. */
     support: FrequencySupport | null;
 }
 
@@ -365,10 +320,12 @@ export interface RecordingRung {
 /**
  * The primary's chosen analysis combined with the same analysis (same segment length and sample
  * rate, so the same frequency grid) of independent recordings of this axis. Nothing is interpolated
- * and no recording is concatenated: a bin is pooled only where both flights identify it and agree,
- * taken from the other flight only where the primary does not identify it and the other does (its
- * excitation not shown absent, the loop's own support rule, and the flights consistent over the axis), and otherwise left as the
- * primary measured it. `minCoherence` is the loop's own minimum (LOOP_MIN_COHERENCE).
+ * and no recording is concatenated. Each flight is first judged over the axis against the primary's
+ * own measurement; then, per bin and over all consistent flights at once (so their order changes
+ * nothing): pooled with the primary where they agree with its value, taken from the other flights
+ * only where the primary has no testable estimate and they identify the bin (excitation not shown
+ * absent, the loop's own support rule) and agree among themselves, and otherwise left as the primary
+ * measured it. `minCoherence` is the loop's own minimum (LOOP_MIN_COHERENCE).
  */
 export function combineRecordings(
     axis: "roll" | "pitch" | "yaw",
@@ -404,20 +361,16 @@ export function combineRecordings(
         hImag: Float64Array.from(p.hImag),
         numSegments: p.numSegments,
     };
-    // The primary's own whole-segment averages (fixed), and the averages behind the combined estimate.
+    // The primary's own whole-segment averages.
     const nOwn = new Float64Array(n);
     for (let k = 0; k < n; k++) {
         const f = p.frequencies[k];
         nOwn[k] = f > 0 ? sweepAverages(f, primary.analysis, primary.sweep, primary.analysis.windowSamples) : 0;
     }
-    const nNow = Float64Array.from(nOwn);
     // The primary's own bin by the loop's rules: coherence at the minimum, excitation not shown absent.
     const ownOk = (k: number) =>
         p.coherence[k] >= minCoherence && primary.support?.bins.get(p.frequencies[k])?.verdict !== "UNSUPPORTED";
-    // Which bins of the combined estimate already rest on another flight (taken or pooled into it).
-    const fromOther = new Uint8Array(n);
     const byBin = new Map<number, CombinedBin>();
-    let changed = false;
     // z between two estimates of one bin, each with its own γ² and averages (null: an average count unknown).
     const zOf = (
         aRe: number,
@@ -435,15 +388,19 @@ export function combineRecordings(
         const s = Math.hypot(ea, eb);
         return Number.isFinite(s) && s > 0 ? Math.hypot(aRe - bRe, aIm - bIm) / s : null;
     };
-    const setBin = (k: number, re: number, im: number, g2: number, nAvg: number) => {
-        tf.hReal[k] = re;
-        tf.hImag[k] = im;
-        tf.coherence[k] = g2;
-        tf.magnitude[k] = 20 * Math.log10(Math.hypot(re, im));
-        tf.phase[k] = (Math.atan2(im, re) * 180) / Math.PI;
-        nNow[k] = nAvg;
-        out.averagesByHz.set(p.frequencies[k], nAvg);
-    };
+
+    // Pass 1, per flight: consistency over the axis against the primary's OWN measurement, on the bins
+    // both identify. Each flight is judged on its own, so no flight's verdict depends on another's.
+    interface Gated {
+        id: string;
+        o: TransferFunction;
+        support: FrequencySupport;
+        nO: Float64Array;
+        ok: Uint8Array;
+        used: boolean;
+    }
+    const gated: Gated[] = [];
+    const verdictAt = new Map<string, number>();
     for (const other of [...others].sort((a, b) => byRecordingId(a.log, b.log))) {
         const id = `${other.log.sha256}:${other.log.logIndex}`;
         const o = other.tf;
@@ -457,21 +414,24 @@ export function combineRecordings(
             out.flights.push({ id, medianZ: null, commonBins: 0, verdict: "grid_differs" });
             continue;
         }
-        const nO = (k: number) => {
+        const nO = new Float64Array(n);
+        const ok = new Uint8Array(n);
+        for (let k = 0; k < n; k++) {
             const f = o.frequencies[k];
-            return f > 0 ? sweepAverages(f, other.analysis, other.sweep, other.analysis.windowSamples) : 0;
-        };
-        // The loop's own rule (loopModel binsDroppedForSupport): a bin whose excitation was shown absent
-        // is left out; without any support evidence the other flight fills nothing.
-        const otherOk = (k: number) =>
-            o.coherence[k] >= minCoherence &&
-            !!other.support &&
-            other.support.bins.get(o.frequencies[k])?.verdict !== "UNSUPPORTED";
-        // Consistency over the axis: every other flight against the primary's OWN measurement (never
-        // against an estimate other flights already changed), on the bins both identify.
+            nO[k] = f > 0 ? sweepAverages(f, other.analysis, other.sweep, other.analysis.windowSamples) : 0;
+            // The loop's own rule (loopModel binsDroppedForSupport): a bin whose excitation was shown
+            // absent is left out; without any support evidence the other flight fills nothing.
+            ok[k] =
+                f > 0 &&
+                o.coherence[k] >= minCoherence &&
+                !!other.support &&
+                other.support.bins.get(f)?.verdict !== "UNSUPPORTED"
+                    ? 1
+                    : 0;
+        }
         const zs: number[] = [];
         for (let k = 0; k < n; k++) {
-            if (!(p.frequencies[k] > 0) || !ownOk(k) || !otherOk(k)) continue;
+            if (!(p.frequencies[k] > 0) || !ownOk(k) || !ok[k]) continue;
             const z = zOf(
                 p.hReal[k],
                 p.hImag[k],
@@ -480,7 +440,7 @@ export function combineRecordings(
                 o.hReal[k],
                 o.hImag[k],
                 o.coherence[k],
-                nO(k),
+                nO[k],
             );
             if (z !== null) zs.push(z);
         }
@@ -498,81 +458,154 @@ export function combineRecordings(
             out.flights.push({ id, medianZ: median, commonBins: zs.length, verdict: "disagrees" });
             continue;
         }
-        let used = false;
-        for (let k = 0; k < n; k++) {
-            const f = p.frequencies[k];
-            if (!(f > 0)) continue;
-            if (!otherOk(k)) {
-                if (!ownOk(k) && !fromOther[k] && !byBin.has(f))
-                    byBin.set(f, {
-                        frequencyHz: f,
-                        use: "not_filled",
-                        coherence: [p.coherence[k], o.coherence[k]],
-                        z: null,
-                    });
-                continue;
-            }
-            const nOk = nO(k);
-            const take = (use: CombinedBinUse) => {
-                byBin.set(f, { frequencyHz: f, use, coherence: [p.coherence[k], o.coherence[k]], z: null });
-                setBin(k, o.hReal[k], o.hImag[k], o.coherence[k], nOk);
-                fromOther[k] = 1;
-                // The bin's values are the other flight's: its support evidence goes with them.
-                const ob = other.support!.bins.get(f);
-                if (support) {
-                    if (ob) support.bins.set(f, ob);
-                    else support.bins.delete(f);
-                }
-                used = true;
-            };
-            if (!ownOk(k) && !fromOther[k]) {
-                // A bin the primary does not identify, taken from a flight that does.
-                take("other_flight");
-                continue;
-            }
-            if (ownOk(k) && nNow[k] < 1 && nOk >= 1 && !fromOther[k]) {
-                // Both identify the bin and only this flight has whole-segment averages there: its
-                // estimate is the better-supported one, whichever flight is the primary (block 8 review).
-                take("other_flight");
-                continue;
-            }
-            // Both estimates exist: pooled only where they agree (against the primary's own value where it
-            // identifies the bin, else against the flight that supplied it), with both averages known.
-            const z = ownOk(k)
-                ? zOf(p.hReal[k], p.hImag[k], p.coherence[k], nOwn[k], o.hReal[k], o.hImag[k], o.coherence[k], nOk)
-                : zOf(tf.hReal[k], tf.hImag[k], tf.coherence[k], nNow[k], o.hReal[k], o.hImag[k], o.coherence[k], nOk);
-            if (z === null || !(nNow[k] >= 1)) continue;
-            if (z > RECORDING_AGREEMENT.maxBinZ) {
-                byBin.set(f, {
-                    frequencyHz: f,
-                    use: "disagree_primary_kept",
-                    coherence: [p.coherence[k], o.coherence[k]],
-                    z,
-                });
-                continue;
-            }
-            const wa = nNow[k] / (nNow[k] + nOk);
-            const wb = 1 - wa;
-            // An approximation: the averages-weighted mean of both coherences stands for the pooled
-            // estimate's (the H1 random error ε = √((1−γ²)/(2nγ²)) is then read with the summed n). The
-            // exact pooled coherence needs both flights' auto- and cross-spectra, which the rung does not keep.
-            setBin(
-                k,
-                wa * tf.hReal[k] + wb * o.hReal[k],
-                wa * tf.hImag[k] + wb * o.hImag[k],
-                wa * tf.coherence[k] + wb * o.coherence[k],
-                nNow[k] + nOk,
+        verdictAt.set(id, out.flights.length);
+        out.flights.push({ id, medianZ: median, commonBins: zs.length, verdict: "consistent_unused" });
+        gated.push({ id, o, support: other.support!, nO, ok, used: false });
+    }
+
+    // Pass 2, per bin, over the whole set of consistent flights at once: the result is the same in
+    // any order (block 8 review round 2). Pooling is an averages-weighted mean, which no order changes.
+    const RANK: Record<string, number> = { UNSUPPORTED: 0, UNKNOWN: 1, SUPPORTED: 2 };
+    let changed = false;
+    for (let k = 0; k < n; k++) {
+        const f = p.frequencies[k];
+        if (!(f > 0) || !gated.length) continue;
+        const here = gated.filter((g) => g.ok[k]);
+        const lowestOther = (gs: Gated[]) => Math.min(...gs.map((g) => g.o.coherence[k]));
+        const pool = (gs: Gated[], withPrimary: boolean) => {
+            let w = withPrimary ? nOwn[k] : 0;
+            let re = withPrimary ? nOwn[k] * p.hReal[k] : 0;
+            let im = withPrimary ? nOwn[k] * p.hImag[k] : 0;
+            let g2 = withPrimary ? nOwn[k] * p.coherence[k] : 0;
+            // Summed in an order the values fix (not the recording ids), so the result is bit-identical in any order.
+            const byValue = [...gs].sort(
+                (x, y) => x.o.hReal[k] - y.o.hReal[k] || x.o.hImag[k] - y.o.hImag[k] || x.nO[k] - y.nO[k],
             );
-            if (byBin.get(f)?.use !== "other_flight")
-                byBin.set(f, { frequencyHz: f, use: "pooled", coherence: [p.coherence[k], o.coherence[k]], z });
-            fromOther[k] = 1;
-            used = true;
-        }
-        out.flights.push({ id, medianZ: median, commonBins: zs.length, verdict: used ? "used" : "consistent_unused" });
-        if (used) {
-            out.contributors.push(id);
+            for (const g of byValue) {
+                w += g.nO[k];
+                re += g.nO[k] * g.o.hReal[k];
+                im += g.nO[k] * g.o.hImag[k];
+                g2 += g.nO[k] * g.o.coherence[k];
+            }
+            // An approximation: the averages-weighted mean of the coherences stands for the pooled
+            // estimate's (the H1 random error ε = √((1−γ²)/(2nγ²)) is then read with the summed n). The
+            // exact pooled coherence needs every flight's auto- and cross-spectra, which the rung does not keep.
+            tf.hReal[k] = re / w;
+            tf.hImag[k] = im / w;
+            tf.coherence[k] = g2 / w;
+            tf.magnitude[k] = 20 * Math.log10(Math.hypot(tf.hReal[k], tf.hImag[k]));
+            tf.phase[k] = (Math.atan2(tf.hImag[k], tf.hReal[k]) * 180) / Math.PI;
+            out.averagesByHz.set(f, w);
+            for (const g of gs) g.used = true;
             changed = true;
+        };
+        const mark = (use: CombinedBinUse, gs: Gated[], z: number | null, disagreeing: Gated[] = []) =>
+            byBin.set(f, {
+                frequencyHz: f,
+                use,
+                coherence: [p.coherence[k], gs.length ? lowestOther(gs) : lowestOther(here)],
+                z,
+                flights: gs.map((g) => g.id),
+                disagreeing: disagreeing.map((g) => g.id),
+            });
+
+        if (ownOk(k) && nOwn[k] >= 1) {
+            // The primary identifies the bin with its own averages: each flight against that value.
+            const agree: Gated[] = [];
+            const disagree: Gated[] = [];
+            let zMax: number | null = null;
+            for (const g of here) {
+                const z = zOf(
+                    p.hReal[k],
+                    p.hImag[k],
+                    p.coherence[k],
+                    nOwn[k],
+                    g.o.hReal[k],
+                    g.o.hImag[k],
+                    g.o.coherence[k],
+                    g.nO[k],
+                );
+                if (z === null) continue;
+                if (z > RECORDING_AGREEMENT.maxBinZ) disagree.push(g);
+                else agree.push(g);
+                zMax = Math.max(zMax ?? 0, z);
+            }
+            if (agree.length) {
+                pool(agree, true);
+                mark("pooled", agree, zMax, disagree);
+            } else if (disagree.length) mark("disagree_primary_kept", [], zMax, disagree);
+            continue;
         }
+
+        // The primary has no testable estimate here (below the loop minimum, or without whole-segment
+        // averages): only the other flights can supply it, and only when they agree among themselves.
+        if (!here.length) {
+            if (!ownOk(k)) mark("not_filled", [], null);
+            continue;
+        }
+        const counted = here.filter((g) => g.nO[k] >= 1);
+        if (!counted.length && ownOk(k)) continue; // nothing better supported than the primary's own value
+        const set = counted.length ? counted : here;
+        let zMax: number | null = null;
+        let comparable = true;
+        let agreeing = true;
+        for (let i = 0; i < set.length; i++)
+            for (let j = i + 1; j < set.length; j++) {
+                const a = set[i];
+                const b = set[j];
+                const z = zOf(
+                    a.o.hReal[k],
+                    a.o.hImag[k],
+                    a.o.coherence[k],
+                    a.nO[k],
+                    b.o.hReal[k],
+                    b.o.hImag[k],
+                    b.o.coherence[k],
+                    b.nO[k],
+                );
+                if (z === null) comparable = false;
+                else {
+                    zMax = Math.max(zMax ?? 0, z);
+                    if (z > RECORDING_AGREEMENT.maxBinZ) agreeing = false;
+                }
+            }
+        if (!comparable || !agreeing) {
+            // Two flights that disagree here, or cannot be compared, decide nothing: no flight is preferred.
+            mark("others_disagree", [], zMax, set);
+            continue;
+        }
+        if (set.length === 1) {
+            // One flight: its values as measured, with its own averages (0: unknown below one segment).
+            const g = set[0];
+            tf.hReal[k] = g.o.hReal[k];
+            tf.hImag[k] = g.o.hImag[k];
+            tf.coherence[k] = g.o.coherence[k];
+            tf.magnitude[k] = g.o.magnitude[k];
+            tf.phase[k] = g.o.phase[k];
+            out.averagesByHz.set(f, g.nO[k]);
+            g.used = true;
+            changed = true;
+        } else pool(set, false);
+        mark("other_flight", set, zMax);
+        // The bin's values are the other flights': their support evidence goes with them, the most
+        // conservative verdict among them (then the lowest excitation coherence), whatever their order.
+        if (support) {
+            const bins = set.map((g) => g.support.bins.get(f));
+            if (bins.some((b) => !b)) support.bins.delete(f);
+            else {
+                const pick = [...bins].sort(
+                    (a, b) =>
+                        (RANK[a!.verdict] ?? 0) - (RANK[b!.verdict] ?? 0) ||
+                        (a!.excitationCoherence ?? -1) - (b!.excitationCoherence ?? -1),
+                )[0]!;
+                support.bins.set(f, pick);
+            }
+        }
+    }
+    for (const g of gated) {
+        if (!g.used) continue;
+        out.flights[verdictAt.get(g.id)!].verdict = "used";
+        out.contributors.push(g.id);
     }
     // Per flight above; the summary: combined when any flight took part, disagreeing when one disagreed
     // and none took part, unknown otherwise. The median reported is the largest of the flights used.

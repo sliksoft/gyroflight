@@ -324,6 +324,7 @@ export function buildLogInputs(
                 ...(support ? { support } : {}),
                 ...(analyses.length ? { analyses } : {}),
                 tf: m.diagnostics!.transferFunction,
+                measurementId: m.id,
                 start,
                 end,
                 state: m.state,

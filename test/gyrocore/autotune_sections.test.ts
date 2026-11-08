@@ -418,6 +418,49 @@ describe("Autotune overview", () => {
         unmount();
     });
 
+    it("after a calculation it names the engine's primary flight and reads its measurements, not the file imported last", async () => {
+        await importLog(); // air65.bbl: the file CHIRP quality and Graphs show
+        const v2 = useAutotuneV2Store();
+        const report = {
+            filename: "primary.bbl",
+            logCount: 2,
+            logs: [],
+            measurements: [
+                {
+                    id: "p-roll",
+                    logIndex: 1,
+                    axisName: "roll",
+                    state: "rejected",
+                    durationS: 20,
+                    quality: { meanBandCoherence: 0.4 },
+                },
+            ],
+        };
+        v2.sources = [
+            ...v2.sources,
+            { filename: "primary.bbl", bytes: new Uint8Array(), report: report as never, uid: null },
+        ];
+        v2.inputFiles = new Map([["ab".repeat(32), "primary.bbl"]]);
+        v2.result = resultWith({
+            primarySource: { sha256: "ab".repeat(32), logIndex: 1, measurementIds: { roll: "p-roll" } },
+        });
+        v2.state = "done";
+        const { container, unmount } = mountComponent(AutotuneOverview);
+        await flush();
+        const flight = container.querySelector('[data-gyrocore="overview-primary-flight"]')!.textContent!;
+        expect(flight).toContain("primary.bbl");
+        expect(flight).toContain("gyrocoreChirpLog|2");
+        expect(container.querySelector('[data-gyrocore="overview-shown-elsewhere"]')!.textContent).toContain(
+            "gyroflightOverviewShownElsewhere|air65.bbl",
+        );
+        const row = (axis: string) => container.querySelector(`[data-gyrocore="overview-axes"] [data-axis="${axis}"]`)!;
+        // The primary's own roll sweep (rejected there), and no pitch sweep in the primary at all.
+        expect(row("roll").getAttribute("data-measurement")).toBe("rejected");
+        expect(row("roll").textContent).toContain("p-roll");
+        expect(row("pitch").getAttribute("data-measurement")).toBe("none");
+        unmount();
+    });
+
     it("a VALIDATED releasable value is reported as such, with the released Apply", async () => {
         const v2 = useAutotuneV2Store();
         v2.result = resultWith({

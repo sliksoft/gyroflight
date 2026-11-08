@@ -257,6 +257,96 @@ describe("combineRecordings with several flights and unequal averages (block 8 r
     });
 });
 
+describe("combineRecordings: the same result whatever the order of the other flights (block 8 review round 2)", () => {
+    // `others` is sorted by recording id inside, so the order is flipped through the ids, never the array.
+    const same = (x: ReturnType<typeof combineRecordings>, y: ReturnType<typeof combineRecordings>) => {
+        expect(x.tf && [...x.tf.hReal]).toEqual(y.tf && [...y.tf.hReal]);
+        expect(x.tf && [...x.tf.hImag]).toEqual(y.tf && [...y.tf.hImag]);
+        expect(x.tf && [...x.tf.coherence]).toEqual(y.tf && [...y.tf.coherence]);
+        expect([...x.averagesByHz].sort()).toEqual([...y.averagesByHz].sort());
+        expect(x.support && [...x.support.bins].sort()).toEqual(y.support && [...y.support.bins].sort());
+        const ids = (b: (typeof x.bins)[number]) => ({
+            ...b,
+            flights: b.flights.length,
+            disagreeing: b.disagreeing.length,
+        });
+        expect(x.bins.map(ids)).toEqual(y.bins.map(ids));
+    };
+
+    it("a hole two consistent flights disagree on is not filled, in either order (probe A)", () => {
+        const a = rung("a", estimate({ coherence: (f) => (f === 70 ? 0.5 : 0.95) }));
+        const b = estimate({ gain: () => 1.0005 });
+        const c = estimate({ gain: (f) => (f === 70 ? 1.6 : 1.0005) });
+        const one = combineRecordings("roll", a, [rung("b", b), rung("c", c)], 0.8);
+        const two = combineRecordings("roll", a, [rung("b", b), rung("0", c)], 0.8);
+        same(one, two);
+        for (const r of [one, two]) {
+            // Both pass the axis gate; at 70 Hz neither is preferred: the primary's (unidentified) value stays.
+            expect(r.flights.map((x) => x.verdict)).toEqual(["used", "used"]);
+            const bin = r.bins.find((x) => x.frequencyHz === 70)!;
+            expect(bin.use).toBe("others_disagree");
+            expect(bin.z!).toBeGreaterThan(RECORDING_AGREEMENT.maxBinZ);
+            expect(bin.disagreeing).toHaveLength(2);
+            expect(r.tf!.hReal[at(a.tf, 70)]).toBe(a.tf.hReal[at(a.tf, 70)]);
+            expect(r.tf!.coherence[at(a.tf, 70)]).toBe(0.5);
+            expect(r.averagesByHz.has(70)).toBe(false);
+        }
+    });
+
+    it("a hole two agreeing flights identify is filled with both, pooled by their averages (probe A, agreeing)", () => {
+        const a = rung("a", estimate({ coherence: (f) => (f === 70 ? 0.5 : 0.95) }));
+        const b = estimate({ gain: () => 1.0005 });
+        const c = estimate({ gain: () => 1.001 });
+        const one = combineRecordings("roll", a, [rung("b", b), rung("c", c)], 0.8);
+        const two = combineRecordings("roll", a, [rung("b", b), rung("0", c)], 0.8);
+        same(one, two);
+        const k = at(a.tf, 70);
+        const bin = one.bins.find((x) => x.frequencyHz === 70)!;
+        expect(bin.use).toBe("other_flight");
+        expect(bin.flights).toHaveLength(2);
+        // Equal averages: the mean of both, and their averages summed.
+        expect(one.tf!.hReal[k]).toBeCloseTo((b.hReal[k] + c.hReal[k]) / 2, 12);
+        const n70 = sweepAverages(70, a.analysis, SWEEP, a.analysis.windowSamples);
+        expect(one.averagesByHz.get(70)).toBe(2 * n70);
+    });
+
+    it("a bin the primary has without averages takes both agreeing flights, in either order (probe B)", () => {
+        const fine = 1000;
+        const short = estimate({ segmentSamples: fine });
+        const A1 = estimate({ segmentSamples: fine, gain: () => 1.0005 });
+        const A2 = estimate({ segmentSamples: fine, gain: () => 1.001 });
+        const P = rung("p", short, [], 300_000);
+        const one = combineRecordings("roll", P, [rung("x1", A1), rung("x2", A2)], 0.8);
+        const two = combineRecordings("roll", P, [rung("x2", A1), rung("x1", A2)], 0.8);
+        same(one, two);
+        const k = at(short, 50);
+        const n50 = sweepAverages(50, rung("x", A1).analysis, SWEEP, ANALYSIS.windowSamples);
+        expect(one.bins.find((x) => x.frequencyHz === 50)!.use).toBe("other_flight");
+        expect(one.averagesByHz.get(50)).toBe(2 * n50);
+        expect(one.tf!.hReal[k]).toBeCloseTo((A1.hReal[k] + A2.hReal[k]) / 2, 12);
+    });
+
+    it("a bin the primary identifies is pooled with the agreeing flight and names the disagreeing one, in either order", () => {
+        const a = rung("a", estimate({}));
+        const b = estimate({ gain: () => 1.0005 });
+        const c = estimate({ gain: (f) => (f === 70 ? 1.6 : 1.0005) });
+        const one = combineRecordings("roll", a, [rung("b", b), rung("c", c)], 0.8);
+        const two = combineRecordings("roll", a, [rung("b", b), rung("0", c)], 0.8);
+        same(one, two);
+        for (const [r, cId] of [
+            [one, "c:0"],
+            [two, "0:0"],
+        ] as const) {
+            const bin = r.bins.find((x) => x.frequencyHz === 70)!;
+            expect(bin.use).toBe("pooled");
+            expect(bin.flights).toEqual(["b:0"]);
+            expect(bin.disagreeing).toEqual([cId]);
+            const k = at(a.tf, 70);
+            expect(r.tf!.hReal[k]).toBeCloseTo((a.tf.hReal[k] + b.hReal[k]) / 2, 12);
+        }
+    });
+});
+
 // --- the engine on simulated flights ------------------------------------------------------------
 
 function decoded(o: Parameters<typeof closedLoopChirpLog>[0], name: string): AutotuneLogInput {
@@ -289,11 +379,36 @@ describe("the experimental decision with a second flight (engine, simulated)", (
         runAutotuneV2({ primary, others, verifiedTune: null, createdAt: "2026-11-08T00:00:00Z" });
 
     it("alone the holed flight stops at its holes; with an agreeing flight they are filled from it, in either order", () => {
-        const alone = run(holed, []).candidateDecisions.roll!.primary!;
+        const aloneRun = run(holed, []);
+        const alone = aloneRun.candidateDecisions.roll!.primary!;
         expect(alone.status).toBe("plant_band_insufficient");
         expect(alone.checks.find((c) => c.rule === "decision_band_gaps")!.result).toBe("fail");
 
-        const ab = run(holed, [clean]).candidateDecisions.roll!.primary!;
+        const abRun = run(holed, [clean]);
+        const ab = abRun.candidateDecisions.roll!.primary!;
+        // The release route rests on the primary's own measurement only (block 8): another flight
+        // changes neither its margins, their uncertainty and averages, nor what it releases. It is
+        // used there only as a between-flight repeatability check (crossLogPlant), never as data.
+        const ownOnly = (m: unknown) =>
+            JSON.parse(
+                JSON.stringify(m, (k, v) =>
+                    k === "repeatability"
+                        ? undefined
+                        : k === "unknown" && Array.isArray(v)
+                          ? v.filter((x) => x !== "repeatability_between_flights")
+                          : v,
+                ),
+            );
+        expect(ownOnly(abRun.margins.roll)).toEqual(ownOnly(aloneRun.margins.roll));
+        expect(abRun.releasableProposal).toEqual(aloneRun.releasableProposal);
+        expect(abRun.multiRecording.contributors).toEqual(ab.combination!.flights);
+        // The result names the flight it rests on and the measurement it read (the overview shows that one).
+        expect(holed.chirp.roll!.measurementId).toBeTruthy();
+        expect(abRun.primarySource).toEqual({
+            sha256: holed.sha256,
+            logIndex: holed.logIndex,
+            measurementIds: { roll: holed.chirp.roll!.measurementId },
+        });
         const ba = run(clean, [holed]).candidateDecisions.roll!.primary!;
         expect(ab.combination!.consistent).toBe(true);
         // The holed flight's unsupported bins come from the clean flight, with its support.

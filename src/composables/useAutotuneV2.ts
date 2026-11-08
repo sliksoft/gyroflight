@@ -167,6 +167,7 @@ export function useAutotuneV2() {
         if (store.inputs) return store.inputs;
         const revision = store.revision;
         const inputs: AutotuneLogInput[] = [];
+        const files = new Map<string, string>();
         const n = store.sources.length;
         for (const [i, s] of store.sources.entries()) {
             store.progressMessage = i18n.getMessage("gyroflightV2Progress", [s.filename, String(i + 1), String(n)]);
@@ -174,6 +175,7 @@ export function useAutotuneV2() {
             await new Promise((r) => setTimeout(r, 0));
             const sha = await sha256Hex(s.bytes);
             if (store.revision !== revision) throw new StaleRun();
+            files.set(sha, s.filename);
             // store.sources is newest first: the first source gets the highest order.
             for (const l of buildLogInputs(s.bytes, sha, s.report, analyzeM4BblFile(s.bytes, s.filename))) {
                 inputs.push({ ...l, order: n - i });
@@ -185,6 +187,7 @@ export function useAutotuneV2() {
         store.inputs = Object.freeze(
             uniqueFlights(inputs).map((l) => Object.freeze({ ...l, channels: Object.freeze({ ...l.channels }) })),
         );
+        store.inputFiles = files;
         return store.inputs;
     }
 

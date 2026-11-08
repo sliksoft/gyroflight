@@ -99,7 +99,6 @@ import { buildExperimentalProposal, type ExperimentalProposal, type WithheldItem
 import { decideAxis, type RouteDecision } from "./candidateDecision";
 import { recordingPlan, SUPPLEMENTARY_MEASUREMENT, type RecordingPlan } from "./recordingInstruction";
 import {
-    collectMultiRecordingAverages,
     combineRecordings,
     eligibleRecordings,
     otherSweep,
@@ -123,6 +122,8 @@ export const FLIGHT_THROTTLE = 1150;
 
 export interface ChirpAxisInput {
     tf: TransferFunction;
+    /** The qualification's measurement this input is (chirp/qualification.ts id); absent: not recorded. */
+    measurementId?: string;
     /** Sample index range of the sweep in the channel arrays. */
     start: number;
     end: number;
@@ -260,11 +261,16 @@ export interface AutotuneV2Result {
     /** Why other logs were not used as independent repeats (duplicate flight, other craft / firmware / config). */
     crossLogRejected: string[];
     /**
-     * Multi-recording average ledger (multiRecording.ts): which independent flights contributed
-     * whole-segment averages and which were rejected. Informative for the UI; uncertainty already
-     * applied the extras when present.
+     * Multi-recording ledger (multiRecording.ts combineRecordings): which independent flights' measured
+     * values the EXPERIMENTAL decision combined with the primary's, and which were not combined and why.
+     * The release route uses none of them: its uncertainty counts the primary's own averages only.
      */
     multiRecording: { contributors: string[]; rejected: string[] };
+    /**
+     * The primary flight this result was computed from (logInput.ts pickPrimary): its file, log and, per
+     * axis, the qualification's measurement the engine read. What the overview names; absent: not recorded.
+     */
+    primarySource?: { sha256: string; logIndex: number; measurementIds: Partial<Record<AxisName, string>> };
     safety: { analysisEvidence: string; reasons: string[] };
     parts: PartReport[];
     /** Every recommended change, with its status: what Compare shows. */
@@ -752,16 +758,6 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             // rungs with that candidate, never copied from the current tune.
             resolutionFor = (cand) => resolutionConvergence(ladder, pick.index, probeWith(cand), pick.reasons);
         }
-        const multiRec = collectMultiRecordingAverages(
-            log,
-            input.others,
-            name,
-            chosen.tf.frequencies,
-            chosen.analysis,
-            sweep,
-        );
-        multiRecordingContributors.push(...multiRec.contributors);
-        multiRecordingRejected.push(...multiRec.rejected);
         const qualification = qualificationFor(name, axis, chosen.analysis);
         const loop = buildAxisLoop(axis, chosen.tf, ctl.cfg, eff, chainOk(axis), attested, qualification, {
             sweep,
@@ -769,10 +765,11 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             support: chosen.support,
             resolution,
             resolutionFor,
-            multiRecordingExtraByHz: multiRec.extraAveragesByHz,
         });
-        // Experimental decision (block 8): the other flights' measured values where they agree, never
-        // their average counts alone. The release loop above is unchanged.
+        // The release loop above rests on the primary's own measurement only: its uncertainty counts the
+        // averages of the data it reads, never another flight's average counts without that flight's
+        // values (block 8). The experimental decision may use the other flights' measured values where
+        // they agree (combineRecordings), with exactly the averages behind each combined bin.
         const eligibility = input.others.length ? eligibleRecordings(log, input.others, name) : null;
         const combination =
             chosen.analysis && sweep && eligibility
@@ -812,26 +809,20 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                     return why.length ? `${r}:${why.join(",")}` : r;
                 }),
             );
-        const experimentalLoop =
-            combination?.tf || multiRec.extraAveragesByHz.size
-                ? buildAxisLoop(
-                      axis,
-                      combination?.tf ?? chosen.tf,
-                      ctl.cfg,
-                      eff,
-                      chainOk(axis),
-                      attested,
-                      qualification,
-                      {
-                          sweep,
-                          analysis: chosen.analysis,
-                          support: combination?.support ?? chosen.support,
-                          resolution,
-                          resolutionFor,
-                          combinedAveragesByHz: combination?.averagesByHz ?? null,
-                      },
-                  )
-                : loop;
+        if (combination) {
+            multiRecordingContributors.push(...combination.contributors);
+            multiRecordingRejected.push(...combination.rejected);
+        } else if (eligibility) multiRecordingRejected.push(...eligibility.rejected);
+        const experimentalLoop = combination?.tf
+            ? buildAxisLoop(axis, combination?.tf ?? chosen.tf, ctl.cfg, eff, chainOk(axis), attested, qualification, {
+                  sweep,
+                  analysis: chosen.analysis,
+                  support: combination?.support ?? chosen.support,
+                  resolution,
+                  resolutionFor,
+                  combinedAveragesByHz: combination?.averagesByHz ?? null,
+              })
+            : loop;
         axes[name] = {
             loop,
             dterm: ctl.dterm,
@@ -1308,6 +1299,13 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         multiRecording: {
             contributors: [...new Set(multiRecordingContributors)],
             rejected: [...new Set(multiRecordingRejected)],
+        },
+        primarySource: {
+            sha256: log.sha256,
+            logIndex: log.logIndex,
+            measurementIds: Object.fromEntries(
+                AXES.flatMap((a) => (log.chirp[a]?.measurementId ? [[a, log.chirp[a]!.measurementId!]] : [])),
+            ),
         },
         safety,
         parts,

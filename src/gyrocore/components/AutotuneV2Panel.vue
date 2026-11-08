@@ -1548,7 +1548,7 @@ const decisionRows = computed(() => {
             const source = c
                 ? [
                       c.consistent && c.flights.length
-                          ? `with ${c.flights.length} other flight(s) (median z ${num(c.medianZ, 2)}): pooled ${hz(c.pooledHz)}; from the other flight ${hz(c.otherFlightHz)}${c.disagreeHz.length ? `; disagree, kept as measured ${hz(c.disagreeHz.map((x) => x.hz))}` : ""}`
+                          ? `with ${c.flights.length} other flight(s) (median z ${num(c.medianZ, 2)}): pooled ${hz(c.pooledHz)}; from the other flight ${hz(c.otherFlightHz)}${c.disagreeHz.length ? `; disagree, kept as measured ${hz(c.disagreeHz.map((x) => x.hz))}` : ""}${c.othersDisagreeHz?.length ? `; other flights disagree, not filled ${hz(c.othersDisagreeHz)}` : ""}`
                           : c.consistent
                             ? `other flight(s) agree (median z ${num(c.medianZ, 2)}), nothing to add`
                             : "",

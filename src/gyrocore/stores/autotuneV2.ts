@@ -103,6 +103,8 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
      * frozen (useAutotuneV2 buildInputs): what an Apply was authorized against cannot change in place.
      */
     const inputs = shallowRef<readonly AutotuneLogInput[] | null>(null);
+    /** The imported file each input's sha256 came from (set with `inputs`): to name the engine's primary flight. */
+    const inputFiles = shallowRef<ReadonlyMap<string, string>>(new Map());
     /** Outcome of the last "create Verified Tune" (the record itself goes to the Verified Tune store). */
     const verifiedTuneAttempt = ref<{ verdict: "PASS" | "FAIL" | "NONE"; id: string | null; reasons: string[] } | null>(
         null,
@@ -119,6 +121,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         sources.value = [{ filename, bytes, report, uid }, ...same].slice(0, MAX_SOURCES);
         revision.value++;
         inputs.value = null;
+        inputFiles.value = new Map();
         result.value = null;
         qualification.value = null;
         preview.value = null;
@@ -129,6 +132,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
         sources.value = [];
         revision.value++;
         inputs.value = null;
+        inputFiles.value = new Map();
         verifiedTuneAttempt.value = null;
         result.value = null;
         qualification.value = null;
@@ -142,6 +146,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
     return {
         sources,
         inputs,
+        inputFiles,
         verifiedTuneAttempt,
         result,
         qualification,

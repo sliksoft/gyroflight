@@ -1,21 +1,32 @@
 <template>
     <UiBox :title="$t('gyroflightOverviewTitle')" type="neutral" data-gyrocore="autotune-overview">
-        <!-- The selected flight: the one file every section reads. -->
+        <!-- The flight this overview reads: once calculated, the primary flight the engine used. -->
         <p v-if="!filename" class="text-sm text-dimmed" data-gyrocore="overview-no-log">
             {{ $t("gyroflightOverviewNoLog") }}
         </p>
         <div v-else class="flex flex-wrap gap-x-6 gap-y-1 text-sm" data-gyrocore="overview-flight">
-            <span>
+            <span v-if="primary" data-gyrocore="overview-primary-flight">
+                <span class="text-dimmed">{{ $t("gyroflightOverviewPrimaryFlight") }}: </span>
+                <span class="font-bold break-all">{{ primary.file ?? "--" }}</span>
+                <span v-if="(primary.report?.logCount ?? 1) > 1">
+                    · {{ t("gyrocoreChirpLog", [primary.logIndex + 1]) }}</span
+                >
+            </span>
+            <span v-else>
                 <span class="text-dimmed">{{ $t("gyroflightOverviewFlight") }}: </span>
                 <span class="font-bold break-all">{{ filename }}</span>
             </span>
-            <span v-if="report">
+            <span v-if="shownReport">
                 <span class="text-dimmed">{{ $t("gyroflightOverviewChirp") }}: </span>
-                {{ t("gyroflightOverviewChirpCount", [report.measurements.length, report.logCount]) }}
+                {{ t("gyroflightOverviewChirpCount", [shownReport.measurements.length, shownReport.logCount]) }}
             </span>
             <span v-if="v2.sources.length > 1" data-gyrocore="overview-sources">
                 <span class="text-dimmed">{{ $t("gyroflightOverviewSources") }}: </span>
                 {{ v2.sources.length }}
+            </span>
+            <!-- CHIRP quality and Graphs show the file selected there: named when it is not the primary. -->
+            <span v-if="shownElsewhere" class="basis-full text-dimmed" data-gyrocore="overview-shown-elsewhere">
+                {{ t("gyroflightOverviewShownElsewhere", [shownElsewhere]) }}
             </span>
         </div>
 
@@ -126,6 +137,30 @@ const report = computed(() => {
 const result = computed(() => v2.result);
 const filename = computed(() => autotune.analysisResult?.filename ?? v2.sources[0]?.filename ?? null);
 
+/**
+ * The primary flight the calculation used (logInput.ts pickPrimary, named in the result): its file,
+ * log and own CHIRP report. Once calculated the measurement column reads this flight, the one every
+ * tuning answer rests on, not the file imported last (block 8).
+ */
+const primary = computed(() => {
+    const ps = result.value?.primarySource;
+    if (!ps) return null;
+    const file = v2.inputFiles.get(ps.sha256) ?? null;
+    const report = (file && v2.sources.find((s) => s.filename === file)?.report) || null;
+    return { file, logIndex: ps.logIndex, report, ids: ps.measurementIds };
+});
+const shownReport = computed(() => primary.value?.report ?? report.value);
+/** The file CHIRP quality and Graphs show, when it is not the primary flight's log. */
+const shownElsewhere = computed(() => {
+    const p = primary.value;
+    const g = report.value;
+    if (!p || !g) return "";
+    if (g.filename === p.file && gate.selectedLogIndex === p.logIndex) return "";
+    return g.logCount > 1 && gate.selectedLogIndex !== null
+        ? `${g.filename} · ${t("gyrocoreChirpLog", [gate.selectedLogIndex + 1])}`
+        : g.filename;
+});
+
 const t = (key: string, params?: (string | number)[]) => i18n.getMessage(key, params?.map(String));
 const axisLabel = (axis: Axis) => t(`autotuneAxis${axis[0].toUpperCase()}${axis.slice(1)}`);
 const ofAxis = (key: string, axis: Axis) => key.endsWith(`_${axis}`);
@@ -137,7 +172,8 @@ const RED = "text-red-500";
 const DIM = "text-dimmed";
 
 function measurementOf(axis: Axis) {
-    const m = gate.selectedMeasurements[axis];
+    const p = primary.value;
+    const m = p ? (p.report?.measurements.find((x) => x.id === p.ids[axis]) ?? null) : gate.selectedMeasurements[axis];
     if (!m) return { state: "none", label: t("gyroflightOverviewNotMeasured"), cls: DIM, detail: "" };
     const label = {
         usable: t("gyrocoreChirpStateUsable"),

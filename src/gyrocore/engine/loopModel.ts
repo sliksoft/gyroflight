@@ -472,11 +472,10 @@ export function loopUncertainty(
     measurement: {
         sweep?: SweepInfo | null;
         analysis?: AnalysisProvenance | null;
-        /** Extra whole-segment averages from independent recordings (multiRecording.ts); never invents primary support. */
-        multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
         /**
-         * The averages behind a bin of a combined estimate (multiRecording.ts combineRecordings: both
-         * flights where pooled, the other flight's own where taken from it). Replaces the count.
+         * The averages behind a bin of a combined estimate (multiRecording.ts combineRecordings: every
+         * estimate pooled into it). Replaces the count there. Another flight's averages are never counted
+         * without its values (block 8): there is no count-only route.
          */
         combinedAveragesByHz?: ReadonlyMap<number, number> | null;
     } = {},
@@ -540,8 +539,7 @@ export function loopUncertainty(
             countedAsOne++;
             continue;
         }
-        const extra = combined !== undefined ? 0 : (measurement.multiRecordingExtraByHz?.get(f) ?? 0);
-        const n = counted + (Number.isFinite(extra) && extra > 0 ? Math.floor(extra) : 0);
+        const n = counted;
         averagesByHz.set(f, n);
         lo = Math.min(lo, n);
         hi = Math.max(hi, n);
@@ -1165,7 +1163,6 @@ export function buildAxisLoop(
         resolution?: ResolutionConvergence | null;
         /** The verdict for another candidate (AxisLoop.resolutionFor); absent: unknown for candidates. */
         resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
-        multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
         combinedAveragesByHz?: ReadonlyMap<number, number> | null;
         /**
          * A plant measured directly (jioSweep.ts: G = H_ry / H_ru from the logged pidSum) instead of
