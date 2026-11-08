@@ -429,7 +429,7 @@ export function decideAxis(o: {
               result: combination.consistent === true ? "pass" : combination.consistent === false ? "fail" : "unknown",
               consequence:
                   combination.consistent === true
-                      ? "agreeing bins pooled; bins only the other flight identifies taken from it; disagreeing bins keep the primary's values and fill no hole"
+                      ? `agreeing bins pooled; bins only another flight identifies taken from it; disagreeing bins keep the primary's values and fill no hole${combination.rejected.length ? `; not combined: ${combination.rejected.join(", ")}` : ""}`
                       : "no combination: the primary's own measurement only",
           }
         : null;
@@ -797,6 +797,27 @@ export function decideAxis(o: {
     // ±MAX_STEP of the current tune (a farther target never widens what one Apply may write).
     const target = o.segment ? null : targetSearch(loop, current, kdRatio, curV);
     const reached = !!target?.target;
+    // The first step towards the target lies within ±MAX_STEP on every term; when it meets the targets
+    // on its own margins it is a candidate like any grid point (block 8 review, NOTE 3). Rare: the
+    // grid would normally have found it, but the step's rounding and d_max differ from the grid's.
+    if (target?.step?.meetsTargets) {
+        const sv = target.step.values;
+        const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...sv, d: sv.d * kdRatio }) });
+        const outcome = curMeets ? "improved" : "restores_margins";
+        checks.push(
+            searchCheck(
+                "pass",
+                `${outcome}: first step towards the target, crossover ${curV.crossoverHz?.toFixed(1)}→${target.step.crossoverHz?.toFixed(1)} Hz, PM ${target.step.pmDeg?.toFixed(0)}°, GM ${target.step.gmDb?.toFixed(1)} dB, |S| ${target.step.sDb?.toFixed(1)} dB`,
+                "experimental candidate offered (the first step; the target itself lies beyond one Apply)",
+            ),
+            targetCheck(target),
+        );
+        return out("candidate_found", {
+            ...searched,
+            target,
+            candidate: candidate(sv, m, outcome, ["first_step_towards_target"]),
+        });
+    }
     checks.push(
         searchCheck(
             "fail",
@@ -981,7 +1002,7 @@ function targetCheck(t: TargetSearch): DecisionCheck {
         threshold: `a candidate is offered only within ±${Math.round(MAX_STEP * 100)} % per term and meeting PM ≥ ${PID_TARGETS.minPhaseMarginDeg}°, GM ≥ ${PID_TARGETS.minGainMarginDb} dB, |S| ≤ ${PID_TARGETS.maxSensitivityPeakDb} dB itself (search ${bounds})`,
         result: t.step?.meetsTargets ? "pass" : "fail",
         consequence: t.step?.meetsTargets
-            ? "the first step meets the targets on its own margins"
+            ? "the first step meets the targets on its own margins and lies within one Apply: offered as the experimental candidate; the target itself is not"
             : "target not offered (beyond one Apply); the first step is not offered because it misses the targets itself; both are measured predictions, not flight advice",
     };
 }

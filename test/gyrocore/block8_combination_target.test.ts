@@ -37,7 +37,7 @@ import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
 import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { runAutotuneV2, type AutotuneLogInput } from "../../src/gyrocore/engine/autotuneV2";
-import { MAX_STEP } from "../../src/gyrocore/engine/pidOptimizer";
+import { MAX_STEP, searchGrid } from "../../src/gyrocore/engine/pidOptimizer";
 import { TARGET_SEARCH } from "../../src/gyrocore/engine/candidateDecision";
 import { experimentalWriteDecision } from "../../src/gyrocore/releaseGate/experimentalAuthority";
 import type { ExperimentalProposal } from "../../src/gyrocore/engine/experimentalProposal";
@@ -98,11 +98,16 @@ function supportOf(tf: TransferFunction, unsupported: number[] = []): FrequencyS
     };
 }
 
-function rung(sha: string, tf: TransferFunction, unsupported: number[] = []): RecordingRung {
+function rung(
+    sha: string,
+    tf: TransferFunction,
+    unsupported: number[] = [],
+    windowSamples = ANALYSIS.windowSamples,
+): RecordingRung {
     return {
         log: { sha256: sha, logIndex: 0 } as AutotuneLogInput,
         tf,
-        analysis: { ...ANALYSIS, segmentSamples: (tf.frequencies.length - 1) * 2 },
+        analysis: { ...ANALYSIS, segmentSamples: (tf.frequencies.length - 1) * 2, windowSamples },
         sweep: SWEEP,
         support: supportOf(tf, unsupported),
     };
@@ -203,6 +208,52 @@ describe("combineRecordings: the other flight's values only where it measured th
         }
         // Pooled bins: the same weighted mean either way.
         expect(ab.tf!.hReal[at(A, 50)]).toBeCloseTo(ba.tf!.hReal[at(B, 50)], 12);
+    });
+});
+
+describe("combineRecordings with several flights and unequal averages (block 8 review)", () => {
+    it("each flight is judged against the primary's own measurement; a later disagreeing flight does not hide an earlier one", () => {
+        const a = rung("a", estimate({ coherence: (f) => (f === 70 ? 0.5 : 0.95) }));
+        const agree = estimate({ gain: () => 1.0005 });
+        const contra = estimate({ gain: () => 1.6 });
+        // Sorted by id: the agreeing flight first, then the contradicting one, and the other way round.
+        const one = combineRecordings("roll", a, [rung("b", agree), rung("c", contra)], 0.8);
+        const two = combineRecordings("roll", a, [rung("0", contra), rung("b", agree)], 0.8);
+        for (const c of [one, two]) {
+            expect(c.contributors).toEqual(["b:0"]);
+            expect(c.consistent).toBe(true);
+            expect(c.flights.find((x) => x.id === "b:0")!.verdict).toBe("used");
+            expect(c.flights.find((x) => x.id !== "b:0")!.verdict).toBe("disagrees");
+            expect(c.rejected.some((x) => x.startsWith("multi_recording_flights_disagree:roll"))).toBe(true);
+            expect(c.bins.find((x) => x.frequencyHz === 70)!.use).toBe("other_flight");
+            // The median shown is the used flight's, not the rejected one's.
+            expect(c.medianZ!).toBeLessThan(RECORDING_AGREEMENT.maxAxisMedianZ);
+        }
+        // The order of the other flights does not change the combined estimate.
+        expect([...one.tf!.hReal]).toEqual([...two.tf!.hReal]);
+        expect([...one.tf!.coherence]).toEqual([...two.tf!.coherence]);
+    });
+
+    it("a bin both identify but only one with whole-segment averages takes that flight's estimate, in either order", () => {
+        // 1 Hz bins; the short window has no whole-segment dwell above ≈ 14 Hz (the sweep is past it).
+        const fine = 1000;
+        const full = estimate({ segmentSamples: fine });
+        const short = estimate({ segmentSamples: fine, gain: () => 1.0005 });
+        const A = rung("a", full);
+        const B = rung("b", short, [], 300_000);
+        const k50 = at(full, 50);
+        expect(sweepAverages(50, A.analysis, SWEEP, A.analysis.windowSamples)).toBeGreaterThan(0);
+        expect(sweepAverages(50, B.analysis, SWEEP, B.analysis.windowSamples)).toBe(0);
+        const ab = combineRecordings("roll", A, [B], 0.8);
+        const ba = combineRecordings("roll", B, [A], 0.8);
+        expect(ab.consistent).toBe(true);
+        expect(ba.consistent).toBe(true);
+        // Both ways the 50 Hz bin carries the long flight's value and its averages.
+        const valueAt50 = (c: typeof ab, prim: TransferFunction) => (c.tf ?? prim).hReal[k50];
+        expect(valueAt50(ab, full)).toBe(full.hReal[k50]);
+        expect(valueAt50(ba, short)).toBe(full.hReal[k50]);
+        expect(ba.bins.find((x) => x.frequencyHz === 50)!.use).toBe("other_flight");
+        expect(ba.averagesByHz.get(50)).toBe(sweepAverages(50, A.analysis, SWEEP, A.analysis.windowSamples));
     });
 });
 
@@ -345,6 +396,10 @@ describe("target search beyond one Apply (engine, simulated)", () => {
             expect(Math.sign(t.step!.values[k] - cur[k])).toBe(Math.sign(t.target!.values[k] - cur[k]));
         }
         expect(t.step!.meetsTargets).toBe(false);
+        // The step is a point of the ±30 % grid (P and I move together on its scale, D is clipped to its
+        // edges): a step meeting the targets would have been the grid's candidate, so this status
+        // always means the step misses them.
+        expect([...searchGrid(cur, null)]).toContainEqual(t.step!.values);
         expect(d.checks.find((c) => c.rule === "target_search_wider_bounds")!.result).toBe("fail");
         // Nothing for roll in the experimental proposal: neither the target nor the step.
         expect(r.experimental?.items.some((i) => i.key.endsWith("_roll")) ?? false).toBe(false);

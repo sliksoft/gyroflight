@@ -1546,9 +1546,21 @@ const decisionRows = computed(() => {
             // A recording id (sha256:logIndex) shortened for the table; the full ids stay in the result.
             const shortIds = (r: string) => r.replace(/\b([0-9a-f]{8})[0-9a-f]{56}(:\d+)/g, "$1…$2");
             const source = c
-                ? c.consistent
-                    ? `with ${c.flights.length} other flight(s) (median z ${num(c.medianZ, 2)}): pooled ${hz(c.pooledHz)}; from the other flight ${hz(c.otherFlightHz)}${c.disagreeHz.length ? `; disagree, kept as measured ${hz(c.disagreeHz.map((x) => x.hz))}` : ""}`
-                    : `other flight not combined: ${c.rejected.map(shortIds).join(", ") || "agreement not shown"}`
+                ? [
+                      c.consistent && c.flights.length
+                          ? `with ${c.flights.length} other flight(s) (median z ${num(c.medianZ, 2)}): pooled ${hz(c.pooledHz)}; from the other flight ${hz(c.otherFlightHz)}${c.disagreeHz.length ? `; disagree, kept as measured ${hz(c.disagreeHz.map((x) => x.hz))}` : ""}`
+                          : c.consistent
+                            ? `other flight(s) agree (median z ${num(c.medianZ, 2)}), nothing to add`
+                            : "",
+                      // With several flights some may take part and others not: both are named.
+                      c.rejected.length
+                          ? `${c.consistent ? "not combined" : "other flight not combined"}: ${c.rejected.map(shortIds).join(", ")}`
+                          : c.consistent
+                            ? ""
+                            : "other flight not combined: agreement not shown",
+                  ]
+                      .filter(Boolean)
+                      .join("; ")
                 : "";
             const waived = r.checks
                 .filter((c) => c.result === "waived")

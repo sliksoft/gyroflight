@@ -304,7 +304,7 @@ function holeAdvice(r: RouteDecision): string[] {
         out.push(
             `Existing flights combined where they agree (${c.flights.length} other flight(s); pooled ${c.pooledHz.length} bin(s), ${c.otherFlightHz.length} taken from the other flight); the holes listed remain after that.`,
         );
-    else if (c && c.rejected.length) out.push(`Other flights not combined on this axis: ${c.rejected.join("; ")}.`);
+    if (c && c.rejected.length) out.push(`Other flights not combined on this axis: ${c.rejected.join("; ")}.`);
     const holes = r.missing.filter((m) => m.kind === "decision_band_hole");
     const hz = (ms: typeof holes) =>
         ms

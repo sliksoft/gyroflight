@@ -326,8 +326,18 @@ export interface RecordingCombination {
     /** Median per-bin z over the bins both flights identify; null with fewer than minCommonBins. */
     medianZ: number | null;
     commonBins: number;
-    /** The flights measured the same loop (median z within maxAxisMedianZ); false: no combination. */
+    /**
+     * true: at least one other flight measured the same loop (median z within maxAxisMedianZ against the
+     * primary's own measurement); false: none did and one disagreed; null: agreement not shown.
+     */
     consistent: boolean | null;
+    /** Each other flight on its own: compared with the primary's own measurement, never with the combination. */
+    flights: {
+        id: string;
+        medianZ: number | null;
+        commonBins: number;
+        verdict: "used" | "consistent_unused" | "disagrees" | "too_few_common_bins" | "grid_differs";
+    }[];
     /** The bins this combination changed or deliberately left alone (the primary's other bins are unchanged). */
     bins: CombinedBin[];
     /** The combined estimate on the primary's grid (null when nothing was combined). */
@@ -373,6 +383,7 @@ export function combineRecordings(
         medianZ: null,
         commonBins: 0,
         consistent: null,
+        flights: [],
         bins: [],
         tf: null,
         averagesByHz: new Map(),
@@ -381,26 +392,58 @@ export function combineRecordings(
     const support: FrequencySupport | null = primary.support
         ? { observedHz: primary.support.observedHz, bins: new Map(primary.support.bins) }
         : null;
-    const n = primary.tf.frequencies.length;
+    const p = primary.tf;
+    const n = p.frequencies.length;
+    // The combined estimate: starts as the primary's own measurement.
     const tf: TransferFunction = {
-        frequencies: primary.tf.frequencies,
-        magnitude: Float64Array.from(primary.tf.magnitude),
-        phase: Float64Array.from(primary.tf.phase),
-        coherence: Float64Array.from(primary.tf.coherence),
-        hReal: Float64Array.from(primary.tf.hReal),
-        hImag: Float64Array.from(primary.tf.hImag),
-        numSegments: primary.tf.numSegments,
+        frequencies: p.frequencies,
+        magnitude: Float64Array.from(p.magnitude),
+        phase: Float64Array.from(p.phase),
+        coherence: Float64Array.from(p.coherence),
+        hReal: Float64Array.from(p.hReal),
+        hImag: Float64Array.from(p.hImag),
+        numSegments: p.numSegments,
     };
-    // Averages behind the current estimate per bin (starts as the primary's own whole-segment dwell).
-    const nNow = new Float64Array(n);
+    // The primary's own whole-segment averages (fixed), and the averages behind the combined estimate.
+    const nOwn = new Float64Array(n);
     for (let k = 0; k < n; k++) {
-        const f = primary.tf.frequencies[k];
-        nNow[k] = f > 0 ? sweepAverages(f, primary.analysis, primary.sweep, primary.analysis.windowSamples) : 0;
+        const f = p.frequencies[k];
+        nOwn[k] = f > 0 ? sweepAverages(f, primary.analysis, primary.sweep, primary.analysis.windowSamples) : 0;
     }
+    const nNow = Float64Array.from(nOwn);
+    // The primary's own bin by the loop's rules: coherence at the minimum, excitation not shown absent.
+    const ownOk = (k: number) =>
+        p.coherence[k] >= minCoherence && primary.support?.bins.get(p.frequencies[k])?.verdict !== "UNSUPPORTED";
+    // Which bins of the combined estimate already rest on another flight (taken or pooled into it).
+    const fromOther = new Uint8Array(n);
     const byBin = new Map<number, CombinedBin>();
     let changed = false;
-    // Read on the combined support: a bin already taken from another flight carries that flight's.
-    const primarySupported = (f: number) => (support ?? primary.support)?.bins.get(f)?.verdict !== "UNSUPPORTED";
+    // z between two estimates of one bin, each with its own γ² and averages (null: an average count unknown).
+    const zOf = (
+        aRe: number,
+        aIm: number,
+        aG2: number,
+        aN: number,
+        bRe: number,
+        bIm: number,
+        bG2: number,
+        bN: number,
+    ) => {
+        if (!(aN >= 1 && bN >= 1)) return null;
+        const ea = relErrOf(aG2, aN) * Math.hypot(aRe, aIm);
+        const eb = relErrOf(bG2, bN) * Math.hypot(bRe, bIm);
+        const s = Math.hypot(ea, eb);
+        return Number.isFinite(s) && s > 0 ? Math.hypot(aRe - bRe, aIm - bIm) / s : null;
+    };
+    const setBin = (k: number, re: number, im: number, g2: number, nAvg: number) => {
+        tf.hReal[k] = re;
+        tf.hImag[k] = im;
+        tf.coherence[k] = g2;
+        tf.magnitude[k] = 20 * Math.log10(Math.hypot(re, im));
+        tf.phase[k] = (Math.atan2(im, re) * 180) / Math.PI;
+        nNow[k] = nAvg;
+        out.averagesByHz.set(p.frequencies[k], nAvg);
+    };
     for (const other of [...others].sort((a, b) => byRecordingId(a.log, b.log))) {
         const id = `${other.log.sha256}:${other.log.logIndex}`;
         const o = other.tf;
@@ -408,128 +451,144 @@ export function combineRecordings(
             other.analysis.segmentSamples !== primary.analysis.segmentSamples ||
             other.analysis.sampleRateHz !== primary.analysis.sampleRateHz ||
             o.frequencies.length !== n ||
-            o.frequencies.some((f, k) => f !== primary.tf.frequencies[k])
+            o.frequencies.some((f, k) => f !== p.frequencies[k])
         ) {
             out.rejected.push(`multi_recording_grid_differs:${axis}:${id}`);
+            out.flights.push({ id, medianZ: null, commonBins: 0, verdict: "grid_differs" });
             continue;
         }
         const nO = (k: number) => {
             const f = o.frequencies[k];
             return f > 0 ? sweepAverages(f, other.analysis, other.sweep, other.analysis.windowSamples) : 0;
         };
-        // The loop's own rule for the primary (loopModel binsDroppedForSupport): a bin whose excitation
-        // was shown absent is left out; without any support evidence the other flight fills nothing.
-        const supported = (k: number) =>
-            !!other.support && other.support.bins.get(o.frequencies[k])?.verdict !== "UNSUPPORTED";
-        const zAt = (k: number, nOk: number) => {
-            const ea = relErrOf(tf.coherence[k], nNow[k]) * Math.hypot(tf.hReal[k], tf.hImag[k]);
-            const eb = relErrOf(o.coherence[k], nOk) * Math.hypot(o.hReal[k], o.hImag[k]);
-            const d = Math.hypot(tf.hReal[k] - o.hReal[k], tf.hImag[k] - o.hImag[k]);
-            const s = Math.hypot(ea, eb);
-            return Number.isFinite(s) && s > 0 ? d / s : null;
-        };
-        // Consistency over the axis: the bins both flights identify (each at or above the loop minimum).
+        // The loop's own rule (loopModel binsDroppedForSupport): a bin whose excitation was shown absent
+        // is left out; without any support evidence the other flight fills nothing.
+        const otherOk = (k: number) =>
+            o.coherence[k] >= minCoherence &&
+            !!other.support &&
+            other.support.bins.get(o.frequencies[k])?.verdict !== "UNSUPPORTED";
+        // Consistency over the axis: every other flight against the primary's OWN measurement (never
+        // against an estimate other flights already changed), on the bins both identify.
         const zs: number[] = [];
         for (let k = 0; k < n; k++) {
-            if (!(tf.frequencies[k] > 0)) continue;
-            if (
-                tf.coherence[k] >= minCoherence &&
-                primarySupported(tf.frequencies[k]) &&
-                o.coherence[k] >= minCoherence &&
-                supported(k)
-            ) {
-                const z = zAt(k, nO(k));
-                if (z !== null) zs.push(z);
-            }
+            if (!(p.frequencies[k] > 0) || !ownOk(k) || !otherOk(k)) continue;
+            const z = zOf(
+                p.hReal[k],
+                p.hImag[k],
+                p.coherence[k],
+                nOwn[k],
+                o.hReal[k],
+                o.hImag[k],
+                o.coherence[k],
+                nO(k),
+            );
+            if (z !== null) zs.push(z);
         }
         zs.sort((a, b) => a - b);
         const median = zs.length >= RECORDING_AGREEMENT.minCommonBins ? zs[Math.floor(zs.length / 2)] : null;
-        out.medianZ = median;
-        out.commonBins = zs.length;
         if (median === null) {
             out.rejected.push(`multi_recording_too_few_common_bins:${axis}:${zs.length}:${id}`);
-            out.consistent = out.consistent ?? null;
+            out.flights.push({ id, medianZ: null, commonBins: zs.length, verdict: "too_few_common_bins" });
             continue;
         }
         if (median > RECORDING_AGREEMENT.maxAxisMedianZ) {
             out.rejected.push(
                 `multi_recording_flights_disagree:${axis}:median_z:${median.toFixed(2)}>${RECORDING_AGREEMENT.maxAxisMedianZ}:${id}`,
             );
-            out.consistent = false;
+            out.flights.push({ id, medianZ: median, commonBins: zs.length, verdict: "disagrees" });
             continue;
         }
-        out.consistent = true;
         let used = false;
         for (let k = 0; k < n; k++) {
-            const f = tf.frequencies[k];
+            const f = p.frequencies[k];
             if (!(f > 0)) continue;
-            const nOk = nO(k);
-            // The primary's own bin by the same rules (a bin whose excitation was shown absent is not identified).
-            const pOk = tf.coherence[k] >= minCoherence && primarySupported(f);
-            // Identified by the rules the loop applies to the primary's own bins (coherence, support);
-            // a bin whose dwell is below one segment carries no counted averages there either.
-            const oOk = o.coherence[k] >= minCoherence && supported(k);
-            if (!oOk) {
-                if (!pOk && !byBin.has(f))
+            if (!otherOk(k)) {
+                if (!ownOk(k) && !fromOther[k] && !byBin.has(f))
                     byBin.set(f, {
                         frequencyHz: f,
                         use: "not_filled",
-                        coherence: [tf.coherence[k], o.coherence[k]],
+                        coherence: [p.coherence[k], o.coherence[k]],
                         z: null,
                     });
                 continue;
             }
-            if (pOk) {
-                // Pooling needs both flights' averages: without them agreement cannot be shown.
-                const z = nNow[k] >= 1 && nOk >= 1 ? zAt(k, nOk) : null;
-                // Unknown agreement keeps the primary's bin as measured (nothing to report); a shown
-                // disagreement is named.
-                if (z === null) continue;
-                if (z > RECORDING_AGREEMENT.maxBinZ) {
-                    byBin.set(f, {
-                        frequencyHz: f,
-                        use: "disagree_primary_kept",
-                        coherence: [tf.coherence[k], o.coherence[k]],
-                        z,
-                    });
-                    continue;
-                }
-                const wa = nNow[k] / (nNow[k] + nOk);
-                const wb = 1 - wa;
-                const g2 = wa * tf.coherence[k] + wb * o.coherence[k];
-                byBin.set(f, { frequencyHz: f, use: "pooled", coherence: [tf.coherence[k], o.coherence[k]], z });
-                tf.hReal[k] = wa * tf.hReal[k] + wb * o.hReal[k];
-                tf.hImag[k] = wa * tf.hImag[k] + wb * o.hImag[k];
-                tf.coherence[k] = g2;
-                nNow[k] += nOk;
-            } else if (!pOk) {
-                byBin.set(f, {
-                    frequencyHz: f,
-                    use: "other_flight",
-                    coherence: [tf.coherence[k], o.coherence[k]],
-                    z: null,
-                });
-                tf.hReal[k] = o.hReal[k];
-                tf.hImag[k] = o.hImag[k];
-                tf.coherence[k] = o.coherence[k];
-                nNow[k] = nOk;
-                // The bin's excitation is the other flight's: its support evidence goes with it.
+            const nOk = nO(k);
+            const take = (use: CombinedBinUse) => {
+                byBin.set(f, { frequencyHz: f, use, coherence: [p.coherence[k], o.coherence[k]], z: null });
+                setBin(k, o.hReal[k], o.hImag[k], o.coherence[k], nOk);
+                fromOther[k] = 1;
+                // The bin's values are the other flight's: its support evidence goes with them.
                 const ob = other.support!.bins.get(f);
                 if (support) {
                     if (ob) support.bins.set(f, ob);
                     else support.bins.delete(f);
                 }
-            } else continue;
-            tf.magnitude[k] = 20 * Math.log10(Math.hypot(tf.hReal[k], tf.hImag[k]));
-            tf.phase[k] = (Math.atan2(tf.hImag[k], tf.hReal[k]) * 180) / Math.PI;
-            out.averagesByHz.set(f, nNow[k]);
+                used = true;
+            };
+            if (!ownOk(k) && !fromOther[k]) {
+                // A bin the primary does not identify, taken from a flight that does.
+                take("other_flight");
+                continue;
+            }
+            if (ownOk(k) && nNow[k] < 1 && nOk >= 1 && !fromOther[k]) {
+                // Both identify the bin and only this flight has whole-segment averages there: its
+                // estimate is the better-supported one, whichever flight is the primary (block 8 review).
+                take("other_flight");
+                continue;
+            }
+            // Both estimates exist: pooled only where they agree (against the primary's own value where it
+            // identifies the bin, else against the flight that supplied it), with both averages known.
+            const z = ownOk(k)
+                ? zOf(p.hReal[k], p.hImag[k], p.coherence[k], nOwn[k], o.hReal[k], o.hImag[k], o.coherence[k], nOk)
+                : zOf(tf.hReal[k], tf.hImag[k], tf.coherence[k], nNow[k], o.hReal[k], o.hImag[k], o.coherence[k], nOk);
+            if (z === null || !(nNow[k] >= 1)) continue;
+            if (z > RECORDING_AGREEMENT.maxBinZ) {
+                byBin.set(f, {
+                    frequencyHz: f,
+                    use: "disagree_primary_kept",
+                    coherence: [p.coherence[k], o.coherence[k]],
+                    z,
+                });
+                continue;
+            }
+            const wa = nNow[k] / (nNow[k] + nOk);
+            const wb = 1 - wa;
+            // An approximation: the averages-weighted mean of both coherences stands for the pooled
+            // estimate's (the H1 random error ε = √((1−γ²)/(2nγ²)) is then read with the summed n). The
+            // exact pooled coherence needs both flights' auto- and cross-spectra, which the rung does not keep.
+            setBin(
+                k,
+                wa * tf.hReal[k] + wb * o.hReal[k],
+                wa * tf.hImag[k] + wb * o.hImag[k],
+                wa * tf.coherence[k] + wb * o.coherence[k],
+                nNow[k] + nOk,
+            );
+            if (byBin.get(f)?.use !== "other_flight")
+                byBin.set(f, { frequencyHz: f, use: "pooled", coherence: [p.coherence[k], o.coherence[k]], z });
+            fromOther[k] = 1;
             used = true;
         }
+        out.flights.push({ id, medianZ: median, commonBins: zs.length, verdict: used ? "used" : "consistent_unused" });
         if (used) {
             out.contributors.push(id);
             changed = true;
         }
     }
+    // Per flight above; the summary: combined when any flight took part, disagreeing when one disagreed
+    // and none took part, unknown otherwise. The median reported is the largest of the flights used.
+    const usedFlights = out.flights.filter((x) => x.verdict === "used" || x.verdict === "consistent_unused");
+    out.consistent = out.contributors.length
+        ? true
+        : out.flights.some((x) => x.verdict === "disagrees")
+          ? false
+          : usedFlights.length
+            ? true
+            : null;
+    const shown = usedFlights.length ? usedFlights : out.flights.filter((x) => x.medianZ !== null);
+    out.medianZ = shown.length ? Math.max(...shown.map((x) => x.medianZ!)) : null;
+    out.commonBins = shown.length
+        ? Math.min(...shown.map((x) => x.commonBins))
+        : Math.max(0, ...out.flights.map((x) => x.commonBins));
     out.bins = [...byBin.values()].sort((a, b) => a.frequencyHz - b.frequencyHz);
     out.tf = changed ? tf : null;
     out.support = changed ? support : null;
