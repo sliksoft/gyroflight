@@ -1359,6 +1359,7 @@
     "gyroflightOverviewTuningValidated": { "message": "VALIDATED values" },
     "gyroflightOverviewTuningExperimental": { "message": "EXPERIMENTAL values (not validated)" },
     "gyroflightOverviewTuningWithheld": { "message": "no proposal: not enough information for a value" },
+    "gyroflightOverviewTuningNoValueMeetsTargets": { "message": "no proposal: no value meets the targets" },
     "gyroflightOverviewTuningNoChange": { "message": "no change proposed" },
     "gyroflightOverviewApplyReleased": { "message": "released Apply (after the live checks)" },
     "gyroflightOverviewApplyExperimental": {

@@ -663,8 +663,24 @@ describe("Overview reasons (RED-53)", () => {
                         },
                         "pitch: a tune meeting the targets lies beyond one Apply.",
                     ),
+                    planAxis(
+                        "yaw",
+                        "record",
+                        {
+                            route: "primary",
+                            status: "plant_band_insufficient",
+                            rule: "decision_band_gaps",
+                            value: 1,
+                            threshold: "0 unidentified bins",
+                        },
+                        "yaw: a hole at 95.7 Hz.",
+                    ),
                 ],
             },
+            experimentalWithheld: [
+                { key: "pid_roll", reasons: ["primary:targets_not_reachable"] },
+                { key: "pid_yaw", reasons: ["primary:plant_band_insufficient"] },
+            ],
         });
         v2.state = "done";
         const { container, unmount } = mountComponent(AutotuneOverview, { onOpen: () => {} });
@@ -675,6 +691,11 @@ describe("Overview reasons (RED-53)", () => {
         expect(reason("roll")).toContain("gyroflightOverviewNextNoPidProposal");
         expect(reason("pitch")).toContain("gyroflightAxisSummaryTargetBeyondStep");
         expect(reason("pitch")).not.toContain("gyroflightOverviewNextSearchLimit");
+        // The tuning column: a search that found no value is not "not enough information".
+        const tuning = (axis: string) =>
+            container.querySelector(`tr[data-axis="${axis}"][data-tuning="withheld"]`)?.textContent ?? "";
+        expect(tuning("roll")).toContain("gyroflightOverviewTuningNoValueMeetsTargets");
+        expect(tuning("yaw")).toContain("gyroflightOverviewTuningWithheld");
         unmount();
     });
 

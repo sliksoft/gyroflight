@@ -560,7 +560,7 @@ describe("AutotuneV2Panel", () => {
                 commonBins: 6,
                 consistent: true,
                 pooledHz: [5.9, 7.8, 9.8],
-                otherFlightHz: [44.9, 46.9],
+                otherFlightHz: [3.9, 44.9, 46.9],
                 disagreeHz: [],
                 notFilledHz: [],
             },
@@ -584,16 +584,39 @@ describe("AutotuneV2Panel", () => {
                 stepImprovesAll: null,
             },
         };
+        const sha = "eb8ad42e2010e88b6c2bed7e2be4b316993dd38ad86f1438907355d8d5d923a7";
+        const pitch = {
+            ...primary,
+            status: "plant_band_insufficient" as const,
+            candidate: null,
+            target: null,
+            searchRan: false,
+            combination: {
+                ...primary.combination,
+                consistent: null,
+                flights: [],
+                pooledHz: [],
+                otherFlightHz: [],
+                rejected: [`multi_recording_axis_unusable:pitch:${sha}:0:measurement:low_coherence`],
+            },
+        };
         const r = {
             ...emptyResult(),
-            candidateDecisions: { roll: { primary, jio: null } },
+            candidateDecisions: { roll: { primary, jio: null }, pitch: { primary: pitch, jio: null } },
         } as unknown as AutotuneV2Result;
         const d = mount(r);
         await flush();
         const row = q(d, '[data-gyrocore="v2-decisions"] tr[data-axis="roll"][data-route="primary"]')!;
         expect(row.getAttribute("data-status")).toBe("targets_not_reachable");
         expect(q(row, '[data-gyrocore="v2-decision-source"]')!.textContent).toContain(
-            "with 1 other flight(s) (median z 0.08): pooled 5.9–9.8 Hz (3); from the other flight 44.9–46.9 Hz (2)",
+            "with 1 other flight(s) (median z 0.08): pooled 5.9–9.8 Hz (3 bins); from the other flight 3.9, 44.9–46.9 Hz (3 bins)",
+        );
+        // A rejected flight is named with a short id (the full id stays in the result).
+        expect(
+            q(d, '[data-gyrocore="v2-decisions"] tr[data-axis="pitch"] [data-gyrocore="v2-decision-source"]')!
+                .textContent,
+        ).toContain(
+            "other flight not combined: multi_recording_axis_unusable:pitch:eb8ad42e…:0:measurement:low_coherence",
         );
         const values = [...q(row, '[data-gyrocore="v2-decision-values"]')!.querySelectorAll("span")].map((e) =>
             e.textContent!.trim(),

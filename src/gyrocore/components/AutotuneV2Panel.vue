@@ -794,7 +794,7 @@
                                     {{ row.plant }}
                                     <span
                                         v-if="row.source"
-                                        class="block text-dimmed"
+                                        class="block text-dimmed [overflow-wrap:anywhere]"
                                         data-gyrocore="v2-decision-source"
                                         >{{ row.source }}</span
                                     >
@@ -1529,12 +1529,26 @@ const decisionRows = computed(() => {
                     );
             }
             const c = r.combination;
-            const hz = (xs: number[]) =>
-                xs.length ? `${num(Math.min(...xs), 1)}–${num(Math.max(...xs), 1)} Hz (${xs.length})` : "none";
+            // Bins as the intervals they form (adjacent grid bins joined), never one range over a gap.
+            const hz = (xs: number[]) => {
+                if (!xs.length) return "none";
+                const sorted = [...xs].sort((a, b) => a - b);
+                const step = Math.min(...sorted.slice(1).map((x, i) => x - sorted[i]), Infinity);
+                const groups: [number, number][] = [];
+                for (const x of sorted) {
+                    const last = groups[groups.length - 1];
+                    if (last && x - last[1] <= step * 1.5) last[1] = x;
+                    else groups.push([x, x]);
+                }
+                const text = groups.map(([a, b]) => (a === b ? num(a, 1) : `${num(a, 1)}–${num(b, 1)}`)).join(", ");
+                return `${text} Hz (${xs.length} bin${xs.length === 1 ? "" : "s"})`;
+            };
+            // A recording id (sha256:logIndex) shortened for the table; the full ids stay in the result.
+            const shortIds = (r: string) => r.replace(/\b([0-9a-f]{8})[0-9a-f]{56}(:\d+)/g, "$1…$2");
             const source = c
                 ? c.consistent
                     ? `with ${c.flights.length} other flight(s) (median z ${num(c.medianZ, 2)}): pooled ${hz(c.pooledHz)}; from the other flight ${hz(c.otherFlightHz)}${c.disagreeHz.length ? `; disagree, kept as measured ${hz(c.disagreeHz.map((x) => x.hz))}` : ""}`
-                    : `other flight not combined: ${c.rejected.join(", ") || "agreement not shown"}`
+                    : `other flight not combined: ${c.rejected.map(shortIds).join(", ") || "agreement not shown"}`
                 : "";
             const waived = r.checks
                 .filter((c) => c.result === "waived")

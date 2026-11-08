@@ -178,9 +178,11 @@ function tuningOf(axis: Axis) {
     }
     const withheld = r.experimentalWithheld.filter((w) => ofAxis(w.key, axis));
     if (withheld.length) {
+        // A search that ran on a usable plant and found no value is not missing information (block 8).
+        const searched = r.recordingPlan?.axes.find((a) => a.axis === axis)?.kind === "search_limit";
         return {
             state: "withheld",
-            label: t("gyroflightOverviewTuningWithheld"),
+            label: t(searched ? "gyroflightOverviewTuningNoValueMeetsTargets" : "gyroflightOverviewTuningWithheld"),
             cls: RED,
             detail: withheld.map((w) => w.key).join(", "),
         };
