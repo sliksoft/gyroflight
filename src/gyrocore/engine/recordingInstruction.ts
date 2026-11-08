@@ -186,6 +186,7 @@ function decisive(d: { primary: RouteDecision | null; jio: RouteDecision | null 
         (r) =>
             r.status === "search_limit_max_step" ||
             r.status === "target_beyond_max_step" ||
+            r.status === "target_search_limit" ||
             r.status === "targets_not_reachable" ||
             r.status === "search_constrained_by_verified_tune",
     );
@@ -247,7 +248,11 @@ function axisNeed(
             plannerBandsHz: bands,
             note: `${axis}: the bound Verified Tune's gain-change flight also moved feedforward (${r.firstCause?.value ?? "unknown"}), so the search finds no point on its segment. A new CHIRP sweep does not lift this; a gain-change flight with feedforward unchanged does (release route: required_measurement:gain_change_flight_with_feedforward_unchanged).`,
         };
-    if (r.status === "target_beyond_max_step" || (r.status === "targets_not_reachable" && r.target)) {
+    if (
+        r.status === "target_beyond_max_step" ||
+        r.status === "target_search_limit" ||
+        (r.status === "targets_not_reachable" && r.target)
+    ) {
         const t = r.target!;
         const read = (x: NonNullable<typeof t.step>) =>
             `P ${x.values.p}, I ${x.values.i}, D ${x.values.d}: PM ${x.pmDeg?.toFixed(0)}°, GM ${x.gmDb?.toFixed(1)} dB, |S| ${x.sDb?.toFixed(1)} dB`;
@@ -261,7 +266,9 @@ function axisNeed(
             note:
                 r.status === "target_beyond_max_step"
                     ? `${axis}: on the ${r.route} plant a tune meeting the targets lies beyond one Apply (${read(t.target!)}). The first step of at most ±30 % (${t.step ? read(t.step) : "not readable"}) misses the targets on its own margins, so nothing is offered. Measured predictions only; new data can still change this assessment.`
-                    : `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and no candidate meets the targets, within ±30 % nor in the wider search (${bounds}${t.best ? `; best ${read(t.best)}${t.bestOnEdge ? ", on its edge" : ""}` : ""}). The step limit is not what stops a candidate: PID scaling alone does not reach the targets on this measurement. New data can still change this assessment.`,
+                    : r.status === "target_search_limit"
+                      ? `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and no candidate meets the targets, within ±30 % nor in the wider search (${bounds}${t.best ? `; best ${read(t.best)}, on its edge` : ""}). The wider search's bounds limit it: P and I are not searched below ×${t.pScale[0]}, because PM, GM and |S| do not measure what lower P and I give up (low-frequency disturbance rejection and tracking). Nothing is offered. New data can still change this assessment.`
+                      : `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and no candidate meets the targets, within ±30 % nor in the wider search (${bounds}${t.best ? `; best ${read(t.best)}` : ""}). The step limit is not what stops a candidate: PID scaling alone does not reach the targets on this measurement. New data can still change this assessment.`,
         };
     }
     if (r.status === "search_limit_max_step" || r.status === "targets_not_reachable")

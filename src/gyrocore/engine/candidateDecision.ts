@@ -83,6 +83,7 @@ export type DecisionStatus =
     | "targets_not_reachable"
     | "search_limit_max_step"
     | "target_beyond_max_step"
+    | "target_search_limit"
     | "search_constrained_by_verified_tune"
     | "no_change_needed"
     | "candidate_found";
@@ -266,7 +267,10 @@ export interface TargetSearch {
  * ±MAX_STEP grid), D on its own; d_max keeps its ratio to D. P/I down to 0.4×: the AIR65 roll search
  * finds its safest candidate on the −30 % edge, so the measured loop asks for less P than one step
  * allows; every candidate is still read only where its crossover, phase crossing and |S| peak lie
- * inside the identified band without holes, which bounds the search by the data, not by the scale.
+ * inside the identified band without holes. Not below 0.4×: PM, GM and the |S| peak do not measure
+ * what lower P and I give up (low-frequency disturbance rejection and tracking), so a search without
+ * that bound drifts to tunes that only look good on these three numbers (AIR65 011849 JIO roll: a
+ * "target" at P 8, I 12). A best candidate on this edge is reported as such (target_search_limit).
  * D is never raised beyond one Apply's +30 %: D-term noise and motor heat are not in the margins.
  * Same 0.05 resolution as SCALES.
  */
@@ -799,29 +803,36 @@ export function decideAxis(o: {
             shortfall,
             reached
                 ? `no candidate within ±${Math.round(MAX_STEP * 100)} % meets the targets; a tune meeting them lies farther (see target search)`
-                : target
-                  ? `no candidate meets the targets within ±${Math.round(MAX_STEP * 100)} % nor within the wider target search: the step limit is not what stops a candidate on this measurement`
-                  : atEdge
-                    ? `search limit: the best candidate lies on the ±${Math.round(MAX_STEP * 100)} % step edge; the current search found no suitable candidate within its limits (new data can still change this)`
-                    : "targets not reachable with this plant inside the search grid (the current search found no suitable candidate within its limits; new data can still change this)",
+                : target?.bestOnEdge
+                  ? `no candidate meets the targets within ±${Math.round(MAX_STEP * 100)} % nor within the wider target search, whose best candidate lies on its edge: the search bounds limit it (see target search)`
+                  : target
+                    ? `no candidate meets the targets within ±${Math.round(MAX_STEP * 100)} % nor within the wider target search: the step limit is not what stops a candidate on this measurement`
+                    : atEdge
+                      ? `search limit: the best candidate lies on the ±${Math.round(MAX_STEP * 100)} % step edge; the current search found no suitable candidate within its limits (new data can still change this)`
+                      : "targets not reachable with this plant inside the search grid (the current search found no suitable candidate within its limits; new data can still change this)",
         ),
     );
     if (target) checks.push(targetCheck(target));
-    // With the wider search run and no target in it, the ±MAX_STEP edge is not the limit (block 8).
+    // With the wider search run and no target in it, the ±MAX_STEP edge is not the limit (block 8);
+    // the wider bounds are, when its best candidate lies on their edge.
     const status: DecisionStatus = reached
         ? "target_beyond_max_step"
-        : atEdge && !target
-          ? "search_limit_max_step"
-          : "targets_not_reachable";
+        : target?.bestOnEdge
+          ? "target_search_limit"
+          : atEdge && !target
+            ? "search_limit_max_step"
+            : "targets_not_reachable";
     return out(status, {
         ...searched,
         target,
         candidate: candidate(safest!.v, safest!.m, "targets_not_reachable", [
             reached
                 ? "target_beyond_max_step"
-                : atEdge && !target
-                  ? "search_limit:max_step"
-                  : "no_candidate_meets_all_targets",
+                : target?.bestOnEdge
+                  ? "search_limit:target_search_bounds"
+                  : atEdge && !target
+                    ? "search_limit:max_step"
+                    : "no_candidate_meets_all_targets",
         ]),
     });
 }
@@ -955,7 +966,9 @@ function targetCheck(t: TargetSearch): DecisionCheck {
             unit: "",
             threshold: `PM ≥ ${PID_TARGETS.minPhaseMarginDeg}°, GM ≥ ${PID_TARGETS.minGainMarginDb} dB, |S| ≤ ${PID_TARGETS.maxSensitivityPeakDb} dB within ${bounds}`,
             result: "fail",
-            consequence: "no tune within the wider bounds meets the targets on this measurement; nothing offered",
+            consequence: t.bestOnEdge
+                ? "no tune within the wider bounds meets the targets; the best lies on their edge, so the bounds limit the search (below P/I ×0.4 the targets do not measure what is given up); nothing offered"
+                : "no tune within the wider bounds meets the targets on this measurement; nothing offered",
         };
     const step = t.step
         ? `first step ${fmtRead(t.step)}${t.step.meetsTargets ? "" : " — misses the targets"}${t.stepImprovesAll ? "; better than the current tune on PM, GM and |S|" : ""}`

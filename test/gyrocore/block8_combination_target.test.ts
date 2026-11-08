@@ -279,6 +279,43 @@ describe("the experimental decision with a second flight (engine, simulated)", (
     }, 240_000);
 });
 
+describe("the wider search without a target: its bounds named only when they limit it (engine, simulated)", () => {
+    const decide = (K: number, delayS: number, name: string) => {
+        const log = decoded(
+            {
+                plants: [ratePlant({ K, motorHz: 40, delayS }), null, null],
+                sweepS: 12,
+                seed: 141,
+                noise: 0.3,
+                envelope: (f) => (f >= 30 && f <= 34 ? 0 : 1),
+            },
+            name,
+        );
+        return runAutotuneV2({ primary: log, others: [], verifiedTune: null, createdAt: "2026-11-08T00:00:00Z" })
+            .candidateDecisions.roll!.primary!;
+    };
+
+    it("best on the edge of the wider bounds: target_search_limit, the bounds and why P/I stop at ×0.4 are named", () => {
+        const d = decide(60, 0.004, "edge.bbl");
+        expect(d.status).toBe("target_search_limit");
+        expect(d.target!.target).toBeNull();
+        expect(d.target!.bestOnEdge).toBe(true);
+        expect(d.target!.best!.values.p).toBe(Math.round(d.candidate!.current.p * TARGET_SEARCH.pScale[0]));
+        expect(d.candidate!.reasons).toContain("search_limit:target_search_bounds");
+        expect(d.checks.find((c) => c.rule === "target_search_wider_bounds")!.consequence).toContain(
+            "the bounds limit the search",
+        );
+    }, 240_000);
+
+    it("best inside the wider bounds: targets_not_reachable, a larger step is not what is missing", () => {
+        const d = decide(150, 0.004, "inside.bbl");
+        expect(d.status).toBe("targets_not_reachable");
+        expect(d.target!.target).toBeNull();
+        expect(d.target!.bestOnEdge).toBe(false);
+        expect(d.candidate!.reasons).toContain("no_candidate_meets_all_targets");
+    }, 240_000);
+});
+
 describe("target search beyond one Apply (engine, simulated)", () => {
     // A loop with too much gain for its delay: nothing within ±30 % meets the targets, a farther P does.
     const log = decoded(

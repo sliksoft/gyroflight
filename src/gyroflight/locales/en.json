@@ -1397,6 +1397,9 @@
     "gyroflightAxisSummaryTargetsNotReachable": {
         "message": "No PID values meet the targets on this measurement, neither within one step nor in a wider search; a larger step would not help. This does not rule out that new data changes the assessment."
     },
+    "gyroflightAxisSummaryTargetSearchLimit": {
+        "message": "No PID values meet the targets within one step nor within the wider search; its best values lie on the edge of its bounds. P and I are not searched lower, because the targets do not measure what lower P and I give up. This does not rule out that new data changes the assessment."
+    },
     "gyroflightAxisSummaryTargetBeyondStep": {
         "message": "PID values that meet the targets lie farther away than one Apply may change; the first allowed step does not meet the targets itself, so nothing is offered."
     },

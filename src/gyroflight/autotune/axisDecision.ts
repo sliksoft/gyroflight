@@ -67,9 +67,11 @@ export function axisDecisionTexts(result: AutotuneV2Result | null, t: Translate)
                             ? "gyroflightAxisSummaryVerifiedTune"
                             : tr?.status === "target_beyond_max_step"
                               ? "gyroflightAxisSummaryTargetBeyondStep"
-                              : tr?.status === "targets_not_reachable"
-                                ? "gyroflightAxisSummaryTargetsNotReachable"
-                                : "gyroflightAxisSummarySearchLimit",
+                              : tr?.status === "target_search_limit"
+                                ? "gyroflightAxisSummaryTargetSearchLimit"
+                                : tr?.status === "targets_not_reachable"
+                                  ? "gyroflightAxisSummaryTargetsNotReachable"
+                                  : "gyroflightAxisSummarySearchLimit",
                     )
                   : t(
                         tr?.status === "no_change_needed"
@@ -81,7 +83,9 @@ export function axisDecisionTexts(result: AutotuneV2Result | null, t: Translate)
                 ? t("gyroflightOverviewNextRecord")
                 : ax.kind === "search_limit"
                   ? t(
-                        tr?.status === "target_beyond_max_step" || tr?.status === "targets_not_reachable"
+                        tr?.status === "target_beyond_max_step" ||
+                            tr?.status === "target_search_limit" ||
+                            tr?.status === "targets_not_reachable"
                             ? "gyroflightOverviewNextNoPidProposal"
                             : "gyroflightOverviewNextSearchLimit",
                     )

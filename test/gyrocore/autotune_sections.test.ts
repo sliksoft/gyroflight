@@ -697,6 +697,31 @@ describe("Overview reasons (RED-53)", () => {
         expect(tuning("roll")).toContain("gyroflightOverviewTuningNoValueMeetsTargets");
         expect(tuning("yaw")).toContain("gyroflightOverviewTuningWithheld");
         unmount();
+        // The wider search limited by its own bounds reads as such.
+        v2.result = resultWith({
+            recordingPlan: {
+                axes: [
+                    planAxis(
+                        "roll",
+                        "search_limit",
+                        {
+                            route: "jio",
+                            status: "target_search_limit",
+                            rule: "candidate_search_measured_margins",
+                            value: "best PM 29°",
+                            threshold: "PM ≥ 45°",
+                        },
+                        "roll: the wider search's bounds limit it.",
+                    ),
+                ],
+            },
+        });
+        const second = mountComponent(AutotuneOverview, { onOpen: () => {} });
+        await flush();
+        const roll = second.container.querySelector('[data-gyrocore="overview-reasons"] [data-axis="roll"]')!;
+        expect(roll.textContent).toContain("gyroflightAxisSummaryTargetSearchLimit");
+        expect(roll.textContent).toContain("gyroflightOverviewNextNoPidProposal");
+        second.unmount();
     });
 
     it("a search limit reads as a limit of the current search, keeps the engine's check behind a toggle and points to the technical details", async () => {
