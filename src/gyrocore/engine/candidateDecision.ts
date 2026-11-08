@@ -43,6 +43,7 @@ import {
     UNCERTAINTY,
 } from "@/gyrocore/engine/loopModel";
 import { MEAN_COHERENCE_BAND_HZ } from "@/gyrocore/chirp/quality";
+import { RECORDING_AGREEMENT, type RecordingCombination } from "@/gyrocore/engine/multiRecording";
 import {
     candidateCfg,
     MAX_STEP,
@@ -81,6 +82,7 @@ export type DecisionStatus =
     | "plant_band_insufficient"
     | "targets_not_reachable"
     | "search_limit_max_step"
+    | "target_beyond_max_step"
     | "search_constrained_by_verified_tune"
     | "no_change_needed"
     | "candidate_found";
@@ -208,6 +210,93 @@ export interface RouteDecision {
     missing: MissingInterval[];
     /** Qualification gates this route waived for the experimental route (named, not hidden). */
     waived: string[];
+    /** Independent flights combined into this route's loop (block 8); null: none offered. */
+    combination?: CombinationSummary | null;
+    /**
+     * The wider target search (TARGET_SEARCH), run when no candidate within one Apply's ±MAX_STEP
+     * meets the targets: where a final tune would lie, and the first step towards it, each read on
+     * its own margins. Information only: neither is offered unless it meets the targets itself.
+     */
+    target?: TargetSearch | null;
+}
+
+export interface CombinationSummary {
+    flights: string[];
+    rejected: string[];
+    medianZ: number | null;
+    commonBins: number;
+    consistent: boolean | null;
+    /** Bin centres (Hz) by how the combination formed them. */
+    pooledHz: number[];
+    otherFlightHz: number[];
+    disagreeHz: { hz: number; z: number | null }[];
+    notFilledHz: number[];
+}
+
+export interface CandidateRead {
+    values: PidValues;
+    /** Relative change per term against the current tune (P, I, D). */
+    change: { p: number; i: number; d: number };
+    crossoverHz: number | null;
+    pmDeg: number | null;
+    gmDb: number | null;
+    sDb: number | null;
+    meetsTargets: boolean;
+}
+
+export interface TargetSearch {
+    /** The bounds searched, as scales of the current P (I with it) and D. */
+    pScale: [number, number];
+    dScale: [number, number];
+    tried: number;
+    usable: number;
+    /** The candidate meeting all targets with the highest crossover; null: none in these bounds. */
+    target: CandidateRead | null;
+    /** Without a target: the candidate with the highest PM, and whether it lies on the bounds' edge. */
+    best: CandidateRead | null;
+    bestOnEdge: boolean;
+    /** The target clipped term by term to ±MAX_STEP of the current tune, read on its own margins. */
+    step: CandidateRead | null;
+    /** step improves PM, GM and |S| against the current tune (shown; not a release or offer rule). */
+    stepImprovesAll: boolean | null;
+}
+
+/**
+ * Bounds of the wider target search (block 8). P and I move together (their ratio is kept, as in the
+ * ±MAX_STEP grid), D on its own; d_max keeps its ratio to D. P/I down to 0.4×: the AIR65 roll search
+ * finds its safest candidate on the −30 % edge, so the measured loop asks for less P than one step
+ * allows; every candidate is still read only where its crossover, phase crossing and |S| peak lie
+ * inside the identified band without holes, which bounds the search by the data, not by the scale.
+ * D is never raised beyond one Apply's +30 %: D-term noise and motor heat are not in the margins.
+ * Same 0.05 resolution as SCALES.
+ */
+export const TARGET_SEARCH = Object.freeze({
+    pScale: [0.4, 1.3] as [number, number],
+    dScale: [0.5, 1.3] as [number, number],
+    step: 0.05,
+});
+
+function scalesOf([lo, hi]: [number, number], step: number): number[] {
+    const out: number[] = [];
+    for (let k = Math.round(lo / step); k <= Math.round(hi / step) + 1e-9; k++)
+        out.push(Math.round(k * step * 100) / 100);
+    return out;
+}
+
+function summarize(c: RecordingCombination | null | undefined): CombinationSummary | null {
+    if (!c) return null;
+    const of = (u: string) => c.bins.filter((b) => b.use === u);
+    return {
+        flights: c.contributors,
+        rejected: c.rejected,
+        medianZ: c.medianZ,
+        commonBins: c.commonBins,
+        consistent: c.consistent,
+        pooledHz: of("pooled").map((b) => b.frequencyHz),
+        otherFlightHz: of("other_flight").map((b) => b.frequencyHz),
+        disagreeHz: of("disagree_primary_kept").map((b) => ({ hz: b.frequencyHz, z: b.z })),
+        notFilledHz: of("not_filled").map((b) => b.frequencyHz),
+    };
 }
 
 const REF_LOOP = "src/gyrocore/engine/loopModel.ts:loopMargins";
@@ -277,7 +366,7 @@ function bandTopCheck(loop: AxisLoop, band: [number, number] | null, required: [
     };
 }
 
-function valuesOf(m: LoopMargins) {
+export function valuesOf(m: LoopMargins) {
     return {
         crossoverHz: m.crossoverHz,
         pmDeg: m.phaseMarginDeg,
@@ -317,12 +406,37 @@ export function decideAxis(o: {
     noPlantReasons?: string[];
     /** The band the planner needs for this loop (measurementPlan bandHz.primary); null: unknown. */
     requiredBandHz?: [number, number] | null;
+    /** Independent flights combined into `loop` (multiRecording.ts combineRecordings); null: none. */
+    combination?: RecordingCombination | null;
 }): RouteDecision {
     const checks: DecisionCheck[] = [];
+    const combination = summarize(o.combination);
+    // Named next to the other checks; never the first cause (an unusable combination leaves the
+    // primary's own measurement, judged by the checks that follow).
+    const combinationCheck: DecisionCheck | null = combination
+        ? {
+              rule: "multi_recording_combination",
+              ref: "src/gyrocore/engine/multiRecording.ts:combineRecordings",
+              value:
+                  `${combination.flights.length} flight(s) combined; median z ${combination.medianZ === null ? "unknown" : combination.medianZ.toFixed(2)} over ${combination.commonBins} common bins; ` +
+                  `pooled ${combination.pooledHz.length}, from the other flight ${combination.otherFlightHz.length}, disagreeing (primary kept) ${combination.disagreeHz.length}, not filled ${combination.notFilledHz.length}`,
+              unit: "",
+              threshold: `median z ≤ ${RECORDING_AGREEMENT.maxAxisMedianZ} over ≥ ${RECORDING_AGREEMENT.minCommonBins} bins both flights identify; a bin pooled only with z ≤ ${RECORDING_AGREEMENT.maxBinZ}; same analysis grid`,
+              result: combination.consistent === true ? "pass" : combination.consistent === false ? "fail" : "unknown",
+              consequence:
+                  combination.consistent === true
+                      ? "agreeing bins pooled; bins only the other flight identifies taken from it; disagreeing bins keep the primary's values and fill no hole"
+                      : "no combination: the primary's own measurement only",
+          }
+        : null;
     const waived: string[] = [];
     const missing: MissingInterval[] = [];
     const out = (status: DecisionStatus, extra: Partial<RouteDecision> = {}): RouteDecision => {
-        const firstCause = checks.find((c) => c.result === "fail" || c.result === "unknown") ?? null;
+        const firstCause =
+            checks.find(
+                (c) => (c.result === "fail" || c.result === "unknown") && c.rule !== "multi_recording_combination",
+            ) ?? null;
+        if (combinationCheck && !checks.includes(combinationCheck)) checks.push(combinationCheck);
         return {
             route: o.route,
             plant: "absent",
@@ -339,6 +453,8 @@ export function decideAxis(o: {
             measurementUsable: false,
             missing,
             waived,
+            combination,
+            target: null,
             ...extra,
         };
     };
@@ -671,19 +787,188 @@ export function decideAxis(o: {
     const atEdge = !!safest && (edge(safest.v.p, current.p) || edge(safest.v.d, current.d));
     const s = safest!.val;
     const shortfall = `best PM ${s.pmDeg?.toFixed(0)}° (P ${safest!.v.p}, I ${safest!.v.i}, D ${safest!.v.d}), GM ${s.gmDb?.toFixed(1)} dB, |S| ${s.sDb?.toFixed(1)} dB over ${usableN} usable of ${tried}`;
+    // The search space of a final tune is wider than one Apply (block 8): where would a tune meeting
+    // the targets lie, and what does the first step towards it predict on its own margins? Neither
+    // is offered: a candidate is offered only when it meets the targets itself and lies within
+    // ±MAX_STEP of the current tune (a farther target never widens what one Apply may write).
+    const target = o.segment ? null : targetSearch(loop, current, kdRatio, curV);
+    const reached = !!target?.target;
     checks.push(
         searchCheck(
             "fail",
             shortfall,
-            atEdge
-                ? `search limit: the best candidate lies on the ±${Math.round(MAX_STEP * 100)} % step edge; the current search found no suitable candidate within its limits (new data can still change this)`
-                : "targets not reachable with this plant inside the search grid (the current search found no suitable candidate within its limits; new data can still change this)",
+            reached
+                ? `no candidate within ±${Math.round(MAX_STEP * 100)} % meets the targets; a tune meeting them lies farther (see target search)`
+                : target
+                  ? `no candidate meets the targets within ±${Math.round(MAX_STEP * 100)} % nor within the wider target search: the step limit is not what stops a candidate on this measurement`
+                  : atEdge
+                    ? `search limit: the best candidate lies on the ±${Math.round(MAX_STEP * 100)} % step edge; the current search found no suitable candidate within its limits (new data can still change this)`
+                    : "targets not reachable with this plant inside the search grid (the current search found no suitable candidate within its limits; new data can still change this)",
         ),
     );
-    return out(atEdge ? "search_limit_max_step" : "targets_not_reachable", {
+    if (target) checks.push(targetCheck(target));
+    // With the wider search run and no target in it, the ±MAX_STEP edge is not the limit (block 8).
+    const status: DecisionStatus = reached
+        ? "target_beyond_max_step"
+        : atEdge && !target
+          ? "search_limit_max_step"
+          : "targets_not_reachable";
+    return out(status, {
         ...searched,
+        target,
         candidate: candidate(safest!.v, safest!.m, "targets_not_reachable", [
-            atEdge ? "search_limit:max_step" : "no_candidate_meets_all_targets",
+            reached
+                ? "target_beyond_max_step"
+                : atEdge && !target
+                  ? "search_limit:max_step"
+                  : "no_candidate_meets_all_targets",
         ]),
     });
+}
+
+function readOf(v: PidValues, current: PidValues, val: ReturnType<typeof valuesOf>): CandidateRead {
+    const rel = (x: number, c: number) => (c > 0 ? x / c - 1 : 0);
+    return {
+        values: v,
+        change: { p: rel(v.p, current.p), i: rel(v.i, current.i), d: rel(v.d, current.d) },
+        crossoverHz: val.crossoverHz,
+        pmDeg: val.pmDeg,
+        gmDb: val.gmDb,
+        sDb: val.sDb,
+        meetsTargets: meetsMeasured(val),
+    };
+}
+
+/** One candidate's in-band measured margins, or null where the band does not show them (same rule as the grid). */
+function readCandidate(loop: AxisLoop, v: PidValues, kdRatio: number): ReturnType<typeof valuesOf> | null {
+    if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) return null;
+    const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
+    const st = metricStates(m);
+    if (
+        !usable(st.pm) ||
+        !usable(st.gm) ||
+        !usable(st.s) ||
+        has(m, DATA_BLOCKERS) ||
+        has(m, /^(unidentified_bins_inside_band|identified_band_has_gaps)/)
+    )
+        return null;
+    return valuesOf(m);
+}
+
+/** The PID values at scale `ps` of P and I and `ds` of D (d_max keeps its ratio to D, never below D). */
+function scaled(current: PidValues, ps: number, ds: number): PidValues {
+    const d = Math.round(current.d * ds);
+    return {
+        p: Math.round(current.p * ps),
+        i: Math.round(current.i * ps),
+        d,
+        dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), d) : 0,
+    };
+}
+
+/** TARGET_SEARCH around `current`, and the first ±MAX_STEP step towards its target. */
+export function targetSearch(
+    loop: AxisLoop,
+    current: PidValues,
+    kdRatio: number,
+    curV: ReturnType<typeof valuesOf>,
+    bounds: { pScale: [number, number]; dScale: [number, number] } = TARGET_SEARCH,
+): TargetSearch {
+    const pScales = scalesOf(bounds.pScale, TARGET_SEARCH.step);
+    const dScales = current.d > 0 ? scalesOf(bounds.dScale, TARGET_SEARCH.step) : [1];
+    let tried = 0;
+    let usableN = 0;
+    let target: { v: PidValues; val: ReturnType<typeof valuesOf> } | null = null;
+    let best: { v: PidValues; val: ReturnType<typeof valuesOf>; ps: number; ds: number } | null = null;
+    for (const ps of pScales)
+        for (const ds of dScales) {
+            const v = scaled(current, ps, ds);
+            tried++;
+            const val = readCandidate(loop, v, kdRatio);
+            if (!val) continue;
+            usableN++;
+            if (!best || val.pmDeg! > best.val.pmDeg!) best = { v, val, ps, ds };
+            if (meetsMeasured(val) && (!target || val.crossoverHz! > target.val.crossoverHz!)) target = { v, val };
+        }
+    const onEdge =
+        !!best &&
+        (best.ps === pScales[0] ||
+            best.ps === pScales[pScales.length - 1] ||
+            (dScales.length > 1 && (best.ds === dScales[0] || best.ds === dScales[dScales.length - 1])));
+    let step: CandidateRead | null = null;
+    let stepImprovesAll: boolean | null = null;
+    if (target) {
+        // Term by term towards the target, at most MAX_STEP from the current value.
+        const clip = (x: number, c: number) =>
+            c > 0 ? Math.min(Math.round(c * (1 + MAX_STEP)), Math.max(Math.round(c * (1 - MAX_STEP)), x)) : x;
+        const sv: PidValues = {
+            p: clip(target.v.p, current.p),
+            i: clip(target.v.i, current.i),
+            d: clip(target.v.d, current.d),
+            dMax: 0,
+        };
+        sv.dMax =
+            current.dMax > 0 && current.d > 0
+                ? Math.max(Math.round((current.dMax * sv.d) / current.d), sv.d)
+                : current.dMax > 0
+                  ? current.dMax
+                  : 0;
+        const val = readCandidate(loop, sv, kdRatio);
+        if (val) {
+            step = readOf(sv, current, val);
+            stepImprovesAll =
+                curV.pmDeg !== null &&
+                curV.gmDb !== null &&
+                curV.sDb !== null &&
+                val.pmDeg! > curV.pmDeg &&
+                val.gmDb! > curV.gmDb &&
+                val.sDb! < curV.sDb;
+        }
+    }
+    return {
+        pScale: bounds.pScale,
+        dScale: current.d > 0 ? bounds.dScale : [1, 1],
+        tried,
+        usable: usableN,
+        target: target ? readOf(target.v, current, target.val) : null,
+        best: target ? null : best ? readOf(best.v, current, best.val) : null,
+        bestOnEdge: !target && onEdge,
+        step,
+        stepImprovesAll,
+    };
+}
+
+function fmtRead(r: CandidateRead): string {
+    const pct = (x: number) => `${x >= 0 ? "+" : ""}${Math.round(x * 100)} %`;
+    return `P ${r.values.p} (${pct(r.change.p)}), I ${r.values.i} (${pct(r.change.i)}), D ${r.values.d} (${pct(r.change.d)}): crossover ${r.crossoverHz?.toFixed(1)} Hz, PM ${r.pmDeg?.toFixed(0)}°, GM ${r.gmDb?.toFixed(1)} dB, |S| ${r.sDb?.toFixed(1)} dB`;
+}
+
+function targetCheck(t: TargetSearch): DecisionCheck {
+    const bounds = `P/I ×${t.pScale[0]}–${t.pScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]} (${t.usable} usable of ${t.tried})`;
+    if (!t.target)
+        return {
+            rule: "target_search_wider_bounds",
+            ref: "src/gyrocore/engine/candidateDecision.ts:targetSearch",
+            value: t.best
+                ? `no target; best ${fmtRead(t.best)}${t.bestOnEdge ? " (on the bounds' edge)" : ""}`
+                : "no usable candidate",
+            unit: "",
+            threshold: `PM ≥ ${PID_TARGETS.minPhaseMarginDeg}°, GM ≥ ${PID_TARGETS.minGainMarginDb} dB, |S| ≤ ${PID_TARGETS.maxSensitivityPeakDb} dB within ${bounds}`,
+            result: "fail",
+            consequence: "no tune within the wider bounds meets the targets on this measurement; nothing offered",
+        };
+    const step = t.step
+        ? `first step ${fmtRead(t.step)}${t.step.meetsTargets ? "" : " — misses the targets"}${t.stepImprovesAll ? "; better than the current tune on PM, GM and |S|" : ""}`
+        : "first step not readable inside the identified band";
+    return {
+        rule: "target_search_wider_bounds",
+        ref: "src/gyrocore/engine/candidateDecision.ts:targetSearch",
+        value: `target ${fmtRead(t.target)}; ${step}`,
+        unit: "",
+        threshold: `a candidate is offered only within ±${Math.round(MAX_STEP * 100)} % per term and meeting PM ≥ ${PID_TARGETS.minPhaseMarginDeg}°, GM ≥ ${PID_TARGETS.minGainMarginDb} dB, |S| ≤ ${PID_TARGETS.maxSensitivityPeakDb} dB itself (search ${bounds})`,
+        result: t.step?.meetsTargets ? "pass" : "fail",
+        consequence: t.step?.meetsTargets
+            ? "the first step meets the targets on its own margins"
+            : "target not offered (beyond one Apply); the first step is not offered because it misses the targets itself; both are measured predictions, not flight advice",
+    };
 }

@@ -73,6 +73,7 @@ import {
 } from "./gyroChain";
 import {
     buildAxisLoop,
+    LOOP_MIN_COHERENCE,
     loopMargins,
     validateChain,
     type AnalysisProvenance,
@@ -97,7 +98,15 @@ import { crossLogReferenceIssues, PLANT_CONFIG_KEYS, sameFlight } from "./logInp
 import { buildExperimentalProposal, type ExperimentalProposal, type WithheldItem } from "./experimentalProposal";
 import { decideAxis, type RouteDecision } from "./candidateDecision";
 import { recordingPlan, SUPPLEMENTARY_MEASUREMENT, type RecordingPlan } from "./recordingInstruction";
-import { collectMultiRecordingAverages, transferFunctionValuesIdentical } from "./multiRecording";
+import {
+    collectMultiRecordingAverages,
+    combineRecordings,
+    eligibleRecordings,
+    otherSweep,
+    transferFunctionValuesIdentical,
+    type RecordingCombination,
+    type RecordingRung,
+} from "./multiRecording";
 import {
     analyzeJioSweeps,
     crossFlightRepeatabilityZ,
@@ -538,6 +547,13 @@ interface AxisAnalysis {
     window: [number, number];
     /** The analysis the loop is read on (the adaptive rung; adaptiveResolution.ts). */
     analysis: AnalysisProvenance | null;
+    /**
+     * The loop the experimental candidate decision reads (block 8): the chosen analysis combined with
+     * the same analysis of independent flights (multiRecording.ts combineRecordings) where they agree,
+     * without the release loop's average counts. Equal to `loop` when there is nothing to combine.
+     */
+    experimentalLoop: AxisLoop;
+    combination: RecordingCombination | null;
 }
 
 /** D path (M5-B) and controller-in-force for one axis of one log. */
@@ -746,28 +762,84 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         );
         multiRecordingContributors.push(...multiRec.contributors);
         multiRecordingRejected.push(...multiRec.rejected);
+        const qualification = qualificationFor(name, axis, chosen.analysis);
+        const loop = buildAxisLoop(axis, chosen.tf, ctl.cfg, eff, chainOk(axis), attested, qualification, {
+            sweep,
+            analysis: chosen.analysis,
+            support: chosen.support,
+            resolution,
+            resolutionFor,
+            multiRecordingExtraByHz: multiRec.extraAveragesByHz,
+        });
+        // Experimental decision (block 8): the other flights' measured values where they agree, never
+        // their average counts alone. The release loop above is unchanged.
+        const eligibility = input.others.length ? eligibleRecordings(log, input.others, name) : null;
+        const combination =
+            chosen.analysis && sweep && eligibility
+                ? combineRecordings(
+                      name,
+                      { log, tf: chosen.tf, analysis: chosen.analysis, sweep, support: chosen.support },
+                      eligibility.eligible.flatMap((other): RecordingRung[] => {
+                          const rung = other.chirp[name]?.analyses?.find(
+                              (r) =>
+                                  r.analysis.segmentSamples === chosen.analysis!.segmentSamples &&
+                                  r.analysis.sampleRateHz === chosen.analysis!.sampleRateHz,
+                          );
+                          const os = otherSweep(other);
+                          return rung && os
+                              ? [
+                                    {
+                                        log: other,
+                                        tf: rung.tf,
+                                        analysis: rung.analysis,
+                                        sweep: os,
+                                        support: rung.support ?? null,
+                                    },
+                                ]
+                              : [];
+                      }),
+                      LOOP_MIN_COHERENCE,
+                  )
+                : null;
+        // Why another flight did not take part, with its own qualification reasons where it was rejected.
+        if (combination && eligibility)
+            combination.rejected.unshift(
+                ...eligibility.rejected.map((r) => {
+                    const other = input.others.find((o) => r.endsWith(`${o.sha256}:${o.logIndex}`));
+                    const why = r.startsWith("multi_recording_axis_unusable")
+                        ? (other?.chirp[name]?.qualificationReasons ?? [])
+                        : [];
+                    return why.length ? `${r}:${why.join(",")}` : r;
+                }),
+            );
+        const experimentalLoop =
+            combination?.tf || multiRec.extraAveragesByHz.size
+                ? buildAxisLoop(
+                      axis,
+                      combination?.tf ?? chosen.tf,
+                      ctl.cfg,
+                      eff,
+                      chainOk(axis),
+                      attested,
+                      qualification,
+                      {
+                          sweep,
+                          analysis: chosen.analysis,
+                          support: combination?.support ?? chosen.support,
+                          resolution,
+                          resolutionFor,
+                          combinedAveragesByHz: combination?.averagesByHz ?? null,
+                      },
+                  )
+                : loop;
         axes[name] = {
-            loop: buildAxisLoop(
-                axis,
-                chosen.tf,
-                ctl.cfg,
-                eff,
-                chainOk(axis),
-                attested,
-                qualificationFor(name, axis, chosen.analysis),
-                {
-                    sweep,
-                    analysis: chosen.analysis,
-                    support: chosen.support,
-                    resolution,
-                    resolutionFor,
-                    multiRecordingExtraByHz: multiRec.extraAveragesByHz,
-                },
-            ),
+            loop,
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,
             window: [c.start, c.end],
             analysis: chosen.analysis,
+            experimentalLoop,
+            combination,
         };
     });
 
@@ -1106,7 +1178,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         const primary = c
             ? decideAxis({
                   route: "primary",
-                  loop: ax?.loop ?? null,
+                  loop: ax?.experimentalLoop ?? null,
+                  combination: ax?.combination ?? null,
                   current,
                   gate: { state: c.state, gates: c.qualityGates },
                   // The same Verified Tune segment the release search is bound to (none without one).

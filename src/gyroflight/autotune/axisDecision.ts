@@ -65,7 +65,11 @@ export function axisDecisionTexts(result: AutotuneV2Result | null, t: Translate)
                   ? t(
                         tr?.status === "search_constrained_by_verified_tune"
                             ? "gyroflightAxisSummaryVerifiedTune"
-                            : "gyroflightAxisSummarySearchLimit",
+                            : tr?.status === "target_beyond_max_step"
+                              ? "gyroflightAxisSummaryTargetBeyondStep"
+                              : tr?.status === "targets_not_reachable"
+                                ? "gyroflightAxisSummaryTargetsNotReachable"
+                                : "gyroflightAxisSummarySearchLimit",
                     )
                   : t(
                         tr?.status === "no_change_needed"
@@ -76,7 +80,11 @@ export function axisDecisionTexts(result: AutotuneV2Result | null, t: Translate)
             ax.kind === "record"
                 ? t("gyroflightOverviewNextRecord")
                 : ax.kind === "search_limit"
-                  ? t("gyroflightOverviewNextSearchLimit")
+                  ? t(
+                        tr?.status === "target_beyond_max_step" || tr?.status === "targets_not_reachable"
+                            ? "gyroflightOverviewNextNoPidProposal"
+                            : "gyroflightOverviewNextSearchLimit",
+                    )
                   : t("gyroflightOverviewNextCandidate");
         const section: AutotuneSection =
             ax.kind === "record" ? "plan" : ax.kind === "candidate" ? "tuning" : "technical";

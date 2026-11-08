@@ -509,6 +509,102 @@ describe("AutotuneV2Panel", () => {
         expect(roll.querySelector("details [data-gyrocore='v2-missing-interval']")).not.toBeNull();
     });
 
+    it("section 4c (block 8): source of a combination, current and best values with predicted margins, the wider search", async () => {
+        const check = {
+            rule: "candidate_search_measured_margins",
+            ref: "candidateDecision",
+            value: "best PM 26° (P 39, I 55, D 30), GM 5.1 dB, |S| 8.9 dB over 127 usable of 169",
+            unit: "",
+            threshold: "PM ≥ 45°, GM ≥ 6 dB, |S| ≤ 6 dB; P/I/D within ±30 %",
+            result: "fail",
+            consequence: "no candidate meets the targets within ±30 % nor within the wider target search",
+        } as const;
+        const m = (pm: number, gm: number, s: number) => ({
+            phaseMarginDeg: pm,
+            gainMarginDb: null,
+            sensitivityPeakDb: null,
+            measured: { phaseMarginDeg: pm, gainMarginDb: gm, sensitivityPeakDb: s },
+            evidence: { level: "MEASURED" },
+            reasons: [],
+        });
+        const primary = {
+            route: "primary" as const,
+            plant: "present_with_limitation" as const,
+            bandHz: [7.8, 50.8] as [number, number],
+            metrics: null,
+            current: { crossoverHz: 26, pmDeg: 16, gmDb: 3.4, sDb: 12.3 },
+            checks: [check],
+            searchRan: true,
+            candidatesTried: 169,
+            candidatesUsable: 127,
+            status: "targets_not_reachable" as const,
+            firstCause: check,
+            candidate: {
+                axis: "roll",
+                current: { p: 56, i: 79, d: 30, dMax: 40 },
+                proposed: { p: 39, i: 55, d: 30, dMax: 40 },
+                changed: true,
+                currentMargins: m(16, 3.4, 12.3),
+                proposedMargins: m(26, 5.1, 8.9),
+                outcome: "targets_not_reachable",
+                status: "BLOCKED",
+                reasons: [],
+            },
+            measurementUsable: true,
+            missing: [],
+            waived: [],
+            combination: {
+                flights: ["eb8ad42e:0"],
+                rejected: [],
+                medianZ: 0.08,
+                commonBins: 6,
+                consistent: true,
+                pooledHz: [5.9, 7.8, 9.8],
+                otherFlightHz: [44.9, 46.9],
+                disagreeHz: [],
+                notFilledHz: [],
+            },
+            target: {
+                pScale: [0.4, 1.3],
+                dScale: [0.5, 1.3],
+                tried: 323,
+                usable: 164,
+                target: null,
+                best: {
+                    values: { p: 22, i: 32, d: 35, dMax: 46 },
+                    change: { p: -0.61, i: -0.59, d: 0.17 },
+                    crossoverHz: 23.9,
+                    pmDeg: 37,
+                    gmDb: 5.5,
+                    sDb: 8,
+                    meetsTargets: false,
+                },
+                bestOnEdge: true,
+                step: null,
+                stepImprovesAll: null,
+            },
+        };
+        const r = {
+            ...emptyResult(),
+            candidateDecisions: { roll: { primary, jio: null } },
+        } as unknown as AutotuneV2Result;
+        const d = mount(r);
+        await flush();
+        const row = q(d, '[data-gyrocore="v2-decisions"] tr[data-axis="roll"][data-route="primary"]')!;
+        expect(row.getAttribute("data-status")).toBe("targets_not_reachable");
+        expect(q(row, '[data-gyrocore="v2-decision-source"]')!.textContent).toContain(
+            "with 1 other flight(s) (median z 0.08): pooled 5.9–9.8 Hz (3); from the other flight 44.9–46.9 Hz (2)",
+        );
+        const values = [...q(row, '[data-gyrocore="v2-decision-values"]')!.querySelectorAll("span")].map((e) =>
+            e.textContent!.trim(),
+        );
+        expect(values).toEqual([
+            "now P 56, I 79, D 30: PM 16°, GM 3.4 dB, |S| 12.3 dB (MEASURED)",
+            "best within ±30 %, not offered: P 39, I 55, D 30: PM 26°, GM 5.1 dB, |S| 8.9 dB (misses the targets)",
+            "wider search (P/I ×0.4–1.3, D ×0.5–1.3): no candidate meets the targets; best P 22, I 32, D 35: PM 37°, GM 5.5 dB, |S| 8.0 dB (on its edge)",
+        ]);
+    });
+
     it("experimental Apply is refused when the craft is armed, without a write and without a backup", async () => {
         const r = {
             ...emptyResult(),

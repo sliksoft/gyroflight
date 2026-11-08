@@ -775,6 +775,7 @@
                                 <th>{{ $t("gyroflightV2DecisionRoute") }}</th>
                                 <th>{{ $t("gyroflightV2DecisionPlant") }}</th>
                                 <th>{{ $t("gyroflightV2DecisionSearch") }}</th>
+                                <th>{{ $t("gyroflightV2DecisionValues") }}</th>
                                 <th>{{ $t("gyroflightV2DecisionStatus") }}</th>
                                 <th>{{ $t("gyroflightV2DecisionCause") }}</th>
                             </tr>
@@ -789,8 +790,19 @@
                             >
                                 <td>{{ row.axis }}</td>
                                 <td>{{ row.route }}</td>
-                                <td>{{ row.plant }}</td>
+                                <td>
+                                    {{ row.plant }}
+                                    <span
+                                        v-if="row.source"
+                                        class="block text-dimmed"
+                                        data-gyrocore="v2-decision-source"
+                                        >{{ row.source }}</span
+                                    >
+                                </td>
                                 <td>{{ row.search }}</td>
+                                <td class="text-dimmed" data-gyrocore="v2-decision-values">
+                                    <span v-for="(line, i) in row.values" :key="i" class="block">{{ line }}</span>
+                                </td>
                                 <td>{{ row.status }}</td>
                                 <td class="text-dimmed">{{ row.cause }}</td>
                             </tr>
@@ -1466,6 +1478,64 @@ const decisionRows = computed(() => {
             const r = d[axis]?.[route];
             if (!r) return [];
             const fc = r.firstCause;
+            // Values per axis (block 8): now, the best (or offered) candidate within one Apply and the
+            // wider target search, each with its predicted margins and their evidence; never a stand-in.
+            const pid = (v: { p: number; i: number; d: number }) => `P ${v.p}, I ${v.i}, D ${v.d}`;
+            const margins = (m: { pmDeg: number | null; gmDb: number | null; sDb: number | null }) =>
+                `PM ${num(m.pmDeg, 0)}°, GM ${num(m.gmDb, 1)} dB, |S| ${num(m.sDb, 1)} dB`;
+            const level = r.candidate?.currentMargins.evidence?.level ?? (r.current ? "MEASURED" : null);
+            // The logged values of this axis (the release search's `current`), with or without a search.
+            const nowPid = r.candidate?.current ?? v2.result?.pid.find((p) => p.axis === axis)?.current ?? null;
+            const values: string[] = [];
+            if (r.current)
+                values.push(`now ${nowPid ? pid(nowPid) : "--"}: ${margins(r.current)}${level ? ` (${level})` : ""}`);
+            if (r.candidate && r.status === "candidate_found")
+                values.push(
+                    `offered (experimental): ${pid(r.candidate.proposed)}: ${margins({
+                        pmDeg: r.candidate.proposedMargins.phaseMarginDeg,
+                        gmDb:
+                            r.candidate.proposedMargins.gainMarginDb ??
+                            r.candidate.proposedMargins.measured.gainMarginDb,
+                        sDb:
+                            r.candidate.proposedMargins.sensitivityPeakDb ??
+                            r.candidate.proposedMargins.measured.sensitivityPeakDb,
+                    })}`,
+                );
+            else if (r.candidate && r.status !== "no_change_needed")
+                values.push(
+                    `best within ±30 %, not offered: ${pid(r.candidate.proposed)}: ${margins({
+                        pmDeg: r.candidate.proposedMargins.phaseMarginDeg,
+                        gmDb:
+                            r.candidate.proposedMargins.gainMarginDb ??
+                            r.candidate.proposedMargins.measured.gainMarginDb,
+                        sDb:
+                            r.candidate.proposedMargins.sensitivityPeakDb ??
+                            r.candidate.proposedMargins.measured.sensitivityPeakDb,
+                    })} (misses the targets)`,
+                );
+            const t = r.target;
+            if (t) {
+                const bounds = `P/I ×${t.pScale[0]}–${t.pScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}`;
+                if (t.target)
+                    values.push(
+                        `target (${bounds}), not offered: ${pid(t.target.values)}: ${margins(t.target)}`,
+                        t.step
+                            ? `first step ±30 %: ${pid(t.step.values)}: ${margins(t.step)}${t.step.meetsTargets ? "" : " (misses the targets, not offered)"}`
+                            : "first step ±30 %: not readable inside the identified band",
+                    );
+                else
+                    values.push(
+                        `wider search (${bounds}): no candidate meets the targets${t.best ? `; best ${pid(t.best.values)}: ${margins(t.best)}${t.bestOnEdge ? " (on its edge)" : ""}` : ""}`,
+                    );
+            }
+            const c = r.combination;
+            const hz = (xs: number[]) =>
+                xs.length ? `${num(Math.min(...xs), 1)}–${num(Math.max(...xs), 1)} Hz (${xs.length})` : "none";
+            const source = c
+                ? c.consistent
+                    ? `with ${c.flights.length} other flight(s) (median z ${num(c.medianZ, 2)}): pooled ${hz(c.pooledHz)}; from the other flight ${hz(c.otherFlightHz)}${c.disagreeHz.length ? `; disagree, kept as measured ${hz(c.disagreeHz.map((x) => x.hz))}` : ""}`
+                    : `other flight not combined: ${c.rejected.join(", ") || "agreement not shown"}`
+                : "";
             const waived = r.checks
                 .filter((c) => c.result === "waived")
                 .map((c) => `${c.rule}: waived (${c.consequence})`)
@@ -1477,6 +1547,8 @@ const decisionRows = computed(() => {
                     status: r.status,
                     plant: `${r.plant}${r.bandHz ? ` (${band(r.bandHz)} Hz)` : ""}`,
                     search: r.searchRan ? `${r.candidatesUsable} of ${r.candidatesTried}` : "not run",
+                    source,
+                    values: values.length ? values : ["--"],
                     cause:
                         [
                             fc

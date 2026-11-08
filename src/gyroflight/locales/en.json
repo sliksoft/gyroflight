@@ -1051,6 +1051,7 @@
     "gyroflightV2DecisionRoute": { "message": "Route" },
     "gyroflightV2DecisionPlant": { "message": "Plant (identified band)" },
     "gyroflightV2DecisionSearch": { "message": "Search (usable of tried)" },
+    "gyroflightV2DecisionValues": { "message": "PID values and predicted margins (evidence)" },
     "gyroflightV2DecisionStatus": { "message": "Status" },
     "gyroflightV2DecisionCause": { "message": "First decisive check: value; threshold; result; consequence" },
     "gyroflightV2RecordingPlanTitle": { "message": "Recording plan (preparation for a flight not yet made)" },
@@ -1392,11 +1393,20 @@
     "gyroflightAxisSummarySearchLimit": {
         "message": "The current candidate search found no suitable value within its limits. This does not rule out that new data changes the assessment."
     },
+    "gyroflightAxisSummaryTargetsNotReachable": {
+        "message": "No PID values meet the targets on this measurement, neither within one step nor in a wider search; a larger step would not help. This does not rule out that new data changes the assessment."
+    },
+    "gyroflightAxisSummaryTargetBeyondStep": {
+        "message": "PID values that meet the targets lie farther away than one Apply may change; the first allowed step does not meet the targets itself, so nothing is offered."
+    },
     "gyroflightAxisSummaryVerifiedTune": {
         "message": "The candidate search is constrained by the bound Verified Tune: its gain-change flight also changed feedforward."
     },
     "gyroflightAxisSummaryCandidate": { "message": "A candidate value was found; review it with its checks." },
     "gyroflightAxisSummaryNoChange": { "message": "According to the current data no change is needed." },
+    "gyroflightOverviewNextNoPidProposal": {
+        "message": "no PID proposal for this axis on this measurement; the searches, their bounds and the best values are under Technical details"
+    },
     "gyroflightOverviewNextSearchLimit": {
         "message": "a change larger than one step is outside this search; the candidate searches are explained under Technical details"
     },

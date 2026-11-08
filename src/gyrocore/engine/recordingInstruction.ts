@@ -185,6 +185,7 @@ function decisive(d: { primary: RouteDecision | null; jio: RouteDecision | null 
     const searchFailed = routes.find(
         (r) =>
             r.status === "search_limit_max_step" ||
+            r.status === "target_beyond_max_step" ||
             r.status === "targets_not_reachable" ||
             r.status === "search_constrained_by_verified_tune",
     );
@@ -246,6 +247,23 @@ function axisNeed(
             plannerBandsHz: bands,
             note: `${axis}: the bound Verified Tune's gain-change flight also moved feedforward (${r.firstCause?.value ?? "unknown"}), so the search finds no point on its segment. A new CHIRP sweep does not lift this; a gain-change flight with feedforward unchanged does (release route: required_measurement:gain_change_flight_with_feedforward_unchanged).`,
         };
+    if (r.status === "target_beyond_max_step" || (r.status === "targets_not_reachable" && r.target)) {
+        const t = r.target!;
+        const read = (x: NonNullable<typeof t.step>) =>
+            `P ${x.values.p}, I ${x.values.i}, D ${x.values.d}: PM ${x.pmDeg?.toFixed(0)}°, GM ${x.gmDb?.toFixed(1)} dB, |S| ${x.sDb?.toFixed(1)} dB`;
+        const bounds = `P/I ×${t.pScale[0]}–${t.pScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}`;
+        return {
+            axis,
+            trigger,
+            kind: "search_limit",
+            missing,
+            plannerBandsHz: bands,
+            note:
+                r.status === "target_beyond_max_step"
+                    ? `${axis}: on the ${r.route} plant a tune meeting the targets lies beyond one Apply (${read(t.target!)}). The first step of at most ±30 % (${t.step ? read(t.step) : "not readable"}) misses the targets on its own margins, so nothing is offered. Measured predictions only; new data can still change this assessment.`
+                    : `${axis}: the ${r.route} plant is usable (${r.candidatesUsable} of ${r.candidatesTried} candidates have in-band margins) and no candidate meets the targets, within ±30 % nor in the wider search (${bounds}${t.best ? `; best ${read(t.best)}${t.bestOnEdge ? ", on its edge" : ""}` : ""}). The step limit is not what stops a candidate: PID scaling alone does not reach the targets on this measurement. New data can still change this assessment.`,
+        };
+    }
     if (r.status === "search_limit_max_step" || r.status === "targets_not_reachable")
         return {
             axis,
@@ -264,8 +282,38 @@ function axisNeed(
         kind: "record",
         missing,
         plannerBandsHz: bands,
-        note: `${causeText(r)}.`,
+        note: [`${causeText(r)}.`, ...holeAdvice(r)].join(" "),
     };
+}
+
+/**
+ * What the existing flights did and did not supply for the holes of this route (block 8), and what
+ * a new sweep of the axis can add — never a promise that it fills them.
+ */
+function holeAdvice(r: RouteDecision): string[] {
+    const out: string[] = [];
+    const c = r.combination;
+    if (c?.consistent && (c.pooledHz.length || c.otherFlightHz.length))
+        out.push(
+            `Existing flights combined where they agree (${c.flights.length} other flight(s); pooled ${c.pooledHz.length} bin(s), ${c.otherFlightHz.length} taken from the other flight); the holes listed remain after that.`,
+        );
+    else if (c && c.rejected.length) out.push(`Other flights not combined on this axis: ${c.rejected.join("; ")}.`);
+    const holes = r.missing.filter((m) => m.kind === "decision_band_hole");
+    const hz = (ms: typeof holes) =>
+        ms
+            .map((m) => (m.fromHz === m.toHz ? m.fromHz.toFixed(1) : `${m.fromHz.toFixed(1)}–${m.toHz.toFixed(1)}`))
+            .join(", ");
+    const unc = holes.filter((m) => m.reason === "uncertainty");
+    const coh = holes.filter((m) => m.reason === "coherence");
+    if (unc.length)
+        out.push(
+            `At ${hz(unc)} Hz the estimate is coherent but too uncertain (±2ε above 0.5): more whole sweeps of this axis add averages there, and flights are pooled only where they agree; how many are needed is not known in advance.`,
+        );
+    if (coh.length)
+        out.push(
+            `At ${hz(coh)} Hz γ² stayed below ${LOOP_MIN_COHERENCE} in the data used; another sweep of this axis may or may not reach it there (a bin is filled only by a flight that identifies it itself, never by interpolation).`,
+        );
+    return out;
 }
 
 /** The logged debug_mode with its name when it is CHIRP ("96 (CHIRP)"). */

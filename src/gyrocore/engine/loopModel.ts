@@ -474,6 +474,11 @@ export function loopUncertainty(
         analysis?: AnalysisProvenance | null;
         /** Extra whole-segment averages from independent recordings (multiRecording.ts); never invents primary support. */
         multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
+        /**
+         * The averages behind a bin of a combined estimate (multiRecording.ts combineRecordings: both
+         * flights where pooled, the other flight's own where taken from it). Replaces the count.
+         */
+        combinedAveragesByHz?: ReadonlyMap<number, number> | null;
     } = {},
     /** Which SUB_SEGMENT_DWELL policy applies (the primary measurement or the model-class qualification). */
     path: MeasurementPath = "primary",
@@ -521,7 +526,13 @@ export function loopUncertainty(
         // from the TF's segment count (stationary record). Never invent n=1 for fractional chirp dwell
         // (Grokbot F2); SUB_SEGMENT_DWELL[path] stays UNKNOWN on every path.
         void SUB_SEGMENT_DWELL[path];
-        const counted = sweep ? sweepAverages(f, analysis, sweep, windowSamples) : Math.max(0, Math.floor((K + 1) / 2));
+        const combined = measurement.combinedAveragesByHz?.get(f);
+        const counted =
+            combined !== undefined
+                ? Math.floor(combined)
+                : sweep
+                  ? sweepAverages(f, analysis, sweep, windowSamples)
+                  : Math.max(0, Math.floor((K + 1) / 2));
         if (counted < 1) {
             averagesByHz.set(f, 0);
             lo = Math.min(lo, 0);
@@ -529,7 +540,7 @@ export function loopUncertainty(
             countedAsOne++;
             continue;
         }
-        const extra = measurement.multiRecordingExtraByHz?.get(f) ?? 0;
+        const extra = combined !== undefined ? 0 : (measurement.multiRecordingExtraByHz?.get(f) ?? 0);
         const n = counted + (Number.isFinite(extra) && extra > 0 ? Math.floor(extra) : 0);
         averagesByHz.set(f, n);
         lo = Math.min(lo, n);
@@ -1155,6 +1166,7 @@ export function buildAxisLoop(
         /** The verdict for another candidate (AxisLoop.resolutionFor); absent: unknown for candidates. */
         resolutionFor?: ((cand: LoopCandidate) => ResolutionConvergence | null) | null;
         multiRecordingExtraByHz?: ReadonlyMap<number, number> | null;
+        combinedAveragesByHz?: ReadonlyMap<number, number> | null;
         /**
          * A plant measured directly (jioSweep.ts: G = H_ry / H_ru from the logged pidSum) instead of
          * the one inferred from `tf` through the controller model. Its bins must lie on `tf`'s grid.

@@ -634,6 +634,50 @@ describe("Tuning status (first on Tuning and apply)", () => {
 });
 
 describe("Overview reasons (RED-53)", () => {
+    it("block 8: a search that the wider bounds also fail, and a target beyond one Apply, read as such", async () => {
+        const v2 = useAutotuneV2Store();
+        v2.result = resultWith({
+            recordingPlan: {
+                axes: [
+                    planAxis(
+                        "roll",
+                        "search_limit",
+                        {
+                            route: "primary",
+                            status: "targets_not_reachable",
+                            rule: "candidate_search_measured_margins",
+                            value: "best PM 26°",
+                            threshold: "PM ≥ 45°",
+                        },
+                        "roll: no candidate meets the targets, within ±30 % nor in the wider search.",
+                    ),
+                    planAxis(
+                        "pitch",
+                        "search_limit",
+                        {
+                            route: "primary",
+                            status: "target_beyond_max_step",
+                            rule: "candidate_search_measured_margins",
+                            value: "best PM 40°",
+                            threshold: "PM ≥ 45°",
+                        },
+                        "pitch: a tune meeting the targets lies beyond one Apply.",
+                    ),
+                ],
+            },
+        });
+        v2.state = "done";
+        const { container, unmount } = mountComponent(AutotuneOverview, { onOpen: () => {} });
+        await flush();
+        const reason = (axis: string) =>
+            container.querySelector(`[data-gyrocore="overview-reasons"] [data-axis="${axis}"]`)!.textContent!;
+        expect(reason("roll")).toContain("gyroflightAxisSummaryTargetsNotReachable");
+        expect(reason("roll")).toContain("gyroflightOverviewNextNoPidProposal");
+        expect(reason("pitch")).toContain("gyroflightAxisSummaryTargetBeyondStep");
+        expect(reason("pitch")).not.toContain("gyroflightOverviewNextSearchLimit");
+        unmount();
+    });
+
     it("a search limit reads as a limit of the current search, keeps the engine's check behind a toggle and points to the technical details", async () => {
         const v2 = useAutotuneV2Store();
         v2.result = resultWith({
