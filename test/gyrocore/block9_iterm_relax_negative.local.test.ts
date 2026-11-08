@@ -21,9 +21,10 @@
 
 /*
  * LOCAL negative control (block 9, Grok SHOULD-FIX 1): the I-relax acceptance on the real AIR65 logs
- * with the right parameters and with deliberately wrong ones (ACRO threshold instead of ANGLE, a
- * wrong relax cutoff, no relax). A wrong hypothesis must not be accepted. Written as JSON to
- * GYROFLIGHT_TRACE_OUT. Skipped without the private logs.
+ * with the right parameters and with deliberately wrong ones (ACRO threshold instead of ANGLE, a relax
+ * cutoff of 5 Hz or 100 Hz instead of the header's 25 Hz). The firmware parameters must be accepted,
+ * every ACRO threshold and 100 Hz cutoff rejected; the 5 Hz cutoff is reported (it passes on 2 of 6
+ * sweeps). Written as JSON to GYROFLIGHT_TRACE_OUT. Skipped without the private logs.
  */
 
 import { createHash } from "node:crypto";
@@ -108,6 +109,8 @@ describe.skipIf(!present)("block 9: I-relax acceptance, negative control on real
                         ),
                     });
                     expect(variants.firmware.status).toBe("reconstructed");
+                    expect(variants.acroThreshold.status).toBe("unknown");
+                    expect(variants.cutoff100Hz.status).toBe("unknown");
                 }
             }
         }

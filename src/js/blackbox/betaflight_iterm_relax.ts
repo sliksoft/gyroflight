@@ -70,10 +70,10 @@ const ITERM_RELAX_TYPE_SETPOINT = 1;
 export const ITERM_RELAX_ACCEPT = Object.freeze({ maxRmsOfUnrelaxed: 0.1, maxRmsOfLoggedP: 0.05 });
 // Set after seeing the AIR65 data (block 9; Grok review SHOULD-FIX 1): with the firmware parameters
 // the six real sweeps give ≤ 0.038 of the unrelaxed error and ≤ 0.022 of rms P (≥ 2.2× margin). The
-// negative control on the same logs (block9_iterm_relax_negative.local.test.ts) rejects 22 of 24
-// wrong hypotheses — every ACRO threshold, every 100 Hz cutoff — but accepts a 5 Hz instead of 25 Hz
-// cutoff on 2 of 6 sweeps (factor 0.06 instead of 0.11). The cutoff is read from the log header, not
-// estimated, so the rule decides the relax hypothesis, not the cutoff.
+// negative control on the same logs (block9_iterm_relax_negative.local.test.ts) rejects 16 of 18
+// wrong hypotheses — all 6 ACRO thresholds, all 6 100 Hz cutoffs, 4 of 6 5 Hz cutoffs — but accepts a
+// 5 Hz instead of 25 Hz cutoff on 2 of 6 sweeps (factor 0.06 instead of 0.11). The cutoff is read
+// from the log header, not estimated, so the rule decides the relax hypothesis, not the cutoff.
 
 /**
  * Pooling across flights (multi-recording): a flight's T is combined with the primary's only when its
@@ -263,7 +263,11 @@ export function itermRelaxForSweep(
     return itermRelaxInForce({ ...signals, ...window }, config, axis);
 }
 
-/** Whether two sweeps ran the same I closely enough for their T to be extracted with one controller. */
+/**
+ * Whether two sweeps ran the same I closely enough for their T to be extracted with one controller.
+ * Two unknown sweeps pool (both with the headers' I): the primary axis then already carries
+ * iterm_relax_unknown and the release model is PARTIAL (Grok review round 2, NOTE 4).
+ */
 export function itermRelaxPoolable(a: ItermRelaxInForce, b: ItermRelaxInForce | null | undefined): boolean {
     return !!b && a.status === b.status && Math.abs(a.meanFactor - b.meanFactor) <= ITERM_RELAX_POOL_TOLERANCE;
 }
