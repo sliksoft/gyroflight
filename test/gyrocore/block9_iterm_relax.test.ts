@@ -26,14 +26,23 @@
  * margins and candidates keep the I of normal flight. SIMULATION ONLY.
  */
 
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
+import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
+import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
+import { runAutotuneV2 } from "../../src/gyrocore/engine/autotuneV2";
+import { closedLoopChirpLog, ratePlant } from "./harness/closedLoopBbl";
 import {
     BOX_ANGLE_BIT,
     ITERM_RELAX_ACCEPT,
     itermRelaxApplies,
     itermRelaxConfigFromHeaders,
+    ITERM_RELAX_POOL_TOLERANCE,
     itermRelaxForSweep,
     itermRelaxInForce,
+    itermRelaxPoolable,
+    itermRelaxUnknown,
 } from "../../src/js/blackbox/betaflight_iterm_relax";
 import {
     cadd,
@@ -284,5 +293,31 @@ describe("buildAxisLoop with the controller in force during the sweep", () => {
     it("leaves a loop without a sweep controller as before (no sweepCfg field)", () => {
         const loop = buildAxisLoop(0, tf, CFG, null, false, false);
         expect("sweepCfg" in loop).toBe(false);
+    });
+});
+
+describe("review round 1: unknown is named, pooling needs the same I in force", () => {
+    const rec = (meanFactor: number) => ({ ...itermRelaxUnknown([]), status: "reconstructed" as const, meanFactor });
+    it("pools only the same status within the tolerance", () => {
+        expect(itermRelaxPoolable(rec(0.109), rec(0.106))).toBe(true);
+        expect(itermRelaxPoolable(rec(0.1), rec(0.1 + ITERM_RELAX_POOL_TOLERANCE * 1.01))).toBe(false);
+        expect(itermRelaxPoolable(rec(0.109), itermRelaxUnknown(["x"]))).toBe(false);
+        expect(itermRelaxPoolable(itermRelaxUnknown(["x"]), itermRelaxUnknown(["y"]))).toBe(true);
+        expect(itermRelaxPoolable(rec(0.109), null)).toBe(false);
+    });
+
+    it("an engine run without the relax headers names it on the PID result", () => {
+        const bytes = closedLoopChirpLog({
+            plants: [ratePlant({ K: 60, motorHz: 40, delayS: 0.002 }), null, null],
+            sweepS: 20,
+            seed: 901,
+        });
+        const sha = createHash("sha256").update(bytes).digest("hex");
+        const [log] = buildLogInputs(bytes, sha, qualifyChirpFile(bytes, "a.bbl", 45, AUTOTUNE_MATH), null);
+        const r = runAutotuneV2({ primary: log, others: [], verifiedTune: null, createdAt: "2026-11-08T00:00:00Z" });
+        expect(r.itermRelax.find((x) => x.axis === "roll")).toMatchObject({ status: "unknown", meanFactor: 1 });
+        expect(r.pid.find((p) => p.axis === "roll")!.reasons).toContain(
+            "iterm_relax_unknown:roll:iterm_relax_headers_missing",
+        );
     });
 });

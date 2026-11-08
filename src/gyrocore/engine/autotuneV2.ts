@@ -36,7 +36,7 @@
  */
 
 import type { DigitalControllerConfig } from "@/js/blackbox/betaflight_digital_controller";
-import { itermRelaxForSweep, type ItermRelaxInForce } from "@/js/blackbox/betaflight_iterm_relax";
+import { itermRelaxForSweep, itermRelaxPoolable, type ItermRelaxInForce } from "@/js/blackbox/betaflight_iterm_relax";
 import {
     dtermConfigFromHeaders,
     dtermFitAccepted,
@@ -819,12 +819,33 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         // values (block 8). The experimental decision may use the other flights' measured values where
         // they agree (combineRecordings), with exactly the averages behind each combined bin.
         const eligibility = input.others.length ? eligibleRecordings(log, input.others, name) : null;
+        // A combined T is extracted with this flight's sweep controller: only flights whose I was in
+        // force the same way (same relax status, mean factor within ITERM_RELAX_POOL_TOLERANCE) pool.
+        const relaxRejected: string[] = [];
+        const relaxMatches = (other: AutotuneLogInput) => {
+            const oc = other.chirp[name];
+            const o = oc
+                ? analyzeAxisController(
+                      other,
+                      headerMap(other.headerPairs),
+                      axis,
+                      oc,
+                      flightMask(other.channels.rcThrottle),
+                  )?.itermRelax
+                : null;
+            const ok = itermRelaxPoolable(ctl.itermRelax, o);
+            if (!ok)
+                relaxRejected.push(
+                    `multi_recording_iterm_relax_differs:${o ? `${o.status}:${o.meanFactor.toFixed(3)}` : "unknown"}:${other.sha256}:${other.logIndex}`,
+                );
+            return ok;
+        };
         const combination =
             chosen.analysis && sweep && eligibility
                 ? combineRecordings(
                       name,
                       { log, tf: chosen.tf, analysis: chosen.analysis, sweep, support: chosen.support },
-                      eligibility.eligible.flatMap((other): RecordingRung[] => {
+                      eligibility.eligible.filter(relaxMatches).flatMap((other): RecordingRung[] => {
                           const rung = other.chirp[name]?.analyses?.find(
                               (r) =>
                                   r.analysis.segmentSamples === chosen.analysis!.segmentSamples &&
@@ -857,6 +878,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                     return why.length ? `${r}:${why.join(",")}` : r;
                 }),
             );
+        if (combination) combination.rejected.unshift(...relaxRejected);
+        else multiRecordingRejected.push(...relaxRejected);
         if (combination) {
             multiRecordingContributors.push(...combination.contributors);
             multiRecordingRejected.push(...combination.rejected);
@@ -882,6 +905,13 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             combination,
         };
     });
+
+    // An axis whose I relax could not be reconstructed was extracted with the headers' I, which the
+    // sweep may not have run: named on its PID result and in the release model (never silent).
+    const relaxNote = (a: AxisName) => {
+        const r = itermRelaxReport.find((x) => x.axis === a);
+        return r?.status === "unknown" ? [`iterm_relax_unknown:${a}:${r.reasons.join(",")}`] : [];
+    };
 
     // EXPERIMENTAL CHIRP + JIO route (jioSweep.ts): the same loop model, candidate search and planner
     // on a plant measured from the logged pidSum. Kept apart from `items`: it is not release evidence.
@@ -942,6 +972,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             ),
         );
     });
+
+    for (const p of pid) p.reasons = [...p.reasons, ...relaxNote(p.axis)];
 
     // 4b. Filters (needs the chain simulation).
     let filters: FilterGroupResult[] = [];
@@ -1163,6 +1195,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                     ? []
                     : [`cross_log_plant_${(crossLogPlant[a]?.status ?? "untested").toLowerCase()}:${a}`],
             ),
+            ...scope.flatMap((a) => relaxNote(a)),
         ];
         const release: AbsoluteReleaseEvidence = {
             measurement: { valid: measurementReasons.length === 0 && scope.length > 0, reasons: measurementReasons },
