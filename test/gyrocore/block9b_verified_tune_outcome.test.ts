@@ -42,10 +42,20 @@ const cmp = (axis: AxisComparison["axis"], verdict: AxisComparison["verdict"]): 
     toleranceSource: "baseline_repeat",
     verdict,
 });
-const attempt = (verdict: "PASS" | "FAIL", comparisons: AxisComparison[]): VerifiedTuneAttempt => ({
-    record: { verdict, comparisons, reasons: [] } as unknown as VerifiedTune,
-    reasons: [],
-});
+// As buildVerifiedTune records it: one reason per axis that is not PASS, plus any `extra` reasons.
+const attempt = (
+    verdict: "PASS" | "FAIL",
+    comparisons: AxisComparison[],
+    extra: string[] = [],
+): VerifiedTuneAttempt => {
+    const reasons = [
+        ...extra,
+        ...comparisons
+            .filter((c) => c.verdict !== "PASS")
+            .map((c) => `verified_tune:${c.axis}:${c.verdict.toLowerCase()}`),
+    ];
+    return { record: { verdict, comparisons, reasons } as unknown as VerifiedTune, reasons };
+};
 
 describe("verifiedTuneOutcome", () => {
     it("PASS stays PASS; no record is NONE", () => {
@@ -66,5 +76,21 @@ describe("verifiedTuneOutcome", () => {
     });
     it("a refusal without any comparison (another craft, a non-PID change) is NONE", () => {
         expect(verifiedTuneOutcome(attempt("FAIL", []))).toBe("NONE");
+    });
+    // GBR-BLK-9-e26aaac-01: buildVerifiedTune still compares the axes when the comparison itself is
+    // invalid; such a record must not read as a failed (or merely undetectable) prediction.
+    it.each([
+        "verified_tune:non_pid_value_changed:gyro_lpf1_static_hz",
+        "verified_tune:repeat_not_independent",
+        "verified_tune:log_hash_invalid",
+        "verified_tune:same_log",
+        "verified_tune:no_pid_change_between_logs",
+        "verified_tune:logged_values_missing",
+        "verified_tune:axis_not_measured:pitch",
+    ])("an invalid comparison (%s) is NONE, whatever the axes say", (reason) => {
+        expect(verifiedTuneOutcome(attempt("FAIL", [cmp("roll", "FAIL")], [reason]))).toBe("NONE");
+        expect(verifiedTuneOutcome(attempt("FAIL", [cmp("roll", "INSUFFICIENT")], [reason]))).toBe("NONE");
+        expect(verifiedTuneOutcome(attempt("FAIL", [cmp("roll", "NOT_DETECTABLE")], [reason]))).toBe("NONE");
+        expect(verifiedTuneOutcome(attempt("FAIL", [cmp("roll", "PASS")], [reason]))).toBe("NONE");
     });
 });

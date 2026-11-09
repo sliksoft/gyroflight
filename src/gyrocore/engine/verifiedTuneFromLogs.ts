@@ -63,14 +63,21 @@ export interface VerifiedTuneAttempt {
  * What an attempt shows (block 9b): the stored record knows only PASS / FAIL, and any axis that is not
  * PASS makes it FAIL — but an axis whose change was not detectable or whose data were insufficient
  * has not refuted the prediction. FAIL only when an axis comparison failed; NOT_DETECTABLE /
- * INSUFFICIENT when that is the worst axis outcome; NONE when no comparison was made (refused).
+ * INSUFFICIENT when that is the worst axis outcome; NONE when no valid comparison was made: refused, or
+ * the record carries a reason that invalidates the comparison itself (another value than the PIDs
+ * changed, a dependent repeat, a bad hash, an axis not measured, …). buildVerifiedTune still runs the
+ * axis comparisons then, but their verdicts say nothing about the prediction (GBR-BLK-9-e26aaac-01).
  */
 export type VerifiedTuneOutcome = "PASS" | "FAIL" | "NOT_DETECTABLE" | "INSUFFICIENT" | "NONE";
+
+/** The only record reasons that are an axis outcome; every other record reason invalidates the comparison. */
+const AXIS_OUTCOME_REASON = /^verified_tune:(roll|pitch|yaw):(fail|insufficient|not_detectable)$/;
 
 export function verifiedTuneOutcome(attempt: VerifiedTuneAttempt): VerifiedTuneOutcome {
     const r = attempt.record;
     if (!r) return "NONE";
     if (r.verdict === "PASS") return "PASS";
+    if (r.reasons.some((x) => !AXIS_OUTCOME_REASON.test(x))) return "NONE";
     const v = r.comparisons.map((c) => c.verdict);
     if (v.includes("FAIL")) return "FAIL";
     if (v.includes("INSUFFICIENT")) return "INSUFFICIENT";

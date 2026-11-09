@@ -127,7 +127,21 @@ describe.skipIf(!present)("block 9b: pre-registered trial evaluation (local)", (
             if (!cand) return { verdict: "NONE" as const, reasons: ["log_missing"], roll: null };
             const attempt = verifiedTuneFromLogs([base, rep, cand]);
             const roll = attempt.record?.comparisons.find((c) => c.axis === "roll") ?? null;
-            // The outcome the app shows (useAutotuneV2 createVerifiedTune → verifiedTuneOutcome).
+            // bestLog picks the baseline within the P56 group by score, not by import order: a verdict
+            // counts only against the registered baseline and repeat (GBR-BLK-9-e26aaac-01).
+            const r = attempt.record;
+            if (r && (r.baseline.sha256 !== BASE.sha256 || r.baselineRepeat?.sha256 !== REP.sha256)) {
+                return {
+                    verdict: "NONE" as const,
+                    reasons: [
+                        `baseline_not_registered:${r.baseline.sha256}:${r.baselineRepeat?.sha256 ?? "none"}`,
+                        ...attempt.reasons,
+                    ],
+                    roll,
+                };
+            }
+            // The outcome the app shows (useAutotuneV2 createVerifiedTune → verifiedTuneOutcome), which
+            // is NONE when the record carries a reason that invalidates the comparison.
             return { verdict: verifiedTuneOutcome(attempt), reasons: attempt.reasons, roll };
         };
         const vA = verdictOf(A);

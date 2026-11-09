@@ -333,7 +333,7 @@ describe("review round 1: unknown is named, pooling needs the same I in force", 
     });
 });
 
-describe("block 9b: the repair in the release loop (bins the I relax changes)", () => {
+describe("block 9b: the repair in the loop functions the release uses (bins the I relax changes)", () => {
     // Coherence per bin chosen so that ±2ε of L sits between the two error gains: with the headers' I
     // the bin is too uncertain, with the I in force it is not (the AIR65 case at 7.8–9.8 Hz).
     const f0 = 8;
@@ -428,9 +428,7 @@ describe("block 9b: an axis whose I state is unknown never gets a releasable pro
         expect(
             mixed.multiRecording.rejected.filter((x) => x.startsWith("multi_recording_iterm_relax_differs:")),
         ).toEqual(
-            ["roll", "pitch", "yaw"].map(
-                (a) => `multi_recording_iterm_relax_differs:${a}:unknown:1.000:${"2".repeat(64)}:0`,
-            ),
+            ["roll", "pitch", "yaw"].map((a) => `multi_recording_iterm_relax_differs:${a}:unknown:${"2".repeat(64)}:0`),
         );
         const same = run(OFF);
         expect(same.multiRecording.rejected.some((x) => x.startsWith("multi_recording_iterm_relax_differs:"))).toBe(

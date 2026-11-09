@@ -836,7 +836,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             const ok = itermRelaxPoolable(ctl.itermRelax, o);
             if (!ok)
                 relaxRejected.push(
-                    `multi_recording_iterm_relax_differs:${name}:${o ? `${o.status}:${o.meanFactor.toFixed(3)}` : "unknown"}:${other.sha256}:${other.logIndex}`,
+                    `multi_recording_iterm_relax_differs:${name}:${o && o.status !== "unknown" ? `${o.status}:${o.meanFactor.toFixed(3)}` : "unknown"}:${other.sha256}:${other.logIndex}`,
                 );
             return ok;
         };
