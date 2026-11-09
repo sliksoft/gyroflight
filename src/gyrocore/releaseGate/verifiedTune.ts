@@ -233,8 +233,33 @@ function extractG(T: Complex, cfg: DigitalControllerConfig, f: number): Complex 
     return cmag(den) > 1e-9 ? cdiv(T, den) : null;
 }
 
-/** Compare predicted and measured T, and the predicted and measured loop, for one axis. Pure. */
-export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
+/**
+ * One plant bin as compareAxis judged it (block 9b: which frequencies a comparison actually tested).
+ * `excluded` is the first reason the bin entered neither domain; otherwise `loopExcluded` /
+ * `tExcluded` say why it is missing from one domain (null: it was compared there).
+ */
+export interface AxisBinTrace {
+    frequencyHz: number;
+    excluded: string | null;
+    candidateCoherence: number | null;
+    repeatCoherence: number | null;
+    loopExcluded: string | null;
+    loopExcess: number | null;
+    tExcluded: string | null;
+    tExcess: number | null;
+    tolerance: { magDb: number; phaseDeg: number } | null;
+    detectable: boolean | null;
+    predictedChangeDb: number | null;
+    predictedChangeDeg: number | null;
+    errMagDb: number | null;
+    errPhaseDeg: number | null;
+}
+
+/**
+ * Compare predicted and measured T, and the predicted and measured loop, for one axis. Pure. With
+ * `trace`, every plant bin is appended to it; the trace never changes the comparison.
+ */
+export function compareAxis(axis: Axis, input: AxisInput, trace?: AxisBinTrace[]): AxisComparison {
     const whatIf = plantFixedWhatIf(input.plant, input.baselineCfg, input.candidateCfg);
     let compared = 0;
     let detectable = 0;
@@ -256,11 +281,41 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
             : tol;
     };
     for (const b of whatIf.bins) {
-        if (b.status !== "ok" || !b.T_candidate || !b.T_current || !b.T_measured || !b.G) continue;
+        const tr: AxisBinTrace | null = trace
+            ? {
+                  frequencyHz: b.frequencyHz,
+                  excluded: null,
+                  candidateCoherence: null,
+                  repeatCoherence: null,
+                  loopExcluded: null,
+                  loopExcess: null,
+                  tExcluded: null,
+                  tExcess: null,
+                  tolerance: null,
+                  detectable: null,
+                  predictedChangeDb: null,
+                  predictedChangeDeg: null,
+                  errMagDb: null,
+                  errPhaseDeg: null,
+              }
+            : null;
+        if (tr) trace!.push(tr);
+        if (b.status !== "ok" || !b.T_candidate || !b.T_current || !b.T_measured || !b.G) {
+            if (tr) tr.excluded = `plant_bin_${b.status !== "ok" ? b.status : "incomplete"}`;
+            continue;
+        }
         const meas = measuredAt(input.candidateT, b.frequencyHz);
-        if (!meas || !(meas.coherence >= VALIDATION_MIN_COHERENCE)) continue;
+        if (tr) tr.candidateCoherence = meas?.coherence ?? null;
+        if (!meas || !(meas.coherence >= VALIDATION_MIN_COHERENCE)) {
+            if (tr) tr.excluded = meas ? "candidate_coherence_below_min" : "candidate_not_measured";
+            continue;
+        }
         const rep = input.baselineRepeatT ? measuredAt(input.baselineRepeatT, b.frequencyHz) : null;
-        if (input.baselineRepeatT && (!rep || !(rep.coherence >= VALIDATION_MIN_COHERENCE))) continue;
+        if (tr) tr.repeatCoherence = rep?.coherence ?? null;
+        if (input.baselineRepeatT && (!rep || !(rep.coherence >= VALIDATION_MIN_COHERENCE))) {
+            if (tr) tr.excluded = rep ? "repeat_coherence_below_min" : "repeat_not_measured";
+            continue;
+        }
 
         // Loop domain, wherever the plant is identified.
         const cfb = evaluateControllerFrf(input.candidateCfg, b.frequencyHz).cFeedback;
@@ -275,6 +330,11 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
             candidates++;
             if (!tol) {
                 capped++;
+                // As before the trace: a bin the repeat cannot bound in the loop is not compared in T either.
+                if (tr) {
+                    tr.loopExcluded = "loop_scatter_capped";
+                    tr.tExcluded = "loop_scatter_capped";
+                }
                 continue;
             }
             const Lmeas = cmul(Gmeas, cfb);
@@ -285,10 +345,16 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
             loopBins++;
             loopMaxExcess = Math.max(loopMaxExcess, excess);
             if (excess <= 1) loopWithin++;
+            if (tr) tr.loopExcess = excess;
+        } else if (tr) {
+            tr.loopExcluded = Gmeas ? "loop_outside_band" : "loop_g_not_extractable";
         }
 
         // Closed-loop T, in the band where the CHIRP plant estimate is tight.
-        if (b.frequencyHz > VALIDATION_MAX_HZ) continue;
+        if (b.frequencyHz > VALIDATION_MAX_HZ) {
+            if (tr) tr.tExcluded = "above_validation_max_hz";
+            continue;
+        }
         let tol: { magDb: number; phaseDeg: number } | null = toleranceFloor(b.frequencyHz);
         if (rep) {
             // Twice the observed log-to-log scatter, never tighter than the floor, never above the bound.
@@ -301,6 +367,7 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
         candidates++;
         if (!tol) {
             capped++;
+            if (tr) tr.tExcluded = "scatter_capped";
             continue;
         }
         compared++;
@@ -314,6 +381,15 @@ export function compareAxis(axis: Axis, input: AxisInput): AxisComparison {
         const excess = Math.max(errMag / tol.magDb, errPhase / tol.phaseDeg);
         maxExcess = Math.max(maxExcess, excess);
         if (excess <= 1) within++;
+        if (tr) {
+            tr.tolerance = tol;
+            tr.tExcess = excess;
+            tr.detectable = changeMag > tol.magDb || changePhase > tol.phaseDeg;
+            tr.predictedChangeDb = db(b.T_candidate) - db(b.T_current);
+            tr.predictedChangeDeg = phaseDiff(b.T_candidate, b.T_current);
+            tr.errMagDb = db(meas.T) - db(b.T_candidate);
+            tr.errPhaseDeg = phaseDiff(meas.T, b.T_candidate);
+        }
     }
     const withinShare = compared ? within / compared : 0;
     const loopWithinShare = loopBins ? loopWithin / loopBins : 0;
