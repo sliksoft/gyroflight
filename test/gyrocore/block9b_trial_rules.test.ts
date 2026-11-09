@@ -109,6 +109,12 @@ describe("AIR65 roll trial: the exact change in A and B", () => {
             ).toEqual([`header_changed:${k}:${new Map(REF).get(k)}:${v}`]);
         }
     });
+    it("a key logged twice with different values is ambiguous", () => {
+        const dup: [string, string][] = [...withValues({ rollPID: "45,79,30" }), ["chirp_time_seconds", "25"]];
+        expect(trialHeaderCheck(REF, dup, TRIAL.rollPidTrial).issues).toContain(
+            "header_duplicate:log:chirp_time_seconds",
+        );
+    });
     it("missing evidence is never a match", () => {
         expect(trialHeaderCheck(REF, withValues({ rollPID: null }), TRIAL.rollPidTrial).issues).toEqual([
             "header_missing:rollPID",
@@ -201,6 +207,10 @@ describe("compareAxis trace: which bins were tested", () => {
         expect(withTrace).toEqual(compareAxis("roll", input));
         expect(trace.length).toBeGreaterThan(0);
         expect(traceMatches(trace, withTrace)).toBe(true);
+        // Any aggregate that differs from the record breaks the match.
+        for (const k of ["withinShare", "loopWithinShare", "maxExcess", "comparedBins", "scatterCappedBins"] as const) {
+            expect(traceMatches(trace, { ...withTrace, [k]: (withTrace[k] ?? 0) + 1 })).toBe(false);
+        }
     });
     it("names why a bin was left out, and the peak bins' coverage", () => {
         // Candidate coherence below the limit at 27.3 Hz, the repeat's at 29.3 Hz.

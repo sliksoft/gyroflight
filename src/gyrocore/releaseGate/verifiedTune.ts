@@ -235,8 +235,10 @@ function extractG(T: Complex, cfg: DigitalControllerConfig, f: number): Complex 
 
 /**
  * One plant bin as compareAxis judged it (block 9b: which frequencies a comparison actually tested).
- * `excluded` is the first reason the bin entered neither domain; otherwise `loopExcluded` /
- * `tExcluded` say why it is missing from one domain (null: it was compared there).
+ * `excluded` is the reason the bin was dropped before either domain was tried (plant status,
+ * coherence); otherwise `loopExcluded` / `tExcluded` say why it is missing from that domain (null: it
+ * was compared there). A bin the repeat cannot bound in the loop has excluded null and both
+ * loopExcluded and tExcluded "loop_scatter_capped".
  */
 export interface AxisBinTrace {
     frequencyHz: number;

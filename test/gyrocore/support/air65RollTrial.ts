@@ -90,6 +90,17 @@ export function trialHeaderCheck(
     const b = new Map(baseline);
     const l = new Map(log);
     const issues: string[] = [];
+    // A key logged twice with different values is ambiguous evidence (a Map would keep the last).
+    for (const [name, pairs] of [
+        ["baseline", baseline],
+        ["log", log],
+    ] as const) {
+        const seen = new Map<string, string>();
+        for (const [k, v] of pairs) {
+            if (seen.has(k) && seen.get(k) !== v) issues.push(`header_duplicate:${name}:${k}`);
+            seen.set(k, v);
+        }
+    }
     const settings: HeaderCheck["settings"] = {};
     for (const k of REPORTED_SETTINGS) settings[k] = { reference: b.get(k) ?? null, log: l.get(k) ?? null };
 
@@ -176,7 +187,7 @@ export function coverage(trace: readonly AxisBinTrace[], maxHz = 40): BinCoverag
         }));
 }
 
-/** The bin of `trace` nearest `hz`, within half a bin of the 1.953 Hz grid. */
+/** The bin of `rows` nearest `hz`, within 0.5 Hz (about a quarter of the 1.953 Hz grid). */
 export function binAt<T extends { frequencyHz: number }>(rows: readonly T[], hz: number): T | null {
     let best: T | null = null;
     for (const r of rows) {
@@ -189,15 +200,23 @@ export function binAt<T extends { frequencyHz: number }>(rows: readonly T[], hz:
     return best;
 }
 
-/** The trace's aggregates must be the record's comparison, or the trace is not what decided. */
+/**
+ * The trace's aggregates must be the record's comparison, or the trace is not what decided: counts,
+ * within shares, maxima and capped bins in both domains.
+ */
 export function traceMatches(trace: readonly AxisBinTrace[], cmp: AxisComparison): boolean {
     const t = trace.filter((x) => !x.excluded && !x.tExcluded && x.tExcess !== null);
     const l = trace.filter((x) => !x.excluded && !x.loopExcluded && x.loopExcess !== null);
     const max = (v: number[]) => v.reduce((a, b) => Math.max(a, b), 0);
+    const share = (n: number, of: number) => (of ? n / of : 0);
+    const capped = trace.filter((x) => x.loopExcluded === "loop_scatter_capped" || x.tExcluded === "scatter_capped");
     return (
         t.length === cmp.comparedBins &&
         t.filter((x) => x.detectable).length === cmp.detectableBins &&
         l.length === cmp.loopBins &&
+        Math.abs(share(t.filter((x) => x.tExcess! <= 1).length, t.length) - cmp.withinShare) < 1e-12 &&
+        Math.abs(share(l.filter((x) => x.loopExcess! <= 1).length, l.length) - cmp.loopWithinShare) < 1e-12 &&
+        capped.length === (cmp.scatterCappedBins ?? 0) &&
         Math.abs(max(t.map((x) => x.tExcess!)) - cmp.maxExcess) < 1e-12 &&
         Math.abs(max(l.map((x) => x.loopExcess!)) - cmp.loopMaxExcess) < 1e-12
     );
