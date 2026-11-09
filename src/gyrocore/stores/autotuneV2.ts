@@ -30,6 +30,7 @@ import { ref, shallowRef } from "vue";
 import type { ChirpQualificationReport } from "@/gyrocore/chirp/qualification";
 import type { AutotuneLogInput, AutotuneV2Result } from "@/gyrocore/engine/autotuneV2";
 import type { ModelQualificationReport } from "@/gyrocore/engine/modelQualification";
+import type { VerifiedTuneOutcome } from "@/gyrocore/engine/verifiedTuneFromLogs";
 import type { AbsoluteDiffRow, AbsoluteSnapshot } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity } from "@/gyrocore/tuning/fcIdentity";
 
@@ -106,7 +107,7 @@ export const useAutotuneV2Store = defineStore("gyroflightAutotuneV2", () => {
     /** The imported file each input's sha256 came from (set with `inputs`): to name the engine's primary flight. */
     const inputFiles = shallowRef<ReadonlyMap<string, string>>(new Map());
     /** Outcome of the last "create Verified Tune" (the record itself goes to the Verified Tune store). */
-    const verifiedTuneAttempt = ref<{ verdict: "PASS" | "FAIL" | "NONE"; id: string | null; reasons: string[] } | null>(
+    const verifiedTuneAttempt = ref<{ verdict: VerifiedTuneOutcome; id: string | null; reasons: string[] } | null>(
         null,
     );
 

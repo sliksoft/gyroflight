@@ -44,7 +44,7 @@ import { ApplyBlockedError } from "@/gyrocore/chirp/applyGate";
 import { type AutotuneLogInput } from "@/gyrocore/engine/autotuneV2";
 import { runAutotuneV2Cancellable } from "@/gyrocore/engine/autotuneV2WorkerClient";
 import { buildLogInputs, uniqueFlights } from "@/gyrocore/engine/logInput";
-import { verifiedTuneFromLogs } from "@/gyrocore/engine/verifiedTuneFromLogs";
+import { verifiedTuneFromLogs, verifiedTuneOutcome } from "@/gyrocore/engine/verifiedTuneFromLogs";
 import type { AbsoluteProposal } from "@/gyrocore/releaseGate/releaseContract";
 import { currentAnalysisInput } from "@/gyrocore/releaseGate/analysisBinding";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
@@ -248,7 +248,7 @@ export function useAutotuneV2() {
             if (store.revision !== revision) return;
             const stored = attempt.record?.verdict === "PASS" && useVerifiedTuneStore().save(attempt.record);
             store.verifiedTuneAttempt = {
-                verdict: attempt.record ? attempt.record.verdict : "NONE",
+                verdict: verifiedTuneOutcome(attempt),
                 id: stored ? attempt.record!.id : null,
                 reasons: attempt.reasons,
             };

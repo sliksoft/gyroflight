@@ -59,6 +59,25 @@ export interface VerifiedTuneAttempt {
     reasons: string[];
 }
 
+/**
+ * What an attempt shows (block 9b): the stored record knows only PASS / FAIL, and any axis that is not
+ * PASS makes it FAIL — but an axis whose change was not detectable or whose data were insufficient
+ * has not refuted the prediction. FAIL only when an axis comparison failed; NOT_DETECTABLE /
+ * INSUFFICIENT when that is the worst axis outcome; NONE when no comparison was made (refused).
+ */
+export type VerifiedTuneOutcome = "PASS" | "FAIL" | "NOT_DETECTABLE" | "INSUFFICIENT" | "NONE";
+
+export function verifiedTuneOutcome(attempt: VerifiedTuneAttempt): VerifiedTuneOutcome {
+    const r = attempt.record;
+    if (!r) return "NONE";
+    if (r.verdict === "PASS") return "PASS";
+    const v = r.comparisons.map((c) => c.verdict);
+    if (v.includes("FAIL")) return "FAIL";
+    if (v.includes("INSUFFICIENT")) return "INSUFFICIENT";
+    if (v.includes("NOT_DETECTABLE")) return "NOT_DETECTABLE";
+    return "NONE";
+}
+
 export function verifiedTuneFromLogs(logs: readonly AutotuneLogInput[], createdAt?: string): VerifiedTuneAttempt {
     // A flight imported twice (another name or hash) is one flight: never its own repeat.
     const groups = groupByTune(uniqueFlights(logs));

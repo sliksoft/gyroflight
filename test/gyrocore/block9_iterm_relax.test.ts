@@ -56,7 +56,18 @@ import {
     type DigitalControllerConfig,
 } from "../../src/js/blackbox/betaflight_digital_controller";
 import type { TransferFunction } from "../../src/js/blackbox/spectral_analysis";
-import { buildAxisLoop, loopMargins, loopUncertainty } from "../../src/gyrocore/engine/loopModel";
+import {
+    binsDroppedForUncertainty,
+    buildAxisLoop,
+    candidateLoop,
+    loopErrorGain,
+    loopMargins,
+    loopUncertainty,
+    UNCERTAINTY,
+} from "../../src/gyrocore/engine/loopModel";
+import { evaluateRelease } from "../../src/gyrocore/releaseGate/releaseContract";
+import { syntheticLogInput } from "./harness/syntheticLog";
+import { verifiedTuneAllAxesFixture } from "./harness/verifiedTuneFixture";
 
 const PID_DT = 250e-6;
 const HEADERS = {
@@ -320,4 +331,110 @@ describe("review round 1: unknown is named, pooling needs the same I in force", 
             "iterm_relax_unknown:roll:iterm_relax_headers_missing",
         );
     });
+});
+
+describe("block 9b: the repair in the release loop (bins the I relax changes)", () => {
+    // Coherence per bin chosen so that ±2ε of L sits between the two error gains: with the headers' I
+    // the bin is too uncertain, with the I in force it is not (the AIR65 case at 7.8–9.8 Hz).
+    const f0 = 8;
+    const T = measuredT(SWEEP_CFG);
+    const k = Array.from(T.frequencies).indexOf(f0);
+    const Tk = { re: T.hReal[k], im: T.hImag[k] };
+    const kH = loopErrorGain(Tk, CFG, f0);
+    const kS = loopErrorGain(Tk, SWEEP_CFG, f0);
+    // n = (K + 1) / 2 averages without a sweep; aim 2·ε_T·√(kH·kS) = 0.5.
+    const n = Math.floor((T.numSegments + 1) / 2);
+    const eT = UNCERTAINTY.maxCoverageRelErr / (UNCERTAINTY.coverage * Math.sqrt(kH * kS));
+    const g2 = 1 / (1 + 2 * n * eT * eT);
+    const tf: TransferFunction = { ...T, coherence: new Float64Array(T.frequencies.length).fill(g2) };
+
+    it("the header I drops the bin for uncertainty, the I in force keeps it, with the right plant", () => {
+        expect(kH).toBeGreaterThan(kS);
+        const header = buildAxisLoop(0, tf, CFG, null, false, false);
+        const inForce = buildAxisLoop(0, tf, CFG, null, false, false, null, { sweepCfg: SWEEP_CFG });
+        const kept = (l: typeof header) => candidateLoop(l, { cfg: CFG }).some((p) => p.f === f0);
+        expect(kept(header)).toBe(false);
+        expect(kept(inForce)).toBe(true);
+        const G = inForce.plant.bins.find((b) => b.frequencyHz === f0)!.G!;
+        const truth = plantAt(f0);
+        expect(cmag({ re: G.re - truth.re, im: G.im - truth.im }) / cmag(truth)).toBeLessThan(1e-9);
+        // The release loop's own list of bins dropped for uncertainty names it with the headers' I only.
+        expect(binsDroppedForUncertainty(header)).toContain(f0);
+        expect(binsDroppedForUncertainty(inForce)).not.toContain(f0);
+    });
+});
+
+describe("block 9b: an axis whose I state is unknown never gets a releasable proposal (engine → release)", () => {
+    const AT = "2026-10-23T00:00:00Z";
+    const vt = verifiedTuneAllAxesFixture(0.9, 0.7);
+    const OFF: [string, string][] = [
+        ["iterm_relax", "0"],
+        ["iterm_relax_type", "1"],
+        ["iterm_relax_cutoff", "15"],
+    ];
+    const RP: [string, string][] = [
+        ["iterm_relax", "1"],
+        ["iterm_relax_type", "1"],
+        ["iterm_relax_cutoff", "15"],
+    ];
+    const run = (extra: [string, string][], otherExtra = extra) => {
+        const p = syntheticLogInput("1".repeat(64));
+        const o = syntheticLogInput("2".repeat(64));
+        return runAutotuneV2({
+            primary: { ...p, headerPairs: [...p.headerPairs, ...extra] },
+            others: [{ ...o, headerPairs: [...o.headerPairs, ...otherExtra] }],
+            verifiedTune: vt,
+            createdAt: AT,
+        });
+    };
+    const relaxBlocks = (r: ReturnType<typeof run>) =>
+        evaluateRelease(r.proposal!).blocks.filter((b) => b.includes("iterm_relax_unknown"));
+
+    it("relax headers missing: every axis unknown, model PARTIAL, release blocked on each axis", () => {
+        const r = run([]);
+        expect(r.itermRelax.every((x) => x.status === "unknown")).toBe(true);
+        expect(r.proposal!.release.model.status).toBe("PARTIAL");
+        expect(relaxBlocks(r).sort()).toEqual(
+            ["pitch", "roll", "yaw"].map((a) => `model_quality:iterm_relax_unknown:${a}:iterm_relax_headers_missing`),
+        );
+        expect(r.releasableProposal).toBeNull();
+    }, 600_000);
+
+    it("RP without a logged mode mask: roll and pitch unknown, yaw not relaxed — only roll and pitch block", () => {
+        const r = run(RP);
+        expect(r.itermRelax.map((x) => [x.axis, x.status])).toEqual([
+            ["roll", "unknown"],
+            ["pitch", "unknown"],
+            ["yaw", "not_relaxed"],
+        ]);
+        expect(
+            relaxBlocks(r)
+                .map((b) => b.split(":")[2])
+                .sort(),
+        ).toEqual(["pitch", "roll"]);
+        expect(r.releasableProposal).toBeNull();
+    }, 600_000);
+
+    it("positive control: a known I state (relax OFF) adds no block and leaves the model VALIDATED", () => {
+        const r = run(OFF);
+        expect(r.itermRelax.every((x) => x.status === "not_relaxed")).toBe(true);
+        expect(relaxBlocks(r)).toEqual([]);
+        expect(r.proposal!.release.model.status).toBe("VALIDATED");
+    }, 600_000);
+
+    it("a flight combination carries the I state: a flight of another state is named and never pooled", () => {
+        const mixed = run(OFF, []);
+        expect(mixed.multiRecording.contributors).toEqual([]);
+        expect(
+            mixed.multiRecording.rejected.filter((x) => x.startsWith("multi_recording_iterm_relax_differs:")),
+        ).toEqual(
+            ["roll", "pitch", "yaw"].map(
+                (a) => `multi_recording_iterm_relax_differs:${a}:unknown:1.000:${"2".repeat(64)}:0`,
+            ),
+        );
+        const same = run(OFF);
+        expect(same.multiRecording.rejected.some((x) => x.startsWith("multi_recording_iterm_relax_differs:"))).toBe(
+            false,
+        );
+    }, 600_000);
 });

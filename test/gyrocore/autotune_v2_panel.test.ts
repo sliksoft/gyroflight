@@ -163,6 +163,8 @@ afterEach(() => {
 
 describe("AutotuneV2Panel", () => {
     it("shows the experimental CHIRP + JIO route as a diagnostic, blocked without its channels, never as a release path", async () => {
+        // Synthesises two flights and runs the full engine with the second as a repeat: seconds of
+        // compute, not a UI wait, so the default 5 s limit timed out under a loaded full suite (blocks 8–9).
         // Synthetic engine input without the JIO channels: the route names what is missing.
         const c = mount(blocked);
         await flush();
@@ -289,7 +291,7 @@ describe("AutotuneV2Panel", () => {
         }
         expect(q(d, '[data-gyrocore="v2-experimental-status"]')?.textContent ?? "").not.toContain("releasable");
         expect(writes()).toEqual([]);
-    });
+    }, 60_000);
 
     it("experimental Apply: own status, acknowledgement required, writes through the technical checks, labels the next recording", async () => {
         // The standard release is unavailable (no releasable proposal); the experimental proposal is the

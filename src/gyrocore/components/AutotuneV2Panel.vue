@@ -62,7 +62,13 @@
                     :data-verdict="v2.verifiedTuneAttempt.verdict"
                 >
                     <span
-                        :class="v2.verifiedTuneAttempt.verdict === 'PASS' ? 'text-green-500' : 'text-red-500'"
+                        :class="
+                            v2.verifiedTuneAttempt.verdict === 'PASS'
+                                ? 'text-green-500'
+                                : v2.verifiedTuneAttempt.verdict === 'FAIL'
+                                  ? 'text-red-500'
+                                  : 'text-amber-500'
+                        "
                         class="font-bold"
                     >
                         {{ $t(`gyroflightV2VerifiedTune_${v2.verifiedTuneAttempt.verdict}`) }}
