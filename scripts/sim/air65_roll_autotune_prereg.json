@@ -1,5 +1,5 @@
 {
-    "version": "air65-roll-sim-autotune-v1",
+    "version": "air65-roll-sim-autotune-v1.1",
     "registeredAt": "2026-11-10",
     "purpose": "First closed GyroFlight roll autotune loop in the AIR65 Betaflight lockstep SITL. Simulator only: no flight controller, no Blackbox flight, no P45 trial.",
     "environment": {
@@ -16,11 +16,28 @@
         "repeatSpreadRelativeCost": 6.3e-5,
         "repeatBitIdentical": "2 of 3 repeats; the third differs by one 0.1 deg/s LSB on 107 samples, together with the RC-smoothing RX-rate header estimate (110 vs 109)",
         "commandDelayTicks": "1 or 2, constant within a run",
-        "current": { "pid": "56,79,30", "overshoot": 0.025, "oscillation": 0.021, "saturationShare": 0.048 },
+        "current": {
+            "pid": "56,79,30",
+            "overshoot": 0.025,
+            "oscillation": 0.021,
+            "saturationShare": 0.048
+        },
         "corners": {
-            "120,79,10": { "overshoot": 0.275, "oscillation": 0.101, "saturationShare": 0.12 },
-            "20,79,80": { "overshoot": 0.349, "oscillation": 1.273, "saturationShare": 0.003 },
-            "120,160,80": { "overshoot": 0.031, "oscillation": 0.034, "saturationShare": 0.058 }
+            "120,79,10": {
+                "overshoot": 0.275,
+                "oscillation": 0.101,
+                "saturationShare": 0.12
+            },
+            "20,79,80": {
+                "overshoot": 0.349,
+                "oscillation": 1.273,
+                "saturationShare": 0.003
+            },
+            "120,160,80": {
+                "overshoot": 0.031,
+                "oscillation": 0.034,
+                "saturationShare": 0.058
+            }
         }
     },
     "leadTicks": 20,
@@ -29,22 +46,40 @@
         {
             "id": "S1_doublet_250_120ms",
             "segments": [
-                { "rollDps": 250, "ticks": 12 },
-                { "rollDps": -250, "ticks": 12 }
+                {
+                    "rollDps": 250,
+                    "ticks": 12
+                },
+                {
+                    "rollDps": -250,
+                    "ticks": 12
+                }
             ]
         },
         {
             "id": "S2_doublet_150_200ms",
             "segments": [
-                { "rollDps": 150, "ticks": 20 },
-                { "rollDps": -150, "ticks": 20 }
+                {
+                    "rollDps": 150,
+                    "ticks": 20
+                },
+                {
+                    "rollDps": -150,
+                    "ticks": 20
+                }
             ]
         },
         {
             "id": "S3_doublet_neg350_80ms",
             "segments": [
-                { "rollDps": -350, "ticks": 8 },
-                { "rollDps": 350, "ticks": 8 }
+                {
+                    "rollDps": -350,
+                    "ticks": 8
+                },
+                {
+                    "rollDps": 350,
+                    "ticks": 8
+                }
             ]
         }
     ],
@@ -52,30 +87,57 @@
         {
             "id": "H1_doublet_400_70ms",
             "segments": [
-                { "rollDps": 400, "ticks": 7 },
-                { "rollDps": -400, "ticks": 7 }
+                {
+                    "rollDps": 400,
+                    "ticks": 7
+                },
+                {
+                    "rollDps": -400,
+                    "ticks": 7
+                }
             ]
         },
         {
             "id": "H2_doublet_neg200_150ms",
             "segments": [
-                { "rollDps": -200, "ticks": 15 },
-                { "rollDps": 200, "ticks": 15 }
+                {
+                    "rollDps": -200,
+                    "ticks": 15
+                },
+                {
+                    "rollDps": 200,
+                    "ticks": 15
+                }
             ]
         },
         {
             "id": "H3_triplet_300_50_100_50ms",
             "segments": [
-                { "rollDps": 300, "ticks": 5 },
-                { "rollDps": -300, "ticks": 10 },
-                { "rollDps": 300, "ticks": 5 }
+                {
+                    "rollDps": 300,
+                    "ticks": 5
+                },
+                {
+                    "rollDps": -300,
+                    "ticks": 10
+                },
+                {
+                    "rollDps": 300,
+                    "ticks": 5
+                }
             ]
         },
         {
             "id": "H4_doublet_100_250ms",
             "segments": [
-                { "rollDps": 100, "ticks": 25 },
-                { "rollDps": -100, "ticks": 25 }
+                {
+                    "rollDps": 100,
+                    "ticks": 25
+                },
+                {
+                    "rollDps": -100,
+                    "ticks": 25
+                }
             ]
         }
     ],
@@ -103,7 +165,11 @@
     },
     "improvement": "A tune is better than a reference when: oscillation <= oscillationMax and saturationShare <= saturationShareMax (absolute rejections), cost <= reference cost * (1 - minRelativeGain), tracking <= reference * (1 + trackingTolerance), overshoot <= reference + overshootToleranceAbs, riseMs <= reference * (1 + riseTolerance) + riseToleranceMs. minRelativeGain 0.02 is > 300x the measured repeat spread.",
     "search": {
-        "bounds": { "p": [20, 120], "i": [20, 160], "d": [10, 80] },
+        "bounds": {
+            "p": [20, 120],
+            "i": [20, 160],
+            "d": [10, 80]
+        },
         "dMaxRatio": 1.3333333333333333,
         "dMaxNote": "d_max_roll = round(d * 4/3), the AIR65 ratio 30/40, so D moves the whole D range (in this firmware d_max <= D disables the boost).",
         "stepFactors": [1.25, 1.1],
@@ -114,29 +180,57 @@
     "holdoutRepeats": 2,
     "validity": {
         "harness": "status harness_error (provisioning, startup, SITL I/O, run short), a header that does not carry exactly the requested roll PID and d_max, any other header line different from the run's first measurement (except the run-time keys vbatref, rc_smoothing_active_cutoffs_ff_sp_thr, rc_smoothing_rx_smoothed), no high-resolution log, looptime != 1000, or a logged setpoint that does not equal the schedule at a constant delay of 0-2 ticks. Says nothing about the candidate: one retry for harness_error, otherwise the start tune's run stops as BLOCKED.",
-        "candidate": "plant roll angle beyond maxAbsRollDeg, height below minZ or non-finite plant state = the candidate failed the manoeuvre (rejected, not a harness fault)."
+        "candidate": "plant roll angle beyond maxAbsRollDeg, height below minZ or non-finite plant state = the candidate failed the manoeuvre (rejected, not a harness fault).",
+        "harnessAmendment_v1_1": "A logged setpoint that does not follow the schedule is a harness fault (one retry, like harness_error) only when the adapter's commandPhaseSlips list a later command-activation gap other than 10 PID ticks that explains it; an unexplained mismatch stays non-retryable (BLOCKED)."
     },
     "startTunes": [
         {
             "id": "T1_air65_current",
-            "pid": { "p": 56, "i": 79, "d": 30 },
+            "pid": {
+                "p": 56,
+                "i": 79,
+                "d": 30
+            },
             "rationale": "The AIR65 tune flown since 19 Oct 2026."
         },
         {
             "id": "T2_vliegai_oracle_soft",
-            "pid": { "p": 20, "i": 30, "d": 15 },
+            "pid": {
+                "p": 20,
+                "i": 30,
+                "d": 15
+            },
             "rationale": "The VliegAI oracle recipe's roll PID: a soft tune at the lower edge of the box."
         },
         {
             "id": "T3_p_heavy_low_d",
-            "pid": { "p": 100, "i": 79, "d": 12 },
+            "pid": {
+                "p": 100,
+                "i": 79,
+                "d": 12
+            },
             "rationale": "High P with little D: expected to overshoot and ring."
         },
         {
             "id": "T4_d_heavy_low_p",
-            "pid": { "p": 35, "i": 79, "d": 60 },
+            "pid": {
+                "p": 35,
+                "i": 79,
+                "d": 60
+            },
             "rationale": "Low P with a lot of D: expected to be slow and damped."
         }
     ],
-    "success": "The demo shows GyroFlight's loop working if, from at least two start tunes, the selection is better than the start tune on the held-out manoeuvres (decision 'improved'). Every start tune is reported, also when it is kept."
+    "success": "The demo shows GyroFlight's loop working if, from at least two start tunes, the selection is better than the start tune on the held-out manoeuvres (decision 'improved'). Every start tune is reported, also when it is kept.",
+    "reRegistrations": [
+        {
+            "version": "v1.1",
+            "after": "demo1 (v1, commit de0a3860d, prereg sha256 39c3a243eaf9f8422603e40819696f7e01e55aa8ed6564c64f2988d9e9bacc09)",
+            "changed": "retry classification only: a setpoint mismatch explained by a logged command phase slip is a harness fault (one retry)",
+            "unchanged": "thresholds, box, budget, step factors, candidate order, manoeuvres, start tunes, holdout rule, success criterion",
+            "reason": "demo1 run 051 (T4 candidate 35,79,75): command 57 became active 11 PID ticks after command 56 instead of 10, so the logged setpoint moved one sample later from there; under v1 this stopped T4 as BLOCKED. A slip says nothing about the candidate.",
+            "scope": "T4 is re-run alone; T1-T3 keep their v1 result (their runs had no slip in the scored setpoint; the only other slip, run 049 of T4, fell in settle zeros).",
+            "verdict": "The v1 result stands as the registered outcome; the T4 re-run is reported separately."
+        }
+    ]
 }

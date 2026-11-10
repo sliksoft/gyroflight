@@ -155,6 +155,15 @@ def main() -> int:
         return finish("harness_error", "scored_window_incomplete")
     if result["header"]["values"].get("blackbox_high_resolution") != "1":
         return finish("harness_error", "blackbox_not_high_resolution")
+    # Command delivery phase: each command should become active 10 PID ticks after the previous one (the first gap,
+    # from the pre-accepted command 0, is longer). A different later gap is a lockstep phase slip of the harness.
+    sequences = [str(c["sequence"]) for c in commands]
+    ticks = [case["blackbox"]["active_sequence_first_pid_ticks"].get(q) for q in sequences]
+    result["commandPhaseSlips"] = [
+        [i, ticks[i + 1] - ticks[i]]
+        for i in range(1, len(ticks) - 1)
+        if ticks[i] is not None and ticks[i + 1] is not None and ticks[i + 1] - ticks[i] != INNER_PER_OUTER
+    ]
     window = slice(start, stop)
     result["trace"] = {
         "dtS": 0.001,

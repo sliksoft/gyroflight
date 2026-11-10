@@ -154,6 +154,17 @@ describe("sim roll autotune: metrics and validity", () => {
         expect(validateMeasurement(late, pid, 40, SEARCH, BASE_HEADER)).toContain("setpoint_not_schedule");
     });
 
+    it("calls a setpoint mismatch a harness fault only when a logged command phase slip explains it", () => {
+        const pid = { p: 56, i: 79, d: 30 };
+        const m = synthetic(pid, 40, SEARCH, { wn: 100, zeta: 0.7 });
+        // from sample 800 on, every command arrives one PID tick later (as in demo1 run 051)
+        const sp = m.trace!.setpointDps;
+        for (let k = sp.length - 1; k > 800; k--) sp[k] = sp[k - 1];
+        expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["setpoint_not_schedule"]);
+        m.commandPhaseSlips = [[56, 11]];
+        expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["harness:command_phase_slip:56+11"]);
+    });
+
     it("accepts exactly the requested roll PID and d_max and nothing else changed", () => {
         const pid = { p: 70, i: 79, d: 33 };
         const ok = synthetic(pid, 44, SEARCH, { wn: 100, zeta: 0.7 });
@@ -298,6 +309,23 @@ describe("sim roll autotune: candidate selection", () => {
         const r = await runStartTune("lost", { p: 56, i: 79, d: 30 }, PRE, measure, BASE_HEADER);
         expect(r.decision).toBe("kept_start_rejected");
         expect(r.evaluations).toEqual([]);
+    });
+
+    it("retries a command phase slip once and goes on with the clean repeat", async () => {
+        const calls: string[] = [];
+        const measure: Measure = async (pid, dMax, schedule, label) => {
+            calls.push(label);
+            const m = synthetic(pid, dMax, schedule, { wn: 120, zeta: 0.8 });
+            if (calls.length === 2) {
+                const sp = m.trace!.setpointDps;
+                for (let k = sp.length - 1; k > 800; k--) sp[k] = sp[k - 1];
+                m.commandPhaseSlips = [[56, 11]];
+            }
+            return m;
+        };
+        const r = await runStartTune("slip", { p: 56, i: 79, d: 30 }, PRE, measure, BASE_HEADER);
+        expect(calls.slice(0, 3)).toEqual(["slip_start_search", "slip_r1_70,79,30", "slip_r1_70,79,30_retry1"]);
+        expect(r.evaluations[0].pid).toEqual({ p: 70, i: 79, d: 30 });
     });
 
     it("retries a harness fault once and then stops as invalid; a wrong configuration is not retried", async () => {

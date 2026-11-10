@@ -126,6 +126,8 @@ export interface Measurement {
     header?: { values: Record<string, string>; duplicates: string[] };
     trace?: { dtS: number; setpointDps: number[]; gyroDps: number[]; motors: number[][] };
     plant?: { maxAbsRollDeg: number; minZ: number; finite: boolean };
+    /** [command index, PID ticks to the next command] for every later gap other than 10 (lockstep phase slips) */
+    commandPhaseSlips?: [number, number][];
 }
 
 export const SAMPLES_PER_TICK = 10;
@@ -183,7 +185,15 @@ export function validateMeasurement(
         issues.push(`trace_length:${sp.length}:${n}`);
         return issues;
     }
-    if (setpointLag(sp, schedule) === null) issues.push("setpoint_not_schedule");
+    if (setpointLag(sp, schedule) === null) {
+        // A logged command-delivery phase slip explains the mismatch: a harness fault (retried), not a wrong setpoint.
+        const slips = m.commandPhaseSlips ?? [];
+        issues.push(
+            slips.length
+                ? `harness:command_phase_slip:${slips.map(([i, g]) => `${i}+${g}`).join(",")}`
+                : "setpoint_not_schedule",
+        );
+    }
     if (!m.trace.gyroDps.every(Number.isFinite)) issues.push("gyro_not_finite");
     return issues;
 }
