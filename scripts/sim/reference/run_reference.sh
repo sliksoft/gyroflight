@@ -4,7 +4,7 @@
 # Refuses an existing output directory, a wrong ELF hash, a wrong VliegAI HEAD or GyroFlight scripts that differ from HEAD.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO="$(cd "$HERE/../.." && pwd)"
+REPO="$(cd "$HERE/../../.." && pwd)"
 OUT="${1:?output dir}"; shift || true
 ONLY_ARM=""; SMOKE=0
 while [ $# -gt 0 ]; do case "$1" in --only-arm) ONLY_ARM="$2"; shift 2;; --smoke) SMOKE=1; shift;; *) echo "unknown $1"; exit 2;; esac; done
