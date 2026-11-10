@@ -26,6 +26,7 @@
  * the noise floor. No new analysis framework: this only joins the existing ones by sample.
  */
 
+import { descaleHighResolution, parseLoggedHeaders } from "../chirp/headers";
 import { FlightLog } from "@/blackbox-viewer/flightlog.js";
 import { FlightLogIndex } from "@/blackbox-viewer/flightlog_index.js";
 import { extractOptionalBlackboxChannels } from "@/js/blackbox/flight_metrics_analysis";
@@ -234,7 +235,9 @@ export function buildLogInputs(
         if (!Object.keys(best).length || log.logIndex >= index.getLogCount() || !flightLog.openLog(log.logIndex))
             continue;
         const ex = extractOptionalBlackboxChannels(flightLog, { fields: FIELDS });
-        const ch = ex.named;
+        // High-resolution logs carry gyroADC, gyroUnfilt, rcCommand and setpoint ×10: back to firmware
+        // units here, before anything reads them (D path, gyro chain, I relax, JIO, flight mask).
+        const ch = descaleHighResolution(ex.named, parseLoggedHeaders(log.headerPairs as [string, string][]));
         const t = ch.time;
         if (!t || !ch["gyroADC[0]"] || !ch["gyroADC[1]"] || !ch["gyroADC[2]"] || !ch["rcCommand[3]"]) continue;
         const aligned = <T extends ArrayLike<number>>(c: T | null | undefined) =>

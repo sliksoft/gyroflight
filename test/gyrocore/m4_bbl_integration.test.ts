@@ -101,7 +101,7 @@ function stickFrames(withD: boolean[] = [true, true, true], withErpm = true, rat
         if (withErpm) {
             extra.push(LOGGED_ERPM, LOGGED_ERPM + 10, LOGGED_ERPM - 10, LOGGED_ERPM + 20);
         }
-        extra.push(1400); // rcCommand[3]: throttle up for the whole log
+        extra.push(1400 * rateScale); // rcCommand[3]: throttle up for the whole log (×10 in a high-resolution log, blackbox.c)
         frames.push({
             time: 1_000_000 + i * 1000,
             setpoint: [sp * rateScale, sp * rateScale, Math.round(sp / 3) * rateScale],

@@ -94,6 +94,8 @@ export interface ClosedLoopLogOptions {
      * stays at the stop frequency.
      */
     abortAtHz?: number;
+    /** Write the log as blackbox_high_resolution: setpoint, gyro and rcCommand ×10 (blackbox.c), header line added. */
+    highResolution?: boolean;
     /**
      * How a sweep's registration really ends (firmware pid.c / chirp.c at 43875a55a), for one axis
      * or for every swept axis. Unlike `abortAtHz` (the generator's output held at zero while the
@@ -392,6 +394,14 @@ export function closedLoopChirpLog(o: ClosedLoopLogOptions): Uint8Array {
             }
         }
         idle(jio ? Math.round((jio.gapS ?? 0.6) * RATE_HZ) : 100);
+    }
+    if (o.highResolution) {
+        headers.push("blackbox_high_resolution:1");
+        for (const fr of frames) {
+            fr.setpoint = fr.setpoint.map((v) => Math.round(v * 10)) as [number, number, number];
+            fr.gyro = fr.gyro.map((v) => Math.round(v * 10)) as [number, number, number];
+            if (fr.extra) fr.extra[0] = Math.round(fr.extra[0] * 10); // rcCommand[3]
+        }
     }
     return encodeLog(frames, {
         iInterval: 32,

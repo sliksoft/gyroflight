@@ -415,8 +415,25 @@ export function decideAxis(o: {
     requiredBandHz?: [number, number] | null;
     /** Independent flights combined into `loop` (multiRecording.ts combineRecordings); null: none. */
     combination?: RecordingCombination | null;
+    /** The D-path fit of this axis (autotuneV2 analyzeAxisController); null: no D term or not simulated. */
+    dterm?: { accepted: boolean; applied: boolean; nrmse: number | null; fallback: string } | null;
 }): RouteDecision {
     const checks: DecisionCheck[] = [];
+    if (o.dterm)
+        checks.push({
+            rule: "dterm_path_fit",
+            ref: "src/js/blackbox/betaflight_dterm_dynamic.ts:dtermFitAccepted",
+            value: o.dterm.nrmse,
+            unit: "NRMSE",
+            threshold: "accepted: coherent bands within 5 % gain and 3°, NRMSE below the static model",
+            // Not a cause: the decision runs either way, on the controller named in the consequence.
+            result: o.dterm.applied ? "pass" : "waived",
+            consequence: o.dterm.applied
+                ? "effective D (d_max, TPA, dynamic D-LPF) from the D-path simulation used for plant and margins"
+                : o.dterm.accepted
+                  ? `fit accepted but no effective-D window in the sweep: fallback ${o.dterm.fallback} (the headers' D with its static D-LPF) used for plant and margins`
+                  : `D-path simulation does not reproduce the logged axisD: fallback ${o.dterm.fallback} (the headers' D with its static D-LPF) used for plant and margins`,
+        });
     const combination = summarize(o.combination);
     // Named next to the other checks; never the first cause (an unusable combination leaves the
     // primary's own measurement, judged by the checks that follow).

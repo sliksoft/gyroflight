@@ -54,7 +54,7 @@ import {
 import { extractPlantFromClosedLoop, type IdentifiedPlant, type PlantBin } from "@/js/blackbox/betaflight_open_loop";
 import { ComplexFFT } from "@/js/blackbox/fft";
 import type { TransferFunction } from "@/js/blackbox/spectral_analysis";
-import { highResolutionScale, parseLoggedHeaders, validateChirpDebugMode } from "@/gyrocore/chirp/headers";
+import { parseLoggedHeaders, validateChirpDebugMode } from "@/gyrocore/chirp/headers";
 import type { AxisName } from "./safetyEvidence";
 import type { SweepInfo } from "./loopModel";
 
@@ -838,7 +838,6 @@ export function analyzeJioSweeps(
     };
     if (blockers.length || !ch || !pidDtUs || !sweep || !amplitudes || !lag || !lead) return base;
     const fs = log.sampleRateHz;
-    const scale = highResolutionScale(logged);
     const n = log.gyroAdc[0].length;
     const sweepSamples = Math.round(sweep.durationS * fs);
     // The settle tail never reaches into the next sweep record: a record's window would otherwise
@@ -922,7 +921,7 @@ export function analyzeJioSweeps(
         const out = new Float64Array(L);
         const Y = log.gyroAdc[a];
         for (let k = 0; k < L; k++) {
-            const v = Y[start + k] * scale;
+            const v = Y[start + k];
             out[k] = Number.isFinite(v) ? v : 0;
         }
         return out;
@@ -1142,7 +1141,7 @@ export function analyzeJioSweeps(
                 if (Math.abs(u[ai][k]) >= limit) limitHits++;
                 uSq += u[ai][k] ** 2;
                 rPeak = Math.max(rPeak, Math.abs(r[k]));
-                const d = sp[s.start + k] * scale - r[k];
+                const d = sp[s.start + k] - r[k];
                 spDiffSq += Number.isFinite(d) ? d * d : 0;
             }
             if (limitHits / L > JIO_SWEEP.maxLimitHitFraction) flags.push(`pidsum_limit_active:${limitHits}`);

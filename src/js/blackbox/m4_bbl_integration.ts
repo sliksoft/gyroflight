@@ -396,7 +396,8 @@ function analyzeLog(
     const segmentation = segmentFlightLog({
         timeUs: frames.timeUs,
         flightModeFlags: frames.flightModeFlags,
-        throttle,
+        // rcCommand[3] is ×10 in a high-resolution log, like setpoint and gyro.
+        throttle: throttle ? scaled(throttle, scale) : null,
         failsafePhase: failsafe,
         setpoint,
         sampleRateHz: analysisRateHz,

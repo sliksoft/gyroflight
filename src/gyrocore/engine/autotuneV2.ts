@@ -258,7 +258,8 @@ export interface PartReport {
 
 export interface AutotuneV2Result {
     chain: { config: GyroChainConfig | null; validation: ChainValidation[]; notes: string[] };
-    dterm: { axis: AxisName; accepted: boolean; nrmse: number | null }[];
+    /** D path per axis: the fit against the logged axisD, whether its effective D was applied, else the fallback used. */
+    dterm: { axis: AxisName; accepted: boolean; nrmse: number | null; applied: boolean; fallback: string | null }[];
     /**
      * The I term in force during each axis's sweep (block 9, betaflight_iterm_relax.ts): the plant is
      * extracted with Ki × meanFactor when the reconstruction reproduces the logged axisI; otherwise
@@ -558,10 +559,15 @@ function motorSaturation(
     return n ? sat / n : null;
 }
 
+/** The controller used when the D-path simulation does not reproduce the logged axisD. */
+export const DTERM_FALLBACK = "headers_d_static_dterm_lpf";
+
 interface AxisAnalysis {
     loop: AxisLoop;
     dterm: DtermDynamicConfig | null;
     dtermAccepted: boolean;
+    dtermApplied: boolean;
+    dtermNrmse: number | null;
     window: [number, number];
     /** The analysis the loop is read on (the adaptive rung; adaptiveResolution.ts). */
     analysis: AnalysisProvenance | null;
@@ -589,6 +595,8 @@ export function analyzeAxisController(
     dterm: DtermDynamicConfig | null;
     accepted: boolean;
     nrmse: number | null;
+    /** The effective D (d_max, TPA, dynamic D-LPF) of the simulation replaced the headers' D. */
+    dtermApplied: boolean;
 } | null {
     const base = controllerConfigFromHeaders(h, axis);
     if (!base) return null;
@@ -596,6 +604,7 @@ export function analyzeAxisController(
     const dterm = base.axis.d > 0 ? dtermConfigFromHeaders(h, axis, base.pidDt) : null;
     let accepted = false;
     let nrmse: number | null = null;
+    let dtermApplied = false;
     const loggedD = log.channels.axisD?.[axis] ?? null;
     if (dterm) {
         const input = {
@@ -611,8 +620,13 @@ export function analyzeAxisController(
             nrmse = fit?.nrmse ?? null;
             accepted = dtermFitAccepted(fit, fitDterm(stat, loggedD, log.sampleRateHz));
         }
-        const eff = effectiveDtermOverWindow(sim, chirp.start, chirp.end);
-        if (eff) cfg = withEffectiveDterm(cfg, eff);
+        // Only a simulation that reproduces the logged axisD may replace the headers' D: a rejected
+        // fit keeps the base controller (the headers' D with its static D-LPF), named as the fallback.
+        const eff = accepted ? effectiveDtermOverWindow(sim, chirp.start, chirp.end) : null;
+        if (eff) {
+            cfg = withEffectiveDterm(cfg, eff);
+            dtermApplied = true;
+        }
     }
     // pid.c relaxes I on the swept setpoint: the plant is extracted with the I in force during the
     // sweep (reconstructed and checked against the logged axisI), the margins keep the I of flight.
@@ -637,7 +651,7 @@ export function analyzeAxisController(
         itermRelax.status === "reconstructed"
             ? { ...cfg, axis: { ...cfg.axis, i: cfg.axis.i * itermRelax.meanFactor } }
             : cfg;
-    return { cfg, sweepCfg, itermRelax, dterm, accepted, nrmse };
+    return { cfg, sweepCfg, itermRelax, dterm, accepted, nrmse, dtermApplied };
 }
 
 function statusOf(items: { status: PartStatus }[]): Exclude<ReportStatus, "IMPLEMENTED"> {
@@ -758,7 +772,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         if (!c) return;
         const ctl = analyzeAxisController(log, h, axis, c, mask);
         if (!ctl) return;
-        if (ctl.dterm) dtermReport.push({ axis: name, accepted: ctl.accepted, nrmse: ctl.nrmse });
+        if (ctl.dterm)
+            dtermReport.push({
+                axis: name,
+                accepted: ctl.accepted,
+                nrmse: ctl.nrmse,
+                applied: ctl.dtermApplied,
+                fallback: ctl.dtermApplied ? null : DTERM_FALLBACK,
+            });
         itermRelaxReport.push({ axis: name, ...ctl.itermRelax });
         const eff = sim && chainCfg ? effectiveChainFrf(sim, chainCfg, axis, c.start, c.end) : null;
         // Adaptive resolution (adaptiveResolution.ts, H1): from the standard analysis's crossover, the
@@ -899,6 +920,8 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             loop,
             dterm: ctl.dterm,
             dtermAccepted: ctl.accepted,
+            dtermApplied: ctl.dtermApplied,
+            dtermNrmse: ctl.nrmse,
             window: [c.start, c.end],
             analysis: chosen.analysis,
             experimentalLoop,
@@ -1266,6 +1289,14 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
                           : null,
                   noPlantReasons: ax ? [] : ["primary_axis_not_identified"],
                   requiredBandHz: measurementPlan.find((m) => m.axis === name)?.bandHz.primary ?? null,
+                  dterm: ax?.dterm
+                      ? {
+                            accepted: ax.dtermAccepted,
+                            applied: ax.dtermApplied,
+                            nrmse: ax.dtermNrmse,
+                            fallback: DTERM_FALLBACK,
+                        }
+                      : null,
               })
             : null;
         const jioDecision = jio.chain[name]?.decision ?? null;
