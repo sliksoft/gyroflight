@@ -187,7 +187,7 @@ def main() -> int:
             blocks = [b.strip() for b in "; ".join(read.get("blocks") or []).split(";") if b.strip()]
             candidate_blocks = [b for b in blocks if b not in APPLY_BLOCKS_NOT_ABOUT_THE_CANDIDATE]
             # A proposal: roll items in 4b with the Apply route present and no block about the candidate itself.
-            shown = "proposal" if items and apply_btn.get("present") and not candidate_blocks else ("blocked_apply_route" if items else read.get("rollShown"))
+            shown = "proposal" if items and apply_btn.get("present") and not candidate_blocks else ("items_with_apply_route_blocked" if items else read.get("rollShown"))
             chosen = parse_candidate(start["tune"], app) if items else None
             shown_m = parse_shown_margins(app)
             eng = (engine or {}).get("decisionRoll", {}).get("primary") if engine else None
@@ -206,15 +206,18 @@ def main() -> int:
                         "rollStep": app.get("rollStep"), "errs": app.get("errs"), "provenance": prov}
             if not prov:
                 notes.append("WARNING: app/provenance.json missing (HEAD and src state at Calculate not recorded by the harness)")
+            elif prov.get("reconstructed") or prov.get("srcDirtyRecordedAtCalculate") is False or prov.get("srcDirty") is None:
+                notes.append(f"WARNING: app provenance reconstructed after the fact (HEAD {prov.get('gyroflightHead')}); the state of src/ at Calculate was not recorded")
             elif prov.get("srcDirty"):
                 notes.append(f"WARNING: src/ was not clean at Calculate: {prov.get('srcDirty')}")
-            if shown != "proposal" or not chosen:
+            # Protocol step (1) first whenever the candidate is known, then (2).
+            if chosen and not grid_point(start["tune"], chosen):
+                v["firstDecisiveStep"] = "candidate_missing_in_grid"
+                stop("FAIL", f"the chosen candidate {chosen} is not a point of the ±30 % grid around the start")
+            elif shown != "proposal" or not chosen:
                 v["firstDecisiveStep"] = "candidate_rejected"
                 cause = (eng or {}).get("firstCause") or {}
                 stop("FAIL", f"the app offers no roll proposal ({shown}; blocks about the candidate: {candidate_blocks}); engine status {eng and eng.get('status')}, first cause {cause.get('rule')}={str(cause.get('value'))[:160]}")
-            elif not grid_point(start["tune"], chosen):
-                v["firstDecisiveStep"] = "candidate_missing_in_grid"
-                stop("FAIL", f"the chosen candidate {chosen} is not a point of the ±30 % grid around the start")
             else:
                 if ec and ec.get("proposed") != chosen:
                     notes.append(f"WARNING: engine candidate {ec.get('proposed')} differs from the app's items {chosen}; no prediction accuracy reported")
