@@ -9,10 +9,11 @@ Verdict rules (protocol):
                 meet all three targets with GM assessable, or it does not improve the start's missed target by the
                 reference tolerance), the start does not miss a target (no room), GM not assessable on a tune the verdict
                 needs, or repeats spread >= 1° PM.
-  FAIL          first decisive step: (1) candidate_missing_in_grid — the app searched and no proposal, while no grid point
-                is the control (never, by construction) ; (2) candidate_rejected — the app shows no proposal for roll (a
-                block or an informative step only), with the app's first cause; (3) remeasurement_does_not_confirm — the
-                proposal's remeasured reference does not meet all three targets or does not improve as required.
+  FAIL          first decisive step: (1) candidate_missing_in_grid — the positive control or the chosen candidate is not a
+                point of the ±30 % grid as searchGrid forms it; (2) candidate_rejected — the app shows no proposal for roll
+                (a block, an informative step only, or an Apply route blocked for a reason about the candidate itself), with
+                the app's first cause; (3) remeasurement_does_not_confirm — the proposal's remeasured reference does not
+                meet all three targets or does not improve as required.
   PASS          the app chose a roll candidate on its own (a proposal, Apply route), its remeasured reference meets PM >= 45°,
                 GM >= 6 dB (assessable), |S| <= 6 dB and improves the start's missed target(s) by at least the reference
                 tolerance while no met target is lost.
@@ -23,6 +24,7 @@ loop-reference tolerances: fc 10 %, PM 5°, |S| 1 dB, GM 1.5 dB.
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -30,19 +32,28 @@ from pathlib import Path
 TOL = {"fcRel": 0.10, "pmDeg": 5.0, "sDb": 1.0, "gmDb": 1.5, "repeatPmDeg": 1.0}
 TARGETS = {"pm": 45.0, "gm": 6.0, "s": 6.0}
 SCALES = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3]
+# Blocks of the experimental Apply route that do not reject the candidate itself: no flight controller, no acknowledgement
+# (both expected in this headless run), and a SITL log without a board identity (fc_identity_binding: the SITL header names no
+# board; a property of the log, not of the candidate). Any other block counts as the app rejecting the candidate.
+APPLY_BLOCKS_NOT_ABOUT_THE_CANDIDATE = {"fc:not_connected", "experimental:not_acknowledged", "fc_identity_binding:log_board_missing"}
+
+
+def js_round(x: float) -> int:
+    """Math.round: half away from zero for positive values (Python round is half-even)."""
+    return int(math.floor(x + 0.5))
 
 
 def grid_point(start: dict, v: dict) -> bool:
     """Is v a point of the ±30 % grid around start (pidOptimizer searchGrid: P, I, D each on SCALES, d_max on D's scale)?"""
     for ps in SCALES:
-        if round(start["p"] * ps) != v["p"]:
+        if js_round(start["p"] * ps) != v["p"]:
             continue
         for is_ in (SCALES if start["i"] > 0 else [1]):
-            if round(start["i"] * is_) != v["i"]:
+            if js_round(start["i"] * is_) != v["i"]:
                 continue
             for ds in (SCALES if start["d"] > 0 else [1]):
-                d = round(start["d"] * ds)
-                dmax = max(round(start["dMax"] * ds), d) if start["dMax"] > 0 else 0
+                d = js_round(start["d"] * ds)
+                dmax = max(js_round(start["dMax"] * ds), d) if start["dMax"] > 0 else 0
                 if d == v["d"] and dmax == v["dMax"]:
                     return True
     return False
@@ -153,7 +164,8 @@ def main() -> int:
             if control["nValid"] != control["n"]:
                 stop("INSUFFICIENT", f"control: {control['nValid']}/{control['n']} valid runs")
             elif not in_grid:
-                stop("INSUFFICIENT", "positive control is not a point of the ±30 % grid around the start")
+                v["firstDecisiveStep"] = "candidate_missing_in_grid"
+                stop("FAIL", "positive control is not a point of the ±30 % grid around the start (grid rule differs from searchGrid)")
             elif not control["gmAssessableAll"]:
                 stop("INSUFFICIENT", "control: GM not assessable")
             elif not control.get("refMeetsTargets"):
@@ -169,33 +181,46 @@ def main() -> int:
         if not app:
             stop("INSUFFICIENT", "app step not recorded (app/tuning_and_apply.json missing)")
         else:
-            shown = (app.get("read") or {}).get("rollShown")
-            chosen = parse_candidate(start["tune"], app)
+            read = app.get("read") or {}
+            items = app.get("rollItems") or []
+            apply_btn = read.get("applyButton") or {}
+            blocks = [b.strip() for b in "; ".join(read.get("blocks") or []).split(";") if b.strip()]
+            candidate_blocks = [b for b in blocks if b not in APPLY_BLOCKS_NOT_ABOUT_THE_CANDIDATE]
+            # A proposal: roll items in 4b with the Apply route present and no block about the candidate itself.
+            shown = "proposal" if items and apply_btn.get("present") and not candidate_blocks else ("blocked_apply_route" if items else read.get("rollShown"))
+            chosen = parse_candidate(start["tune"], app) if items else None
             shown_m = parse_shown_margins(app)
             eng = (engine or {}).get("decisionRoll", {}).get("primary") if engine else None
             ec = eng and eng.get("candidate")
             pred = None
-            if ec and ec.get("proposedMargins"):
+            if ec and ec.get("proposedMargins") and ec.get("proposed") == chosen:
                 pm_ = ec["proposedMargins"]
                 pred = {"fc": pm_["crossoverHz"], "pm": pm_["phaseMarginDeg"],
                         "gm": pm_["gainMarginDb"] if pm_["gainMarginDb"] is not None else pm_["measured"]["gainMarginDb"],
                         "s": pm_["sensitivityPeakDb"] if pm_["sensitivityPeakDb"] is not None else pm_["measured"]["sensitivityPeakDb"]}
-            v["app"] = {"rollShown": shown, "chosen": chosen, "shownMargins": shown_m, "applyButton": app.get("read", {}).get("applyButton"),
+            prov = load("app/provenance.json")
+            v["app"] = {"rollShown": shown, "rollShownByPage": read.get("rollShown"), "chosen": chosen, "shownMargins": shown_m, "applyButton": apply_btn,
+                        "blocks": blocks, "blocksAboutTheCandidate": candidate_blocks, "itemStatuses": sorted({it.get("status") for it in items}),
                         "engineStatus": eng and eng.get("status"), "engineCandidate": ec and ec.get("proposed"), "enginePredicted": pred,
                         "engineCurrent": eng and eng.get("current"), "firstCause": eng and eng.get("firstCause") and {"rule": eng["firstCause"]["rule"], "value": eng["firstCause"]["value"]},
-                        "rollStep": app.get("rollStep"), "errs": app.get("errs")}
+                        "rollStep": app.get("rollStep"), "errs": app.get("errs"), "provenance": prov}
+            if not prov:
+                notes.append("WARNING: app/provenance.json missing (HEAD and src state at Calculate not recorded by the harness)")
+            elif prov.get("srcDirty"):
+                notes.append(f"WARNING: src/ was not clean at Calculate: {prov.get('srcDirty')}")
             if shown != "proposal" or not chosen:
                 v["firstDecisiveStep"] = "candidate_rejected"
                 cause = (eng or {}).get("firstCause") or {}
-                stop("FAIL", f"the app offers no roll proposal ({shown}); engine status {eng and eng.get('status')}, first cause {cause.get('rule')}={str(cause.get('value'))[:160]}")
+                stop("FAIL", f"the app offers no roll proposal ({shown}; blocks about the candidate: {candidate_blocks}); engine status {eng and eng.get('status')}, first cause {cause.get('rule')}={str(cause.get('value'))[:160]}")
+            elif not grid_point(start["tune"], chosen):
+                v["firstDecisiveStep"] = "candidate_missing_in_grid"
+                stop("FAIL", f"the chosen candidate {chosen} is not a point of the ±30 % grid around the start")
             else:
                 if ec and ec.get("proposed") != chosen:
-                    notes.append(f"WARNING: engine candidate {ec.get('proposed')} differs from the app's items {chosen}")
+                    notes.append(f"WARNING: engine candidate {ec.get('proposed')} differs from the app's items {chosen}; no prediction accuracy reported")
                 if shown_m and pred and (round(pred["pm"]) != round(shown_m["pm"]) or abs(pred["gm"] - shown_m["gm"]) > 0.051 or abs(pred["s"] - shown_m["s"]) > 0.051):
                     notes.append(f"WARNING: UI margins {shown_m} differ from engine prediction {pred}")
-                if not grid_point(start["tune"], chosen):
-                    notes.append("WARNING: the chosen candidate is not a point of the ±30 % grid")
-                notes.append(f"app chose {chosen} (shown: {shown}); predicted {pred}")
+                notes.append(f"app chose {chosen} (shown: {shown}; Apply route blocks {blocks}; item status {v['app']['itemStatuses']}); predicted {pred}")
     # 4. remeasurement
     if v["verdict"] is None:
         if not cand or not cand.get("refMedian"):

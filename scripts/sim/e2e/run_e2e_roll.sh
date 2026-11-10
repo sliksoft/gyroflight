@@ -28,6 +28,12 @@ if [ ! -f "$DOSSIER/app/tuning_and_apply.json" ]; then
   (cd "$REPO" && setsid nohup npx vite --port "$PORT" --strictPort > "$DOSSIER/app/vite.log" 2>&1 &)
   for i in $(seq 1 60); do ss -ltn | grep -q ":$PORT " && break; sleep 1; done
   sleep 3
+  # provenance of the app step: the HEAD Vite serves, whether src/ is clean, and the e2e scripts' hashes
+  {
+    echo "{\"startedAt\":\"$(date -u +%FT%TZ)\",\"gyroflightHead\":\"$(git -C "$REPO" rev-parse HEAD)\",\"srcDirty\":\"$(git -C "$REPO" status --porcelain -- src package.json | tr '\n' ' ')\",\"port\":$PORT,\"scripts\":{"
+    for f in run_e2e_roll.sh run_tune.sh summarize_tune.py ui_calculate.mjs e2e_verdict.py; do echo "\"e2e/$f\":\"$(sha256sum "$HERE/$f" | cut -d' ' -f1)\","; done
+    echo "\"reference/reference_loop.py\":\"$(sha256sum "$REPO/scripts/sim/reference/reference_loop.py" | cut -d' ' -f1)\"}}"
+  } > "$DOSSIER/app/provenance.json"
   (cd "$REPO" && node "$HERE/ui_calculate.mjs" "$DOSSIER/app" $LOGS | tee "$DOSSIER/app/run.log") || echo "  ui exit $?"
   VPID=$(ss -ltnp | grep ":$PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); [ -n "$VPID" ] && kill "$VPID" || true
   # the engine on exactly the imported logs (first log + others), for the predicted margins at full precision
