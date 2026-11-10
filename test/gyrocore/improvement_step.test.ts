@@ -132,6 +132,7 @@ describe("improvement step", () => {
                 {
                     target: {
                         pScale: [0.4, 1.3],
+                        iScale: [0.4, 1.3],
                         dScale: [0.5, 1.3],
                         tried: 323,
                         usable: 171,

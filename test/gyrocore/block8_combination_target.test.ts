@@ -511,9 +511,9 @@ describe("target search beyond one Apply (engine, simulated)", () => {
             expect(Math.sign(t.step!.values[k] - cur[k])).toBe(Math.sign(t.target!.values[k] - cur[k]));
         }
         expect(t.step!.meetsTargets).toBe(false);
-        // The step is a point of the ±30 % grid (P and I move together on its scale, D is clipped to its
-        // edges): a step meeting the targets would have been the grid's candidate, so this status
-        // always means the step misses them.
+        // The step is a point of the ±30 % grid (P, I and D each clipped to its edges on their own scale,
+        // d_max on D's scale; block 11): a step meeting the targets would have been the grid's candidate,
+        // so this status always means the step misses them.
         expect([...searchGrid(cur, null)]).toContainEqual(t.step!.values);
         expect(d.checks.find((c) => c.rule === "target_search_wider_bounds")!.result).toBe("fail");
         // Nothing for roll in the experimental proposal: neither the target nor the step.

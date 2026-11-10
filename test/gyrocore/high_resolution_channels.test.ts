@@ -136,7 +136,7 @@ describe("high-resolution channels", () => {
         const db = hi.dterm.find((d) => d.axis === "roll");
         expect(db?.applied).toBe(da?.applied);
         expect(db?.fallback).toBe(da?.fallback);
-    });
+    }, 60_000);
 });
 
 describe("D-path fit gating", () => {

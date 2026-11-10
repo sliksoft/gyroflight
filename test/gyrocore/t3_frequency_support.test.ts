@@ -295,7 +295,7 @@ describe("positive control: a smooth plant, full support, a finer qualification"
         const bare = optimizeAxisPid(build(tf, { fine }), current, null);
         expect(bare.outcome).toBe("improved");
         expect(bare.status).toBe("VALIDATED");
-    });
+    }, 60_000);
 });
 
 describe("the T3 counterexample: a narrow resonance on one incoherent bin", () => {

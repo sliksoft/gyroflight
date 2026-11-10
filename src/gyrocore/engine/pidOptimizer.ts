@@ -132,15 +132,26 @@ export function* searchGrid(current: PidValues, segment: ValidatedSegment | null
         }
         return;
     }
+    // P, I and D each on their own SCALES (block 11: P and I independent; before, I kept its ratio
+    // to P). Every point of the former coupled grid (P and I on the same scale) is still a point of
+    // this one; d_max keeps its ratio to D. Candidates equal after rounding are yielded once.
     const dScales = current.d > 0 ? SCALES : [1];
+    const iScales = current.i > 0 ? SCALES : [1];
+    const seen = new Set<string>();
     for (const ps of SCALES) {
-        for (const ds of dScales) {
-            yield {
-                p: Math.round(current.p * ps),
-                i: Math.round(current.i * ps),
-                d: Math.round(current.d * ds),
-                dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), Math.round(current.d * ds)) : 0,
-            };
+        for (const is of iScales) {
+            for (const ds of dScales) {
+                const v: PidValues = {
+                    p: Math.round(current.p * ps),
+                    i: Math.round(current.i * is),
+                    d: Math.round(current.d * ds),
+                    dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), Math.round(current.d * ds)) : 0,
+                };
+                const key = `${v.p}|${v.i}|${v.d}|${v.dMax}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                yield v;
+            }
         }
     }
 }

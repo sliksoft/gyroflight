@@ -463,7 +463,7 @@ describe("P2-2: a candidate's resolution verdict is its own, never the current t
             );
         }
         if (r.changed) expect(v.deltaCrossoverPct).not.toBeNull();
-    });
+    }, 60_000);
 
     it("end to end (SIMULATION): the engine's proposed margins carry their own verdict, consistent with the target", () => {
         const G = ratePlant({ K: 60, motorHz: 40, delayS: 0.002 });

@@ -67,9 +67,12 @@ function trace(
     qual: ReturnType<typeof qualifyChirpFile>,
     others: AutotuneLogInput[],
 ) {
+    const t0 = performance.now();
     const r = runAutotuneV2({ primary, others, verifiedTune: null, createdAt: "2026-11-08T00:00:00Z" });
+    const elapsedMs = Math.round(performance.now() - t0);
     return {
         run: name,
+        elapsedMs,
         primarySha256: primary.sha256,
         others: others.map((o) => o.sha256),
         sampleRateHz: primary.sampleRateHz,

@@ -1633,7 +1633,9 @@ const decisionRows = computed(() => {
                 );
             const t = r.target;
             if (t) {
-                const bounds = `P/I ×${t.pScale[0]}–${t.pScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}`;
+                // Results stored before block 11 carry no iScale (I was on P's scale).
+                const iScale = t.iScale ?? t.pScale;
+                const bounds = `P ×${t.pScale[0]}–${t.pScale[1]}, I ×${iScale[0]}–${iScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}`;
                 if (t.target)
                     values.push(
                         `target (${bounds}), not offered: ${pid(t.target.values)}: ${margins(t.target)}`,

@@ -200,6 +200,11 @@ export interface RouteDecision {
     searchRan: boolean;
     candidatesTried: number;
     candidatesUsable: number;
+    /**
+     * Wall time of the candidate search on this route (±MAX_STEP grid and, when run, the wider target
+     * search). Diagnostic only, not deterministic: strip it before comparing two decisions.
+     */
+    searchMs?: number;
     status: DecisionStatus;
     /** The first failing check (null when a candidate was found or none is needed). */
     firstCause: DecisionCheck | null;
@@ -248,8 +253,9 @@ export interface CandidateRead {
 }
 
 export interface TargetSearch {
-    /** The bounds searched, as scales of the current P (I with it) and D. */
+    /** The bounds searched, as scales of the current P, I and D (each on its own scale). */
     pScale: [number, number];
+    iScale: [number, number];
     dScale: [number, number];
     tried: number;
     usable: number;
@@ -265,8 +271,10 @@ export interface TargetSearch {
 }
 
 /**
- * Bounds of the wider target search (block 8). P and I move together (their ratio is kept, as in the
- * ±MAX_STEP grid), D on its own; d_max keeps its ratio to D. P/I down to 0.4×: the AIR65 roll search
+ * Bounds of the wider target search (block 8). P, I and D each on their own scale (block 11: before,
+ * I kept its ratio to P, as the ±MAX_STEP grid did); d_max keeps its ratio to D. Every point of the
+ * former coupled grid (P and I on the same scale) is still a point of this one; candidates equal
+ * after rounding are read once. P and I down to 0.4×: the AIR65 roll search
  * finds its safest candidate on the −30 % edge, so the measured loop asks for less P than one step
  * allows; every candidate is still read only where its crossover, phase crossing and |S| peak lie
  * inside the identified band without holes. Not below 0.4×: PM, GM and the |S| peak do not measure
@@ -278,11 +286,12 @@ export interface TargetSearch {
  */
 export const TARGET_SEARCH = Object.freeze({
     pScale: [0.4, 1.3] as [number, number],
+    iScale: [0.4, 1.3] as [number, number],
     dScale: [0.5, 1.3] as [number, number],
     step: 0.05,
 });
 
-function scalesOf([lo, hi]: [number, number], step: number): number[] {
+export function scalesOf([lo, hi]: [number, number], step: number): number[] {
     const out: number[] = [];
     for (let k = Math.round(lo / step); k <= Math.round(hi / step) + 1e-9; k++)
         out.push(Math.round(k * step * 100) / 100);
@@ -311,6 +320,16 @@ const REF_SEARCH = "src/gyrocore/engine/candidateDecision.ts:decideAxis";
 const DATA_BLOCKERS =
     /^(crossover_band_unsupported|crossover_neighbour_bins_missing|sweep_generator_stopped_early|model_class_qualification_failed)/;
 const BAND_END = /^loop_gain_(rising|near_unity|above_one)_at_band_end/;
+/**
+ * A candidate read the band does not show: holes inside the decision band, or a loop phase whose
+ * branch the loop model could not verify (loopModel phaseIssues: unwrapping ambiguous between bins,
+ * or the plant and controller phases do not add up to the loop phase). On such a read the PM may be
+ * off by 360° (block 11: on the AIR65 JIO roll loop, P ×0.4 with I ×1.1–1.3 reads PM 377–402° with
+ * GM −11 to −24 dB), so it is not ranked, counted usable or compared with the targets.
+ */
+const GAPS = /^(unidentified_bins_inside_band|identified_band_has_gaps)/;
+const PHASE_UNREADABLE = /^(phase_branch_unverified|phase_unwrap_ambiguous)/;
+const UNREADABLE = new RegExp(`${GAPS.source}|${PHASE_UNREADABLE.source}`);
 
 function has(m: LoopMargins, re: RegExp): string | null {
     return m.reasons.find((r) => re.test(r)) ?? null;
@@ -618,7 +637,7 @@ export function decideAxis(o: {
     // Holes inside the decision band (bins left out for coherence, support or uncertainty) can hide
     // a resonance or the |S| peak between the bins that remain (loopModel supportIssues; the T3 audit
     // case: one incoherent bin read PM 82° on a loop with 4.7°). Block 6 review: no search on them.
-    const holesReason = has(cur, /^(unidentified_bins_inside_band|identified_band_has_gaps)/);
+    const holesReason = has(cur, GAPS);
     const holeCount = (() => {
         const r = cur.reasons.find((x) => x.startsWith("unidentified_bins_inside_band:"));
         const n = r ? Number(r.split(":")[1]) : NaN;
@@ -632,6 +651,21 @@ export function decideAxis(o: {
         threshold: "0 unidentified bins inside the decision band (a hole can hide a resonance or the |S| peak)",
         result: holesReason ? "fail" : "pass",
         consequence: holesReason ? "margins between the holes not shown by the data; no candidate search" : "none",
+    });
+    // The current tune's own read on the same rule as every candidate (UNREADABLE): a loop phase
+    // whose branch is unverified may put the PM off by 360°, and every comparison below (curMeets,
+    // the crossover gain, stepImprovesAll) would rest on it (block 11 review).
+    const phaseReason = has(cur, PHASE_UNREADABLE);
+    checks.push({
+        rule: "decision_band_phase_branch",
+        ref: "src/gyrocore/engine/loopModel.ts:phaseIssues",
+        value: phaseReason,
+        unit: "",
+        threshold: "loop phase unwrapped unambiguously and equal to plant phase plus controller phase",
+        result: phaseReason ? "fail" : "pass",
+        consequence: phaseReason
+            ? "the phase margin may be off by 360°; margins not readable, no candidate search"
+            : "none",
     });
     // 5. GM and |S| shown by the band (bounded, or read inside the band).
     const bandTop = band ? band[1] : null;
@@ -660,12 +694,13 @@ export function decideAxis(o: {
     checks.push(gmCheck, sCheck);
     if (!usable(states.gm) || !usable(states.s)) checks.push(bandTopCheck(loop, band, o.requiredBandHz ?? null));
     const limitation = cur.evidence?.level !== "VALIDATED";
-    if (blocker || holesReason || !usable(states.gm) || !usable(states.s))
+    if (blocker || holesReason || phaseReason || !usable(states.gm) || !usable(states.s))
         return out("plant_band_insufficient", {
             plant: "present_with_limitation",
             bandHz: band,
             metrics: states,
-            current: valuesOf(cur),
+            // A read on an unverified phase branch is not shown as the current margins (Grok round 2).
+            current: phaseReason ? null : valuesOf(cur),
             measurementUsable,
         });
     if (cur.evidence?.level === "MEASURED")
@@ -711,19 +746,13 @@ export function decideAxis(o: {
     let usableN = 0;
     let best: { v: PidValues; m: LoopMargins; val: ReturnType<typeof valuesOf> } | null = null;
     let safest: { v: PidValues; m: LoopMargins; val: ReturnType<typeof valuesOf> } | null = null;
+    const t0 = performance.now();
     for (const v of searchGrid(current, o.segment ?? null)) {
         if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) continue;
         tried++;
         const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
         const st = metricStates(m);
-        if (
-            !usable(st.pm) ||
-            !usable(st.gm) ||
-            !usable(st.s) ||
-            has(m, DATA_BLOCKERS) ||
-            has(m, /^(unidentified_bins_inside_band|identified_band_has_gaps)/)
-        )
-            continue;
+        if (!usable(st.pm) || !usable(st.gm) || !usable(st.s) || has(m, DATA_BLOCKERS) || has(m, UNREADABLE)) continue;
         usableN++;
         const val = valuesOf(m);
         if (!safest || val.pmDeg! > safest.val.pmDeg!) safest = { v, m, val };
@@ -762,6 +791,10 @@ export function decideAxis(o: {
         searchRan: true,
         candidatesTried: tried,
         candidatesUsable: usableN,
+        // Read when a result spreads it (`{ ...searched }`): the time up to that return.
+        get searchMs() {
+            return Math.round(performance.now() - t0);
+        },
         measurementUsable,
     };
     const searchCheck = (result: DecisionCheck["result"], value: string, consequence: string): DecisionCheck => ({
@@ -808,7 +841,8 @@ export function decideAxis(o: {
     // limit bounds it (the safest candidate on the edge of the ±MAX_STEP grid).
     const edge = (x: number, c: number) =>
         c > 0 && (x === Math.round(c * SCALES[0]) || x === Math.round(c * SCALES[SCALES.length - 1]));
-    const atEdge = !!safest && (edge(safest.v.p, current.p) || edge(safest.v.d, current.d));
+    const atEdge =
+        !!safest && (edge(safest.v.p, current.p) || edge(safest.v.i, current.i) || edge(safest.v.d, current.d));
     const s = safest!.val;
     const shortfall = `best PM ${s.pmDeg?.toFixed(0)}° (P ${safest!.v.p}, I ${safest!.v.i}, D ${safest!.v.d}), GM ${s.gmDb?.toFixed(1)} dB, |S| ${s.sDb?.toFixed(1)} dB over ${usableN} usable of ${tried}`;
     // The search space of a final tune is wider than one Apply (block 8): where would a tune meeting
@@ -898,26 +932,45 @@ function readCandidate(loop: AxisLoop, v: PidValues, kdRatio: number): ReturnTyp
     if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) return null;
     const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
     const st = metricStates(m);
-    if (
-        !usable(st.pm) ||
-        !usable(st.gm) ||
-        !usable(st.s) ||
-        has(m, DATA_BLOCKERS) ||
-        has(m, /^(unidentified_bins_inside_band|identified_band_has_gaps)/)
-    )
-        return null;
+    if (!usable(st.pm) || !usable(st.gm) || !usable(st.s) || has(m, DATA_BLOCKERS) || has(m, UNREADABLE)) return null;
     return valuesOf(m);
 }
 
-/** The PID values at scale `ps` of P and I and `ds` of D (d_max keeps its ratio to D, never below D). */
-function scaled(current: PidValues, ps: number, ds: number): PidValues {
+/** The PID values at scale `ps` of P, `is` of I and `ds` of D (d_max keeps its ratio to D, never below D). */
+function scaled(current: PidValues, ps: number, is: number, ds: number): PidValues {
     const d = Math.round(current.d * ds);
     return {
         p: Math.round(current.p * ps),
-        i: Math.round(current.i * ps),
+        i: Math.round(current.i * is),
         d,
         dMax: current.dMax > 0 ? Math.max(Math.round(current.dMax * ds), d) : 0,
     };
+}
+
+export type TargetBounds = { pScale: [number, number]; iScale: [number, number]; dScale: [number, number] };
+
+/**
+ * The points of the wider target search around `current`: P, I and D each on their own scales
+ * (TARGET_SEARCH.step), with the scales they came from; a point equal to an earlier one after
+ * rounding is not yielded again. I (D) at 0 stays 0, on the one scale 1.
+ */
+export function* targetGrid(
+    current: PidValues,
+    bounds: TargetBounds = TARGET_SEARCH,
+): Generator<{ v: PidValues; ps: number; is: number; ds: number }> {
+    const pScales = scalesOf(bounds.pScale, TARGET_SEARCH.step);
+    const iScales = current.i > 0 ? scalesOf(bounds.iScale, TARGET_SEARCH.step) : [1];
+    const dScales = current.d > 0 ? scalesOf(bounds.dScale, TARGET_SEARCH.step) : [1];
+    const seen = new Set<string>();
+    for (const ps of pScales)
+        for (const is of iScales)
+            for (const ds of dScales) {
+                const v = scaled(current, ps, is, ds);
+                const key = `${v.p}|${v.i}|${v.d}|${v.dMax}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                yield { v, ps, is, ds };
+            }
 }
 
 /** TARGET_SEARCH around `current`, and the first ±MAX_STEP step towards its target. */
@@ -926,47 +979,42 @@ export function targetSearch(
     current: PidValues,
     kdRatio: number,
     curV: ReturnType<typeof valuesOf>,
-    bounds: { pScale: [number, number]; dScale: [number, number] } = TARGET_SEARCH,
+    bounds: TargetBounds = TARGET_SEARCH,
 ): TargetSearch {
     const pScales = scalesOf(bounds.pScale, TARGET_SEARCH.step);
+    const iScales = current.i > 0 ? scalesOf(bounds.iScale, TARGET_SEARCH.step) : [1];
     const dScales = current.d > 0 ? scalesOf(bounds.dScale, TARGET_SEARCH.step) : [1];
     let tried = 0;
     let usableN = 0;
-    let target: { v: PidValues; val: ReturnType<typeof valuesOf> } | null = null;
-    let best: { v: PidValues; val: ReturnType<typeof valuesOf>; ps: number; ds: number } | null = null;
-    for (const ps of pScales)
-        for (const ds of dScales) {
-            const v = scaled(current, ps, ds);
-            tried++;
-            const val = readCandidate(loop, v, kdRatio);
-            if (!val) continue;
-            usableN++;
-            if (!best || val.pmDeg! > best.val.pmDeg!) best = { v, val, ps, ds };
-            if (meetsMeasured(val) && (!target || val.crossoverHz! > target.val.crossoverHz!)) target = { v, val };
-        }
-    const onEdge =
-        !!best &&
-        (best.ps === pScales[0] ||
-            best.ps === pScales[pScales.length - 1] ||
-            (dScales.length > 1 && (best.ds === dScales[0] || best.ds === dScales[dScales.length - 1])));
+    let target: { v: PidValues; val: ReturnType<typeof valuesOf>; ds: number } | null = null;
+    let best: { v: PidValues; val: ReturnType<typeof valuesOf>; ps: number; is: number; ds: number } | null = null;
+    for (const { v, ps, is, ds } of targetGrid(current, bounds)) {
+        tried++;
+        const val = readCandidate(loop, v, kdRatio);
+        if (!val) continue;
+        usableN++;
+        if (!best || val.pmDeg! > best.val.pmDeg!) best = { v, val, ps, is, ds };
+        if (meetsMeasured(val) && (!target || val.crossoverHz! > target.val.crossoverHz!)) target = { v, val, ds };
+    }
+    const atEnd = (x: number, scales: number[]) =>
+        scales.length > 1 && (x === scales[0] || x === scales[scales.length - 1]);
+    const onEdge = !!best && (atEnd(best.ps, pScales) || atEnd(best.is, iScales) || atEnd(best.ds, dScales));
     let step: CandidateRead | null = null;
     let stepImprovesAll: boolean | null = null;
     if (target) {
-        // Term by term towards the target, at most MAX_STEP from the current value.
+        // Term by term towards the target, at most MAX_STEP from the current value. d_max as the
+        // ±MAX_STEP grid forms it (searchGrid): the current d_max on D's clipped scale, never below D,
+        // so the step is a point of that grid in every term.
         const clip = (x: number, c: number) =>
             c > 0 ? Math.min(Math.round(c * (1 + MAX_STEP)), Math.max(Math.round(c * (1 - MAX_STEP)), x)) : x;
+        const stepDs = Math.min(1 + MAX_STEP, Math.max(1 - MAX_STEP, target.ds));
         const sv: PidValues = {
             p: clip(target.v.p, current.p),
             i: clip(target.v.i, current.i),
             d: clip(target.v.d, current.d),
             dMax: 0,
         };
-        sv.dMax =
-            current.dMax > 0 && current.d > 0
-                ? Math.max(Math.round((current.dMax * sv.d) / current.d), sv.d)
-                : current.dMax > 0
-                  ? current.dMax
-                  : 0;
+        sv.dMax = current.dMax > 0 ? Math.max(Math.round(current.dMax * stepDs), sv.d) : 0;
         const val = readCandidate(loop, sv, kdRatio);
         if (val) {
             step = readOf(sv, current, val);
@@ -981,6 +1029,7 @@ export function targetSearch(
     }
     return {
         pScale: bounds.pScale,
+        iScale: current.i > 0 ? bounds.iScale : [1, 1],
         dScale: current.d > 0 ? bounds.dScale : [1, 1],
         tried,
         usable: usableN,
@@ -998,7 +1047,7 @@ function fmtRead(r: CandidateRead): string {
 }
 
 function targetCheck(t: TargetSearch): DecisionCheck {
-    const bounds = `P/I ×${t.pScale[0]}–${t.pScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]} (${t.usable} usable of ${t.tried})`;
+    const bounds = `P ×${t.pScale[0]}–${t.pScale[1]}, I ×${t.iScale[0]}–${t.iScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}, each on its own scale (${t.usable} usable of ${t.tried})`;
     if (!t.target)
         return {
             rule: "target_search_wider_bounds",

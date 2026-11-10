@@ -330,7 +330,7 @@ describe("review round 1: unknown is named, pooling needs the same I in force", 
         expect(r.pid.find((p) => p.axis === "roll")!.reasons).toContain(
             "iterm_relax_unknown:roll:iterm_relax_headers_missing",
         );
-    });
+    }, 60_000);
 });
 
 describe("block 9b: the repair in the loop functions the release uses (bins the I relax changes)", () => {

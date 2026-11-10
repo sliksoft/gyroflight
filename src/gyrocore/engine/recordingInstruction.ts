@@ -256,7 +256,8 @@ function axisNeed(
         const t = r.target!;
         const read = (x: NonNullable<typeof t.step>) =>
             `P ${x.values.p}, I ${x.values.i}, D ${x.values.d}: PM ${x.pmDeg?.toFixed(0)}°, GM ${x.gmDb?.toFixed(1)} dB, |S| ${x.sDb?.toFixed(1)} dB`;
-        const bounds = `P/I ×${t.pScale[0]}–${t.pScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}`;
+        const iScale = t.iScale ?? t.pScale;
+        const bounds = `P ×${t.pScale[0]}–${t.pScale[1]}, I ×${iScale[0]}–${iScale[1]}, D ×${t.dScale[0]}–${t.dScale[1]}`;
         return {
             axis,
             trigger,
@@ -596,7 +597,7 @@ export function recordingPlan(o: {
         secondFlight: `Optional: a second, independent flight with the same settings and the same two rounds is supplementary evidence (reproducibility between flights). Without it the cross-flight check stays unknown; that is not a pass, and it does not withhold an experimental proposal. A second flight that disagrees does exclude the JIO candidate.`,
         completionChecks: [
             `Blocking (the engine excludes the data): debug_mode CHIRP; setpoint, axisP/I/F, debug[1] and debug[3] logged, axisD when D > 0 (jio_channel_missing); log rate equal to the PID rate within 2 % (jio_log_rate_not_pid_rate); debug[2] against the firmware law when logged (debug2_frequency_mismatch).`,
-            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only when every other gate passed and the decision band drops no bin for coherence, support or plant status); no unidentified bin inside the decision band (decision_band_gaps); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top (gain_margin_shown_by_band, sensitivity_peak_shown_by_band); the two sweeps of an axis that disagree (repeat z > ${JIO_SWEEP.repeatZThreshold}, experimental threshold) exclude the JIO candidate.`,
+            `Blocking for the candidate: primary quality gate mean γ² over ${MEAN_COHERENCE_BAND_HZ[0]}–${MEAN_COHERENCE_BAND_HZ[1]} Hz ≥ ${MIN_MEAN_BAND_COHERENCE} (low_coherence; waived for the experimental route only when every other gate passed and the decision band drops no bin for coherence, support or plant status); no unidentified bin inside the decision band (decision_band_gaps); loop phase branch verified (decision_band_phase_branch); the identified band (bins with γ² ≥ ${LOOP_MIN_COHERENCE}) reaches the planner band top (gain_margin_shown_by_band, sensitivity_peak_shown_by_band); the two sweeps of an axis that disagree (repeat z > ${JIO_SWEEP.repeatZThreshold}, experimental threshold) exclude the JIO candidate.`,
             `Rounds: ${required} complete rounds give each axis two sweeps for the stationarity check. Fewer leave stationarity unknown, named as a limitation, not a block; a sweep below ${Math.round(JIO_SWEEP.completeSweepFraction * 100)} % of chirp_time_seconds is read in and marked incomplete (sweep_incomplete).`,
             `Second flight: supplementary; absent = unknown (not passed, not required); a disagreeing one excludes the JIO candidate.`,
         ],

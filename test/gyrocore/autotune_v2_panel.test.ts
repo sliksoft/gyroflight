@@ -568,6 +568,7 @@ describe("AutotuneV2Panel", () => {
             },
             target: {
                 pScale: [0.4, 1.3],
+                iScale: [0.4, 1.3],
                 dScale: [0.5, 1.3],
                 tried: 323,
                 usable: 164,
@@ -626,7 +627,7 @@ describe("AutotuneV2Panel", () => {
         expect(values).toEqual([
             "now P 56, I 79, D 30: PM 16°, GM 3.4 dB, |S| 12.3 dB (MEASURED)",
             "best within ±30 %, not offered: P 39, I 55, D 30: PM 26°, GM 5.1 dB, |S| 8.9 dB (misses the targets)",
-            "wider search (P/I ×0.4–1.3, D ×0.5–1.3): no candidate meets the targets; best P 22, I 32, D 35: PM 37°, GM 5.5 dB, |S| 8.0 dB (on its edge)",
+            "wider search (P ×0.4–1.3, I ×0.4–1.3, D ×0.5–1.3): no candidate meets the targets; best P 22, I 32, D 35: PM 37°, GM 5.5 dB, |S| 8.0 dB (on its edge)",
         ]);
         // Block 10: the informative improvement step under Tuning and apply. Roll: the safest candidate beats the
         // current tune on PM, GM and |S| at once, so it is shown with its values, margins and the open targets;

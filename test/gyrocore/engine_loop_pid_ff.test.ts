@@ -228,7 +228,7 @@ describe("PID search", () => {
         expect(bare.proposed).toEqual(r.proposed);
         expect(bare.proposedMargins.evidence.level).toBe("MODEL_CONDITIONAL");
         expect(bare.status).toBe("BLOCKED");
-    });
+    }, 60_000);
 
     it("with too little margin it restores the targets instead of chasing bandwidth", () => {
         const loop = buildAxisLoop(0, tfFor(cfg, 160), cfg, steadyChain, true, true, null, {

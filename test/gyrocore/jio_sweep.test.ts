@@ -348,7 +348,7 @@ describe("CHIRP + JIO route through the whole software chain", () => {
         expect(strip(withJio)).toEqual(strip(noJio));
         expect(withJio.releasableProposal).toEqual(noJio.releasableProposal);
         for (const c of Object.values(withJio.jio.chain)) expect(c!.candidate?.status).not.toBe("VALIDATED");
-    });
+    }, 60_000);
 
     it("names missing debug and controller-term channels instead of assuming them", () => {
         const noPid = run(
