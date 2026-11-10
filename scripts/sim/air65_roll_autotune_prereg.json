@@ -1,0 +1,142 @@
+{
+    "version": "air65-roll-sim-autotune-v1",
+    "registeredAt": "2026-11-10",
+    "purpose": "First closed GyroFlight roll autotune loop in the AIR65 Betaflight lockstep SITL. Simulator only: no flight controller, no Blackbox flight, no P45 trial.",
+    "environment": {
+        "vliegaiRoot": "~/VliegAI/_worktrees/air65-sim-review-20261028",
+        "vliegaiHead": "20f6af5a7ebd40daacc6a2efe9a7160a1d55e0d7",
+        "python": "~/VliegAI/_envs/65mm-vision-foundation/bin/python",
+        "baseOverlay": "configs/control/air65_ctbr_betaflight_oct19_candidate_v2.cfg",
+        "elfSha256": "dc95809f5a713ce9b281f731620a10545ba9f58c2b60441e5a1e69768d0dbbf5",
+        "runtimeRoot": "/dev/shm/gf_sitl",
+        "note": "Betaflight 2026.6.2-lineage lockstep SITL (fork commit 32c557935) runs gyro filtering and the PID loop at 1 kHz; VisFly plant whoop_65mm_v1 (approximated AIR65 mass/inertia, motor tau 12 ms, no gyro noise). Base configuration = oracle recipe v1 + the AIR65 19 Oct tune overlay v2; only roll P/I/D and d_max_roll are replaced."
+    },
+    "calibration": {
+        "note": "Measured before registration, current AIR65 tune and three box corners only, on a calibration doublet (+350/-350 deg/s, 100 ms each) that is in neither manoeuvre set.",
+        "repeatSpreadRelativeCost": 6.3e-5,
+        "repeatBitIdentical": "2 of 3 repeats; the third differs by one 0.1 deg/s LSB on 107 samples, together with the RC-smoothing RX-rate header estimate (110 vs 109)",
+        "commandDelayTicks": "1 or 2, constant within a run",
+        "current": { "pid": "56,79,30", "overshoot": 0.025, "oscillation": 0.021, "saturationShare": 0.048 },
+        "corners": {
+            "120,79,10": { "overshoot": 0.275, "oscillation": 0.101, "saturationShare": 0.12 },
+            "20,79,80": { "overshoot": 0.349, "oscillation": 1.273, "saturationShare": 0.003 },
+            "120,160,80": { "overshoot": 0.031, "oscillation": 0.034, "saturationShare": 0.058 }
+        }
+    },
+    "leadTicks": 20,
+    "settleTicks": 35,
+    "searchManoeuvres": [
+        {
+            "id": "S1_doublet_250_120ms",
+            "segments": [
+                { "rollDps": 250, "ticks": 12 },
+                { "rollDps": -250, "ticks": 12 }
+            ]
+        },
+        {
+            "id": "S2_doublet_150_200ms",
+            "segments": [
+                { "rollDps": 150, "ticks": 20 },
+                { "rollDps": -150, "ticks": 20 }
+            ]
+        },
+        {
+            "id": "S3_doublet_neg350_80ms",
+            "segments": [
+                { "rollDps": -350, "ticks": 8 },
+                { "rollDps": 350, "ticks": 8 }
+            ]
+        }
+    ],
+    "holdoutManoeuvres": [
+        {
+            "id": "H1_doublet_400_70ms",
+            "segments": [
+                { "rollDps": 400, "ticks": 7 },
+                { "rollDps": -400, "ticks": 7 }
+            ]
+        },
+        {
+            "id": "H2_doublet_neg200_150ms",
+            "segments": [
+                { "rollDps": -200, "ticks": 15 },
+                { "rollDps": 200, "ticks": 15 }
+            ]
+        },
+        {
+            "id": "H3_triplet_300_50_100_50ms",
+            "segments": [
+                { "rollDps": 300, "ticks": 5 },
+                { "rollDps": -300, "ticks": 10 },
+                { "rollDps": 300, "ticks": 5 }
+            ]
+        },
+        {
+            "id": "H4_doublet_100_250ms",
+            "segments": [
+                { "rollDps": 100, "ticks": 25 },
+                { "rollDps": -100, "ticks": 25 }
+            ]
+        }
+    ],
+    "metrics": {
+        "tracking": "per manoeuvre RMS(gyro - setpoint) / RMS(setpoint) over its window; set value = mean over manoeuvres",
+        "overshoot": "per edge of the logged setpoint: max excess beyond the new value in the step direction / step size; per manoeuvre the max over edges; set value = mean over manoeuvres",
+        "riseMs": "per edge: ms until the gyro first reaches 90 % of the step (segment length if never); mean over all edges and manoeuvres",
+        "oscillation": "per edge: peak-to-peak error from settleDelayMs after the edge to the next edge / step size; max over everything",
+        "saturationShare": "share of window samples with any motor >= motorHigh or <= motorLow; max over manoeuvres",
+        "cost": "tracking + overshoot"
+    },
+    "thresholds": {
+        "minRelativeGain": 0.02,
+        "trackingTolerance": 0.05,
+        "overshootToleranceAbs": 0.01,
+        "riseTolerance": 0.15,
+        "riseToleranceMs": 2,
+        "oscillationMax": 0.08,
+        "settleDelayMs": 60,
+        "saturationShareMax": 0.04,
+        "motorHigh": 1995,
+        "motorLow": 1060,
+        "maxAbsRollDeg": 75,
+        "minZ": 0.3
+    },
+    "improvement": "A tune is better than a reference when: oscillation <= oscillationMax and saturationShare <= saturationShareMax (absolute rejections), cost <= reference cost * (1 - minRelativeGain), tracking <= reference * (1 + trackingTolerance), overshoot <= reference + overshootToleranceAbs, riseMs <= reference * (1 + riseTolerance) + riseToleranceMs. minRelativeGain 0.02 is > 300x the measured repeat spread.",
+    "search": {
+        "bounds": { "p": [20, 120], "i": [20, 160], "d": [10, 80] },
+        "dMaxRatio": 1.3333333333333333,
+        "dMaxNote": "d_max_roll = round(d * 4/3), the AIR65 ratio 30/40, so D moves the whole D range (in this firmware d_max <= D disables the boost).",
+        "stepFactors": [1.25, 1.1],
+        "budget": 12,
+        "order": "Round candidates around the incumbent in the fixed order P up, P down, D up, D down, I up, I down (rounded to integers, clamped to the box, duplicates and already-measured tunes skipped). A round is measured completely (within the budget); the lowest-cost candidate that is better than the incumbent and also better than the start tune (so per-step tolerances cannot add up) becomes the incumbent (ties: the earlier one). The same factor repeats while a round improves; then the next factor. Search ends when the budget is used or no factor improves."
+    },
+    "holdout": "After the search, start tune and selection are both measured again holdoutRepeats times on the held-out manoeuvres in the same invocation; the means are compared with the same improvement rule. The selection is kept only if it is better than the start there; otherwise the start tune is kept. No re-selection after the holdout.",
+    "holdoutRepeats": 2,
+    "validity": {
+        "harness": "status harness_error (provisioning, startup, SITL I/O, run short), a header that does not carry exactly the requested roll PID and d_max, any other header line different from the run's first measurement (except the run-time keys vbatref, rc_smoothing_active_cutoffs_ff_sp_thr, rc_smoothing_rx_smoothed), no high-resolution log, looptime != 1000, or a logged setpoint that does not equal the schedule at a constant delay of 0-2 ticks. Says nothing about the candidate: one retry for harness_error, otherwise the start tune's run stops as BLOCKED.",
+        "candidate": "plant roll angle beyond maxAbsRollDeg, height below minZ or non-finite plant state = the candidate failed the manoeuvre (rejected, not a harness fault)."
+    },
+    "startTunes": [
+        {
+            "id": "T1_air65_current",
+            "pid": { "p": 56, "i": 79, "d": 30 },
+            "rationale": "The AIR65 tune flown since 19 Oct 2026."
+        },
+        {
+            "id": "T2_vliegai_oracle_soft",
+            "pid": { "p": 20, "i": 30, "d": 15 },
+            "rationale": "The VliegAI oracle recipe's roll PID: a soft tune at the lower edge of the box."
+        },
+        {
+            "id": "T3_p_heavy_low_d",
+            "pid": { "p": 100, "i": 79, "d": 12 },
+            "rationale": "High P with little D: expected to overshoot and ring."
+        },
+        {
+            "id": "T4_d_heavy_low_p",
+            "pid": { "p": 35, "i": 79, "d": 60 },
+            "rationale": "Low P with a lot of D: expected to be slow and damped."
+        }
+    ],
+    "success": "The demo shows GyroFlight's loop working if, from at least two start tunes, the selection is better than the start tune on the held-out manoeuvres (decision 'improved'). Every start tune is reported, also when it is kept."
+}
