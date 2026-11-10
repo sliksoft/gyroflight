@@ -32,7 +32,9 @@ if [ ! -f "$DOSSIER/app/tuning_and_apply.json" ]; then
   VPID=$(ss -ltnp | grep ":$PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); [ -n "$VPID" ] && kill "$VPID" || true
   # the engine on exactly the imported logs (first log + others), for the predicted margins at full precision
   cp "$DOSSIER/start/gyroflight.combined.json" "$DOSSIER/app/engine.json"
-  python3 - "$DOSSIER" <<'EOP'
+fi
+# the candidate = the roll items of 4b applied to the start tune (none when the app shows no proposal)
+[ -f "$DOSSIER/app/candidate.json" ] || python3 - "$DOSSIER" <<'EOP'
 import json, sys
 d = sys.argv[1]
 app = json.load(open(f"{d}/app/tuning_and_apply.json"))
@@ -40,10 +42,10 @@ start = json.load(open(f"{d}/protocol.json"))["start"]
 v = dict(start)
 for it in app["rollItems"]:
     v[{"p": "p", "i": "i", "d": "d", "d_max": "dMax"}[it["key"].replace("_roll", "")]] = int(it["cells"][2])
-json.dump({"shown": app["rollShown"], "candidate": v if app["rollItems"] else None}, open(f"{d}/app/candidate.json", "w"), indent=1)
-print("app:", app["rollShown"], v if app["rollItems"] else None)
+shown = app["read"]["rollShown"]
+json.dump({"shown": shown, "candidate": v if app["rollItems"] else None}, open(f"{d}/app/candidate.json", "w"), indent=1)
+print("app:", shown, v if app["rollItems"] else None)
 EOP
-fi
 
 CAND=$(python3 -c "import json; c=json.load(open('$DOSSIER/app/candidate.json'))['candidate']; print('/'.join(str(c[k]) for k in ('p','i','d','dMax')) if c else '')")
 if [ -n "$CAND" ] && [ ! -f "$DOSSIER/candidate/summary.json" ]; then

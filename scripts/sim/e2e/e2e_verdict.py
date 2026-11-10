@@ -91,12 +91,20 @@ def parse_candidate(start: dict, app: dict) -> dict | None:
 
 
 def parse_shown_margins(app: dict) -> dict | None:
-    """The 'offered (experimental): P .., I .., D ..: PM x°, GM y dB, |S| z dB' line of the roll decision row."""
+    """The rounded margins the UI shows for the offered candidate: the 'offered (experimental): …' line of the roll decision
+    row when that table is rendered, else the improvement-step row ('PM 39° → 46°', 'GM 12.1 dB → 12.2 dB', '|S| 5.6 dB → 5.0 dB')."""
     dec = app.get("rollDecision") or {}
     for line in dec.get("values") or []:
         m = re.match(r"offered \(experimental\): P (\d+), I (\d+), D (\d+): PM (-?[\d.]+)°, GM (-?[\d.]+) dB, \|S\| (-?[\d.]+) dB", line)
         if m:
-            return {"p": int(m[1]), "i": int(m[2]), "d": int(m[3]), "pm": float(m[4]), "gm": float(m[5]), "s": float(m[6])}
+            return {"source": "decision_row", "p": int(m[1]), "i": int(m[2]), "d": int(m[3]), "pm": float(m[4]), "gm": float(m[5]), "s": float(m[6])}
+    text = (app.get("rollStep") or {}).get("text") or ""
+    pm = re.search(r"PM -?[\d.]+° → (-?[\d.]+)°", text)
+    gm = re.search(r"GM -?[\d.]+ dB → (-?[\d.]+) dB", text)
+    s = re.search(r"\|S\| -?[\d.]+ dB → (-?[\d.]+) dB", text)
+    fc = re.search(r"crossover -?[\d.]+ → (-?[\d.]+) Hz", text)
+    if pm and gm and s and "also the offered experimental candidate" in text:
+        return {"source": "improvement_step_row", "pm": float(pm[1]), "gm": float(gm[1]), "s": float(s[1]), "fc": float(fc[1]) if fc else None}
     return None
 
 
@@ -161,7 +169,7 @@ def main() -> int:
         if not app:
             stop("INSUFFICIENT", "app step not recorded (app/tuning_and_apply.json missing)")
         else:
-            shown = app.get("rollShown")
+            shown = (app.get("read") or {}).get("rollShown")
             chosen = parse_candidate(start["tune"], app)
             shown_m = parse_shown_margins(app)
             eng = (engine or {}).get("decisionRoll", {}).get("primary") if engine else None
