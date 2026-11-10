@@ -161,8 +161,14 @@ describe("sim roll autotune: metrics and validity", () => {
         const sp = m.trace!.setpointDps;
         for (let k = sp.length - 1; k > 800; k--) sp[k] = sp[k - 1];
         expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["setpoint_not_schedule"]);
-        m.commandPhaseSlips = [[56, 11]];
-        expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["harness:command_phase_slip:56+11"]);
+        // the shift starts at sample 800 (command 79 starts there with the one-tick delay, command 80 one sample late): a slip after command 79 explains it
+        m.commandPhaseSlips = [[79, 11]];
+        expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["harness:command_phase_slip:79+11"]);
+        // a slip that does not account for the mismatch (wrong place or size) leaves it a wrong setpoint
+        m.commandPhaseSlips = [[150, 11]];
+        expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["setpoint_not_schedule"]);
+        m.commandPhaseSlips = [[79, 12]];
+        expect(validateMeasurement(m, pid, 40, SEARCH, BASE_HEADER)).toEqual(["setpoint_not_schedule"]);
     });
 
     it("accepts exactly the requested roll PID and d_max and nothing else changed", () => {
@@ -255,7 +261,7 @@ describe("sim roll autotune: candidate selection", () => {
         expect(r.final).not.toEqual({ p: 20, i: 30, d: 15 });
         expect(r.final).toEqual(r.searchSelection);
         expect(r.evaluations.length).toBeLessThanOrEqual(PRE.search.budget);
-        expect(r.holdout.selected!.cost).toBeLessThan(r.holdout.start.cost * (1 - T.minRelativeGain));
+        expect(r.holdout.selected!.cost).toBeLessThan(r.holdout.start!.cost * (1 - T.minRelativeGain));
         // every incumbent change was a candidate that was better than the incumbent of its time
         const accepted = r.evaluations.filter((e) => e.versusIncumbent && !e.versusIncumbent.length);
         expect(accepted.length).toBeGreaterThan(0);
@@ -300,6 +306,20 @@ describe("sim roll autotune: candidate selection", () => {
         expect(r.reason).toMatch(/did not hold on the held-out manoeuvres/);
     });
 
+    it("keeps the start tune when the selection loses a held-out manoeuvre", async () => {
+        const measure: Measure = async (pid, dMax, schedule) => {
+            const m = synthetic(pid, dMax, schedule, bowl(pid));
+            if (schedule.rollDps.length === HOLDOUT.rollDps.length && pid.p !== 20)
+                m.plant = { maxAbsRollDeg: 80, minZ: 1, finite: true };
+            return m;
+        };
+        const r = await runStartTune("lostH", { p: 20, i: 30, d: 15 }, PRE, measure, BASE_HEADER);
+        expect(r.searchSelection).not.toEqual({ p: 20, i: 30, d: 15 });
+        expect(r.decision).toBe("kept_holdout_failed");
+        expect(r.holdout.versusStart![0]).toBe("selection_envelope:repeat1:roll_angle_80.0_deg");
+        expect(r.final).toEqual({ p: 20, i: 30, d: 15 });
+    });
+
     it("keeps the start tune without searching when the start itself loses the manoeuvre", async () => {
         const measure: Measure = async (pid, dMax, schedule) => {
             const m = synthetic(pid, dMax, schedule, { wn: 100, zeta: 0.7 });
@@ -309,6 +329,7 @@ describe("sim roll autotune: candidate selection", () => {
         const r = await runStartTune("lost", { p: 56, i: 79, d: 30 }, PRE, measure, BASE_HEADER);
         expect(r.decision).toBe("kept_start_rejected");
         expect(r.evaluations).toEqual([]);
+        expect(r.holdout.start).toBeNull();
     });
 
     it("retries a command phase slip once and goes on with the clean repeat", async () => {
@@ -319,7 +340,7 @@ describe("sim roll autotune: candidate selection", () => {
             if (calls.length === 2) {
                 const sp = m.trace!.setpointDps;
                 for (let k = sp.length - 1; k > 800; k--) sp[k] = sp[k - 1];
-                m.commandPhaseSlips = [[56, 11]];
+                m.commandPhaseSlips = [[79, 11]];
             }
             return m;
         };

@@ -186,10 +186,11 @@ export function validateMeasurement(
         return issues;
     }
     if (setpointLag(sp, schedule) === null) {
-        // A logged command-delivery phase slip explains the mismatch: a harness fault (retried), not a wrong setpoint.
+        // Only a logged command-delivery phase slip that accounts for every mismatching sample makes this a harness
+        // fault (retried); any other mismatch is a wrong setpoint.
         const slips = m.commandPhaseSlips ?? [];
         issues.push(
-            slips.length
+            slips.length && slipsExplainSetpoint(sp, schedule, slips)
                 ? `harness:command_phase_slip:${slips.map(([i, g]) => `${i}+${g}`).join(",")}`
                 : "setpoint_not_schedule",
         );
@@ -216,6 +217,30 @@ export function setpointLag(sp: number[], schedule: Schedule): number | null {
         if (ok) return lagTicks * SAMPLES_PER_TICK;
     }
     return null;
+}
+
+/**
+ * Does the setpoint follow the schedule once the logged phase slips are applied? Slip [i, g]
+ * delays every command after command i by g - 10 samples; on top of that one constant delay of
+ * 0 to MAX_LAG_TICKS ticks is allowed, as in setpointLag.
+ */
+export function slipsExplainSetpoint(sp: number[], schedule: Schedule, slips: [number, number][]): boolean {
+    for (let lagTicks = 0; lagTicks <= MAX_LAG_TICKS; lagTicks++) {
+        const starts = schedule.rollDps.map(
+            (_, j) =>
+                (j + lagTicks) * SAMPLES_PER_TICK +
+                slips.filter(([i]) => i < j).reduce((sum, [, g]) => sum + g - SAMPLES_PER_TICK, 0),
+        );
+        let j = -1;
+        let ok = true;
+        for (let k = 0; k < sp.length && ok; k++) {
+            while (j + 1 < starts.length && starts[j + 1] <= k) j++;
+            const want = j >= 0 ? schedule.rollDps[j] : 0;
+            if (Math.abs(sp[k] - want) > 0.05) ok = false;
+        }
+        if (ok) return true;
+    }
+    return false;
 }
 
 /** Flight-envelope failures caused by the candidate (it lost the manoeuvre). */
@@ -433,7 +458,11 @@ export interface StartTuneResult {
     searchSelection: RollPid;
     searchSelectionVsStart: string[];
     holdout: {
-        start: SetMetrics;
+        /** null when the start was rejected on the search manoeuvres (no holdout run) */
+        start: SetMetrics | null;
+        /** envelope failures on the held-out manoeuvres, per repeat */
+        startEnvelope: string[];
+        selectedEnvelope: string[];
         selected: SetMetrics | null;
         versusStart: string[] | null;
         repeatsIdentical: boolean;
@@ -516,7 +545,14 @@ export async function runStartTune(
             evaluations,
             searchSelection: start,
             searchSelectionVsStart: [],
-            holdout: { start: startSearch, selected: null, versusStart: null, repeatsIdentical: true },
+            holdout: {
+                start: null,
+                startEnvelope: [],
+                selectedEnvelope: [],
+                selected: null,
+                versusStart: null,
+                repeatsIdentical: true,
+            },
             final: start,
             decision: "kept_start_rejected",
             reason: `start tune left the envelope on the search manoeuvres: ${startEnvelope.join(", ")}`,
@@ -587,14 +623,16 @@ export async function runStartTune(
 
     const startH: SetMetrics[] = [];
     const selH: SetMetrics[] = [];
+    const startHoldoutEnvelope: string[] = [];
+    const selectedEnvelope: string[] = [];
     const changed = pidKey(incumbent) !== pidKey(start) && !searchSelectionVsStart.length;
     for (let r = 0; r < pre.holdoutRepeats; r++) {
         const a = await measureValid(measure, start, spec, holdout, `${id}_holdout_start_${r + 1}`, base);
+        startHoldoutEnvelope.push(...envelopeFailures(a.m, t).map((x) => `repeat${r + 1}:${x}`));
         startH.push(setMetrics(a.m, holdout, t));
         if (changed) {
             const b = await measureValid(measure, incumbent, spec, holdout, `${id}_holdout_selected_${r + 1}`, base);
-            if (envelopeFailures(b.m, t).length)
-                throw new MeasurementInvalid(`${id}: selection left the envelope on the holdout`);
+            selectedEnvelope.push(...envelopeFailures(b.m, t).map((x) => `repeat${r + 1}:${x}`));
             selH.push(setMetrics(b.m, holdout, t));
         }
     }
@@ -602,7 +640,10 @@ export async function runStartTune(
         startH.every((x) => sameMetrics(x, startH[0])) && selH.every((x) => sameMetrics(x, selH[0]));
     const startHold = meanMetrics(startH);
     const selHold = selH.length ? meanMetrics(selH) : null;
-    const versusStart = selHold ? compareToReference(selHold, startHold, t) : null;
+    // A selection that loses a held-out manoeuvre is not better, whatever its metrics say.
+    const versusStart = selHold
+        ? [...selectedEnvelope.map((x) => `selection_envelope:${x}`), ...compareToReference(selHold, startHold, t)]
+        : null;
 
     let decision: StartTuneResult["decision"];
     let reason: string;
@@ -621,6 +662,8 @@ export async function runStartTune(
         final = incumbent;
         reason = `held-out cost ${selHold!.cost.toFixed(4)} vs start ${startHold.cost.toFixed(4)} (${(100 * (1 - selHold!.cost / startHold.cost)).toFixed(1)} % lower), all limits met`;
     }
+    if (startHoldoutEnvelope.length)
+        reason += `; the start tune left the envelope on the holdout: ${startHoldoutEnvelope.join(", ")}`;
     return {
         id,
         start,
@@ -628,7 +671,14 @@ export async function runStartTune(
         evaluations,
         searchSelection: incumbent,
         searchSelectionVsStart,
-        holdout: { start: startHold, selected: selHold, versusStart, repeatsIdentical },
+        holdout: {
+            start: startHold,
+            startEnvelope: startHoldoutEnvelope,
+            selectedEnvelope,
+            selected: selHold,
+            versusStart,
+            repeatsIdentical,
+        },
         final,
         decision,
         reason,
