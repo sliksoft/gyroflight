@@ -641,8 +641,13 @@ export async function runStartTune(
     const startHold = meanMetrics(startH);
     const selHold = selH.length ? meanMetrics(selH) : null;
     // A selection that loses a held-out manoeuvre is not better, whatever its metrics say.
+    // Likewise a start that loses one is no valid reference (as on the search manoeuvres): the start tune is kept.
     const versusStart = selHold
-        ? [...selectedEnvelope.map((x) => `selection_envelope:${x}`), ...compareToReference(selHold, startHold, t)]
+        ? [
+              ...startHoldoutEnvelope.map((x) => `start_envelope:${x}`),
+              ...selectedEnvelope.map((x) => `selection_envelope:${x}`),
+              ...compareToReference(selHold, startHold, t),
+          ]
         : null;
 
     let decision: StartTuneResult["decision"];
@@ -662,7 +667,7 @@ export async function runStartTune(
         final = incumbent;
         reason = `held-out cost ${selHold!.cost.toFixed(4)} vs start ${startHold.cost.toFixed(4)} (${(100 * (1 - selHold!.cost / startHold.cost)).toFixed(1)} % lower), all limits met`;
     }
-    if (startHoldoutEnvelope.length)
+    if (startHoldoutEnvelope.length && !selHold)
         reason += `; the start tune left the envelope on the holdout: ${startHoldoutEnvelope.join(", ")}`;
     return {
         id,

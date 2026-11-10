@@ -320,6 +320,20 @@ describe("sim roll autotune: candidate selection", () => {
         expect(r.final).toEqual({ p: 20, i: 30, d: 15 });
     });
 
+    it("keeps the start tune when the start itself loses a held-out manoeuvre: no valid reference", async () => {
+        const measure: Measure = async (pid, dMax, schedule) => {
+            const m = synthetic(pid, dMax, schedule, bowl(pid));
+            if (schedule.rollDps.length === HOLDOUT.rollDps.length && pid.p === 20)
+                m.plant = { maxAbsRollDeg: 80, minZ: 1, finite: true };
+            return m;
+        };
+        const r = await runStartTune("lostS", { p: 20, i: 30, d: 15 }, PRE, measure, BASE_HEADER);
+        expect(r.decision).toBe("kept_holdout_failed");
+        expect(r.holdout.startEnvelope).toEqual(["repeat1:roll_angle_80.0_deg", "repeat2:roll_angle_80.0_deg"]);
+        expect(r.holdout.versusStart![0]).toBe("start_envelope:repeat1:roll_angle_80.0_deg");
+        expect(r.final).toEqual({ p: 20, i: 30, d: 15 });
+    });
+
     it("keeps the start tune without searching when the start itself loses the manoeuvre", async () => {
         const measure: Measure = async (pid, dMax, schedule) => {
             const m = synthetic(pid, dMax, schedule, { wn: 100, zeta: 0.7 });
