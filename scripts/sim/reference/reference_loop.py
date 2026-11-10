@@ -37,6 +37,7 @@ from scipy.signal import csd, welch
 FS = 1000.0
 NPERSEG = 2048
 BAND = (5.0, 50.0)
+GM_BAND = (5.0, 85.0)  # the phase crossing may lie above the assessment band (PROTOCOL.md, limit 4)
 AXIS = 0  # roll
 
 
@@ -79,11 +80,19 @@ def margins(f: np.ndarray, L: np.ndarray, coh_g: np.ndarray, coh_d: np.ndarray) 
         pm = 180.0 + np.degrees(np.angle(Lc))
         pm = (pm + 180) % 360 - 180
         out.update({"crossoverHz": fc, "phaseMarginDeg": float(pm)})
-    f180, k180 = crossing(fb, phase, -180.0, rising=False)
+    gband = (f >= GM_BAND[0]) & (f <= GM_BAND[1])
+    fg, Lg = f[gband], L[gband]
+    gain_g = 20 * np.log10(np.abs(Lg))
+    phase_g = np.degrees(np.unwrap(np.angle(Lg)))
+    f180, k180 = crossing(fg, phase_g, -180.0, rising=False)
     if f180 is None:
-        out.update({"gainMarginDb": None, "phaseCrossingHz": None, "gmReason": "no_phase_crossing_in_band"})
+        out.update({"gainMarginDb": None, "phaseCrossingHz": None, "gmReason": f"no_phase_crossing_in_{GM_BAND[0]:g}-{GM_BAND[1]:g}Hz"})
     else:
-        out.update({"gainMarginDb": float(-np.interp(f180, fb, gain_db)), "phaseCrossingHz": f180})
+        out.update({
+            "gainMarginDb": float(-np.interp(f180, fg, gain_g)),
+            "phaseCrossingHz": f180,
+            "coherenceAtPhaseCrossing": float(min(np.interp(f180, f, coh_g), np.interp(f180, f, coh_d))),
+        })
     S = 1.0 / np.abs(1.0 + Lb)
     k = int(np.argmax(S))
     out.update({"sensitivityPeakDb": float(20 * np.log10(S[k])), "sensitivityPeakHz": float(fb[k])})

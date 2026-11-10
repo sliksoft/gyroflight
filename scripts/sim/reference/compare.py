@@ -1,6 +1,6 @@
 """Compare GyroFlight's roll margins with the independent reference per run and apply PROTOCOL.md (v1).
 
-Usage: compare.py <out dir> runs.json   (runs.json: [{"id","arm","tune","rep","dir"}], each dir holding result.json,
+Usage: compare.py <out dir> runs.json [--primary-arm A|C]   (runs.json: [{"id","arm","tune","rep","dir"}], each dir holding result.json,
 reference.json and gyroflight.json). Writes <out dir>/results.json and <out dir>/RESULTS.md.
 """
 
@@ -93,7 +93,12 @@ def assess_run(run, r, ref, gf):
     d["fcRel"] = (out["gf"]["fc"] - out["ref"]["fc"]) / out["ref"]["fc"]
     d["pmDeg"] = out["gf"]["pm"] - out["ref"]["pm"]
     d["sDb"] = None if meas["sensitivityPeakDb"] is None else meas["sensitivityPeakDb"] - out["ref"]["s"]
-    gm_assessed = out["ref"]["gm"] is not None and meas["gainMarginDb"] is not None and GM_BAND[0] <= (out["ref"]["gmHz"] or 0) <= GM_BAND[1]
+    gm_assessed = (
+        out["ref"]["gm"] is not None and meas["gainMarginDb"] is not None
+        and GM_BAND[0] <= (out["ref"]["gmHz"] or 0) <= GM_BAND[1]
+        and rm.get("coherenceAtPhaseCrossing", 0) >= 0.99
+    )
+    out["ref"]["gmCoherence"] = rm.get("coherenceAtPhaseCrossing")
     d["gmDb"] = (meas["gainMarginDb"] - out["ref"]["gm"]) if gm_assessed else None
     d["gmAssessed"] = gm_assessed
     fails = []
@@ -149,6 +154,7 @@ def split(ref, gf):
 def main():
     out_dir = Path(sys.argv[1])
     runs = json.loads(Path(sys.argv[2]).read_text())
+    primary_arm = sys.argv[sys.argv.index("--primary-arm") + 1] if "--primary-arm" in sys.argv else "A"
     rows = []
     for run in runs:
         r, ref, gf = load(Path(run["dir"]))
@@ -156,7 +162,7 @@ def main():
     # per tune (arm A), medians and the sign test
     tunes = {}
     for row in rows:
-        if row["arm"] != "A" or row["status"] not in ("PASS", "FAIL"):
+        if row["arm"] != primary_arm or row["status"] not in ("PASS", "FAIL"):
             continue
         tunes.setdefault(row["tune"], []).append(row)
     per_tune = {}
@@ -184,23 +190,23 @@ def main():
             "fcWithin10pct": abs(dfc_gf - dfc_ref) <= LIMITS["dFcRel"] * a["ref"]["fc"],
         }
     repeat_ok = all(t["repeatPmRangeGf"] < LIMITS["repeatPmDeg"] and t["repeatPmRangeRef"] < LIMITS["repeatPmDeg"] for t in per_tune.values()) if per_tune else None
-    arm_a = [r for r in rows if r["arm"] == "A"]
+    arm_a = [r for r in rows if r["arm"] == primary_arm]
     if any(r["status"] == "INSUFFICIENT" for r in arm_a) or len(arm_a) < 9 or sign is None:
         verdict = "INSUFFICIENT"
     elif all(r["status"] == "PASS" for r in arm_a) and sign["pmSignOk"] and sign["pmWithin3"] and sign["fcSignOk"] and sign["fcWithin10pct"] and repeat_ok:
         verdict = "PASS"
     else:
         verdict = "FAIL"
-    results = {"verdict": verdict, "limits": LIMITS, "runs": rows, "perTune": per_tune, "signTest56to45": sign, "repeatOk": repeat_ok}
+    results = {"verdict": verdict, "primaryArm": primary_arm, "limits": LIMITS, "runs": rows, "perTune": per_tune, "signTest56to45": sign, "repeatOk": repeat_ok}
     (out_dir / "results.json").write_text(json.dumps(results, indent=1, default=float) + "\n")
     # markdown table
-    lines = [f"# Resultaten (protocol v1) — oordeel: **{verdict}**", "", "| run | arm | tune | fc GF / ref (Hz) | Δfc | PM GF / ref (°) | ΔPM | |S| GF / ref (dB) | Δ|S| | GM GF / ref (dB) | status |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    lines = [f"# Resultaten (protocol v1, arm {primary_arm}) — oordeel: **{verdict}**", "", "| run | arm | tune | fc GF / ref (Hz) | Δfc | PM GF / ref (°) | ΔPM | |S| GF / ref (dB) | Δ|S| | GM GF / ref (dB) | status |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     def fmt(v, p=1):
         return "–" if v is None else f"{v:.{p}f}"
     for r in rows:
         g, rf, d = r["gf"], r["ref"], r["diff"]
         lines.append(f"| {r['id']} | {r['arm']} | {r['tune']} | {fmt(g.get('fc'))} / {fmt(rf.get('fc'))} | {fmt(None if not d else d['fcRel'] * 100)} % | {fmt(g.get('pm'))} / {fmt(rf.get('pm'))} | {fmt(None if not d else d['pmDeg'])} | {fmt(g.get('s'), 2)} / {fmt(rf.get('s'), 2)} | {fmt(None if not d else d['sDb'], 2)} | {fmt(g.get('gm'))} / {fmt(rf.get('gm'))}{'' if not d or d.get('gmAssessed') else ' (onbeoordeeld)'} | {r['status']}{(' — ' + '; '.join(r.get('fails') or r['issues'])) if (r.get('fails') or r['issues']) else ''} |")
-    lines += ["", "## Per tune (mediaan, arm A)", "", "| tune | n | fc GF / ref | PM GF / ref | |S| GF / ref | PM-spreiding GF / ref |", "|---|---|---|---|---|---|"]
+    lines += ["", f"## Per tune (mediaan, arm {primary_arm})", "", "| tune | n | fc GF / ref | PM GF / ref | |S| GF / ref | PM-spreiding GF / ref |", "|---|---|---|---|---|---|"]
     for t, v in per_tune.items():
         lines.append(f"| {t} | {v['n']} | {v['gf']['fc']:.1f} / {v['ref']['fc']:.1f} | {v['gf']['pm']:.1f} / {v['ref']['pm']:.1f} | {v['gf']['s']:.2f} / {v['ref']['s']:.2f} | {v['repeatPmRangeGf']:.2f} / {v['repeatPmRangeRef']:.2f} |")
     if sign:
