@@ -9,6 +9,9 @@
  *   GYROFLIGHT_REF_JOBS='[{"log":"/path/chirp.BFL","out":"/path/gyroflight.json"}]' \
  *     npx vitest run test/gyrocore/sitl_loop_reference.local.test.ts --maxWorkers=1
  *
+ * A job may name `others`: further logs of the same tune. All logs are then imported and the primary is picked
+ * as the app picks it (logInput pickPrimary), the rest go in as repeats (e2e roll proof, scripts/sim/e2e).
+ *
  * Reads product code only; changes nothing in it.
  */
 
@@ -17,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
-import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
+import { buildLogInputs, pickPrimary } from "../../src/gyrocore/engine/logInput";
 import { analyzeM4BblFile } from "../../src/js/blackbox/m4_bbl_integration";
 import {
     runAutotuneV2,
@@ -32,20 +35,29 @@ import {
 } from "../../src/js/blackbox/betaflight_dterm_dynamic";
 import { evaluateControllerFrf } from "../../src/js/blackbox/betaflight_digital_controller";
 
-const jobs: { log: string; out: string }[] = process.env.GYROFLIGHT_REF_JOBS
+const jobs: { log: string; out: string; others?: string[] }[] = process.env.GYROFLIGHT_REF_JOBS
     ? JSON.parse(process.env.GYROFLIGHT_REF_JOBS)
     : [];
 
 describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", () => {
     it("writes the engine's roll margins and controller FRF per log", { timeout: 1_800_000 }, () => {
         for (const job of jobs) {
-            const bytes = new Uint8Array(readFileSync(job.log));
-            const sha = createHash("sha256").update(bytes).digest("hex");
-            const qual = qualifyChirpFile(bytes, "sitl.bbl", 45, AUTOTUNE_MATH);
-            const logs = buildLogInputs(bytes, sha, qual, analyzeM4BblFile(bytes, "sitl.bbl"));
+            const importFile = (file: string) => {
+                const bytes = new Uint8Array(readFileSync(file));
+                const sha = createHash("sha256").update(bytes).digest("hex");
+                const qual = qualifyChirpFile(bytes, "sitl.bbl", 45, AUTOTUNE_MATH);
+                return { sha, qual, logs: buildLogInputs(bytes, sha, qual, analyzeM4BblFile(bytes, "sitl.bbl")) };
+            };
+            const first = importFile(job.log);
+            const { sha, qual } = first;
+            const logs = first.logs;
             expect(logs.length).toBeGreaterThan(0);
-            const primary = logs[0];
-            const r = runAutotuneV2({ primary, others: [], verifiedTune: null, createdAt: "2026-11-10T00:00:00Z" });
+            const otherLogs = (job.others ?? []).flatMap((f) => importFile(f).logs);
+            // Several logs: the primary as the app picks it (pickPrimary), the rest as repeats of the same tune.
+            const picked = otherLogs.length ? pickPrimary([...logs, ...otherLogs]) : null;
+            const primary = picked?.primary ?? logs[0];
+            const others = picked?.others ?? [];
+            const r = runAutotuneV2({ primary, others, verifiedTune: null, createdAt: "2026-11-10T00:00:00Z" });
             const m = r.margins.roll?.current ?? null;
             const headers = Object.fromEntries(primary.headerPairs.map(([k, v]) => [k, v])) as Record<string, string>;
             const cfg = headers ? controllerConfigFromHeaders(headers, 0) : null;
@@ -120,6 +132,9 @@ describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", ()
                 gyroflightHead: process.env.GYROFLIGHT_REF_HEAD ?? null,
                 file: job.log,
                 sha256: sha,
+                others: job.others ?? [],
+                primarySha256: primary.sha256,
+                othersSha256: others.map((l) => l.sha256),
                 sampleRateHz: primary.sampleRateHz,
                 logIndex: primary.logIndex,
                 measurements: qlog?.measurements.map((x) => ({
