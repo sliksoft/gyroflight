@@ -695,6 +695,52 @@
                     </table>
                 </div>
             </template>
+            <!-- 4b′. Informative improvement step per axis (block 10): read from the same measured-margin search, never
+                 an item of the experimental proposal, so no route can write it. -->
+            <div v-if="improvementRows.length" class="text-sm mt-2" data-gyrocore="v2-improvement-steps">
+                <p class="font-bold" data-step="v2-improvement">{{ $t("gyroflightV2StepTitle") }}</p>
+                <p class="text-dimmed">{{ $t("gyroflightV2StepHelp") }}</p>
+                <div class="overflow-x-auto max-w-full">
+                    <table class="gyroflight-workflow-table text-sm">
+                        <thead>
+                            <tr>
+                                <th>{{ $t("gyroflightV2Axis") }}</th>
+                                <th>{{ $t("gyroflightV2StepValues") }}</th>
+                                <th>{{ $t("gyroflightV2StepMargins") }}</th>
+                                <th>{{ $t("gyroflightV2StepEvidence") }}</th>
+                                <th>{{ $t("gyroflightV2StepOpen") }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="row in improvementRows"
+                                :key="row.axis"
+                                :data-axis="row.axis"
+                                :data-state="row.step ? 'step' : 'blocked'"
+                                :data-source="row.step?.source ?? row.blocked?.reason ?? ''"
+                            >
+                                <td>{{ row.axis }}</td>
+                                <template v-if="row.step">
+                                    <td data-gyrocore="v2-step-values">{{ row.values }}</td>
+                                    <td class="text-dimmed" data-gyrocore="v2-step-margins">
+                                        <span v-for="(line, i) in row.margins" :key="i" class="block">{{ line }}</span>
+                                    </td>
+                                    <td data-gyrocore="v2-step-evidence">{{ row.evidence }}</td>
+                                    <td class="text-dimmed" data-gyrocore="v2-step-open">{{ row.open }}</td>
+                                </template>
+                                <template v-else>
+                                    <td colspan="4" class="text-dimmed" data-gyrocore="v2-step-blocked">
+                                        {{ row.blockedText }}
+                                    </td>
+                                </template>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-dimmed" data-gyrocore="v2-improvement-informative">
+                    {{ $t("gyroflightV2StepInformative") }}
+                </p>
+            </div>
             <details v-if="experimentalWithheld.length" class="text-sm mt-1">
                 <summary class="cursor-pointer">
                     {{
@@ -1115,6 +1161,7 @@ import MeasurementPlanTable from "@/gyrocore/components/MeasurementPlanTable.vue
 import { evaluateRelease, LIVE_CONDITIONS } from "@/gyrocore/releaseGate/releaseContract";
 import { absoluteWriteDecision } from "@/gyrocore/releaseGate/writeAuthority";
 import { experimentalWriteDecision } from "@/gyrocore/releaseGate/experimentalAuthority";
+import { improvementStep, type ImprovementStep, type ImprovementStepRead } from "@/gyrocore/engine/candidateDecision";
 import { expectedValues } from "@/gyrocore/tuning/absoluteTune";
 import { logIdentity as recordingIdentity } from "@/gyrocore/tuning/fcIdentity";
 import { evaluateAbsoluteSafety } from "@/gyrocore/safety/absoluteEvaluate";
@@ -1473,6 +1520,71 @@ const canApplyExperimental = computed(
         !connection.virtualMode &&
         !stateBlocks.value.length,
 );
+
+/**
+ * Per axis the informative improvement step (engine candidateDecision.ts improvementStep): the measured
+ * candidate when it beats the current tune on PM, GM and |S| at once, else the check that stops it.
+ * Primary route first; the JIO route only when there is no primary decision for the axis. Never writable.
+ */
+interface ImprovementRow {
+    axis: "roll" | "pitch" | "yaw";
+    step: ImprovementStep | null;
+    blocked: ImprovementStepRead["blocked"];
+    values: string;
+    margins: string[];
+    evidence: string;
+    open: string;
+    blockedText: string;
+}
+const improvementRows = computed<ImprovementRow[]>(() => {
+    const d = v2.result?.candidateDecisions;
+    if (!d) return [];
+    const pid = (v: { p: number; i: number; d: number; dMax: number }) =>
+        `P ${v.p}, I ${v.i}, D ${v.d}${v.dMax ? `, d_max ${v.dMax}` : ""}`;
+    const pct = (x: number) => `${x >= 0 ? "+" : ""}${Math.round(x * 100)} %`;
+    const fmt = (c: { rule: string; value: number | string | null; unit: string; threshold: string }) =>
+        `${c.rule} = ${c.value === null ? "unknown" : typeof c.value === "number" ? (Number.isInteger(c.value) ? String(c.value) : num(c.value, 3)) : c.value}${c.unit ? ` ${c.unit}` : ""}; ${c.threshold}`;
+    return (["roll", "pitch", "yaw"] as const).flatMap((axis): ImprovementRow[] => {
+        const routes = d[axis];
+        if (!routes) return [];
+        const read = routes.primary ? improvementStep(routes.primary) : improvementStep(routes.jio ?? null);
+        const s = read.step;
+        if (s) {
+            const m = (k: "pmDeg" | "gmDb" | "sDb", unit: string, digits: number) =>
+                `${k === "pmDeg" ? "PM" : k === "gmDb" ? "GM" : "|S|"} ${num(s.before[k], digits)}${unit} → ${num(s.after[k], digits)}${unit}`;
+            return [
+                {
+                    axis,
+                    step: s,
+                    blocked: null,
+                    values: `${pid(s.current)} → ${pid(s.values)} (P ${pct(s.change.p)}, I ${pct(s.change.i)}, D ${pct(s.change.d)})`,
+                    margins: [
+                        `crossover ${num(s.before.crossoverHz, 1)} → ${num(s.after.crossoverHz, 1)} Hz`,
+                        m("pmDeg", "°", 0),
+                        m("gmDb", " dB", 1),
+                        m("sDb", " dB", 1),
+                    ],
+                    evidence: `${s.evidence} · ${s.offered ? t("gyroflightV2StepOffered") : s.openTargets.length ? t("gyroflightV2StepNotOffered") : t("gyroflightV2StepNotOfferedOther")}`,
+                    open: s.openTargets.length ? s.openTargets.join("; ") : t("gyroflightV2StepMeetsTargets"),
+                    blockedText: "",
+                },
+            ];
+        }
+        const b = read.blocked;
+        return [
+            {
+                axis,
+                step: null,
+                blocked: b,
+                values: "",
+                margins: [] as string[],
+                evidence: "",
+                open: "",
+                blockedText: `${t(`gyroflightV2StepBlocked_${b?.reason ?? "no_measurement"}`)}${b?.check ? ` — ${fmt(b.check)}` : ""}`,
+            },
+        ];
+    });
+});
 
 /** Per axis and route the candidate decision (engine candidateDecision.ts) as table rows. */
 const decisionRows = computed(() => {

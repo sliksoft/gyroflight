@@ -628,6 +628,35 @@ describe("AutotuneV2Panel", () => {
             "best within ±30 %, not offered: P 39, I 55, D 30: PM 26°, GM 5.1 dB, |S| 8.9 dB (misses the targets)",
             "wider search (P/I ×0.4–1.3, D ×0.5–1.3): no candidate meets the targets; best P 22, I 32, D 35: PM 37°, GM 5.5 dB, |S| 8.0 dB (on its edge)",
         ]);
+        // Block 10: the informative improvement step under Tuning and apply. Roll: the safest candidate beats the
+        // current tune on PM, GM and |S| at once, so it is shown with its values, margins and the open targets;
+        // pitch: the inherited candidate is not better on all three, the search check is named. Nothing here is writable: no experimental item,
+        // no button, the Apply route has nothing.
+        const steps = q(d, '[data-gyrocore="v2-improvement-steps"]')!;
+        expect(steps).not.toBeNull();
+        const rollStep = q(steps, 'tr[data-axis="roll"]')!;
+        expect(rollStep.getAttribute("data-state")).toBe("step");
+        expect(rollStep.getAttribute("data-source")).toBe("candidate_within_max_step");
+        expect(q(rollStep, '[data-gyrocore="v2-step-values"]')!.textContent).toBe(
+            "P 56, I 79, D 30, d_max 40 → P 39, I 55, D 30, d_max 40 (P -30 %, I -30 %, D +0 %)",
+        );
+        expect(
+            [...q(rollStep, '[data-gyrocore="v2-step-margins"]')!.querySelectorAll("span")].map((e) => e.textContent),
+        ).toEqual(["crossover 26.0 → -- Hz", "PM 16° → 26°", "GM 3.4 dB → 5.1 dB", "|S| 12.3 dB → 8.9 dB"]);
+        expect(q(rollStep, '[data-gyrocore="v2-step-evidence"]')!.textContent).toContain("MEASURED");
+        expect(q(rollStep, '[data-gyrocore="v2-step-open"]')!.textContent).toBe(
+            "PM 26° < 45°; GM 5.1 dB < 6 dB; |S| 8.9 dB > 6 dB",
+        );
+        const pitchStep = q(steps, 'tr[data-axis="pitch"]')!;
+        expect(pitchStep.getAttribute("data-state")).toBe("blocked");
+        expect(q(pitchStep, '[data-gyrocore="v2-step-blocked"]')!.textContent).toContain(
+            "candidate_search_measured_margins = best PM 26° (P 39, I 55, D 30), GM 5.1 dB, |S| 8.9 dB over 127 usable of 169; PM ≥ 45°, GM ≥ 6 dB, |S| ≤ 6 dB; P/I/D within ±30 %",
+        );
+        expect(steps.querySelectorAll("button").length).toBe(0);
+        expect(q(d, '[data-gyrocore="v2-improvement-informative"]')).not.toBeNull();
+        expect(q(d, '[data-gyrocore="v2-experimental-none"]')).not.toBeNull();
+        expect(q(d, '[data-gyrocore="v2-experimental-items"]')).toBeNull();
+        expect(q(d, '[data-gyrocore="v2-experimental-apply"]')).toBeNull();
     });
 
     it("experimental Apply is refused when the craft is armed, without a write and without a backup", async () => {

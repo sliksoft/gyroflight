@@ -1088,6 +1088,26 @@
     },
     "gyroflightV2JioSupplementary": { "message": "Supplementary (optional)" },
     "gyroflightV2RecordingChecks": { "message": "Afterwards the app checks" },
+    "gyroflightV2StepTitle": { "message": "Improvement step (informative)" },
+    "gyroflightV2StepHelp": {
+        "message": "Per axis: the measured candidate within one Apply whose own margins are better than the current tune on phase margin, gain margin and sensitivity peak at once, with the targets it still misses. These are measured predictions of the loop reconstruction, not validated by a flight and not flight advice. Shown only; it is not an experimental item and cannot be written."
+    },
+    "gyroflightV2StepValues": { "message": "PID now → step" },
+    "gyroflightV2StepMargins": { "message": "Margins now → step" },
+    "gyroflightV2StepEvidence": { "message": "Evidence" },
+    "gyroflightV2StepOpen": { "message": "Targets still open" },
+    "gyroflightV2StepOffered": { "message": "also the offered experimental candidate" },
+    "gyroflightV2StepNotOffered": { "message": "not offered (misses the targets)" },
+    "gyroflightV2StepNotOfferedOther": { "message": "not offered" },
+    "gyroflightV2StepMeetsTargets": { "message": "none (meets PM ≥ 45°, GM ≥ 6 dB, |S| ≤ 6 dB)" },
+    "gyroflightV2StepInformative": {
+        "message": "Informative only: a measured prediction, not validated and not flight advice; these values are not an experimental proposal and no Apply route writes them."
+    },
+    "gyroflightV2StepBlocked_no_measurement": { "message": "no step: the measurement does not support a search" },
+    "gyroflightV2StepBlocked_no_candidate": { "message": "no step: no candidate can be read on this measurement" },
+    "gyroflightV2StepBlocked_not_better_on_all_three": {
+        "message": "no step: no candidate within one Apply is better than the current tune on PM, GM and |S| at once"
+    },
     "gyroflightV2ExperimentalTitle": { "message": "Experimental tuning (not released, not hardware-validated)" },
     "gyroflightV2ExperimentalHelp": {
         "message": "The values the measurement supports but the release contract cannot release: their margins are not VALIDATED, no independent flight has confirmed a prediction, and the hardware procedure has not been executed. A missing qualification does not remove a computable value here; a measurement that does not support a value withholds it, and nothing is invented. Writing is your explicit, acknowledged decision; the write route keeps every technical check (right craft, firmware and parameter support, current configuration equal to the log's, disarmed, finite values in range, backup, readback, verified save, Restore)."

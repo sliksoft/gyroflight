@@ -1028,3 +1028,131 @@ function targetCheck(t: TargetSearch): DecisionCheck {
             : "target not offered (beyond one Apply); the first step is not offered because it misses the targets itself; both are measured predictions, not flight advice",
     };
 }
+
+/**
+ * Informative improvement step (block 10). The candidate the measured-margin search already holds
+ * for an axis (the offered one, or the safest within ±MAX_STEP when nothing meets the targets), or
+ * the first step of the wider target search, shown when its own measured margins are better than
+ * the current tune on PM, GM and |S| at once (the `stepImprovesAll` rule). Shown only: it is not an
+ * experimental item, so the experimental Apply route cannot write it; the targets it still misses
+ * are named, as is the check that stops a step when the measurement does not support one.
+ */
+export interface ImprovementStep {
+    route: "primary" | "jio";
+    source: "candidate_within_max_step" | "target_first_step";
+    current: PidValues;
+    values: PidValues;
+    change: { p: number; i: number; d: number };
+    before: { crossoverHz: number | null; pmDeg: number | null; gmDb: number | null; sDb: number | null };
+    after: { crossoverHz: number | null; pmDeg: number | null; gmDb: number | null; sDb: number | null };
+    /** Margin evidence of the measurement both are read on (MEASURED on this route). */
+    evidence: string;
+    /** The targets the step still misses (empty: it meets all three, and is then the offered candidate). */
+    openTargets: string[];
+    /** The search already offers this candidate as the experimental item (status candidate_found). */
+    offered: boolean;
+    /** Always true: an informative read, never an item to write. */
+    informative: true;
+}
+
+export interface ImprovementStepRead {
+    step: ImprovementStep | null;
+    /** Why there is no step: the deciding check (value and threshold) or the comparison that failed. */
+    blocked: {
+        reason: "no_measurement" | "no_candidate" | "not_better_on_all_three";
+        check: DecisionCheck | null;
+    } | null;
+}
+
+function betterOnAllThree(before: ImprovementStep["before"], after: ImprovementStep["after"]): boolean {
+    return (
+        before.pmDeg !== null &&
+        before.gmDb !== null &&
+        before.sDb !== null &&
+        after.pmDeg !== null &&
+        after.gmDb !== null &&
+        after.sDb !== null &&
+        after.pmDeg > before.pmDeg &&
+        after.gmDb > before.gmDb &&
+        after.sDb < before.sDb
+    );
+}
+
+export function openTargetsOf(after: ImprovementStep["after"]): string[] {
+    const out: string[] = [];
+    if (after.pmDeg === null || after.pmDeg < PID_TARGETS.minPhaseMarginDeg)
+        out.push(
+            `PM ${after.pmDeg === null ? "unknown" : `${after.pmDeg.toFixed(0)}°`} < ${PID_TARGETS.minPhaseMarginDeg}°`,
+        );
+    if (after.gmDb === null || after.gmDb < PID_TARGETS.minGainMarginDb)
+        out.push(
+            `GM ${after.gmDb === null ? "unknown" : `${after.gmDb.toFixed(1)} dB`} < ${PID_TARGETS.minGainMarginDb} dB`,
+        );
+    if (after.sDb === null || after.sDb > PID_TARGETS.maxSensitivityPeakDb)
+        out.push(
+            `|S| ${after.sDb === null ? "unknown" : `${after.sDb.toFixed(1)} dB`} > ${PID_TARGETS.maxSensitivityPeakDb} dB`,
+        );
+    return out;
+}
+
+export function improvementStep(r: RouteDecision | null): ImprovementStepRead {
+    if (!r || !r.current || !r.measurementUsable || !r.searchRan)
+        return { step: null, blocked: { reason: "no_measurement", check: r?.firstCause ?? null } };
+    const before = r.current;
+    const rel = (x: number, c: number) => (c > 0 ? x / c - 1 : 0);
+    const cand = r.candidate;
+    if (cand && cand.changed) {
+        // Read exactly as the decision table reads a candidate (valuesOf), so before and after compare alike.
+        const after = valuesOf(cand.proposedMargins);
+        if (betterOnAllThree(before, after)) {
+            return {
+                step: {
+                    route: r.route,
+                    source: "candidate_within_max_step",
+                    current: cand.current,
+                    values: cand.proposed,
+                    change: {
+                        p: rel(cand.proposed.p, cand.current.p),
+                        i: rel(cand.proposed.i, cand.current.i),
+                        d: rel(cand.proposed.d, cand.current.d),
+                    },
+                    before,
+                    after,
+                    evidence: cand.currentMargins.evidence?.level ?? "unknown",
+                    openTargets: openTargetsOf(after),
+                    offered: r.status === "candidate_found",
+                    informative: true,
+                },
+                blocked: null,
+            };
+        }
+    }
+    const t = r.target;
+    if (t?.step && t.stepImprovesAll && cand) {
+        const after = { crossoverHz: t.step.crossoverHz, pmDeg: t.step.pmDeg, gmDb: t.step.gmDb, sDb: t.step.sDb };
+        return {
+            step: {
+                route: r.route,
+                source: "target_first_step",
+                current: cand.current,
+                values: t.step.values,
+                change: t.step.change,
+                before,
+                after,
+                evidence: cand.currentMargins.evidence?.level ?? "unknown",
+                openTargets: openTargetsOf(after),
+                offered: false,
+                informative: true,
+            },
+            blocked: null,
+        };
+    }
+    if (!cand) return { step: null, blocked: { reason: "no_candidate", check: r.firstCause } };
+    return {
+        step: null,
+        blocked: {
+            reason: "not_better_on_all_three",
+            check: r.checks.find((c) => c.rule === "candidate_search_measured_margins") ?? r.firstCause,
+        },
+    };
+}
