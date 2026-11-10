@@ -1,6 +1,7 @@
 #!/bin/bash
 # One command for the SITL loop-reference test (PROTOCOL.md v1 in the dossier). Simulator only.
-#   scripts/sim/reference/run_reference.sh <new output dir> [--only-arm A|B] [--smoke]
+#   scripts/sim/reference/run_reference.sh <new output dir> [--only-arm A|B|C] [--smoke]
+# Arm C (post-hoc amendment v1.1): arm A with Blackbox high resolution OFF, as the real AIR65 logs are recorded.
 # Refuses an existing output directory, a wrong ELF hash, a wrong VliegAI HEAD or GyroFlight scripts that differ from HEAD.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -37,32 +38,33 @@ mkdir -p "$OUT/runs" "$RUNTIME_ROOT"
 
 # runs: arm A (ANGLE) 56/45/70 x 3, arm B (ACRO) 56 x 3; chirp start ticks 200/250/300
 RUNS=()
-add() { RUNS+=("$1|$2|$3|$4|$5|$6|$7"); }  # id arm angle p i d start
+add() { RUNS+=("$1|$2|$3|$4|$5|$6|$7|$8"); }  # id arm angle p i d start hires
 i=0
-for spec in "A:1:56" "A:1:45" "A:1:70" "B:0:56"; do
-  arm=${spec%%:*}; rest=${spec#*:}; angle=${rest%%:*}; p=${rest#*:}
+for spec in "A:1:56:1" "A:1:45:1" "A:1:70:1" "B:0:56:1" "C:1:56:0" "C:1:45:0" "C:1:70:0"; do
+  IFS=':' read -r arm angle p hires <<< "$spec"
+  [ -z "$ONLY_ARM" ] && [ "$arm" = "C" ] && continue
   [ -n "$ONLY_ARM" ] && [ "$arm" != "$ONLY_ARM" ] && continue
   for start in 200 250 300; do
-    i=$((i+1)); add "$(printf '%02d' $i)_${arm}_${p}_79_30_s${start}" "$arm" "$angle" "$p" 79 30 "$start"
+    i=$((i+1)); add "$(printf '%02d' $i)_${arm}_${p}_79_30_s${start}" "$arm" "$angle" "$p" 79 30 "$start" "$hires"
     [ $SMOKE = 1 ] && break
   done
 done
 JOBS="["; LIST="["
 for r in "${RUNS[@]}"; do
-  IFS='|' read -r id arm angle p ii d start <<< "$r"
+  IFS='|' read -r id arm angle p ii d start hires <<< "$r"
   dir="$OUT/runs/$id"
   cat > "$OUT/runs/$id.request.json" <<EOF
 {"vliegaiRoot":"$VLIEGAI","baseOverlay":"$OVERLAY","elf":"$ELF","elfSha256":"$ELF_SHA_EXPECTED",
  "betaflightCommit":"$BF_COMMIT","betaflightSource":"$DOSSIER/build/bf-src",
  "rollPid":{"p":$p,"i":$ii,"d":$d,"dMax":40},
  "chirpSettings":{"chirp_frequency_start_deci_hz":20,"chirp_frequency_end_deci_hz":1000,"chirp_time_seconds":20,"chirp_amplitude_roll":230,"chirp_lag_freq_hz":3,"chirp_lead_freq_hz":30},
- "totalTicks":2500,"chirpStartTick":$start,"angleMode":$([ "$angle" = 1 ] && echo true || echo false),
+ "totalTicks":2500,"chirpStartTick":$start,"angleMode":$([ "$angle" = 1 ] && echo true || echo false),"highResolution":$([ "$hires" = 1 ] && echo true || echo false),
  "outDir":"$dir","runtimeRoot":"$RUNTIME_ROOT","label":"$id"}
 EOF
   echo "$(date -u +%T) run $id"
   (cd "$VLIEGAI" && CUDA_VISIBLE_DEVICES= "$PY" "$HERE/air65_chirp_sitl.py" "$OUT/runs/$id.request.json" > "$OUT/runs/$id.stderr.log" 2>&1) || echo "  adapter exit $?"
   if [ -f "$dir/case/controller_trace.npz" ]; then
-    "$PY" "$HERE/reference_loop.py" "$dir/case/controller_trace.npz" "$dir/reference.json" | sed 's/^/  ref /'
+    "$PY" "$HERE/reference_loop.py" "$dir/case/controller_trace.npz" "$dir/reference.json" --scale $([ "$hires" = 1 ] && echo 0.1 || echo 1) | sed 's/^/  ref /'
   fi
   if [ -f "$dir/chirp.BFL" ]; then JOBS="$JOBS{\"log\":\"$dir/chirp.BFL\",\"out\":\"$dir/gyroflight.json\"},"; fi
   LIST="$LIST{\"id\":\"$id\",\"arm\":\"$arm\",\"tune\":\"$p/$ii/$d\",\"rep\":\"s$start\",\"dir\":\"$dir\"},"

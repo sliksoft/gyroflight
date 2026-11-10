@@ -19,7 +19,17 @@ import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
 import { AUTOTUNE_MATH } from "../../src/composables/useAutotune";
 import { buildLogInputs } from "../../src/gyrocore/engine/logInput";
 import { analyzeM4BblFile } from "../../src/js/blackbox/m4_bbl_integration";
-import { runAutotuneV2, controllerConfigFromHeaders } from "../../src/gyrocore/engine/autotuneV2";
+import {
+    runAutotuneV2,
+    controllerConfigFromHeaders,
+    analyzeAxisController,
+    flightMask,
+} from "../../src/gyrocore/engine/autotuneV2";
+import {
+    dtermConfigFromHeaders,
+    simulateDterm,
+    effectiveDtermOverWindow,
+} from "../../src/js/blackbox/betaflight_dterm_dynamic";
 import { evaluateControllerFrf } from "../../src/js/blackbox/betaflight_digital_controller";
 
 const jobs: { log: string; out: string }[] = process.env.GYROFLIGHT_REF_JOBS
@@ -27,7 +37,7 @@ const jobs: { log: string; out: string }[] = process.env.GYROFLIGHT_REF_JOBS
     : [];
 
 describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", () => {
-    it("writes the engine's roll margins and controller FRF per log", () => {
+    it("writes the engine's roll margins and controller FRF per log", { timeout: 1_800_000 }, () => {
         for (const job of jobs) {
             const bytes = new Uint8Array(readFileSync(job.log));
             const sha = createHash("sha256").update(bytes).digest("hex");
@@ -40,6 +50,42 @@ describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", ()
             const headers = Object.fromEntries(primary.headerPairs.map(([k, v]) => [k, v])) as Record<string, string>;
             const cfg = headers ? controllerConfigFromHeaders(headers, 0) : null;
             const relax = r.itermRelax.find((x) => x.axis === "roll") ?? null;
+            // The controller the engine actually reads the loop with (effective D from its D-path simulation).
+            const mask = flightMask(primary.channels.rcThrottle);
+            const ctl = primary.chirp.roll
+                ? analyzeAxisController(primary, headers, 0, primary.chirp.roll, mask)
+                : null;
+            const dcfg = cfg ? dtermConfigFromHeaders(headers, 0, cfg.pidDt) : null;
+            let dsim: Record<string, unknown> | null = null;
+            if (dcfg && primary.chirp.roll) {
+                const sim = simulateDterm(
+                    {
+                        timeUs: primary.channels.timeUs,
+                        gyro: primary.channels.gyroAdc[0],
+                        rcThrottle: primary.channels.rcThrottle,
+                    },
+                    dcfg,
+                    { kind: "dynamic" },
+                );
+                const eff = effectiveDtermOverWindow(sim, primary.chirp.roll.start, primary.chirp.roll.end);
+                const win = (arr: ArrayLike<number>) => {
+                    const v: number[] = [];
+                    for (let k = primary.chirp.roll!.start; k < Math.min(primary.chirp.roll!.end, sim.d.length); k++)
+                        if (sim.valid[k]) v.push(arr[k]);
+                    v.sort((a, b) => a - b);
+                    return v.length
+                        ? { min: v[0], median: v[Math.floor(v.length / 2)], max: v[v.length - 1], n: v.length }
+                        : null;
+                };
+                dsim = {
+                    eff,
+                    notes: sim.notes,
+                    dMaxMultiplier: win(sim.dMaxMultiplier),
+                    tpaFactor: win(sim.tpaFactor),
+                    cutoffHz: win(sim.cutoffHz),
+                    throttle: win(primary.channels.rcThrottle),
+                };
+            }
             const sweepCfg =
                 cfg && relax && relax.status === "reconstructed"
                     ? { ...cfg, axis: { ...cfg.axis, i: cfg.axis.i * relax.meanFactor } }
@@ -99,6 +145,16 @@ describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", ()
                 chain: r.chain,
                 headersUsed: Object.keys(headers).length,
                 cfg,
+                engineCfg: ctl
+                    ? {
+                          cfg: ctl.cfg,
+                          sweepCfg: ctl.sweepCfg,
+                          accepted: ctl.accepted,
+                          nrmse: ctl.nrmse,
+                          dterm: ctl.dterm,
+                      }
+                    : null,
+                dtermSim: dsim,
                 controllerBins: bins,
                 jioRoll: r.jio.analysis.axes.roll
                     ? {

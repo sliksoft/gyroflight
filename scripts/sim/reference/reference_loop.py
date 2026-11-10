@@ -21,7 +21,8 @@ Reference method (recorded in the protocol):
   Signs/scales: setpoint and gyro from the log in deg/s (x0.1 applied), terms in Betaflight PID units; the loop is
   dimensionless. Timing: all signals are sampled at the same PID iteration; the plant delay is inside G.
 
-Usage: reference_loop.py controller_trace.npz out.json [--window a,b]  (window in seconds of the chirp axis active)
+Usage: reference_loop.py controller_trace.npz out.json [--window a,b] [--scale 0.1|1]
+  (window in seconds of the chirp axis active; scale = log units per deg/s: 0.1 for high-resolution logs, 1 otherwise)
 """
 
 from __future__ import annotations
@@ -99,8 +100,9 @@ def main() -> int:
         a, b = sys.argv[sys.argv.index("--window") + 1].split(",")
         window = (float(a), float(b))
     t = npz["time_s"]
-    sp = npz["setpoint"][:, AXIS] / 10.0
-    gy = npz["gyro"][:, AXIS] / 10.0
+    scale = float(sys.argv[sys.argv.index("--scale") + 1]) if "--scale" in sys.argv else 0.1
+    sp = npz["setpoint"][:, AXIS] * scale
+    gy = npz["gyro"][:, AXIS] * scale
     p = npz["p"][:, AXIS]
     i = npz["i"][:, AXIS]
     d = npz["d"][:, AXIS]
@@ -132,6 +134,7 @@ def main() -> int:
     L = C_fb * G
     res = {
         "status": "ok",
+        "unitsScale": scale,
         "windowS": [float(t[a]), float(t[b - 1])],
         "samples": int(b - a),
         "samplePeriodMedianS": float(np.median(dt)),

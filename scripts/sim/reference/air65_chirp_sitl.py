@@ -11,6 +11,7 @@ These runs are therefore NOT oracle acceptance runs.
 
 Usage (VliegAI environment python): air65_chirp_sitl.py request.json
 Output: result.json with status, the Blackbox header, the log path and the decoded trace path.
+Request key `highResolution` (default true): Blackbox high resolution on or off (arm C of the protocol, post-hoc).
 """
 
 from __future__ import annotations
@@ -122,6 +123,8 @@ def main() -> int:
 
     # --- schedule: hover, zero body rates; CHIRP mode from chirpStartTick; ANGLE if requested
     total_ticks = int(request["totalTicks"])
+    high_resolution = bool(request.get("highResolution", True))
+    result["highResolution"] = high_resolution
     chirp_start = int(request["chirpStartTick"])
     angle = bool(request.get("angleMode", True))
     hover = oracle.HOVER_COLLECTIVE
@@ -163,7 +166,7 @@ def main() -> int:
     result["base_overlay_sha256"] = sha256(base)
 
     try:
-        eeprom = oracle.prepare_air65_runtime_eeprom(results_dir, root / "eeprom.bin", provenance_path, True, recipe_overlay=overlay)
+        eeprom = oracle.prepare_air65_runtime_eeprom(results_dir, root / "eeprom.bin", provenance_path, high_resolution, recipe_overlay=overlay)
     except Exception as exc:  # noqa: BLE001
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["traceback"] = traceback.format_exc()
@@ -174,7 +177,7 @@ def main() -> int:
     runtime_root = Path(request["runtimeRoot"]) if request.get("runtimeRoot") else None
     inner_ticks = total_ticks * INNER_PER_OUTER
     try:
-        case = oracle._run_case("chirp_roll", case_dir, results_dir, eeprom, inner_ticks, False, runtime_root, blackbox_high_resolution=True)
+        case = oracle._run_case("chirp_roll", case_dir, results_dir, eeprom, inner_ticks, False, runtime_root, blackbox_high_resolution=high_resolution)
     except SitlIoError as exc:
         result["error"] = f"SitlIoError: {exc}"
         return finish("harness_error", "sitl_io")
