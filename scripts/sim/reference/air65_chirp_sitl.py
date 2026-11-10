@@ -53,6 +53,7 @@ def main() -> int:
         "label": request.get("label"),
         "overrides": [
             "elf:separate_local_build_with_USE_CHIRP",
+            "guards:require_pinned_elf_file,require_runtime_provenance,require_launch_elf->sha256_of_request_elf",
             "recipe:+aux_chirp_box55_aux4",
             "_schedule:zero_body_rates",
             "REGRANT_HOLD_OUTER_TICKS=-1",

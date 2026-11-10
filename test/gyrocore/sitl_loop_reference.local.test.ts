@@ -90,28 +90,34 @@ describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", ()
                 cfg && relax && relax.status === "reconstructed"
                     ? { ...cfg, axis: { ...cfg.axis, i: cfg.axis.i * relax.meanFactor } }
                     : cfg;
-            const bins: {
-                f: number;
-                Cfb: [number, number];
-                Cref: [number, number];
-                CfbSweep: [number, number];
-                CrefSweep: [number, number];
-            }[] = [];
+            // Controller FRFs per bin: from the header (nominal D) and as the engine actually reads the loop (ctl.cfg, effective D;
+            // ctl.sweepCfg, the I in force during the sweep, used for the plant extraction).
+            const bins: Record<string, number | [number, number]>[] = [];
             if (cfg && sweepCfg) {
                 for (let f = 0.48828125; f <= 120; f += 0.48828125) {
                     const a = evaluateControllerFrf(cfg, f);
                     const b = evaluateControllerFrf(sweepCfg, f);
-                    bins.push({
+                    const row: Record<string, number | [number, number]> = {
                         f,
                         Cfb: [a.cFeedback.re, a.cFeedback.im],
                         Cref: [a.cReference.re, a.cReference.im],
                         CfbSweep: [b.cFeedback.re, b.cFeedback.im],
                         CrefSweep: [b.cReference.re, b.cReference.im],
-                    });
+                    };
+                    if (ctl) {
+                        const e = evaluateControllerFrf(ctl.cfg, f);
+                        const es = evaluateControllerFrf(ctl.sweepCfg, f);
+                        row.CfbEngine = [e.cFeedback.re, e.cFeedback.im];
+                        row.CrefEngine = [e.cReference.re, e.cReference.im];
+                        row.CfbEngineSweep = [es.cFeedback.re, es.cFeedback.im];
+                        row.CrefEngineSweep = [es.cReference.re, es.cReference.im];
+                    }
+                    bins.push(row);
                 }
             }
             const qlog = qual.logs.find((l) => l.logIndex === primary.logIndex) ?? qual.logs[0];
             const result = {
+                gyroflightHead: process.env.GYROFLIGHT_REF_HEAD ?? null,
                 file: job.log,
                 sha256: sha,
                 sampleRateHz: primary.sampleRateHz,

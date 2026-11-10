@@ -1,6 +1,6 @@
 """Compare GyroFlight's roll margins with the independent reference per run and apply PROTOCOL.md (v1).
 
-Usage: compare.py <out dir> runs.json [--primary-arm A|C]   (runs.json: [{"id","arm","tune","rep","dir"}], each dir holding result.json,
+Usage: compare.py <out dir> runs.json [--primary-arm A|C] [--gf-name gyroflight.json]   (runs.json: [{"id","arm","tune","rep","dir"}], each dir holding result.json,
 reference.json and gyroflight.json). Writes <out dir>/results.json and <out dir>/RESULTS.md.
 """
 
@@ -38,10 +38,13 @@ def margins_of(f, L, lo, hi):
     return {"fc": None if fc is None else float(fc), "pm": None if pm is None else float(pm), "s": float(20 * np.log10(S.max()))}
 
 
+GF_NAME = "gyroflight.json"
+
+
 def load(dir_: Path):
     r = json.loads((dir_ / "result.json").read_text())
     ref = json.loads((dir_ / "reference.json").read_text()) if (dir_ / "reference.json").is_file() else None
-    gf = json.loads((dir_ / "gyroflight.json").read_text()) if (dir_ / "gyroflight.json").is_file() else None
+    gf = json.loads((dir_ / GF_NAME).read_text()) if (dir_ / GF_NAME).is_file() else None
     return r, ref, gf
 
 
@@ -134,10 +137,19 @@ def split(ref, gf):
     C_gf = at("Cfb")
     C_gf_sweep = at("CfbSweep")
     Cr_gf_sweep = at("CrefSweep")
+    has_engine = "CfbEngine" in gb[0]
+    C_eng = at("CfbEngine") if has_engine else None
+    C_eng_sweep = at("CfbEngineSweep") if has_engine else None
+    Cr_eng_sweep = at("CrefEngineSweep") if has_engine else None
     def cmp(a, b):
         return {"magDbMean": float(np.mean(20 * np.log10(np.abs(a) / np.abs(b)))), "magDbMax": float(np.max(np.abs(20 * np.log10(np.abs(a) / np.abs(b))))), "phaseDegMean": float(np.mean(np.degrees(np.angle(a / b)))), "phaseDegMax": float(np.max(np.abs(np.degrees(np.angle(a / b)))))}
     # controller as the engine reads margins (cfg) and as it extracts the plant (sweepCfg) vs the firmware's own
-    out = {"available": True, "controller_cfg_vs_ref": cmp(C_gf, Cref_ref), "controller_sweepCfg_vs_ref": cmp(C_gf_sweep, Cref_ref)}
+    out = {"available": True, "controller_headerCfg_vs_ref": cmp(C_gf, Cref_ref), "controller_headerSweepCfg_vs_ref": cmp(C_gf_sweep, Cref_ref)}
+    if has_engine:
+        # the controller the engine reads margins with (effective D) and extracts the plant with
+        out["controller_engineCfg_vs_ref"] = cmp(C_eng, Cref_ref)
+        out["controller_engineSweepCfg_vs_ref"] = cmp(C_eng_sweep, Cref_ref)
+        out["marginsRefPlantEngineController"] = margins_of(f, C_eng * G_ref, *BAND)
     # margins of the reference plant with GyroFlight's controller: isolates the controller's contribution
     Lc = C_gf * G_ref
     out["marginsRefPlantGfController"] = margins_of(f, Lc, *BAND)
@@ -147,6 +159,11 @@ def split(ref, gf):
         G_gfstyle = T / (Cr_gf_sweep - T * C_gf_sweep)
         out["plant_gfstyle_vs_ref"] = cmp(G_gfstyle, G_ref)
         out["marginsGfStylePlantGfController"] = margins_of(f, G_gfstyle * C_gf, *BAND)
+        if has_engine:
+            # the engine's own algebra with the engine's own controller: should reproduce the engine's margins
+            G_eng = T / (Cr_eng_sweep - T * C_eng_sweep)
+            out["plant_engineStyle_vs_ref"] = cmp(G_eng, G_ref)
+            out["marginsEngineStylePlantEngineController"] = margins_of(f, G_eng * C_eng, *BAND)
     out["per_bin"] = [{"f": float(f[k]), "CmagDb": float(20 * np.log10(abs(C_gf[k]) / abs(Cref_ref[k]))), "CphaseDeg": float(np.degrees(np.angle(C_gf[k] / Cref_ref[k])))} for k in range(0, len(f), 4)]
     return out
 
@@ -155,6 +172,9 @@ def main():
     out_dir = Path(sys.argv[1])
     runs = json.loads(Path(sys.argv[2]).read_text())
     primary_arm = sys.argv[sys.argv.index("--primary-arm") + 1] if "--primary-arm" in sys.argv else "A"
+    global GF_NAME
+    if "--gf-name" in sys.argv:
+        GF_NAME = sys.argv[sys.argv.index("--gf-name") + 1]
     rows = []
     for run in runs:
         r, ref, gf = load(Path(run["dir"]))
@@ -186,7 +206,7 @@ def main():
         sign = {
             "dPmGf": dpm_gf, "dPmRef": dpm_ref, "dFcGf": dfc_gf, "dFcRef": dfc_ref,
             "pmSignOk": sgn(dpm_gf, spread_gf) == sgn(dpm_ref, spread_ref), "pmWithin3": abs(dpm_gf - dpm_ref) <= LIMITS["dPmDeg"],
-            "fcSignOk": np.sign(dfc_gf) == np.sign(dfc_ref) or (abs(dfc_gf) < 0.02 * a["ref"]["fc"] and abs(dfc_ref) < 0.02 * a["ref"]["fc"]),
+            "fcSignOk": bool(np.sign(dfc_gf) == np.sign(dfc_ref) or (abs(dfc_gf) < 0.02 * a["ref"]["fc"] and abs(dfc_ref) < 0.02 * a["ref"]["fc"])),
             "fcWithin10pct": abs(dfc_gf - dfc_ref) <= LIMITS["dFcRel"] * a["ref"]["fc"],
         }
     repeat_ok = all(t["repeatPmRangeGf"] < LIMITS["repeatPmDeg"] and t["repeatPmRangeRef"] < LIMITS["repeatPmDeg"] for t in per_tune.values()) if per_tune else None
@@ -197,7 +217,7 @@ def main():
         verdict = "PASS"
     else:
         verdict = "FAIL"
-    results = {"verdict": verdict, "primaryArm": primary_arm, "limits": LIMITS, "runs": rows, "perTune": per_tune, "signTest56to45": sign, "repeatOk": repeat_ok}
+    results = {"verdict": verdict, "primaryArm": primary_arm, "gfName": GF_NAME, "limits": LIMITS, "runs": rows, "perTune": per_tune, "signTest56to45": sign, "repeatOk": repeat_ok}
     (out_dir / "results.json").write_text(json.dumps(results, indent=1, default=float) + "\n")
     # markdown table
     lines = [f"# Resultaten (protocol v1, arm {primary_arm}) — oordeel: **{verdict}**", "", "| run | arm | tune | fc GF / ref (Hz) | Δfc | PM GF / ref (°) | ΔPM | |S| GF / ref (dB) | Δ|S| | GM GF / ref (dB) | status |", "|---|---|---|---|---|---|---|---|---|---|---|"]

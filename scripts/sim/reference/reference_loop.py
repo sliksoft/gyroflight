@@ -16,7 +16,7 @@ Reference method (recorded in the protocol):
   - Loop L = C_fb * G; margins read on the Welch grid (1 kHz, nperseg 2048 Hann, 50 % overlap => 0.488 Hz bins):
       crossover fc: first |L| = 1 crossing from below in frequency (linear interpolation on 20 log10|L|);
       PM = 180 + arg L(fc) (unwrapped phase, degrees);
-      GM = -20 log10|L| at the first phase crossing of -180 deg inside 5-50 Hz, else null;
+      GM = -20 log10|L| at the first phase crossing of -180 deg inside 5-85 Hz (with the coherence of G and C_D there), else null;
       |S| peak = max 1/|1+L| over 5-50 Hz (dB).
   Signs/scales: setpoint and gyro from the log in deg/s (x0.1 applied), terms in Betaflight PID units; the loop is
   dimensionless. Timing: all signals are sampled at the same PID iteration; the plant delay is inside G.
