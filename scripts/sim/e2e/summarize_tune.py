@@ -15,6 +15,17 @@ import sys
 from pathlib import Path
 
 TARGETS = {"pmDeg": 45.0, "gmDb": 6.0, "sDb": 6.0}
+# Protocol v4 GM rule (block 13): the random error of the H1 plant estimate at the phase crossing (Bendat–Piersol,
+# ε = √(1 − γ²) / (|γ|·√(2·n_d)), with n_d = 1: the sweep passes the crossing frequency once), as dB on GM.
+GM_V4 = {"nd": 1, "maxSigmaDb": 1.5}
+
+
+def gm_sigma_db(coh):
+    import math
+    if coh is None or not (0 < coh <= 1):
+        return None
+    eps = math.sqrt(1 - coh) / (math.sqrt(coh) * math.sqrt(2 * GM_V4["nd"]))
+    return 20 * math.log10(1 + eps)
 GM_BAND = (5.0, 85.0)
 
 
@@ -99,6 +110,7 @@ def main() -> int:
         row["ref"] = {
             "fc": m["crossoverHz"], "pm": m["phaseMarginDeg"], "gm": m.get("gainMarginDb"), "gmHz": m.get("phaseCrossingHz"),
             "gmCoherence": m.get("coherenceAtPhaseCrossing"), "gmAssessable": gm_ok, "s": m["sensitivityPeakDb"], "sHz": m["sensitivityPeakHz"],
+            "gmSigmaDb": gm_sigma_db(m.get("coherenceAtPhaseCrossing")),
             "kp": ref["kp"], "pmItermSensitivityDeg": sens, "minCohG": m["minCoherencePlantInBand"], "minCohD": m["minCoherenceDtermInBand"],
             "meetsTargets": bool(gm_ok and meets(m["crossoverHz"], m["phaseMarginDeg"], m["gainMarginDb"], m["sensitivityPeakDb"])),
         }
@@ -128,6 +140,7 @@ def main() -> int:
                 row["refPitch"] = {
                     "fc": mp["crossoverHz"], "pm": mp["phaseMarginDeg"], "gm": mp.get("gainMarginDb"), "gmHz": mp.get("phaseCrossingHz"),
                     "gmCoherence": mp.get("coherenceAtPhaseCrossing"), "gmAssessable": gm_okp, "s": mp["sensitivityPeakDb"], "sHz": mp["sensitivityPeakHz"],
+                    "gmSigmaDb": gm_sigma_db(mp.get("coherenceAtPhaseCrossing")),
                     "kp": refp["kp"], "pmItermSensitivityDeg": sensp, "minCohG": mp["minCoherencePlantInBand"], "minCohD": mp["minCoherenceDtermInBand"],
                     "meetsTargets": bool(gm_okp and meets(mp["crossoverHz"], mp["phaseMarginDeg"], mp["gainMarginDb"], mp["sensitivityPeakDb"])),
                 }
@@ -173,6 +186,19 @@ def main() -> int:
         summary["refPitchMedian"] = {k: medp(k) for k in ("fc", "pm", "gm", "s")} if okp else None
         summary["refPitchSpread"] = {k: (max(r["refPitch"][k] for r in okp) - min(r["refPitch"][k] for r in okp)) if okp and all(r["refPitch"][k] is not None for r in okp) else None for k in ("fc", "pm", "gm", "s")} if okp else None
         summary["gmAssessableAllPitch"] = bool(okp) and len(okp) == len(ok) and all(r["refPitch"]["gmAssessable"] for r in okp)
+    # Protocol v4 GM rule per swept axis: assessable when every run's crossing lies in 5–85 Hz and its σ ≤ maxSigmaDb;
+    # the GM used against the target is the median minus 2 × the largest σ (a lower bound).
+    def gm_v4(refs):
+        refs = [x for x in refs if x]
+        if not refs or any(x.get("gm") is None or x.get("gmHz") is None or x.get("gmSigmaDb") is None for x in refs):
+            return {"assessableAll": False, "maxSigmaDb": None, "medianGm": None, "lowerBound": None}
+        sig = max(x["gmSigmaDb"] for x in refs)
+        med_gm = statistics.median(x["gm"] for x in refs)
+        in_band = all(GM_BAND[0] <= x["gmHz"] <= GM_BAND[1] for x in refs)
+        return {"assessableAll": bool(in_band and sig <= GM_V4["maxSigmaDb"]), "maxSigmaDb": sig, "medianGm": med_gm, "lowerBound": med_gm - 2 * sig}
+    summary["gmV4"] = {"rule": GM_V4, "roll": gm_v4([r["ref"] for r in ok])}
+    if (prov.get("sweeps") or 1) >= 2:
+        summary["gmV4"]["pitch"] = gm_v4([r.get("refPitch") for r in ok])
     # Per-motor hover medians and spreads (protocol v3); the clip and hover-length issues are per run.
     hov = [r["noise"] for r in ok if r.get("noise") and r["noise"].get("motorBandHover")]
     if hov:

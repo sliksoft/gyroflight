@@ -426,21 +426,34 @@ export function motorNoiseModel(input: MotorNoiseInput) {
         ): MotorAssessment {
             const gate = staticReasons.length ? { blocking: [], limits: [] } : reproductionGate(base);
             const reasons = [...staticReasons, ...(gyroChanged ? gyroReasons : []), ...gate.blocking];
-            const s = reasons.length ? null : series(key, sig, gyroChanged);
-            const b0 = reasons.length ? null : baselineOf(base);
-            if (!reasons.length && (!s || !b0)) reasons.push("noise_signals_not_computable");
-            if (!s || !b0 || reasons.length)
+            // The per-axis noise is still predicted for every axis the model reproduces (and, for a gyro change, whose chain
+            // is validated in the noise band), even when another axis keeps the motor sums from being assessed.
+            const s = staticReasons.length ? null : series(key, sig, gyroChanged);
+            const b0 = staticReasons.length ? null : baselineOf(base);
+            if (!s || !b0) {
+                if (!staticReasons.length) reasons.push("noise_signals_not_computable");
                 return { assessed: false, reasons, motorRatios: null, maxMotorRatio: null, axisRatios: {} };
+            }
             const u = input.axes.map((a, ai) => axisOutput(s, ai, pids[a.axis] ?? a.current));
             const axisRatios: MotorAssessment["axisRatios"] = {};
             const repro = reproduction(base);
             input.axes.forEach((a, ai) => {
                 const p = P(u[ai], s.valid);
                 const p0 = b0.axes[ai];
+                const chainOk = !gyroChanged || a.chainNoiseValidated;
                 // An axis the model does not reproduce has no noise prediction of its own.
                 axisRatios[a.axis] =
-                    repro[ai]?.reproduced === true && p !== null && p0 !== null && p0 > 0 ? p / p0 : null;
+                    chainOk && repro[ai]?.reproduced === true && p !== null && p0 !== null && p0 > 0 ? p / p0 : null;
             });
+            if (reasons.length)
+                return {
+                    assessed: false,
+                    reasons,
+                    motorRatios: null,
+                    maxMotorRatio: null,
+                    axisRatios,
+                    limitations: gate.limits,
+                };
             const motorRatios: number[] = [];
             for (let m = 0; m < motors; m++) {
                 const y = new Float64Array(n);

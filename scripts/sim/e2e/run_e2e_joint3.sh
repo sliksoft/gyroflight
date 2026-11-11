@@ -1,5 +1,6 @@
 #!/bin/bash
-# One command for the joint PID + filter proof with the every-axis motor rule (block 13, dossier PROTOCOL.md v3):
+# One command for the joint PID + filter proof with the every-axis motor rule (block 13, dossier PROTOCOL.md v3 or v4; the dossier's
+# protocol must equal the committed scripts/sim/e2e/protocols/joint3_protocol_v<version>.json and joint3_PROTOCOL_v<version>.md):
 #   scripts/sim/e2e/run_e2e_joint3.sh <dossier dir>      (protocol.json must already be there; phases already done are kept)
 # Phases: provenance (before anything runs, with both evaluator selftests) → regression (the v2 candidate: the new engine on the
 # v2 start logs and the hover per-motor measure of the v2 runs; no new SITL run) → start (roll then pitch sweep per run, seeded
@@ -30,7 +31,8 @@ V2=$(jq_ "d['regression']['dossier']"); V2="${V2/#\~/$HOME}"
 echo "protocol v$(jq_ "d['version']"): start $START [$START_SET], control $CONTROL [$CONTROL_SET] ticks $CONTROL_STARTS, starts $STARTS, sweeps $SWEEPS, ticks $TICKS, noise $NOISE, head $(git -C "$REPO" rev-parse --short HEAD)"
 
 # The dossier's protocol must be the one committed with the code (pre-registration).
-for f in protocol.json:joint3_protocol_v3.json PROTOCOL.md:joint3_PROTOCOL_v3.md; do
+VER=$(jq_ "d['version']")
+for f in protocol.json:joint3_protocol_v${VER}.json PROTOCOL.md:joint3_PROTOCOL_v${VER}.md; do
   cmp -s "$DOSSIER/${f%%:*}" "$HERE/protocols/${f##*:}" || { echo "STOP: $DOSSIER/${f%%:*} differs from the committed $HERE/protocols/${f##*:}"; exit 2; }
 done
 # 0. Provenance of the whole proof, written before any phase runs: code, build, input, both evaluator selftests.

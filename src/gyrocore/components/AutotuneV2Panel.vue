@@ -1742,7 +1742,7 @@ const jointFilters = computed(() => {
 const jointEffects = computed(() => {
     const j = joint.value;
     if (!j) return null;
-    const as = j.chosen?.assessment ?? j.bestRejected ?? null;
+    const as = j.chosen?.assessment ?? j.bestRejected ?? j.closestToTargets ?? null;
     const mm = j.motorModel;
     const pidText = (v: { p: number; i: number; d: number; dMax: number } | null) => (v ? jointPid(v) : "--");
     const model = [
@@ -1792,10 +1792,12 @@ const jointEffects = computed(() => {
         ? `${t("gyroflightV2JointMotorsPredicted")}: ${m.motorRatios.map((x, i) => `M${i + 1} ${num(x, 2)}`).join(", ")} (${t("gyroflightV2JointMotorLimit")} ${num(m.limit, 2)}: ${m.withinLimit ? t("gyroflightV2JointMotorWithin") : t("gyroflightV2JointMotorExceeds")})`
         : `${t("gyroflightV2JointMotorsNotAssessed")}: ${m.reasons.join(", ")}`;
     return {
-        source: j.chosen ? "chosen" : "best_rejected",
+        source: j.chosen ? "chosen" : j.bestRejected ? "best_rejected" : "closest_to_targets",
         title: j.chosen
             ? t("gyroflightV2JointEffectsChosen", [`gyro LPF ×${as.gyroScale}, D-term LPF ×${as.dtermScale}`])
-            : t("gyroflightV2JointEffectsRejected", [`gyro LPF ×${as.gyroScale}, D-term LPF ×${as.dtermScale}`]),
+            : j.bestRejected
+              ? t("gyroflightV2JointEffectsRejected", [`gyro LPF ×${as.gyroScale}, D-term LPF ×${as.dtermScale}`])
+              : t("gyroflightV2JointEffectsClosest", [`gyro LPF ×${as.gyroScale}, D-term LPF ×${as.dtermScale}`]),
         rows,
         motors:
             motors +

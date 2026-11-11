@@ -371,6 +371,8 @@ export interface JointSearchResult {
     chosen: JointChosen | null;
     /** Without a chosen candidate: the rejected candidate with the highest crossover over all combinations, assessed on every axis. */
     bestRejected: JointAssessment | null;
+    /** Without a chosen or rejected candidate: the readable candidate with the highest PM over the searched combinations (it misses the targets), assessed on every axis (information). */
+    closestToTargets: (JointAssessment & { pmDeg: number | null; axis: JointAxisName }) | null;
     /** The motor model: mixer, what it needs and what it lacks, and the logged motors' current band power (information). */
     motorModel: {
         assessable: boolean;
@@ -584,6 +586,7 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         combos: [],
         chosen: null,
         bestRejected: null,
+        closestToTargets: null,
         motorModel: motorModelInfo(),
         probes: [],
         candidatesTried: 0,
@@ -1067,9 +1070,13 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                 reason:
                     ratio !== null
                         ? null
-                        : rep && rep.reproduced === false
-                          ? `noise_not_reproduced:model/logged_${rep.ratio?.toFixed(2)}${rep.share !== null ? `:share_${(rep.share * 100).toFixed(1)}pct` : ""}`
-                          : m.reasons.join(",") || "not_computable",
+                        : sg !== 1 &&
+                            input.chainInput &&
+                            !input.motor?.axes.find((x) => x.axis === name)?.chainNoiseValidated
+                          ? "gyro_chain_noise_band_not_validated_on_this_axis"
+                          : rep && rep.reproduced === false
+                            ? `noise_not_reproduced:model/logged_${rep.ratio?.toFixed(2)}${rep.share !== null ? `:share_${(rep.share * 100).toFixed(1)}pct` : ""}`
+                            : m.reasons.join(",") || "not_computable",
             },
             margins,
             dPath,
@@ -1116,6 +1123,20 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                 }
         return br && brAxis ? assessment(br.gyroScale, br.dtermScale, { [brAxis]: br.pid }) : null;
     };
+    // The readable candidate with the highest PM over the searched combinations (information when nothing meets).
+    const closestOf = (): JointSearchResult["closestToTargets"] => {
+        let best: JointCandidateRead | null = null;
+        let axis: JointAxisName | null = null;
+        for (const c of combos)
+            for (const ca of c.axes)
+                if (ca.safest && (!best || ca.safest.pmDeg! > best.pmDeg!)) {
+                    best = ca.safest;
+                    axis = ca.axis;
+                }
+        return best && axis
+            ? { ...assessment(best.gyroScale, best.dtermScale, { [axis]: best.pid }), pmDeg: best.pmDeg, axis }
+            : null;
+    };
 
     // The best combination whose combined assessment (every chosen axis together) stays within the
     // motor limit; a combination that exceeds it is named and the next one is tried.
@@ -1143,9 +1164,11 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                 ? "no_filter_combination_meets_the_targets_within_rules; the PID-only candidate stands"
                 : "no_candidate_meets_all_targets_within_rules_in_any_filter_combination",
         );
+        const bestRejected = bestRejectedOf();
         return result(pidOnlyMeeting ? "pid_only_stands" : "no_candidate_meets_targets_within_rules", {
             ...base,
-            bestRejected: bestRejectedOf(),
+            bestRejected,
+            closestToTargets: bestRejected ? null : closestOf(),
             probes: probes(),
         });
     }

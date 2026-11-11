@@ -1,0 +1,130 @@
+{
+    "version": 4,
+    "fixedAt": "2026-11-11",
+    "question": "Can GyroFlight, from the Blackbox logs of the start tune alone (roll and pitch swept), choose a PID + filter candidate that an independent remeasurement in the SITL shows to meet PM >= 45 deg, GM >= 6 dB (as a lower bound: median minus twice the GM uncertainty at the phase crossing) and |S| <= 6 dB on both swept axes, improve the start's missed targets, and keep every motor's hover noise band power within 1.10 x the start's, while the v2 candidate (motor band x1.45 in the v2 window) is rejected?",
+    "sweeps": 2,
+    "totalTicks": 5300,
+    "chirpStartTicks": [410, 460, 510],
+    "start": {
+        "p": 88,
+        "i": 55,
+        "d": 45,
+        "dMax": 60,
+        "settings": {
+            "gyro_lpf1_static_hz": 150,
+            "gyro_lpf1_dyn_min_hz": 150,
+            "gyro_lpf1_dyn_max_hz": 300,
+            "gyro_lpf2_static_hz": 300,
+            "dterm_lpf1_static_hz": 60,
+            "dterm_lpf1_dyn_min_hz": 60,
+            "dterm_lpf1_dyn_max_hz": 120,
+            "dterm_lpf2_static_hz": 120,
+            "p_pitch": 71,
+            "i_pitch": 82,
+            "d_pitch": 84,
+            "d_max_pitch": 0
+        },
+        "design": "noisy and laggy: gains about 1.25x and the D-term lowpass 0.8x of a pilot solution; designed with the engine on pilot logs (pilot/runA, pilot/runT)"
+    },
+    "control": {
+        "p": 62,
+        "i": 44,
+        "d": 41,
+        "dMax": 54,
+        "settings": {
+            "gyro_lpf1_static_hz": 120,
+            "gyro_lpf1_dyn_min_hz": 120,
+            "gyro_lpf1_dyn_max_hz": 240,
+            "gyro_lpf2_static_hz": 240,
+            "dterm_lpf1_static_hz": 90,
+            "dterm_lpf1_dyn_min_hz": 90,
+            "dterm_lpf1_dyn_max_hz": 180,
+            "dterm_lpf2_static_hz": 180,
+            "p_pitch": 50,
+            "i_pitch": 57,
+            "d_pitch": 67,
+            "d_max_pitch": 0
+        },
+        "chirpStartTicks": [430, 480, 530],
+        "gyroScale": 0.8,
+        "dtermScale": 1.5,
+        "pidScales": {
+            "roll": {
+                "p": 0.7,
+                "i": 0.8,
+                "d": 0.9
+            },
+            "pitch": {
+                "p": 0.7,
+                "i": 0.7,
+                "d": 0.8
+            }
+        },
+        "chosenHow": "a point of the joint space that passes every engine rule on the pilot log of the start (pilot/runT/probesC3.json: predicted roll PM 53.3, pitch PM 49.3, motor max 0.934, bandwidth 0.85/0.85, axis noise 0.94/0.93); not the engine's pick on that log (gyro x0.8, D-term x1.25, 62/39/54/72 + 50/57/67); measured before Calculate with other start ticks; never imported into the app"
+    },
+    "gyroNoise": {
+        "stdDps": 2,
+        "seed": 2,
+        "highpassHz": 150,
+        "highpassOrder": 2,
+        "note": "the protocol v2 noise test with a new seed (v3 used seed 1)"
+    },
+    "logGyroUnfilt": true,
+    "highResolution": true,
+    "angleMode": true,
+    "axes": ["roll", "pitch"],
+    "targets": {
+        "pmDeg": 45,
+        "gmDb": 6,
+        "sDb": 6
+    },
+    "improvement": "per swept axis: every target the start misses moves by at least the reference tolerance (PM 5 deg, GM 1.5 dB, |S| 1 dB) in the right direction; no met target is lost",
+    "motorRule": {
+        "metric": "per motor m (0..3): Welch band power 100-500 Hz (nperseg 1024, Hann, 50 %) of the logged motor[m] over the hover samples (every motor armed > 1001 for >= 1 s, outside every active CHIRP +-0.5 s), per contiguous run weighted by its segments (noise_metrics.py motorBandHover); ratio = median over the three candidate runs / median over the three start runs",
+        "maxMotorRatio": 1.1,
+        "criterion": "the highest per-motor ratio <= maxMotorRatio",
+        "maxRunSpreadRel": 0.15,
+        "minHoverSamples": 3072,
+        "clip": "no hover sample with any motor <= 1000 or >= 2000",
+        "why": "NOISE_ALLOWANCE (+10 %), the existing allowance of the filter advice and the joint search, applied to every motor instead of the analysed axis"
+    },
+    "jointSpace": {
+        "gyroLpfScales": [0.8, 1, 1.25, 1.5],
+        "dtermLpfScales": [0.8, 1, 1.25, 1.5],
+        "pidStep": 0.1,
+        "pidRange": [0.7, 1.3],
+        "source": "src/gyrocore/engine/jointSearch.ts JOINT_SEARCH (maxNoiseRatio 1.1, maxMotorNoiseRatio 1.1, minCrossoverKeep 0.8, minGainOverPidOnly 1.03)"
+    },
+    "pidOnly": "no requirement (protocol v2's requirePidOnlyNoCandidate dropped): on the pilot the PID-only search meets both axes too; its status and predicted motor ratios are recorded as information; PASS needs the app's own PID + filter proposal",
+    "regression": {
+        "dossier": "~/Gyroflight-audits/autotune-v2-sitl-e2e-joint-2026-11-11",
+        "candidate": {
+            "roll": {
+                "p": 70,
+                "i": 55,
+                "d": 27,
+                "dMax": 36
+            }
+        },
+        "gyroScale": 1.5,
+        "dtermScale": 1.25,
+        "expect": "the new engine on the v2 start logs does not choose it; its predicted highest motor ratio > 1.10; its v2 remeasurement's hover per-motor ratio > 1.10 (protocol v3 window)"
+    },
+    "tolerancesPredictionVsRemeasure": {
+        "fcRel": 0.1,
+        "pmDeg": 5.0,
+        "sDb": 1.0,
+        "gmDb": 1.5
+    },
+    "motorPredictionToleranceRel": 0.15,
+    "repeatPmSpreadMaxDeg": 1.0,
+    "vitePort": 5199,
+    "designedAfter": "protocol v3 (dossier autotune-v2-sitl-e2e-joint-motor-2026-11-11): INSUFFICIENT at the positive control, GM not assessable because the injected noise lowers the reference coherence at the phase crossing (70-77 Hz) below the v1/v2 threshold 0.99 once filters are lighter; v4 is a new experiment designed with knowledge of v3's data (v3 serves as its pilot): new noise seed, new start ticks, a principled GM rule; start tune, control, space, motor rule and targets unchanged",
+    "gmRule": {
+        "rule": "uncertainty_v4",
+        "sigmaDb": "20 log10(1 + eps), eps = sqrt(1 - coh) / (sqrt(coh) * sqrt(2 * n_d)), coh = reference coherence of the plant H1 at the phase crossing (reference_loop.py coherenceAtPhaseCrossing), n_d = 1 (the sweep passes the crossing frequency once: no averaging credit)",
+        "assessable": "every run of the tune: crossing in 5-85 Hz and sigmaDb <= 1.5 dB (the GM prediction tolerance)",
+        "meets": "median GM - 2 x the largest sigmaDb of the runs >= 6 dB; the improvement and no-loss checks use the same lower bound for start and candidate",
+        "alsoReported": "the protocol v1-v3 rule (coherence >= 0.99) for every tune, beside it"
+    }
+}

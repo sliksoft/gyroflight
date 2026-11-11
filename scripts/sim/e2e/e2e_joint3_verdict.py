@@ -46,11 +46,21 @@ AXES = ("roll", "pitch")
 PITCH_KEYS = {"p": "p_pitch", "i": "i_pitch", "d": "d_pitch", "dMax": "d_max_pitch"}
 
 
+GM_RULE = {"rule": "coherence_0.99"}
+
+
 def axis_ref(summary: dict, axis: str):
-    """(median, spread, gmAssessableAll) of one swept axis of a tune summary."""
+    """(median, spread, gmAssessableAll) of one swept axis of a tune summary. Under the protocol v4 GM rule the GM used against
+    the targets is the lower bound (median − 2σ) and assessability comes from σ; the GM read is kept as gmRead."""
     if axis == "roll":
-        return summary.get("refMedian"), summary.get("refSpread"), summary.get("gmAssessableAll")
-    return summary.get("refPitchMedian"), summary.get("refPitchSpread"), summary.get("gmAssessableAllPitch")
+        med, spread, ok = summary.get("refMedian"), summary.get("refSpread"), summary.get("gmAssessableAll")
+    else:
+        med, spread, ok = summary.get("refPitchMedian"), summary.get("refPitchSpread"), summary.get("gmAssessableAllPitch")
+    if GM_RULE["rule"] == "uncertainty_v4" and med:
+        g = (summary.get("gmV4") or {}).get(axis) or {}
+        med = {**med, "gmRead": med.get("gm"), "gm": g.get("lowerBound"), "gmSigmaDb": g.get("maxSigmaDb"), "gmAssessableCoherence099": ok}
+        ok = g.get("assessableAll", False)
+    return med, spread, ok
 
 
 def pid_of(tune: dict, settings: dict, axis: str) -> dict:
@@ -94,6 +104,12 @@ def selftest() -> int:
         good = r["ok"] is want
         ok = ok and good
         print(f"{'ok  ' if good else 'FAIL'} {name}: ok={r['ok']} max={None if r['max'] is None else round(r['max'], 3)} issues={r['issues']}")
+    # The protocol v4 GM uncertainty (summarize_tune.py gm_sigma_db): fixed reference values.
+    from summarize_tune import gm_sigma_db
+    for coh, want in ((0.946, 1.36), (0.99, 0.60), (0.995, 0.42)):
+        good = abs(gm_sigma_db(coh) - want) < 0.01
+        ok = ok and good
+        print(f"{'ok  ' if good else 'FAIL'} GM sigma at coherence {coh}: {gm_sigma_db(coh):.3f} dB (expected {want})")
     # The engine expectation recorded with the fixtures: no candidate chosen on the v2 start logs, predicted max > limit.
     eng = json.loads((fx / "engine_expectation.json").read_text())
     good = eng["chosen"] is None and eng["predictedMaxMotorRatio"] > rule["maxMotorRatio"]
@@ -112,6 +128,7 @@ def main() -> int:
     start, control, cand = load("start/summary.json"), load("control/summary.json"), load("candidate/summary.json")
     app, cand_file, engine = load("app/tuning_and_apply.json"), load("app/candidate.json"), load("app/engine.json")
     space, rule = proto["jointSpace"], proto["motorRule"]
+    GM_RULE["rule"] = proto.get("gmRule", {}).get("rule", "coherence_0.99") if isinstance(proto.get("gmRule"), dict) else "coherence_0.99"
     v = {"protocol": proto, "steps": [], "verdict": None, "firstDecisiveStep": None, "prediction": None}
     notes = v["steps"]
 

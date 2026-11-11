@@ -1152,6 +1152,9 @@
         "message": "No candidate chosen. Effects of the best rejected candidate on every axis and motor ($1)"
     },
     "gyroflightV2JointEffectsNone": { "message": "No candidate to assess: what this log allows" },
+    "gyroflightV2JointEffectsClosest": {
+        "message": "No candidate meets the targets. Effects of the candidate closest to them (highest phase margin, misses the targets; information only) on every axis and motor ($1)"
+    },
     "gyroflightV2JointEffectsPid": { "message": "PID now → candidate" },
     "gyroflightV2JointEffectsNoise": { "message": "Noise (predicted)" },
     "gyroflightV2JointEffectsMargins": { "message": "Margins" },
