@@ -73,7 +73,7 @@ export interface TuneProvenance {
     method: string;
     /** The change written, by CLI name, with its source route per key. */
     change: Record<string, number>;
-    sources: Record<string, "primary_route" | "jio_route">;
+    sources: Record<string, "primary_route" | "jio_route" | "joint_search">;
     limitations: string[];
     hardwareValidated: false;
     appliedAt: string;

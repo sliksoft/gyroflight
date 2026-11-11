@@ -1,0 +1,40 @@
+{
+    "gyroflightHead": "f487613ba45e46e318a41da9de1da60f494f7098",
+    "primarySha256": "cd4f62ade231e5e095951ba62701d622971faa8248478010a2fe9a8a7e6882ec",
+    "othersSha256": ["7667e54ec7c77cc5e211728bd668a0f0e53af914d98a78ee9a6f5371a2726efe"],
+    "decisionRoll": {
+        "primary": {
+            "status": "candidate_found",
+            "current": {
+                "crossoverHz": 28.63420155158864,
+                "pmDeg": 38.707093360643576,
+                "gmDb": 12.04326668911113,
+                "sDb": 5.642601623801326
+            },
+            "firstCause": null,
+            "candidatesTried": 2197,
+            "candidatesUsable": 2197,
+            "candidate": {
+                "proposed": {
+                    "p": 80,
+                    "i": 55,
+                    "d": 39,
+                    "dMax": 52
+                },
+                "outcome": "restores_margins",
+                "changed": true,
+                "proposedMargins": {
+                    "crossoverHz": 29.291726596271722,
+                    "phaseMarginDeg": 46.29085885819515,
+                    "gainMarginDb": null,
+                    "sensitivityPeakDb": null,
+                    "measured": {
+                        "phaseMarginDeg": 46.29085885819515,
+                        "gainMarginDb": 12.157263820702607,
+                        "sensitivityPeakDb": 4.988927716795767
+                    }
+                }
+            }
+        }
+    }
+}

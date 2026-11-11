@@ -141,6 +141,17 @@ function trace(
         crossLogPlant: r.crossLogPlant,
         crossLogRejected: r.crossLogRejected,
         candidateDecisions: r.candidateDecisions,
+        joint: r.joint,
+        chain: {
+            validation: r.chain.validation.map((v) => ({
+                axis: v.axis,
+                controlBand: v.controlBand,
+                noiseBand: v.noiseBand,
+                reasons: v.reasons,
+            })),
+            notes: r.chain.notes,
+        },
+        filters: r.filters,
         pid: r.pid.map((p) => ({ axis: p.axis, outcome: p.outcome, status: p.status, proposed: p.proposed })),
         proposal: r.proposal,
         recordingPlan: r.recordingPlan,

@@ -741,6 +741,60 @@
                     {{ $t("gyroflightV2StepInformative") }}
                 </p>
             </div>
+            <!-- 4b″. Joint PID + filter search (block 12): what the bounded search over PID, gyro lowpass and D-term
+                 lowpass chose, with its predicted margins, noise cost and the evidence per filter parameter. Its chosen
+                 candidate (if any) is the experimental proposal above; everything else here is information. -->
+            <div v-if="joint" class="text-sm mt-2" data-gyrocore="v2-joint-search" :data-status="joint.status">
+                <p class="font-bold" data-step="v2-joint">{{ $t("gyroflightV2JointTitle") }}</p>
+                <p class="text-dimmed">{{ $t("gyroflightV2JointHelp") }}</p>
+                <p data-gyrocore="v2-joint-status">
+                    <span class="font-bold">{{ $t(`gyroflightV2JointStatus_${joint.status}`) }}</span>
+                    <span class="text-dimmed"> · {{ jointSummary }}</span>
+                </p>
+                <div v-if="jointRows.length" class="overflow-x-auto max-w-full">
+                    <table class="gyroflight-workflow-table text-sm" data-gyrocore="v2-joint-axes">
+                        <thead>
+                            <tr>
+                                <th>{{ $t("gyroflightV2Axis") }}</th>
+                                <th>{{ $t("gyroflightV2JointValues") }}</th>
+                                <th>{{ $t("gyroflightV2JointMargins") }}</th>
+                                <th>{{ $t("gyroflightV2JointNoise") }}</th>
+                                <th>{{ $t("gyroflightV2JointPidOnly") }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="row in jointRows" :key="row.axis" :data-axis="row.axis">
+                                <td>{{ row.axis }}</td>
+                                <td data-gyrocore="v2-joint-values">{{ row.values }}</td>
+                                <td class="text-dimmed" data-gyrocore="v2-joint-margins">
+                                    <span v-for="(line, i) in row.margins" :key="i" class="block">{{ line }}</span>
+                                </td>
+                                <td data-gyrocore="v2-joint-noise">{{ row.noise }}</td>
+                                <td class="text-dimmed" data-gyrocore="v2-joint-pid-only">{{ row.pidOnly }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p v-if="jointFilters" class="text-dimmed" data-gyrocore="v2-joint-filters">{{ jointFilters }}</p>
+                <details class="text-sm">
+                    <summary class="cursor-pointer text-dimmed">{{ $t("gyroflightV2JointEvidenceToggle") }}</summary>
+                    <ul class="list-disc ps-5 [overflow-wrap:anywhere]" data-gyrocore="v2-joint-parameters">
+                        <li
+                            v-for="prm in joint.parameters"
+                            :key="prm.key"
+                            :data-key="prm.key"
+                            :data-searched="prm.searched"
+                        >
+                            <span class="font-bold">{{ prm.key }}</span
+                            >: {{ prm.searched ? $t("gyroflightV2JointSearched") : $t("gyroflightV2JointNotSearched")
+                            }}<span v-if="prm.missing.length"> ({{ prm.missing.join(", ") }})</span> —
+                            <span class="text-dimmed">{{ prm.model }}</span>
+                        </li>
+                    </ul>
+                    <p class="text-dimmed" data-gyrocore="v2-joint-space">{{ jointSpace }}</p>
+                </details>
+                <p class="text-dimmed" data-gyrocore="v2-joint-informative">{{ $t("gyroflightV2JointInformative") }}</p>
+            </div>
             <details v-if="experimentalWithheld.length" class="text-sm mt-1">
                 <summary class="cursor-pointer">
                     {{
@@ -1584,6 +1638,65 @@ const improvementRows = computed<ImprovementRow[]>(() => {
             },
         ];
     });
+});
+
+/** The joint PID + filter search (engine jointSearch.ts, block 12) as the user reads it. */
+const joint = computed(() => v2.result?.joint ?? null);
+const jointPid = (v: { p: number; i: number; d: number; dMax: number }) =>
+    `P ${v.p}, I ${v.i}, D ${v.d}${v.dMax ? `, d_max ${v.dMax}` : ""}`;
+const jointRead = (r: { crossoverHz: number | null; pmDeg: number | null; gmDb: number | null; sDb: number | null }) =>
+    `crossover ${num(r.crossoverHz, 1)} Hz, PM ${num(r.pmDeg, 0)}°, GM ${num(r.gmDb, 1)} dB, |S| ${num(r.sDb, 1)} dB`;
+const jointRows = computed(() => {
+    const j = joint.value;
+    if (!j) return [];
+    const axes = Object.keys(j.current.axes) as ("roll" | "pitch" | "yaw")[];
+    return axes.map((axis) => {
+        const cur = j.current.axes[axis]!;
+        const ch = j.chosen?.axes[axis] ?? null;
+        const po = j.pidOnly[axis] ?? null;
+        const noise = ch?.read.noise ?? null;
+        return {
+            axis,
+            values: ch
+                ? `${jointPid(cur.pid)} → ${jointPid(ch.read.pid)}; gyro LPF ×${ch.read.gyroScale}, D-term LPF ×${ch.read.dtermScale}`
+                : `${jointPid(cur.pid)} (${t("gyroflightV2JointNoCandidateAxis")})`,
+            margins: ch ? [`now: ${jointRead(cur)}`, `candidate: ${jointRead(ch.read)}`] : [`now: ${jointRead(cur)}`],
+            noise: noise
+                ? `${t("gyroflightV2JointNoiseRatio")} ${num(noise.ratio, 2)} (P-term ${num(noise.gyroTermRatio, 2)}, D-term ${num(noise.dtermRatio, 2)}; ${noise.bandHz[0]}–${noise.bandHz[1]} Hz; ${t("gyroflightV2JointNoisePredicted")})`
+                : "--",
+            pidOnly: po
+                ? `${jointPid(po.pid)}: ${jointRead(po)}; ${t("gyroflightV2JointNoiseRatio")} ${num(po.noise.ratio, 2)}${po.meetsTargets ? "" : ` (${t("gyroflightV2StepNotOffered")})`}`
+                : t("gyroflightV2JointNoPidOnly"),
+        };
+    });
+});
+const jointSummary = computed(() => {
+    const j = joint.value;
+    if (!j) return "";
+    const parts = [`${j.candidatesUsable} of ${j.candidatesTried} candidates readable`];
+    if (j.chosen) parts.push(`${t(`gyroflightV2JointReason_${j.chosen.reason}`)}`);
+    if (j.reasons.length) parts.push(j.reasons.join("; "));
+    return parts.join(" · ");
+});
+const jointFilters = computed(() => {
+    const ch = joint.value?.chosen;
+    if (!ch) return "";
+    const items = Object.entries(ch.filters).map(([k, v]) => `${k} ${v.from} → ${v.to}`);
+    return items.length ? `${t("gyroflightV2JointFilters")}: ${items.join(", ")}` : "";
+});
+const jointSpace = computed(() => {
+    const j = joint.value;
+    if (!j) return "";
+    const s = j.searched;
+    // Joined with a middle dot: the message substitution escapes a slash.
+    return t("gyroflightV2JointSpace", [
+        s.gyroLpfScales.join(" · "),
+        s.dtermLpfScales.join(" · "),
+        s.pidScales.join(" · "),
+        num(s.maxNoiseRatio, 2),
+        num(s.minCrossoverKeep, 2),
+        num(s.minGainOverPidOnly, 2),
+    ]);
 });
 
 /** Per axis and route the candidate decision (engine candidateDecision.ts) as table rows. */

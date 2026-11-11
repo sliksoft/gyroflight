@@ -91,6 +91,7 @@ import { chooseAnalysis, resolutionConvergence, type AnalysisOption } from "./ad
 import { selectQualificationRung } from "./qualificationRung";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
+import { jointSearch, type JointSearchResult } from "./jointSearch";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
@@ -318,6 +319,13 @@ export interface AutotuneV2Result {
      * value, unit, threshold and consequence, the plant, whether the search ran, and its status.
      */
     candidateDecisions: Partial<Record<AxisName, { primary: RouteDecision | null; jio: RouteDecision | null }>>;
+    /**
+     * Joint PID + filter search (jointSearch.ts, block 12): the bounded search over the gyro and
+     * D-term lowpass groups together with the ±MAX_STEP PID grid on the primary route's measured
+     * margins, with a predicted noise cost; its chosen candidate (if any) is offered through the
+     * experimental route. Null when not computed.
+     */
+    joint: JointSearchResult | null;
     /**
      * The agreed measurement (two CHIRP rounds, one sweep configuration for all axes), the frequencies
      * each axis's data does not show, and the existing data apart from the proposed settings
@@ -1302,11 +1310,42 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         const jioDecision = jio.chain[name]?.decision ?? null;
         if (primary || jioDecision) candidateDecisions[name] = { primary, jio: jioDecision };
     }
+    // Joint PID + filter search on the primary route (block 12): the same loops and decisions, the
+    // chain simulation of this log and the D paths; the PID-only candidates are the bar it must clear.
+    const joint: JointSearchResult | null = analysed.length
+        ? jointSearch({
+              axes: analysed.flatMap((name) => {
+                  const ax = axes[name]!;
+                  const dec = candidateDecisions[name]?.primary;
+                  const p = nums(h, `${name}PID`);
+                  if (!dec || !p) return [];
+                  return [
+                      {
+                          axis: name,
+                          loop: ax.experimentalLoop,
+                          current: { p: p[0], i: p[1], d: p[2], dMax: dmax[AXES.indexOf(name)] ?? 0 },
+                          decision: dec,
+                          window: ax.window,
+                          dterm: ax.dterm,
+                          dtermValidated: ax.dtermAccepted,
+                          chainValidated: chainOk(AXES.indexOf(name)),
+                          gyroAdc: log.channels.gyroAdc[AXES.indexOf(name)],
+                      },
+                  ];
+              }),
+              chainCfg,
+              chainInput,
+              baseSim: sim,
+              sampleRateHz: log.sampleRateHz,
+              flightMask: mask,
+          })
+        : null;
     const experimentalOutcome = buildExperimentalProposal({
         primaryItems: items,
         primaryPid: pid,
         jio,
         decisions: candidateDecisions,
+        joint,
         buildProposal: (selected) => build(selected).proposal,
     });
 
@@ -1432,6 +1471,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         experimental: experimentalOutcome.proposal,
         experimentalWithheld: experimentalOutcome.withheld,
         candidateDecisions,
+        joint,
         recordingPlan: recordingPlan({
             decisions: candidateDecisions,
             headers: h,

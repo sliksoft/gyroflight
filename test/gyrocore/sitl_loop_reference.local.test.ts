@@ -161,6 +161,18 @@ describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", ()
                 },
                 pidRoll: r.pid.find((p) => p.axis === "roll") ?? null,
                 decisionRoll: r.candidateDecisions.roll ?? null,
+                joint: r.joint,
+                experimental: r.experimental && {
+                    items: r.experimental.items.map((it) => ({
+                        key: it.key,
+                        from: it.from,
+                        to: it.to,
+                        status: it.status,
+                        source: it.source,
+                    })),
+                    limitations: r.experimental.limitations,
+                },
+                experimentalWithheld: r.experimentalWithheld,
                 itermRelax: relax,
                 dterm: r.dterm.find((x) => x.axis === "roll") ?? null,
                 chain: r.chain,

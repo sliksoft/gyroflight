@@ -18,6 +18,24 @@ STARTS=$(jq_ "','.join(str(x) for x in d['chirpStartTicks'])")
 PORT=$(jq_ "d.get('vitePort', 5199)")
 echo "protocol: start $START, control $CONTROL, starts $STARTS, head $(git -C "$REPO" rev-parse --short HEAD)"
 
+# Provenance of the whole proof, written before any phase runs: code, build and input (regression form, 2026-11-11).
+if [ ! -f "$DOSSIER/provenance.json" ]; then
+  REFD=$HOME/Gyroflight-audits/autotune-v2-sitl-loop-reference-2026-11-10
+  {
+    echo "{\"startedAt\":\"$(date -u +%FT%TZ)\",\"gyroflightHead\":\"$(git -C "$REPO" rev-parse HEAD)\","
+    echo "\"gyroflightDirty\":\"$(git -C "$REPO" status --porcelain -- src scripts/sim test package.json | tr '\n' ' ' | sed 's/"/\\\\"/g')\","
+    echo "\"vliegaiHead\":\"$(git -C $HOME/VliegAI/_worktrees/air65-sim-review-20261028 rev-parse HEAD)\","
+    echo "\"elfSha256\":\"$(sha256sum $REFD/build/bf-src/obj/main/betaflight_SITL.elf | cut -d' ' -f1)\","
+    echo "\"protocolSha256\":\"$(sha256sum "$PROTO" | cut -d' ' -f1)\",\"protocolMdSha256\":\"$([ -f "$DOSSIER/PROTOCOL.md" ] && sha256sum "$DOSSIER/PROTOCOL.md" | cut -d' ' -f1)\","
+    echo "\"evaluatorSelftest\":\"$(python3 "$HERE/e2e_verdict.py" --selftest | tail -1)\",\"scripts\":{"
+    for f in run_e2e_roll.sh run_tune.sh summarize_tune.py ui_calculate.mjs e2e_verdict.py; do echo "\"e2e/$f\":\"$(sha256sum "$HERE/$f" | cut -d' ' -f1)\","; done
+    for f in air65_chirp_sitl.py reference_loop.py noise_metrics.py; do echo "\"reference/$f\":\"$(sha256sum "$REPO/scripts/sim/reference/$f" | cut -d' ' -f1)\","; done
+    echo "\"test/sitl_loop_reference.local.test.ts\":\"$(sha256sum "$REPO/test/gyrocore/sitl_loop_reference.local.test.ts" | cut -d' ' -f1)\"}}"
+  } > "$DOSSIER/provenance.json"
+  python3 -c "import json; json.load(open('$DOSSIER/provenance.json'))" || { echo "STOP: provenance.json malformed"; exit 2; }
+  grep -q '"evaluatorSelftest":"selftest PASS"' "$DOSSIER/provenance.json" || { echo "STOP: evaluator selftest failed"; exit 2; }
+fi
+
 [ -f "$DOSSIER/start/summary.json" ] || "$HERE/run_tune.sh" "$DOSSIER/start" --tune "$START" --starts "$STARTS"
 [ -f "$DOSSIER/control/summary.json" ] || "$HERE/run_tune.sh" "$DOSSIER/control" --tune "$CONTROL" --starts "$STARTS"
 
@@ -29,11 +47,18 @@ if [ ! -f "$DOSSIER/app/tuning_and_apply.json" ]; then
   for i in $(seq 1 60); do ss -ltn | grep -q ":$PORT " && break; sleep 1; done
   sleep 3
   # provenance of the app step: the HEAD Vite serves, whether src/ is clean, and the e2e scripts' hashes
-  {
-    echo "{\"startedAt\":\"$(date -u +%FT%TZ)\",\"gyroflightHead\":\"$(git -C "$REPO" rev-parse HEAD)\",\"srcDirty\":\"$(git -C "$REPO" status --porcelain -- src package.json | tr '\n' ' ')\",\"port\":$PORT,\"scripts\":{"
-    for f in run_e2e_roll.sh run_tune.sh summarize_tune.py ui_calculate.mjs e2e_verdict.py; do echo "\"e2e/$f\":\"$(sha256sum "$HERE/$f" | cut -d' ' -f1)\","; done
-    echo "\"reference/reference_loop.py\":\"$(sha256sum "$REPO/scripts/sim/reference/reference_loop.py" | cut -d' ' -f1)\"}}"
-  } > "$DOSSIER/app/provenance.json"
+  python3 - "$DOSSIER" "$REPO" "$HERE" "$PORT" <<'EOP'
+import hashlib, json, subprocess, sys, datetime
+d, repo, here, port = sys.argv[1:5]
+sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+prov = {"startedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "gyroflightHead": subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip(),
+        "srcDirty": subprocess.check_output(["git", "-C", repo, "status", "--porcelain", "--", "src", "package.json"], text=True),
+        "srcDirtyRecordedAtCalculate": True, "port": int(port),
+        "scripts": {f"e2e/{f}": sha(f"{here}/{f}") for f in ("run_e2e_roll.sh", "run_tune.sh", "summarize_tune.py", "ui_calculate.mjs", "e2e_verdict.py")}}
+prov["scripts"]["reference/reference_loop.py"] = sha(f"{repo}/scripts/sim/reference/reference_loop.py")
+json.dump(prov, open(f"{d}/app/provenance.json", "w"), indent=1)
+EOP
   (cd "$REPO" && node "$HERE/ui_calculate.mjs" "$DOSSIER/app" $LOGS | tee "$DOSSIER/app/run.log") || echo "  ui exit $?"
   VPID=$(ss -ltnp | grep ":$PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); [ -n "$VPID" ] && kill "$VPID" || true
   # the engine on exactly the imported logs (first log + others), for the predicted margins at full precision

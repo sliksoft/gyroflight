@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "fixedAt": "2026-11-10",
+    "start": { "p": 100, "i": 79, "d": 30, "dMax": 40 },
+    "control": { "p": 70, "i": 79, "d": 30, "dMax": 40 },
+    "chirpStartTicks": [200, 250, 300],
+    "highResolution": true,
+    "angleMode": true,
+    "targets": { "pmDeg": 45, "gmDb": 6, "sDb": 6 },
+    "improvement": "every target the start misses moves by at least the reference tolerance (PM 5°, GM 1.5 dB, |S| 1 dB) in the right direction; no met target is lost",
+    "tolerancesPredictionVsRemeasure": { "fcRel": 0.1, "pmDeg": 5.0, "sDb": 1.0, "gmDb": 1.5 },
+    "repeatPmSpreadMaxDeg": 1.0,
+    "vitePort": 5199
+}

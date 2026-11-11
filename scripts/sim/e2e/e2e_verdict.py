@@ -1,6 +1,8 @@
 """Verdict of the end-to-end roll autotune proof (dossier PROTOCOL.md, fixed before Calculate).
 
 Usage: e2e_verdict.py <dossier dir>
+       e2e_verdict.py --selftest   (the evaluator on the fixtures of the 2026-11-10 proof, test/fixtures/sitl_e2e_roll_2026-11-10:
+                                   the recorded data must give PASS, and each mutation its named verdict)
 Reads protocol.json, start/summary.json, control/summary.json, app/tuning_and_apply.json, app/engine.json (the engine on the
 same logs, from run_tune.sh's combined job) and candidate/summary.json; writes VERDICT.md and verdict.json.
 
@@ -119,7 +121,74 @@ def parse_shown_margins(app: dict) -> dict | None:
     return None
 
 
+def selftest() -> int:
+    """The evaluator against the recorded proof and mutations of it (regression of the verdict rules)."""
+    import shutil
+    import tempfile
+
+    fixtures = Path(__file__).resolve().parents[3] / "test" / "fixtures" / "sitl_e2e_roll_2026-11-10"
+    cases = []
+
+    def run(name, mutate):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "dossier"
+            shutil.copytree(fixtures, d)
+            mutate(d)
+            saved = sys.argv
+            sys.argv = ["e2e_verdict.py", str(d)]
+            try:
+                import io
+                import contextlib
+
+                with contextlib.redirect_stdout(io.StringIO()):
+                    main()
+            finally:
+                sys.argv = saved
+            v = json.loads((d / "verdict.json").read_text())
+            cases.append((name, v["verdict"], v.get("firstDecisiveStep"), v.get("why")))
+            return v
+
+    def edit(rel, fn):
+        def m(d):
+            p = d / rel
+            data = json.loads(p.read_text())
+            fn(data)
+            p.write_text(json.dumps(data))
+        return m
+
+    def set_pm(summary, pm):
+        summary["refMedian"]["pm"] = pm
+        for r in summary["runs"]:
+            r["ref"]["pm"] = pm
+        summary["refMeetsTargets"] = pm >= TARGETS["pm"] and not [k for k in misses(summary["refMedian"]) if k != "pm"]
+        summary["refMisses"] = misses(summary["refMedian"])
+
+    expected = [
+        ("recorded", lambda d: None, "PASS", None),
+        ("candidate misses PM", edit("candidate/summary.json", lambda s: set_pm(s, 44.0)), "FAIL", "remeasurement_does_not_confirm"),
+        ("candidate improves PM by less than 5°", edit("candidate/summary.json", lambda s: set_pm(s, 44.5)), "FAIL", "remeasurement_does_not_confirm"),
+        ("control outside the grid", edit("control/summary.json", lambda s: s["tune"].update({"p": 69})), "FAIL", "candidate_missing_in_grid"),
+        ("control misses the targets", edit("control/summary.json", lambda s: set_pm(s, 40.0)), "INSUFFICIENT", None),
+        ("start already meets the targets", edit("start/summary.json", lambda s: set_pm(s, 50.0)), "INSUFFICIENT", None),
+        ("start GM not assessable", edit("start/summary.json", lambda s: s.update({"gmAssessableAll": False})), "INSUFFICIENT", None),
+        ("app shows no roll items", edit("app/tuning_and_apply.json", lambda a: (a.update({"rollItems": []}), a["read"].update({"rollShown": "informative_step_only"}))), "FAIL", "candidate_rejected"),
+        ("Apply blocked for a reason about the candidate", edit("app/tuning_and_apply.json", lambda a: a["read"].update({"blocks": ["plausible_step:step_too_large:p_roll"]})), "FAIL", "candidate_rejected"),
+        ("chosen candidate outside the grid", edit("app/tuning_and_apply.json", lambda a: a["rollItems"][0]["cells"].__setitem__(2, "79")), "FAIL", "candidate_missing_in_grid"),
+        ("candidate not remeasured", lambda d: (d / "candidate" / "summary.json").unlink(), "INSUFFICIENT", None),
+    ]
+    ok = True
+    for name, mutate, verdict, step in expected:
+        v = run(name, mutate)
+        good = v["verdict"] == verdict and v.get("firstDecisiveStep") == step
+        ok = ok and good
+        print(f"{'ok  ' if good else 'FAIL'} {name}: {v['verdict']} {v.get('firstDecisiveStep') or ''} (expected {verdict} {step or ''})")
+    print("selftest", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
 def main() -> int:
+    if sys.argv[1:] == ["--selftest"]:
+        return selftest()
     dossier = Path(sys.argv[1])
     proto = json.loads((dossier / "protocol.json").read_text())
     load = lambda rel: json.loads((dossier / rel).read_text()) if (dossier / rel).is_file() else None  # noqa: E731

@@ -43,7 +43,26 @@ def main() -> int:
             row["issues"].append(f"header:rollPID={h.get('rollPID')} d_max={h.get('d_max')} (wanted {want_pid}, {tune['dMax']})")
         if h.get("blackbox_high_resolution") != "1" or h.get("debug_mode") != "96" or h.get("looptime") != "1000":
             row["issues"].append(f"header:hires={h.get('blackbox_high_resolution')} debug={h.get('debug_mode')} looptime={h.get('looptime')}")
-        row["header"] = {k: h.get(k) for k in ("rollPID", "d_max", "debug_mode", "looptime", "blackbox_high_resolution", "Firmware revision")}
+        # Filter settings the run was asked for (joint proof): each checked in the header (dyn min/max share one header key).
+        HEADER_OF = {"gyro_lpf1_dyn_min_hz": ("gyro_lpf1_dyn_hz", 0), "gyro_lpf1_dyn_max_hz": ("gyro_lpf1_dyn_hz", 1),
+                     "dterm_lpf1_dyn_min_hz": ("dterm_lpf1_dyn_hz", 0), "dterm_lpf1_dyn_max_hz": ("dterm_lpf1_dyn_hz", 1)}
+        for key, want in (prov.get("settings") or {}).items():
+            hk, idx = HEADER_OF.get(key, (key, 0))
+            got = (h.get(hk) or "").split(",")
+            got_v = got[idx] if idx < len(got) else None
+            if got_v is None or int(got_v) != int(want):
+                row["issues"].append(f"header:{key}={got_v} (wanted {want})")
+        if prov.get("logGyroUnfilt") and "gyroUnfilt[0]" not in (h.get("Field I name") or ""):
+            row["issues"].append("header:gyroUnfilt_not_logged")
+        noise_req = prov.get("gyroNoise")
+        got_noise = r.get("gyroNoise")
+        if noise_req and (not got_noise or abs(float(got_noise.get("stdDps", -1)) - float(noise_req["stdDps"])) > 1e-9 or int(got_noise.get("seed", -1)) != int(noise_req["seed"])):
+            row["issues"].append(f"sitl:gyro_noise_not_applied:{got_noise}")
+        row["gyroNoise"] = got_noise
+        row["header"] = {k: h.get(k) for k in ("rollPID", "d_max", "debug_mode", "looptime", "blackbox_high_resolution", "Firmware revision",
+                                                 "gyro_lpf1_static_hz", "gyro_lpf1_dyn_hz", "gyro_lpf2_static_hz", "dterm_lpf1_static_hz", "dterm_lpf1_dyn_hz", "dterm_lpf2_static_hz")}
+        nz = json.loads((d / "noise.json").read_text()) if (d / "noise.json").is_file() else None
+        row["noise"] = nz if nz and nz.get("status") == "ok" else None
         row["logSha256"] = r.get("blackbox_log_sha256")
         row["plant"] = r.get("plant")
         if (r.get("plant") or {}).get("maxAbsRollDeg", 0) > 45 or (r.get("plant") or {}).get("minZ", 1) < 0.3:
@@ -106,7 +125,13 @@ def main() -> int:
         "gmAssessableAll": bool(ok) and all(r["ref"]["gmAssessable"] for r in ok),
         "gfMedian": None,
         "combined": None,
+        "settings": prov.get("settings") or {},
+        "gyroNoise": prov.get("gyroNoise"),
+        "noiseMedian": None,
     }
+    nzs = [r["noise"] for r in ok if r.get("noise")]
+    if nzs:
+        summary["noiseMedian"] = {k: statistics.median(n[k] for n in nzs) if all(n.get(k) is not None for n in nzs) else None for k in ("gyroBand", "ptermBand", "dtermBand", "pidSumBand", "ctrlBand", "motorBand", "kp")}
     gfs = [r["gf"] for r in ok if r["gf"] and r["gf"]["fc"] is not None and r["gf"]["pm"] is not None]
     if gfs:
         summary["gfMedian"] = {k: statistics.median(g[k] for g in gfs) if all(g[k] is not None for g in gfs) else None for k in ("fc", "pm", "gm", "s")}
@@ -133,6 +158,20 @@ def main() -> int:
             "searchRan": dec and dec.get("searchRan"), "tried": dec and dec.get("candidatesTried"), "usable": dec and dec.get("candidatesUsable"),
             "combination": dec and dec.get("combination") and {k: dec["combination"][k] for k in ("flights", "rejected", "consistent", "commonBins")},
         }
+        # Joint PID + filter search (block 12) and the experimental items the app would build from it.
+        j = g.get("joint")
+        ch = j and j.get("chosen")
+        roll = ch and (ch.get("axes") or {}).get("roll")
+        summary["combined"]["joint"] = j and {
+            "status": j["status"], "reasons": j["reasons"], "tried": j["candidatesTried"], "usable": j["candidatesUsable"], "searchMs": j.get("searchMs"),
+            "searched": j["searched"], "currentFilters": j["current"]["filters"],
+            "parametersNotSearched": [{"key": p["key"], "missing": p["missing"]} for p in j["parameters"] if not p["searched"]],
+            "chosen": ch and {"gyroScale": ch["gyroScale"], "dtermScale": ch["dtermScale"], "filters": ch["filters"], "reason": ch["reason"], "pidOnly": ch["pidOnly"],
+                              "roll": roll and {"pid": roll["read"]["pid"], "fc": roll["read"]["crossoverHz"], "pm": roll["read"]["pmDeg"], "gm": roll["read"]["gmDb"], "s": roll["read"]["sDb"],
+                                                "noise": roll["read"]["noise"], "crossoverGain": roll["read"]["crossoverGain"], "outcome": roll["proposal"]["outcome"]}},
+            "pidOnlyRoll": (j.get("pidOnly") or {}).get("roll"),
+        }
+        summary["combined"]["experimentalItems"] = (g.get("experimental") or {}).get("items") if g.get("experimental") else None
     (out / "summary.json").write_text(json.dumps(summary, indent=1, default=float) + "\n")
     f = lambda v, p=1: "–" if v is None else f"{v:.{p}f}"  # noqa: E731
     print(f"tune {tune['p']}/{tune['i']}/{tune['d']}/{tune['dMax']}: {len(ok)}/{len(rows)} valid runs")
@@ -143,10 +182,18 @@ def main() -> int:
     if summary["refMedian"]:
         rm = summary["refMedian"]
         print(f"  median ref: fc {f(rm['fc'])} PM {f(rm['pm'])} GM {f(rm['gm'])} |S| {f(rm['s'], 2)} meets={summary.get('refMeetsTargets')} misses={summary.get('refMisses')} gmAssessableAll={summary['gmAssessableAll']}")
+    if summary["noiseMedian"]:
+        nm = summary["noiseMedian"]
+        print(f"  median noise bands (100–500 Hz): gyro {nm['gyroBand']:.4g} P {nm['ptermBand']:.4g} D {nm['dtermBand']:.4g} pidSum {nm['pidSumBand']:.4g} ctrl(Kp·gyro+D) {nm['ctrlBand'] and round(nm['ctrlBand'], 4)} motors {nm['motorBand']:.4g}")
     if summary["combined"]:
         c = summary["combined"]
         print(f"  engine (combined {len(c.get('others') or [])+1} logs): {c['status']} cand {c['candidate'] and c['candidate']['proposed']} "
               f"{c['candidate'] and 'fc %.1f PM %.1f GM %.1f |S| %.2f' % (c['candidate']['fc'], c['candidate']['pm'], c['candidate']['gm'], c['candidate']['s'])}")
+        j = c.get("joint")
+        if j:
+            ch = j.get("chosen")
+            print(f"  joint: {j['status']} ({j['usable']} usable of {j['tried']}, {j.get('searchMs')} ms) " + (f"chosen gyro x{ch['gyroScale']} dterm x{ch['dtermScale']} roll {ch['roll'] and ch['roll']['pid']} "
+                  f"{ch['roll'] and 'fc %.1f PM %.1f GM %.1f |S| %.2f noise %.2f' % (ch['roll']['fc'], ch['roll']['pm'], ch['roll']['gm'], ch['roll']['s'], ch['roll']['noise']['ratio'] or float('nan'))}" if ch else "no chosen"))
     return 0
 
 

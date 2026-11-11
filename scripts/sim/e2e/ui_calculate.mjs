@@ -104,6 +104,29 @@ const read = await p.evaluate(() => {
             ),
         })),
         verified: text('[data-gyrocore="v2-verified"]').map((s) => s.slice(0, 300)),
+        // 4b″ joint PID + filter search (block 12): status, per-axis rows, filter line and the evidence per parameter.
+        joint: (() => {
+            const el = document.querySelector('[data-gyrocore="v2-joint-search"]');
+            if (!el) return null;
+            return {
+                status: el.getAttribute("data-status"),
+                statusText: el.querySelector('[data-gyrocore="v2-joint-status"]')?.innerText.trim() ?? null,
+                axes: [...el.querySelectorAll('[data-gyrocore="v2-joint-axes"] tbody tr')].map((tr) => ({
+                    axis: tr.getAttribute("data-axis"),
+                    values: tr.querySelector('[data-gyrocore="v2-joint-values"]')?.innerText.trim() ?? null,
+                    margins: tr.querySelector('[data-gyrocore="v2-joint-margins"]')?.innerText.trim() ?? null,
+                    noise: tr.querySelector('[data-gyrocore="v2-joint-noise"]')?.innerText.trim() ?? null,
+                    pidOnly: tr.querySelector('[data-gyrocore="v2-joint-pid-only"]')?.innerText.trim() ?? null,
+                })),
+                filters: el.querySelector('[data-gyrocore="v2-joint-filters"]')?.innerText.trim() ?? null,
+                parameters: [...el.querySelectorAll('[data-gyrocore="v2-joint-parameters"] li')].map((li) => ({
+                    key: li.getAttribute("data-key"),
+                    searched: li.getAttribute("data-searched"),
+                    text: li.innerText.trim().slice(0, 300),
+                })),
+                space: el.querySelector('[data-gyrocore="v2-joint-space"]')?.innerText.trim() ?? null,
+            };
+        })(),
     };
 });
 read.improvementRows = await p.evaluate(() =>
@@ -116,13 +139,28 @@ read.improvementRows = await p.evaluate(() =>
 );
 // What the user sees for roll: a proposal (an experimental item with the Apply route), an informative step only, or a block.
 const rollItems = read.experimentalItems.filter((it) => /_roll$/.test(it.key ?? ""));
+// Filter items carry no axis suffix (gyro_lpf*, dterm_lpf*): the joint candidate's filter part.
+const filterItems = read.experimentalItems.filter((it) => /^(gyro|dterm)_lpf/.test(it.key ?? ""));
 const rollStep = read.improvementRows.find((r) => r.axis === "roll") ?? null;
 const rollDecision = read.decisions.find((r) => r.axis === "roll" && r.route === "primary") ?? null;
 read.rollShown = rollItems.length ? "proposal" : rollStep?.state === "step" ? "informative_step_only" : "blocked";
+// Joint proof: a PID + filter proposal is roll items from the joint search together with filter items.
+read.jointShown =
+    rollItems.length && filterItems.length && rollItems.every((it) => it.source === "joint_search")
+        ? "pid_and_filter_proposal"
+        : rollItems.length
+          ? "pid_only_proposal"
+          : (read.joint?.status ?? "no_joint_block");
 writeFileSync(
     `${OUT}/tuning_and_apply.json`,
-    JSON.stringify({ logs: LOGS, errs, importedMs, calculateMs, rollItems, rollStep, rollDecision, read }, null, 1),
+    JSON.stringify(
+        { logs: LOGS, errs, importedMs, calculateMs, rollItems, filterItems, rollStep, rollDecision, read },
+        null,
+        1,
+    ),
 );
+const jointEl = p.locator('[data-gyrocore="v2-joint-search"]').first();
+if (await jointEl.count()) await jointEl.screenshot({ path: `${OUT}/joint_search.png` });
 const section = p.locator('[data-step="v2-experimental"]').first();
 if (await section.count()) await section.scrollIntoViewIfNeeded();
 await p.screenshot({ path: `${OUT}/tuning_and_apply_viewport.png` });
@@ -138,7 +176,9 @@ console.log(
         {
             errs,
             rollShown: read.rollShown,
+            jointShown: read.jointShown,
             rollItems,
+            filterItems,
             apply: read.applyButton,
             rollDecisionValues: rollDecision?.values,
         },

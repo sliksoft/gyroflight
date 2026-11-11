@@ -38,8 +38,10 @@ import type { AbsoluteProposal, PartStatus, ProposalItem, ProposalPart } from "@
 import type { AxisPidProposal } from "@/gyrocore/engine/pidOptimizer";
 import type { JioRouteResult } from "@/gyrocore/engine/autotuneV2";
 import type { DecisionCheck, RouteDecision } from "@/gyrocore/engine/candidateDecision";
+import type { JointSearchResult } from "@/gyrocore/engine/jointSearch";
 
-export type ExperimentalSource = "primary_route" | "jio_route";
+/** joint_search: the joint PID + filter search on the primary route's measurement (jointSearch.ts). */
+export type ExperimentalSource = "primary_route" | "jio_route" | "joint_search";
 
 export interface ExperimentalItem extends ProposalItem {
     source: ExperimentalSource;
@@ -167,6 +169,12 @@ export interface ExperimentalInput {
      * the bounds' qualification is missing, and the first decisive check where it is not computable.
      */
     decisions?: Partial<Record<"roll" | "pitch" | "yaw", { primary: RouteDecision | null; jio: RouteDecision | null }>>;
+    /**
+     * The joint PID + filter search (block 12). With status candidate_found its chosen candidate replaces
+     * the PID items of the axes it covers and adds the filter items it rests on: it was chosen only where
+     * it beats the PID-only candidate (more axes meeting the targets, or a crossover gain at equal axes).
+     */
+    joint?: JointSearchResult | null;
     /** Builds the write-shaped proposal (margins, Safety evidence) for a selection: the engine's own. */
     buildProposal: (selected: ProposalItem[]) => AbsoluteProposal | null;
 }
@@ -302,6 +310,55 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
             withheld.push({ key: `pid_${axis}`, part: "pid", source: "primary_route", reasons: [...new Set(reasons)] });
     }
 
+    // Joint PID + filter candidate (block 12): the axes it covers take its PID values and the filter
+    // values they were read with; the PID-only or JIO items of those axes step aside (the joint search
+    // was chosen only where it beats the PID-only best). Measured margins and a noise simulation on
+    // logged data: status BLOCKED, like every measured-margin candidate; never VALIDATED.
+    const joint = input.joint;
+    if (joint?.status === "candidate_found" && joint.chosen) {
+        const ch = joint.chosen;
+        const covered = Object.keys(ch.axes) as ("roll" | "pitch" | "yaw")[];
+        const jointGaps = [
+            "joint_pid_filter_search_on_measured_margins",
+            `filters:gyro_lpf_x${ch.gyroScale}:dterm_lpf_x${ch.dtermScale}`,
+            "noise_simulated_on_logged_data",
+        ];
+        for (const axis of covered) {
+            const c = ch.axes[axis]!;
+            if (primaryMeasurementOk[axis] === false) continue;
+            for (let k = items.length - 1; k >= 0; k--) {
+                if (items[k].part === "pid" && new RegExp(`_${axis}$`).test(items[k].key)) items.splice(k, 1);
+            }
+            for (let k = withheld.length - 1; k >= 0; k--) if (withheld[k].key === `pid_${axis}`) withheld.splice(k, 1);
+            items.push(...pidItems(c.proposal, "joint_search", jointGaps, []));
+            limitations.add(`experimental:${axis}:margins_measured_in_band_not_bounded`);
+            limitations.add(
+                `experimental:${axis}:joint_candidate_predicted_noise_ratio_${c.read.noise.ratio === null ? "unknown" : c.read.noise.ratio.toFixed(2)}`,
+            );
+        }
+        const anyAxis = covered.some((axis) => primaryMeasurementOk[axis] !== false);
+        if (anyAxis) {
+            for (const [key, v] of Object.entries(ch.filters)) {
+                // A filter item the single-group filter advice already carries steps aside for the joint value.
+                for (let k = items.length - 1; k >= 0; k--) if (items[k].key === key) items.splice(k, 1);
+                for (let k = withheld.length - 1; k >= 0; k--) if (withheld[k].key === key) withheld.splice(k, 1);
+                items.push({
+                    key,
+                    part: key.startsWith("dterm_") ? "dterm_filter" : "gyro_filter",
+                    from: v.from,
+                    to: v.to,
+                    status: "BLOCKED",
+                    reasons: [...jointGaps, "required_measurement:ab_flight_with_proposal"],
+                    source: "joint_search",
+                    evidence: "MEASURED",
+                    qualificationGaps: jointGaps,
+                });
+            }
+            limitations.add("experimental:joint_pid_filter_candidate_measured_margins_and_simulated_noise");
+            limitations.add("experimental:filter_change_not_flown");
+        }
+    }
+
     if (!items.length) return { proposal: null, withheld };
     const selected: ProposalItem[] = items.map(({ key, part, from, to, status, reasons }) => ({
         key,
@@ -323,7 +380,10 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
         const axis = axisOf(it.key);
         if (it.part !== "pid" || !axis) {
             if (!built.release.measurement.valid) measurementReasons.push(`filter_or_ff_measurement_invalid:${it.key}`);
-        } else if (it.source === "primary_route" && primaryMeasurementOk[axis] === false)
+        } else if (
+            (it.source === "primary_route" || it.source === "joint_search") &&
+            primaryMeasurementOk[axis] === false
+        )
             measurementReasons.push(`primary_measurement_unusable:${axis}`);
     }
     const proposal: AbsoluteProposal = {

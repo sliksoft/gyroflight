@@ -1121,6 +1121,41 @@
     "gyroflightV2ExperimentalSource": { "message": "Source" },
     "gyroflightV2ExperimentalSource_primary_route": { "message": "primary route (CHIRP loop model)" },
     "gyroflightV2ExperimentalSource_jio_route": { "message": "CHIRP + JIO route (experimental plant)" },
+    "gyroflightV2ExperimentalSource_joint_search": { "message": "joint PID + filter search (CHIRP loop model)" },
+    "gyroflightV2JointTitle": { "message": "Joint PID + filter search (informative)" },
+    "gyroflightV2JointHelp": {
+        "message": "A bounded search over the gyro lowpass group, the D-term lowpass group and the ±30 % PID grid together, read on the same measured in-band margins as the PID search, with the predicted controller-output noise above 100 Hz (motor load) of each candidate. A candidate must meet PM ≥ 45°, GM ≥ 6 dB and |S| ≤ 6 dB, keep its noise within +10 % and its crossover within 80 % of the current tune; a filter change is chosen only where it beats the PID-only candidate. The chosen candidate (if any) is the experimental proposal above; everything else here is information."
+    },
+    "gyroflightV2JointStatus_not_run": { "message": "not run" },
+    "gyroflightV2JointStatus_candidate_found": { "message": "candidate chosen (PID + filters)" },
+    "gyroflightV2JointStatus_pid_only_stands": { "message": "no filter change: the PID-only candidate stands" },
+    "gyroflightV2JointStatus_no_candidate_meets_targets_within_rules": {
+        "message": "no PID + filter candidate meets the targets within the rules"
+    },
+    "gyroflightV2JointReason_more_axes_meet_targets": {
+        "message": "chosen: more axes meet the targets than with PID alone"
+    },
+    "gyroflightV2JointReason_higher_crossover_at_equal_axes": {
+        "message": "chosen: higher crossover than the PID-only candidate at the same axes meeting the targets"
+    },
+    "gyroflightV2JointValues": { "message": "PID and filters now → candidate" },
+    "gyroflightV2JointMargins": { "message": "Margins now → candidate" },
+    "gyroflightV2JointNoise": { "message": "Noise risk (predicted)" },
+    "gyroflightV2JointPidOnly": { "message": "Best PID-only candidate" },
+    "gyroflightV2JointNoiseRatio": { "message": "controller-output noise ratio" },
+    "gyroflightV2JointNoisePredicted": { "message": "simulated on this log's gyroUnfilt, not flown" },
+    "gyroflightV2JointNoCandidateAxis": { "message": "no joint candidate on this axis" },
+    "gyroflightV2JointNoPidOnly": { "message": "none within ±30 % meets the targets" },
+    "gyroflightV2JointFilters": { "message": "Filters now → candidate" },
+    "gyroflightV2JointEvidenceToggle": { "message": "Evidence per filter parameter and search space" },
+    "gyroflightV2JointSearched": { "message": "searched" },
+    "gyroflightV2JointNotSearched": { "message": "not searched" },
+    "gyroflightV2JointSpace": {
+        "message": "Search space: gyro lowpass ×$1, D-term lowpass ×$2, P/I/D each ×$3; noise ratio ≤ $4; crossover ≥ $5 × now; a filter change needs ≥ $6 × the PID-only crossover at equal axes."
+    },
+    "gyroflightV2JointInformative": {
+        "message": "Measured predictions of the loop reconstruction and a noise simulation on logged data: not validated by a flight, not flight advice. Only the chosen candidate is an experimental proposal; it is written only through the experimental route, within its bounds."
+    },
     "gyroflightV2ExperimentalEvidence": { "message": "Evidence" },
     "gyroflightV2ExperimentalWhy": { "message": "Why not released" },
     "gyroflightV2ExperimentalWithheld": { "message": "withheld, the measurement does not support a value" },

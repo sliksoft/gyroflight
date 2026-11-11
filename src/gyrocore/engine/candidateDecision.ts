@@ -401,7 +401,8 @@ export function valuesOf(m: LoopMargins) {
     };
 }
 
-function meetsMeasured(v: ReturnType<typeof valuesOf>): boolean {
+/** A candidate read meets PM, GM and |S| targets on the values as read (bound or in-band measured). */
+export function meetsMeasured(v: ReturnType<typeof valuesOf>): boolean {
     return (
         v.pmDeg !== null &&
         v.pmDeg >= PID_TARGETS.minPhaseMarginDeg &&
@@ -927,16 +928,28 @@ function readOf(v: PidValues, current: PidValues, val: ReturnType<typeof valuesO
     };
 }
 
-/** One candidate's in-band measured margins, or null where the band does not show them (same rule as the grid). */
-function readCandidate(loop: AxisLoop, v: PidValues, kdRatio: number): ReturnType<typeof valuesOf> | null {
-    if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) return null;
-    const m = loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) });
+/**
+ * The values of a candidate's margins where the band shows all three (PM, GM and |S| bounded or read
+ * in band, no data blocker, no hole or unverified phase branch), else null: the one rule every
+ * candidate of the ±MAX_STEP grid, the wider target search and the joint PID/filter search is read by.
+ */
+export function readableValues(m: LoopMargins): ReturnType<typeof valuesOf> | null {
     const st = metricStates(m);
     if (!usable(st.pm) || !usable(st.gm) || !usable(st.s) || has(m, DATA_BLOCKERS) || has(m, UNREADABLE)) return null;
     return valuesOf(m);
 }
 
+/** One candidate's in-band measured margins, or null where the band does not show them (same rule as the grid). */
+function readCandidate(loop: AxisLoop, v: PidValues, kdRatio: number): ReturnType<typeof valuesOf> | null {
+    if ([v.p, v.i, v.d].some((x) => x < 0 || x > 250) || v.dMax > 250) return null;
+    return readableValues(loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) }));
+}
+
 /** The PID values at scale `ps` of P, `is` of I and `ds` of D (d_max keeps its ratio to D, never below D). */
+export function scaledPid(current: PidValues, ps: number, is: number, ds: number): PidValues {
+    return scaled(current, ps, is, ds);
+}
+
 function scaled(current: PidValues, ps: number, is: number, ds: number): PidValues {
     const d = Math.round(current.d * ds);
     return {

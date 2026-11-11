@@ -4,15 +4,28 @@
 # loop-reference harness (scripts/sim/reference), measures every run with the independent reference and runs the
 # GyroFlight engine on the logs exactly as the app imports them (first log primary, the others as repeats).
 #   scripts/sim/e2e/run_tune.sh <new out dir> --tune P/I/D/DMAX [--starts 200,250,300] [--no-gyroflight]
+#       [--settings k=v,k=v]   extra `set` lines (filters) appended to the overlay after the roll PID (joint proof, 2026-11-11)
+#       [--noise std:seed[:hpHz:order]]  seeded Gaussian gyro noise (deg/s) shaped by `order` RC high-pass stages at hpHz
+#       [--gyrounfilt]         log gyroUnfilt (the recipe disables it); needed for the gyro chain model
+# With --noise the independent noise reference (scripts/sim/reference/noise_metrics.py) is written per run (noise.json).
 # Refuses an existing out dir, a wrong ELF hash, a wrong VliegAI HEAD or harness scripts that differ from HEAD.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 REF="$REPO/scripts/sim/reference"
 OUT="${1:?output dir}"; shift || true
-TUNE=""; STARTS="200,250,300"; GF=1
+TUNE=""; STARTS="200,250,300"; GF=1; SETTINGS=""; NOISE=""; GYROUNFILT=0
 while [ $# -gt 0 ]; do case "$1" in
-  --tune) TUNE="$2"; shift 2;; --starts) STARTS="$2"; shift 2;; --no-gyroflight) GF=0; shift;; *) echo "unknown $1"; exit 2;; esac; done
+  --tune) TUNE="$2"; shift 2;; --starts) STARTS="$2"; shift 2;; --no-gyroflight) GF=0; shift;;
+  --settings) SETTINGS="$2"; shift 2;; --noise) NOISE="$2"; shift 2;; --gyrounfilt) GYROUNFILT=1; shift;;
+  *) echo "unknown $1"; exit 2;; esac; done
+# JSON fragments of the optional parts (empty when not given)
+SETTINGS_JSON=$(python3 -c "import json,sys; s=sys.argv[1]; print(json.dumps({k: int(v) for k, v in (kv.split('=') for kv in s.split(',') if kv)}))" "$SETTINGS")
+NOISE_JSON=$(python3 -c "
+import json,sys; s=sys.argv[1]
+if not s: print('null'); raise SystemExit
+p=s.split(':'); print(json.dumps({'stdDps': float(p[0]), 'seed': int(p[1]), 'highpassHz': float(p[2]) if len(p)>2 else 0, 'highpassOrder': int(p[3]) if len(p)>3 else 0}))" "$NOISE")
+GYROUNFILT_JSON=$([ $GYROUNFILT = 1 ] && echo true || echo false)
 [ -n "$TUNE" ] || { echo "STOP: --tune P/I/D/DMAX required"; exit 2; }
 [ -e "$OUT" ] && { echo "STOP: output_dir_exists:$OUT"; exit 2; }
 IFS='/' read -r P I D DMAX <<< "$TUNE"
@@ -39,8 +52,9 @@ pgrep -f betaflight_SITL.elf > /dev/null && { echo "STOP: a SITL process is alre
 mkdir -p "$OUT/runs" "$RUNTIME_ROOT"
 {
   echo "{\"startedAt\":\"$(date -u +%FT%TZ)\",\"gyroflightHead\":\"$(git -C "$REPO" rev-parse HEAD)\",\"vliegaiHead\":\"$VH\",\"elfSha256\":\"$ELF_SHA\",\"betaflightCommit\":\"$BF_COMMIT\","
-  echo "\"tune\":{\"p\":$P,\"i\":$I,\"d\":$D,\"dMax\":$DMAX},\"starts\":[$STARTS],\"highResolution\":true,\"angleMode\":true,\"scripts\":{"
-  for f in air65_chirp_sitl.py reference_loop.py; do echo "\"reference/$f\":\"$(sha256sum "$REF/$f" | cut -d' ' -f1)\","; done
+  echo "\"tune\":{\"p\":$P,\"i\":$I,\"d\":$D,\"dMax\":$DMAX},\"starts\":[$STARTS],\"highResolution\":true,\"angleMode\":true,"
+  echo "\"settings\":$SETTINGS_JSON,\"gyroNoise\":$NOISE_JSON,\"logGyroUnfilt\":$GYROUNFILT_JSON,\"scripts\":{"
+  for f in air65_chirp_sitl.py reference_loop.py noise_metrics.py; do echo "\"reference/$f\":\"$(sha256sum "$REF/$f" | cut -d' ' -f1)\","; done
   for f in run_tune.sh summarize_tune.py; do echo "\"e2e/$f\":\"$(sha256sum "$HERE/$f" | cut -d' ' -f1)\","; done
   echo "\"test\":\"$(sha256sum "$REPO/test/gyrocore/sitl_loop_reference.local.test.ts" | cut -d' ' -f1)\"}}"
 } > "$OUT/provenance.json"
@@ -55,12 +69,14 @@ for start in "${START_LIST[@]}"; do
  "rollPid":{"p":$P,"i":$I,"d":$D,"dMax":$DMAX},
  "chirpSettings":{"chirp_frequency_start_deci_hz":20,"chirp_frequency_end_deci_hz":1000,"chirp_time_seconds":20,"chirp_amplitude_roll":230,"chirp_lag_freq_hz":3,"chirp_lead_freq_hz":30},
  "totalTicks":2500,"chirpStartTick":$start,"angleMode":true,"highResolution":true,
+ "settings":$SETTINGS_JSON,"gyroNoise":$NOISE_JSON,"logGyroUnfilt":$GYROUNFILT_JSON,
  "outDir":"$dir","runtimeRoot":"$RUNTIME_ROOT","label":"$id"}
 EOR
   echo "$(date -u +%T) run $id"
   (cd "$VLIEGAI" && CUDA_VISIBLE_DEVICES= "$PY" "$REF/air65_chirp_sitl.py" "$OUT/runs/$id.request.json" > "$OUT/runs/$id.stderr.log" 2>&1) || echo "  adapter exit $?"
   if [ -f "$dir/case/controller_trace.npz" ]; then
     "$PY" "$REF/reference_loop.py" "$dir/case/controller_trace.npz" "$dir/reference.json" --scale 0.1 | sed 's/^/  ref /'
+    "$PY" "$REF/noise_metrics.py" "$dir/case/controller_trace.npz" "$dir/noise.json" | sed 's/^/  noise /'
   fi
   [ -f "$dir/chirp.BFL" ] && LOGS+=("$dir/chirp.BFL")
   LIST="$LIST{\"id\":\"$id\",\"tune\":\"$P/$I/$D/$DMAX\",\"start\":$start,\"dir\":\"$dir\"},"

@@ -1,0 +1,233 @@
+{
+    "tune": {
+        "p": 100,
+        "i": 79,
+        "d": 30,
+        "dMax": 40
+    },
+    "n": 3,
+    "nValid": 3,
+    "runs": [
+        {
+            "id": "01_100_79_30_40_s200",
+            "tune": "100/79/30/40",
+            "start": 200,
+            "dir": "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/01_100_79_30_40_s200",
+            "status": "ok",
+            "issues": [],
+            "ref": {
+                "fc": 28.63003251659829,
+                "pm": 39.64796838326666,
+                "gm": 12.084588847674203,
+                "gmHz": 67.5216279952153,
+                "gmCoherence": 0.9960201127243581,
+                "gmAssessable": true,
+                "s": 5.673058486618321,
+                "sHz": 38.0859375,
+                "kp": 3.203125,
+                "pmItermSensitivityDeg": 3.512816229545024e-5,
+                "minCohG": 0.9945366247959133,
+                "minCohD": 0.9964656395859564,
+                "meetsTargets": false
+            },
+            "gf": {
+                "fc": 28.63420155158864,
+                "pm": 38.707093360643576,
+                "gm": 12.04326668911113,
+                "s": 5.642601623801326,
+                "evidence": "MEASURED",
+                "band": [3.90625, 97.65625],
+                "chirpState": "usable",
+                "decisionStatus": "candidate_found",
+                "candidate": {
+                    "p": 80,
+                    "i": 55,
+                    "d": 39,
+                    "dMax": 52
+                }
+            },
+            "header": {
+                "rollPID": "100,79,30",
+                "d_max": "40,0,0",
+                "debug_mode": "96",
+                "looptime": "1000",
+                "blackbox_high_resolution": "1",
+                "Firmware revision": "Betaflight 2026.6.2 (32c557935) SITL"
+            },
+            "logSha256": "cd4f62ade231e5e095951ba62701d622971faa8248478010a2fe9a8a7e6882ec",
+            "plant": {
+                "maxAbsRollDeg": 15.026964620558617,
+                "minZ": 1.0,
+                "maxZ": 3.1259026527404785,
+                "finite": true
+            }
+        },
+        {
+            "id": "02_100_79_30_40_s250",
+            "tune": "100/79/30/40",
+            "start": 250,
+            "dir": "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/02_100_79_30_40_s250",
+            "status": "ok",
+            "issues": [],
+            "ref": {
+                "fc": 28.622359097161546,
+                "pm": 39.667064885782764,
+                "gm": 12.079699713636064,
+                "gmHz": 67.51834537093174,
+                "gmCoherence": 0.9963191321594072,
+                "gmAssessable": true,
+                "s": 5.67778452294927,
+                "sHz": 38.0859375,
+                "kp": 3.202890480209521,
+                "pmItermSensitivityDeg": 1.749745106849332e-5,
+                "minCohG": 0.9944771706421379,
+                "minCohD": 0.996499713663774,
+                "meetsTargets": false
+            },
+            "gf": {
+                "fc": 28.634607821546393,
+                "pm": 38.7046804148397,
+                "gm": 12.045719721490453,
+                "s": 5.6453367156381535,
+                "evidence": "MEASURED",
+                "band": [3.90625, 97.65625],
+                "chirpState": "usable",
+                "decisionStatus": "candidate_found",
+                "candidate": {
+                    "p": 80,
+                    "i": 55,
+                    "d": 39,
+                    "dMax": 52
+                }
+            },
+            "header": {
+                "rollPID": "100,79,30",
+                "d_max": "40,0,0",
+                "debug_mode": "96",
+                "looptime": "1000",
+                "blackbox_high_resolution": "1",
+                "Firmware revision": "Betaflight 2026.6.2 (32c557935) SITL"
+            },
+            "logSha256": "59e07b2c24e26a924d127ba427b250205834d0d3246c3ff93708740066996b35",
+            "plant": {
+                "maxAbsRollDeg": 15.020316219299014,
+                "minZ": 1.0,
+                "maxZ": 3.4634761810302734,
+                "finite": true
+            }
+        },
+        {
+            "id": "03_100_79_30_40_s300",
+            "tune": "100/79/30/40",
+            "start": 300,
+            "dir": "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/03_100_79_30_40_s300",
+            "status": "ok",
+            "issues": [],
+            "ref": {
+                "fc": 28.630122157171904,
+                "pm": 39.67316383648344,
+                "gm": 12.134179470150226,
+                "gmHz": 67.70701008218737,
+                "gmCoherence": 0.9962620319719259,
+                "gmAssessable": true,
+                "s": 5.675594037445705,
+                "sHz": 38.0859375,
+                "kp": 3.2031249999999996,
+                "pmItermSensitivityDeg": 2.469140207495002e-5,
+                "minCohG": 0.9943887489206068,
+                "minCohD": 0.9964895995407111,
+                "meetsTargets": false
+            },
+            "gf": {
+                "fc": 28.636953763157962,
+                "pm": 38.70183275951597,
+                "gm": 12.05245703335889,
+                "s": 5.643263819559126,
+                "evidence": "MEASURED",
+                "band": [3.90625, 97.65625],
+                "chirpState": "usable",
+                "decisionStatus": "candidate_found",
+                "candidate": {
+                    "p": 80,
+                    "i": 55,
+                    "d": 39,
+                    "dMax": 52
+                }
+            },
+            "header": {
+                "rollPID": "100,79,30",
+                "d_max": "40,0,0",
+                "debug_mode": "96",
+                "looptime": "1000",
+                "blackbox_high_resolution": "1",
+                "Firmware revision": "Betaflight 2026.6.2 (32c557935) SITL"
+            },
+            "logSha256": "7667e54ec7c77cc5e211728bd668a0f0e53af914d98a78ee9a6f5371a2726efe",
+            "plant": {
+                "maxAbsRollDeg": 15.020316219477868,
+                "minZ": 1.0,
+                "maxZ": 3.802373170852661,
+                "finite": true
+            }
+        }
+    ],
+    "refMedian": {
+        "fc": 28.63003251659829,
+        "pm": 39.667064885782764,
+        "gm": 12.084588847674203,
+        "s": 5.675594037445705
+    },
+    "refSpread": {
+        "fc": 0.007763060010358203,
+        "pm": 0.025195453216781516,
+        "gm": 0.05447975651416215,
+        "s": 0.004726036330948702
+    },
+    "gmAssessableAll": true,
+    "gfMedian": {
+        "fc": 28.634607821546393,
+        "pm": 38.7046804148397,
+        "gm": 12.045719721490453,
+        "s": 5.643263819559126
+    },
+    "combined": {
+        "file": "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/gyroflight.combined.json",
+        "others": [
+            "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/02_100_79_30_40_s250/chirp.BFL",
+            "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/03_100_79_30_40_s300/chirp.BFL"
+        ],
+        "current": {
+            "crossoverHz": 28.63420155158864,
+            "pmDeg": 38.707093360643576,
+            "gmDb": 12.04326668911113,
+            "sDb": 5.642601623801326
+        },
+        "status": "candidate_found",
+        "firstCause": null,
+        "candidate": {
+            "proposed": {
+                "p": 80,
+                "i": 55,
+                "d": 39,
+                "dMax": 52
+            },
+            "outcome": "restores_margins",
+            "changed": true,
+            "fc": 29.291726596271722,
+            "pm": 46.29085885819515,
+            "gm": 12.157263820702607,
+            "s": 4.988927716795767
+        },
+        "searchRan": true,
+        "tried": 2197,
+        "usable": 2197,
+        "combination": {
+            "flights": ["7667e54ec7c77cc5e211728bd668a0f0e53af914d98a78ee9a6f5371a2726efe:0"],
+            "rejected": [],
+            "consistent": true,
+            "commonBins": 9
+        }
+    },
+    "refMeetsTargets": false,
+    "refMisses": ["pm"]
+}
