@@ -356,11 +356,9 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
             }
             limitations.add("experimental:joint_pid_filter_candidate_measured_margins_and_simulated_noise");
             limitations.add("experimental:filter_change_not_flown");
-            // A gyro filter change moves the noise of every axis; the ones without a sweep were not assessed.
+            // A filter change moves the noise and margins of every axis; the ones without a sweep were not assessed.
             if (ch.noiseNotAssessedAxes.length)
-                limitations.add(
-                    `experimental:filter_change_noise_not_assessed_on:${ch.noiseNotAssessedAxes.join(",")}`,
-                );
+                limitations.add(`experimental:filter_change_not_assessed_on:${ch.noiseNotAssessedAxes.join(",")}`);
         }
     }
 

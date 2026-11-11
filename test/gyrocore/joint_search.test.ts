@@ -480,13 +480,13 @@ describe("joint PID + filter search (block 12)", () => {
         expect(b2.pdd).toBeCloseTo(b.pdd, 9);
     });
 
-    it("a gyro filter change names the axes whose noise was not assessed; a D-term-only change does not", () => {
+    it("a filter change (gyro or D-term group) names the axes it reaches but the search did not analyse", () => {
         model = (ps, sg) => ({ pm: 28 + 40 * (sg - 1) - 30 * (ps - 1), gm: 10, s: 5, fc: FC0 * ps });
         const r = jointSearch(input(decision(false)));
         expect(r.status).toBe("candidate_found");
         expect(r.chosen!.gyroScale).toBe(1.5);
         expect(r.chosen!.noiseNotAssessedAxes).toEqual(["pitch", "yaw"]);
-        expect(r.chosen!.axes.roll!.proposal.reasons).toContain("filter_change_noise_not_assessed_on:pitch,yaw");
+        expect(r.chosen!.axes.roll!.proposal.reasons).toContain("filter_change_not_assessed_on:pitch,yaw");
         const built = buildExperimentalProposal({
             primaryItems: [],
             primaryPid: [],
@@ -510,9 +510,17 @@ describe("joint PID + filter search (block 12)", () => {
                     },
                 }) as never,
         });
-        expect(built.proposal!.limitations).toContain("experimental:filter_change_noise_not_assessed_on:pitch,yaw");
-        // Only the D-term lowpass can move: every axis of the log is the analysed one, nothing is named.
+        expect(built.proposal!.limitations).toContain("experimental:filter_change_not_assessed_on:pitch,yaw");
+        // Every axis the filters apply to is the analysed one: nothing is named.
         const r2 = jointSearch(input(decision(false), { allAxes: ["roll"] }));
         expect(r2.chosen!.noiseNotAssessedAxes).toEqual([]);
+        // A D-term-only change (the gyro lowpass adds nothing here, the D-term lowpass carries the PM) reaches the
+        // other axes' D paths just the same: named as well.
+        model = (ps, _sg, sd) => ({ pm: 28 - 30 * (ps - 1) + 60 * (sd - 1), gm: 10, s: 5, fc: FC0 * ps });
+        const r3 = jointSearch(input(decision(false)));
+        expect(r3.status).toBe("candidate_found");
+        expect(r3.chosen!.gyroScale).toBe(1);
+        expect(r3.chosen!.dtermScale).toBeGreaterThan(1);
+        expect(r3.chosen!.noiseNotAssessedAxes).toEqual(["pitch", "yaw"]);
     });
 });

@@ -1148,7 +1148,7 @@
     "gyroflightV2JointNoPidOnly": { "message": "none within ±30 % meets the targets" },
     "gyroflightV2JointFilters": { "message": "Filters now → candidate" },
     "gyroflightV2JointNoiseNotAssessed": {
-        "message": "The gyro lowpass is one setting for every axis: the noise of $1 (no sweep, PID unchanged) was not assessed and rises with less filtering; the motor load can grow although the analysed axis gets quieter."
+        "message": "The gyro and D-term lowpass are one setting for every axis: for $1 (no sweep, PID unchanged) neither the noise nor the margins under these filters were assessed; less filtering raises their noise (the motor load can grow although the analysed axis gets quieter), more filtering adds phase lag at their crossover."
     },
     "gyroflightV2JointEvidenceToggle": { "message": "Evidence per filter parameter and search space" },
     "gyroflightV2JointSearched": { "message": "searched" },
