@@ -8,7 +8,7 @@ D-term lowpass filters act and where the controller output loads the motors:
   dtermBand     the same of the logged roll D term,
   ptermBand     the same of the logged roll P term,
   pidSumBand    the same of the logged roll pidSum = P + I + D + FF (the controller output before mixer and limits),
-  ctrlBand      the same of Kp·gyro + D with Kp the median of axisP / (setpoint − gyro) over |error| ≥ 20 deg/s (the
+  ctrlBand      the same of −Kp·gyro + D with Kp the median of axisP / (setpoint − gyro) over |error| ≥ 20 deg/s (the
                 reference method's Kp): the part of the controller output the gyro noise causes, without the setpoint
                 (the quantity the engine's noise model predicts, so its ratio is comparable),
   motorBand     the same of the four motor outputs, summed (the mixer's output: the motor load the noise causes).
@@ -81,7 +81,9 @@ def main() -> int:
     err_dps = (z["setpoint"][sel, AXIS].astype(float) - gyro) * scale
     big = np.abs(err_dps) >= 20.0
     kp = float(np.median(p[big] / err_dps[big])) if int(np.sum(big)) >= 100 else None
-    ctrl = kp * gyro * scale + d if kp is not None else None
+    # P acts on the error (setpoint − gyro); the setpoint has no content in the band, so the P part there is −Kp·gyro. Until
+    # 2026-11-11 (block 13) this read +Kp·gyro, which flipped the P·D cross term (the v2 proof's ctrlBand 0.92 is ×1.63 corrected).
+    ctrl = -kp * gyro * scale + d if kp is not None else None
     result = {
         "status": "ok",
         "bandHz": list(band),
