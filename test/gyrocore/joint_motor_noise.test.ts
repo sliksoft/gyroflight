@@ -32,6 +32,7 @@ import {
     motorNoiseModel,
     QUADX_MIX,
     REPRODUCTION,
+    type FilterSignals,
     type MotorNoiseAxis,
 } from "../../src/gyrocore/engine/jointMotorNoise";
 
@@ -196,5 +197,76 @@ describe("every-axis noise and per-motor model (block 13)", () => {
         expect(as.assessed).toBe(true);
         expect(as.axisRatios.yaw).toBeNull();
         expect(as.limitations!.some((x) => x.startsWith("noise_not_reproduced:yaw:share_"))).toBe(true);
+    });
+
+    it("gates (Grok block 13 r1): unknown mixer, unvalidated or unlogged D path, D added to a D-less axis, unvalidated chain noise band", () => {
+        const mk = (over: Partial<Parameters<typeof motorNoiseModel>[0]> = {}, a = axes()) =>
+            motorNoiseModel({
+                axes: a,
+                timeUs,
+                rcThrottle,
+                sampleRateHz: FS,
+                pidDt: 0.001,
+                noiseMask: mask,
+                mixer: { kind: "quadx", yawReversed: false },
+                motors: null,
+                ...over,
+            });
+        const unknown = mk({ mixer: { kind: "unknown", reason: "mixer_type:CUSTOM:motors_logged:6" } });
+        expect(unknown.staticReasons[0]).toMatch(/^mixer_not_modelled:/);
+        expect(unknown.assess("1|1", base, base, false, {}).assessed).toBe(false);
+        const notValidated = axes();
+        notValidated[1] = { ...notValidated[1], dtermValidated: false };
+        expect(mk({}, notValidated).staticReasons).toContain("dterm_path_not_validated:pitch");
+        const notLogged = axes();
+        notLogged[0] = { ...notLogged[0], dtermValidated: null };
+        expect(mk({}, notLogged).staticReasons).toContain("dterm_not_logged_noise_unknown:roll");
+        const m = mk();
+        expect(m.ratiosFor("1|1", base, base, false, 2, { p: 56, i: 79, d: 10, dMax: 0 })).toBeNull();
+        expect(m.assess("1|1", base, base, false, { yaw: { p: 56, i: 79, d: 10, dMax: 0 } }).reasons).toContain(
+            "d_added_to_an_axis_without_d_not_modelled:yaw",
+        );
+        const chainBad = axes();
+        chainBad[2] = { ...chainBad[2], chainNoiseValidated: false };
+        const mc = mk({}, chainBad);
+        expect(mc.gyroReasons).toEqual(["gyro_chain_noise_band_not_validated:yaw"]);
+        // A gyro change is blocked for the motor sums, the per-axis noise of the validated axes is still predicted.
+        const sim = { out: gyro, valid: new Uint8Array(N).fill(1) } as unknown as FilterSignals["sim"];
+        const g = mc.assess("1.25|1", { sim, dterm: base.dterm }, base, true, {});
+        expect(g.assessed).toBe(false);
+        expect(g.axisRatios.roll).not.toBeNull();
+        expect(g.axisRatios.yaw).toBeNull();
+    });
+
+    it("yaw_motors_reversed flips the yaw sign in every motor (the per-motor powers change, the mixer table does not)", () => {
+        const cand = { p: 120, i: 79, d: 36, dMax: 48 };
+        const a = model().assess("1|1", base, base, false, { roll: cand });
+        const rev = motorNoiseModel({
+            axes: axes(),
+            timeUs,
+            rcThrottle,
+            sampleRateHz: FS,
+            pidDt: 0.001,
+            noiseMask: mask,
+            mixer: { kind: "quadx", yawReversed: true },
+            motors: null,
+        });
+        const b = rev.assess("1|1", base, base, false, { roll: cand });
+        // Yaw shares noise with nothing here (its gyro is independent), so the powers change only through cross terms:
+        // equal to well within 1 %, and both assessed.
+        expect(b.assessed).toBe(true);
+        a.motorRatios!.forEach((r, i) => expect(Math.abs(r - b.motorRatios![i]) / r).toBeLessThan(0.01));
+    });
+
+    it("every ratio is paired: a candidate series with fewer valid samples reads the baseline on the same samples", () => {
+        const m = model();
+        // Candidate chain simulation valid only on the second half: the baseline must be read there too.
+        const half = Uint8Array.from({ length: N }, (_, k) => (k >= N / 2 ? 1 : 0));
+        const sim = { out: gyro, valid: half } as unknown as FilterSignals["sim"];
+        const a = m.assess("cand", { sim, dterm: base.dterm }, base, true, {});
+        // Same signals as the baseline (the "chain" passes the logged gyro): every ratio is exactly 1 on paired samples.
+        expect(a.assessed).toBe(true);
+        a.motorRatios!.forEach((r) => expect(r).toBeCloseTo(1, 9));
+        expect(a.axisRatios.roll!).toBeCloseTo(1, 9);
     });
 });

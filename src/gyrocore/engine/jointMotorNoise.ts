@@ -38,8 +38,8 @@
  *                negated as the mixer does unless yaw_motors_reversed), so correlation between the axes'
  *                noise, real on a craft whose motors shake every axis at once, is kept, not summed away.
  *
- * Band power: Welch (NOISE_WELCH_SEGMENT) over NOISE_BAND_HZ (capped at Nyquist), on the samples of the
- * noise mask (in flight, outside every CHIRP window: the sweep's own response must not count as noise)
+ * Band power: Welch (NOISE_WELCH_SEGMENT) over NOISE_BAND_HZ (capped at Nyquist: 100–500 Hz on a 1 kHz log, 100–1000 Hz on a
+ * 2 kHz or faster log — the SITL harness reference is 100–500 Hz), on the samples of the noise mask (in flight, outside every CHIRP window: the sweep's own response must not count as noise)
  * where every simulation holds (maskedBandPower: per contiguous run, weighted by segments).
  *
  * Varying one axis x with gain kp and D scale ds (d_max keeps its ratio, so d is linear in ds), each
@@ -275,12 +275,17 @@ export function motorNoiseModel(input: MotorNoiseInput) {
         return out;
     };
 
-    // Current tune and filters: per-motor and per-axis powers (the denominators of every ratio).
-    let baseline: { motors: number[]; axes: (number | null)[] } | null = null;
-    const baselineOf = (sig: FilterSignals) => {
-        if (baseline) return baseline;
+    // Current tune and filters: per-motor and per-axis powers (the denominators of every ratio), read on exactly the
+    // samples the candidate's own series holds (both valid): every ratio is paired (Grok block-13 round 1).
+    const baselineCache = new Map<string, { motors: number[]; axes: (number | null)[]; valid: Uint8Array } | null>();
+    const baselineOf = (sig: FilterSignals, candValid: Uint8Array | null = null, key = "1|1") => {
+        if (baselineCache.has(key)) return baselineCache.get(key)!;
         const s = series("1|1", sig, false);
-        if (!s) return null;
+        if (!s) {
+            baselineCache.set(key, null);
+            return null;
+        }
+        const valid = candValid ? Uint8Array.from(s.valid, (v, k) => (v && candValid[k] ? 1 : 0)) : s.valid;
         const u = input.axes.map((a, ai) => axisOutput(s, ai, a.current));
         const motorsP: number[] = [];
         for (let m = 0; m < motors; m++) {
@@ -289,10 +294,11 @@ export function motorNoiseModel(input: MotorNoiseInput) {
                 const sg = mix(m, ai);
                 for (let i = 0; i < n; i++) y[i] += sg * u[ai][i];
             }
-            motorsP.push(P(y, s.valid) ?? Number.NaN);
+            motorsP.push(P(y, valid) ?? Number.NaN);
         }
-        baseline = { motors: motorsP, axes: u.map((x) => P(x, s.valid)) };
-        return baseline;
+        const out = { motors: motorsP, axes: u.map((x) => P(x, valid)), valid };
+        baselineCache.set(key, out);
+        return out;
     };
 
     const basisCache = new Map<string, MotorBasis | null>();
@@ -307,10 +313,10 @@ export function motorNoiseModel(input: MotorNoiseInput) {
         const bk = `${key}|${xi}`;
         if (basisCache.has(bk)) return basisCache.get(bk)!;
         const s = series(key, sig, gyroChanged);
-        const b0 = baselineOf(base);
+        const b0 = s ? baselineOf(base, s.valid, key) : null;
         let out: MotorBasis | null = null;
         if (s && b0) {
-            const valid = s.valid;
+            const valid = b0.valid;
             const gpx = s.gp[xi];
             const dx = s.d[xi];
             const A = P(gpx, valid);
@@ -407,6 +413,8 @@ export function motorNoiseModel(input: MotorNoiseInput) {
         ): { motorRatios: number[]; axisRatio: number | null } | null {
             if (staticReasons.length || (gyroChanged && gyroReasons.length)) return null;
             if (reproductionGate(base).blocking.length) return null;
+            // D added to an axis that has none: its D path cannot be scaled from the current one.
+            if (input.axes[xi].current.d === 0 && v.d > 0) return null;
             const b = basis(key, sig, base, gyroChanged, xi);
             if (!b) return null;
             const k = kp(xi, v.p);
@@ -426,10 +434,15 @@ export function motorNoiseModel(input: MotorNoiseInput) {
         ): MotorAssessment {
             const gate = staticReasons.length ? { blocking: [], limits: [] } : reproductionGate(base);
             const reasons = [...staticReasons, ...(gyroChanged ? gyroReasons : []), ...gate.blocking];
+            for (const a of input.axes) {
+                const v = pids[a.axis];
+                if (v && a.current.d === 0 && v.d > 0)
+                    reasons.push(`d_added_to_an_axis_without_d_not_modelled:${a.axis}`);
+            }
             // The per-axis noise is still predicted for every axis the model reproduces (and, for a gyro change, whose chain
             // is validated in the noise band), even when another axis keeps the motor sums from being assessed.
             const s = staticReasons.length ? null : series(key, sig, gyroChanged);
-            const b0 = staticReasons.length ? null : baselineOf(base);
+            const b0 = staticReasons.length || !s ? null : baselineOf(base, s.valid, key);
             if (!s || !b0) {
                 if (!staticReasons.length) reasons.push("noise_signals_not_computable");
                 return { assessed: false, reasons, motorRatios: null, maxMotorRatio: null, axisRatios: {} };
@@ -438,7 +451,7 @@ export function motorNoiseModel(input: MotorNoiseInput) {
             const axisRatios: MotorAssessment["axisRatios"] = {};
             const repro = reproduction(base);
             input.axes.forEach((a, ai) => {
-                const p = P(u[ai], s.valid);
+                const p = P(u[ai], b0.valid);
                 const p0 = b0.axes[ai];
                 const chainOk = !gyroChanged || a.chainNoiseValidated;
                 // An axis the model does not reproduce has no noise prediction of its own.
@@ -461,7 +474,7 @@ export function motorNoiseModel(input: MotorNoiseInput) {
                     const sg = mix(m, ai);
                     for (let i = 0; i < n; i++) y[i] += sg * u[ai][i];
                 }
-                const p = P(y, s.valid);
+                const p = P(y, b0.valid);
                 motorRatios.push(p !== null && b0.motors[m] > 0 ? p / b0.motors[m] : Number.NaN);
             }
             const finite = motorRatios.every(Number.isFinite);

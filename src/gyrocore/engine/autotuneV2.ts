@@ -1353,11 +1353,15 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             loggedD: log.channels.axisD?.[ai] ?? null,
         };
     });
-    // Noise is read in flight outside every CHIRP window (the sweep's own response is not noise).
+    // Noise is read in flight outside every CHIRP window with 0.5 s on either side (the sweep's own response and its
+    // settling are not noise; the same guard as the SITL harness reference).
     const noiseMask = Uint8Array.from(mask);
+    const guard = Math.round(0.5 * log.sampleRateHz);
     for (const name of AXES) {
         const c = log.chirp[name];
-        if (c) for (let k = Math.max(0, c.start); k < Math.min(noiseMask.length, c.end); k++) noiseMask[k] = 0;
+        if (c)
+            for (let k = Math.max(0, c.start - guard); k < Math.min(noiseMask.length, c.end + guard); k++)
+                noiseMask[k] = 0;
     }
     const motorCount = log.channels.motors?.length ?? 0;
     const joint: JointSearchResult | null = analysed.length

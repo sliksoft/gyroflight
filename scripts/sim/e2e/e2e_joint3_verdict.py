@@ -94,7 +94,7 @@ def selftest() -> int:
     start = json.loads((fx / "start_hover.json").read_text())
     cand = json.loads((fx / "candidate_hover.json").read_text())
     cases = [
-        ("v2 candidate (the 1.45x case) fails the motor rule", motor_rule(start, cand, rule), False),
+        ("v2 candidate (x1.45 in the v2 window, x2.5 in hover) fails the motor rule", motor_rule(start, cand, rule), False),
         ("an unchanged tune passes it", motor_rule(start, start, rule), True),
         ("a clipped run makes it invalid", motor_rule(start, {**cand, "motorIssues": ["noise:motor_clip_0.0010"]}, rule), False),
         ("a run spread above the limit makes it invalid", motor_rule(start, {**start, "motorHoverSpreadRel": [0.2, 0, 0, 0]}, rule), False),
@@ -326,7 +326,9 @@ def main() -> int:
                 for ax in AXES:
                     p_, r_ = pred["axes"].get(ax), cv["axes"][ax]["ref"]
                     if p_ and r_:
-                        d = {"fcRel": (p_["crossoverHz"] - r_["fc"]) / r_["fc"], "pmDeg": p_["pmDeg"] - r_["pm"], "gmDb": p_["gmDb"] - r_["gm"], "sDb": p_["sDb"] - r_["s"]}
+                        # GM prediction against the GM as read (median), not against the v4 lower bound (Grok block 13 r1, note 13).
+                        gm_read = r_.get("gmRead", r_["gm"])
+                        d = {"fcRel": (p_["crossoverHz"] - r_["fc"]) / r_["fc"], "pmDeg": p_["pmDeg"] - r_["pm"], "gmDb": p_["gmDb"] - gm_read, "sDb": p_["sDb"] - r_["s"]}
                         d["within"] = {"fc": abs(d["fcRel"]) <= TOL["fcRel"], "pm": abs(d["pmDeg"]) <= TOL["pmDeg"], "gm": abs(d["gmDb"]) <= TOL["gmDb"], "s": abs(d["sDb"]) <= TOL["sDb"]}
                         acc["axes"][ax] = d
                 if pred.get("motorRatios") and mot.get("ratios"):
