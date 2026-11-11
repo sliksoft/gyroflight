@@ -125,6 +125,25 @@ const read = await p.evaluate(() => {
                     text: li.innerText.trim().slice(0, 300),
                 })),
                 space: el.querySelector('[data-gyrocore="v2-joint-space"]')?.innerText.trim() ?? null,
+                // Block 13: effects on every axis and motor.
+                effects: (() => {
+                    const ef = el.querySelector('[data-gyrocore="v2-joint-effects"]');
+                    if (!ef) return null;
+                    return {
+                        source: ef.getAttribute("data-source"),
+                        title: ef.querySelector("p")?.innerText.trim() ?? null,
+                        rows: [...ef.querySelectorAll("tbody tr")].map((tr) => ({
+                            axis: tr.getAttribute("data-axis"),
+                            noise: tr.getAttribute("data-noise"),
+                            margins: tr.getAttribute("data-margins"),
+                            cells: [...tr.querySelectorAll("td")].map((td) => td.innerText.trim()),
+                        })),
+                        motors: ef.querySelector('[data-gyrocore="v2-joint-motors"]')?.innerText.trim() ?? null,
+                        motorsWithin:
+                            ef.querySelector('[data-gyrocore="v2-joint-motors"]')?.getAttribute("data-within") ?? null,
+                        model: ef.querySelector('[data-gyrocore="v2-joint-motor-model"]')?.innerText.trim() ?? null,
+                    };
+                })(),
             };
         })(),
     };
@@ -141,26 +160,30 @@ read.improvementRows = await p.evaluate(() =>
 const rollItems = read.experimentalItems.filter((it) => /_roll$/.test(it.key ?? ""));
 // Filter items carry no axis suffix (gyro_lpf*, dterm_lpf*): the joint candidate's filter part.
 const filterItems = read.experimentalItems.filter((it) => /^(gyro|dterm)_lpf/.test(it.key ?? ""));
+// Every PID item of any axis (block 13: roll and pitch).
+const pidItems = read.experimentalItems.filter((it) => /^(p|i|d|d_max)_(roll|pitch|yaw)$/.test(it.key ?? ""));
 const rollStep = read.improvementRows.find((r) => r.axis === "roll") ?? null;
 const rollDecision = read.decisions.find((r) => r.axis === "roll" && r.route === "primary") ?? null;
 read.rollShown = rollItems.length ? "proposal" : rollStep?.state === "step" ? "informative_step_only" : "blocked";
 // Joint proof: a PID + filter proposal is roll items from the joint search together with filter items.
 read.jointShown =
-    rollItems.length && filterItems.length && rollItems.every((it) => it.source === "joint_search")
+    pidItems.length && filterItems.length && pidItems.every((it) => it.source === "joint_search")
         ? "pid_and_filter_proposal"
-        : rollItems.length
+        : pidItems.length
           ? "pid_only_proposal"
           : (read.joint?.status ?? "no_joint_block");
 writeFileSync(
     `${OUT}/tuning_and_apply.json`,
     JSON.stringify(
-        { logs: LOGS, errs, importedMs, calculateMs, rollItems, filterItems, rollStep, rollDecision, read },
+        { logs: LOGS, errs, importedMs, calculateMs, rollItems, pidItems, filterItems, rollStep, rollDecision, read },
         null,
         1,
     ),
 );
 const jointEl = p.locator('[data-gyrocore="v2-joint-search"]').first();
 if (await jointEl.count()) await jointEl.screenshot({ path: `${OUT}/joint_search.png` });
+const effectsEl = p.locator('[data-gyrocore="v2-joint-effects"]').first();
+if (await effectsEl.count()) await effectsEl.screenshot({ path: `${OUT}/joint_effects.png` });
 const section = p.locator('[data-step="v2-experimental"]').first();
 if (await section.count()) await section.scrollIntoViewIfNeeded();
 await p.screenshot({ path: `${OUT}/tuning_and_apply_viewport.png` });

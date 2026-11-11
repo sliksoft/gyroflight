@@ -143,7 +143,11 @@ const rnd = () => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed / 0x7fffffff - 0.5;
 };
-const unfilt = [0, 1, 2].map(() => Float64Array.from({ length: N }, () => 200 * rnd()));
+// Roll carries the noise; pitch and yaw only a trace of it (block 13: their noise enters the motor sums),
+// so the motor rule follows the roll axis here unless a test raises them.
+const unfiltOf = (pitchYawAmp: number) =>
+    [200, pitchYawAmp, pitchYawAmp].map((amp) => Float64Array.from({ length: N }, () => amp * rnd()));
+const unfilt = unfiltOf(2);
 const timeUs = Float64Array.from({ length: N }, (_, i) => i * 1000);
 const rcThrottle = new Float64Array(N).fill(1300);
 const mask = new Uint8Array(N).fill(1);
@@ -263,13 +267,50 @@ const axisInput = (dec: RouteDecision, over: Partial<JointAxisInput> = {}): Join
     gyroAdc: unfilt[0],
     ...over,
 });
-const input = (dec: RouteDecision, over: Partial<Parameters<typeof jointSearch>[0]> = {}) => ({
-    axes: [axisInput(dec)],
+// The motor model's input for every axis (block 13); the logged P and D terms are what the model itself forms at
+// the current tune (the D mock is +0.02·g at the base D-LPF), so every axis is reproduced.
+const PTERM = 0.032029;
+const motorInput = (u: Float64Array[]) => {
+    const axisOf = (
+        name: "roll" | "pitch" | "yaw",
+        ai: number,
+        pidv: { p: number; i: number; d: number; dMax: number },
+    ) => ({
+        axis: name,
+        current: pidv,
+        dterm: pidv.d > 0 ? { ...dterm, d: pidv.d, dMax: pidv.dMax } : null,
+        dtermValidated: pidv.d > 0 ? true : null,
+        chainNoiseValidated: true,
+        gyroAdc: u[ai],
+        yawLowpassHz: name === "yaw" ? 0 : undefined,
+        loggedP: Float64Array.from(u[ai], (g) => -PTERM * pidv.p * g),
+        loggedD: pidv.d > 0 ? Float64Array.from(u[ai], (g) => 0.02 * g) : null,
+    });
+    return {
+        axes: [
+            axisOf("roll", 0, current),
+            axisOf("pitch", 1, { p: 82, i: 117, d: 61, dMax: 0 }),
+            axisOf("yaw", 2, { p: 56, i: 79, d: 0, dMax: 0 }),
+        ],
+        timeUs,
+        rcThrottle,
+        pidDt: 0.001,
+        mixer: { kind: "quadx" as const, yawReversed: false },
+        motors: null,
+    };
+};
+const input = (
+    dec: RouteDecision,
+    over: Partial<Parameters<typeof jointSearch>[0]> = {},
+    u: Float64Array[] = unfilt,
+) => ({
+    axes: [axisInput(dec, { gyroAdc: u[0] })],
     chainCfg,
-    chainInput: { timeUs, gyroUnfilt: unfilt as [Float64Array, Float64Array, Float64Array], erpm: [], rcThrottle },
+    chainInput: { timeUs, gyroUnfilt: u as [Float64Array, Float64Array, Float64Array], erpm: [], rcThrottle },
     baseSim: null,
     sampleRateHz: FS,
     flightMask: mask,
+    motor: motorInput(u),
     ...over,
 });
 
@@ -486,7 +527,7 @@ describe("joint PID + filter search (block 12)", () => {
         expect(r.status).toBe("candidate_found");
         expect(r.chosen!.gyroScale).toBe(1.5);
         expect(r.chosen!.noiseNotAssessedAxes).toEqual(["pitch", "yaw"]);
-        expect(r.chosen!.axes.roll!.proposal.reasons).toContain("filter_change_not_assessed_on:pitch,yaw");
+        expect(r.chosen!.axes.roll!.proposal.reasons).toContain("filter_change_margins_not_assessed_on:pitch,yaw");
         const built = buildExperimentalProposal({
             primaryItems: [],
             primaryPid: [],
@@ -510,7 +551,7 @@ describe("joint PID + filter search (block 12)", () => {
                     },
                 }) as never,
         });
-        expect(built.proposal!.limitations).toContain("experimental:filter_change_not_assessed_on:pitch,yaw");
+        expect(built.proposal!.limitations).toContain("experimental:filter_change_margins_not_assessed_on:pitch,yaw");
         // Every axis the filters apply to is the analysed one: nothing is named.
         const r2 = jointSearch(input(decision(false), { allAxes: ["roll"] }));
         expect(r2.chosen!.noiseNotAssessedAxes).toEqual([]);
@@ -525,5 +566,36 @@ describe("joint PID + filter search (block 12)", () => {
         expect(r3.chosen!.gyroScale).toBe(1);
         expect(r3.chosen!.dtermScale).toBeGreaterThan(1);
         expect(r3.chosen!.noiseNotAssessedAxes).toEqual(["pitch", "yaw"]);
+    });
+
+    it("block 13: the motor rule turns down a candidate whose own axis passes when the other axes' noise rises", () => {
+        model = (ps, sg) => ({ pm: 28 + 40 * (sg - 1) - 30 * (ps - 1), gm: 10, s: 5, fc: FC0 * ps });
+        // Pitch and yaw carry as much noise as roll: a lighter gyro lowpass raises them with their PID unchanged.
+        const loud = unfiltOf(200);
+        const r = jointSearch(input(decision(false), {}, loud));
+        const searched = r.combos.filter((c) => c.searched);
+        expect(searched.some((c) => c.axes[0].excludedForMotor > 0)).toBe(true);
+        expect(r.chosen).toBeNull();
+        expect(r.bestRejected).not.toBeNull();
+        expect(r.bestRejected!.motor.withinLimit).toBe(false);
+        expect(r.bestRejected!.motor.maxMotorRatio!).toBeGreaterThan(JOINT_SEARCH.maxMotorNoiseRatio);
+        // Every axis is in the assessment: roll with margins, pitch and yaw with noise only.
+        const byAxis = Object.fromEntries(r.bestRejected!.axes.map((a) => [a.axis, a]));
+        expect(byAxis.roll.margins.assessed).toBe(true);
+        expect(byAxis.pitch.margins.assessed).toBe(false);
+        expect(byAxis.pitch.noise.assessed).toBe(true);
+        expect(byAxis.pitch.noise.ratio!).toBeGreaterThan(1.1);
+        expect(byAxis.yaw.missing).toContain("required_measurement:chirp_yaw");
+        // The quiet case of the first test passes the motor rule.
+        const quiet = jointSearch(input(decision(false)));
+        expect(quiet.chosen!.assessment.motor.withinLimit).toBe(true);
+        expect(quiet.motorModel.reproduction!.every((x) => x.reproduced)).toBe(true);
+    });
+
+    it("block 13: without a motor model no filter change is eligible, and the reason is named", () => {
+        const r = jointSearch(input(decision(false), { motor: undefined }));
+        expect(r.chosen).toBeNull();
+        expect(r.motorModel.assessable).toBe(false);
+        expect(r.motorModel.reasons).toContain("motor_model_input_missing");
     });
 });

@@ -15,6 +15,8 @@ Request key `highResolution` (default true): Blackbox high resolution on or off 
 Optional request keys (joint PID/filter proof, 2026-11-11; each recorded in result.json):
   `settings`         {name: value}: extra `set name = value` lines appended to the overlay after the roll PID (filters).
   `logGyroUnfilt`    true: `set blackbox_disable_gyrounfilt = OFF` (the recipe disables it), so the log carries gyroUnfilt.
+  `chirpWindows`     [[a, b), ...] outer ticks: CHIRP on only inside these windows (instead of from chirpStartTick on); the
+                     firmware sweeps the next axis at every new activation (roll, pitch, yaw).
   `gyroNoise`        {"stdDps": s, "seed": n, "highpassHz": f, "highpassOrder": k}: zero-mean Gaussian noise of s deg/s
                      (white at the 1 kHz FDM rate, numpy default_rng(seed), the same sequence for every run with the same
                      seed and tick count), shaped by k cascaded first-order RC high-pass stages at f Hz (k = 0: white), added
@@ -145,12 +147,16 @@ def main() -> int:
     high_resolution = bool(request.get("highResolution", True))
     result["highResolution"] = high_resolution
     chirp_start = int(request["chirpStartTick"])
+    # Optional (block 13): several CHIRP activations, [[startTick, endTick), ...] in outer ticks. The firmware advances
+    # its CHIRP axis (roll → pitch → yaw) each time the mode is switched off, so two windows sweep roll, then pitch.
+    chirp_windows = [tuple(int(x) for x in w) for w in (request.get("chirpWindows") or [])]
+    result["chirpWindows"] = chirp_windows or None
     angle = bool(request.get("angleMode", True))
     hover = oracle.HOVER_COLLECTIVE
     state = {"chirp": False}
 
     def schedule(_name: str, outer_tick: int):
-        state["chirp"] = outer_tick >= chirp_start
+        state["chirp"] = any(a <= outer_tick < b for a, b in chirp_windows) if chirp_windows else outer_tick >= chirp_start
         return (0.0, 0.0, 0.0, hover)
 
     oracle._schedule = schedule

@@ -1,0 +1,7 @@
+{
+    "source": "the new engine (block 13) on the three v2 start logs, probe regression_v2_candidate (roll 70/55/27/36, gyro x1.5, D-term x1.25)",
+    "status": "no_candidate_meets_targets_within_rules",
+    "chosen": null,
+    "predictedMotorRatios": [2.5452423297532656, 2.5177661558757647, 2.528601797237507, 2.524501499633165],
+    "predictedMaxMotorRatio": 2.5452423297532656
+}

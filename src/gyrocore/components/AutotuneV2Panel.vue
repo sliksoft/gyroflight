@@ -783,6 +783,53 @@
                 >
                     {{ t("gyroflightV2JointNoiseNotAssessed", [joint.chosen.noiseNotAssessedAxes.join(", ")]) }}
                 </p>
+                <!-- Block 13: what the candidate does on every axis the filters reach, and on every motor. -->
+                <div
+                    v-if="jointEffects"
+                    class="mt-2"
+                    data-gyrocore="v2-joint-effects"
+                    :data-source="jointEffects.source"
+                >
+                    <p class="font-bold">{{ jointEffects.title }}</p>
+                    <div class="overflow-x-auto max-w-full">
+                        <table class="gyroflight-workflow-table text-sm">
+                            <thead>
+                                <tr>
+                                    <th>{{ $t("gyroflightV2Axis") }}</th>
+                                    <th>{{ $t("gyroflightV2JointEffectsPid") }}</th>
+                                    <th>{{ $t("gyroflightV2JointEffectsNoise") }}</th>
+                                    <th>{{ $t("gyroflightV2JointEffectsMargins") }}</th>
+                                    <th>{{ $t("gyroflightV2JointEffectsModel") }}</th>
+                                    <th>{{ $t("gyroflightV2JointEffectsMissing") }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr
+                                    v-for="row in jointEffects.rows"
+                                    :key="row.axis"
+                                    :data-axis="row.axis"
+                                    :data-noise="row.noiseState"
+                                    :data-margins="row.marginsState"
+                                >
+                                    <td>{{ row.axis }}</td>
+                                    <td>{{ row.pid }}</td>
+                                    <td :class="row.noiseState === 'assessed' ? '' : 'text-yellow-500'">
+                                        {{ row.noise }}
+                                    </td>
+                                    <td :class="row.marginsState === 'assessed' ? '' : 'text-dimmed'">
+                                        {{ row.margins }}
+                                    </td>
+                                    <td class="text-dimmed">{{ row.model }}</td>
+                                    <td class="text-dimmed [overflow-wrap:anywhere]">{{ row.missing }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p data-gyrocore="v2-joint-motors" :data-within="jointEffects.motorWithin">
+                        {{ jointEffects.motors }}
+                    </p>
+                    <p class="text-dimmed" data-gyrocore="v2-joint-motor-model">{{ jointEffects.model }}</p>
+                </div>
                 <details class="text-sm">
                     <summary class="cursor-pointer text-dimmed">{{ $t("gyroflightV2JointEvidenceToggle") }}</summary>
                     <ul class="list-disc ps-5 [overflow-wrap:anywhere]" data-gyrocore="v2-joint-parameters">
@@ -1691,6 +1738,75 @@ const jointFilters = computed(() => {
     const items = Object.entries(ch.filters).map(([k, v]) => `${k} ${v.from} → ${v.to}`);
     return items.length ? `${t("gyroflightV2JointFilters")}: ${items.join(", ")}` : "";
 });
+/** Block 13: every axis and motor under the chosen candidate (else the best rejected one, else what the log allows). */
+const jointEffects = computed(() => {
+    const j = joint.value;
+    if (!j) return null;
+    const as = j.chosen?.assessment ?? j.bestRejected ?? null;
+    const mm = j.motorModel;
+    const pidText = (v: { p: number; i: number; d: number; dMax: number } | null) => (v ? jointPid(v) : "--");
+    const model = [
+        `${t("gyroflightV2JointMotorModel")}: ${mm.mixer}`,
+        `${t("gyroflightV2JointNoiseWindow")}: ${mm.noiseMask}`,
+        mm.reproduction
+            ? `${t("gyroflightV2JointReproduction")}: ${mm.reproduction
+                  .map((r) => `${r.axis} ${r.ratio === null ? "unknown" : num(r.ratio, 2)}${r.reproduced ? "" : " ✗"}`)
+                  .join(", ")}`
+            : "",
+        mm.reasons.length ? `${t("gyroflightV2JointNotAssessable")}: ${mm.reasons.join(", ")}` : "",
+        `${t("gyroflightV2JointLimitations")}: ${[...mm.limitations, ...(as?.motor.limitations ?? [])].join(", ")}`,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+    if (!as)
+        return {
+            source: "none",
+            title: t("gyroflightV2JointEffectsNone"),
+            rows: [],
+            motors: mm.loggedMotorBandPower
+                ? `${t("gyroflightV2JointMotorsLogged")}: ${mm.loggedMotorBandPower.map((x) => num(x, 3)).join(", ")}`
+                : t("gyroflightV2JointMotorsNotLogged"),
+            motorWithin: "",
+            model,
+        };
+    const rows = as.axes.map((a) => ({
+        axis: a.axis,
+        pid:
+            a.pidNow && a.pidCandidate && JSON.stringify(a.pidNow) !== JSON.stringify(a.pidCandidate)
+                ? `${pidText(a.pidNow)} → ${pidText(a.pidCandidate)}`
+                : `${pidText(a.pidNow)} (${t("gyroflightV2JointEffectsUnchanged")})`,
+        noiseState: a.noise.assessed ? "assessed" : "not_assessed",
+        noise: a.noise.assessed
+            ? `${t("gyroflightV2JointNoiseRatio")} ${num(a.noise.ratio, 2)}`
+            : `${t("gyroflightV2JointEffectsNotAssessed")}: ${a.noise.reason ?? "--"}`,
+        marginsState: a.margins.assessed ? "assessed" : "not_assessed",
+        margins:
+            a.margins.assessed && a.margins.read
+                ? jointRead(a.margins.read)
+                : `${t("gyroflightV2JointEffectsNotAssessed")}: ${a.margins.reason ?? "--"}`,
+        model: `D path ${a.dPath}; gyro chain (noise band) ${a.chain}`,
+        missing: a.missing.length ? a.missing.join(", ") : "--",
+    }));
+    const m = as.motor;
+    const motors = m.motorRatios
+        ? `${t("gyroflightV2JointMotorsPredicted")}: ${m.motorRatios.map((x, i) => `M${i + 1} ${num(x, 2)}`).join(", ")} (${t("gyroflightV2JointMotorLimit")} ${num(m.limit, 2)}: ${m.withinLimit ? t("gyroflightV2JointMotorWithin") : t("gyroflightV2JointMotorExceeds")})`
+        : `${t("gyroflightV2JointMotorsNotAssessed")}: ${m.reasons.join(", ")}`;
+    return {
+        source: j.chosen ? "chosen" : "best_rejected",
+        title: j.chosen
+            ? t("gyroflightV2JointEffectsChosen", [`gyro LPF ×${as.gyroScale}, D-term LPF ×${as.dtermScale}`])
+            : t("gyroflightV2JointEffectsRejected", [`gyro LPF ×${as.gyroScale}, D-term LPF ×${as.dtermScale}`]),
+        rows,
+        motors:
+            motors +
+            (mm.loggedMotorBandPower
+                ? ` · ${t("gyroflightV2JointMotorsLogged")}: ${mm.loggedMotorBandPower.map((x) => num(x, 3)).join(", ")}`
+                : ""),
+        motorWithin: m.withinLimit === null ? "unknown" : String(m.withinLimit),
+        model,
+    };
+});
+
 const jointSpace = computed(() => {
     const j = joint.value;
     if (!j) return "";

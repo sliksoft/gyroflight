@@ -91,7 +91,8 @@ import { chooseAnalysis, resolutionConvergence, type AnalysisOption } from "./ad
 import { selectQualificationRung } from "./qualificationRung";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
-import { jointSearch, type JointSearchResult } from "./jointSearch";
+import { jointSearch, type JointProbe, type JointSearchResult } from "./jointSearch";
+import type { MotorNoiseAxis } from "./jointMotorNoise";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
 import { planMeasurement, type AxisMeasurementPlan } from "./measurementPlan";
@@ -237,6 +238,8 @@ export interface AutotuneV2Input {
      */
     modelClassQualification?: AutotuneLogInput | null;
     createdAt?: string;
+    /** Diagnostic reads of named joint candidates (SITL harness only; jointSearch probes). */
+    jointProbes?: JointProbe[];
 }
 
 export type ReportStatus = "IMPLEMENTED" | "VALIDATED" | "PARTIAL" | "BLOCKED";
@@ -1312,6 +1315,51 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
     }
     // Joint PID + filter search on the primary route (block 12): the same loops and decisions, the
     // chain simulation of this log and the D paths; the PID-only candidates are the bar it must clear.
+    // Block 13: every axis the filters reach, for the joint search's every-axis noise and motor rule.
+    const pidDtAll = (nums(h, "looptime")?.[0] ?? 0) * (nums(h, "pid_process_denom")?.[0] ?? 1) * 1e-6;
+    const motorAxes: MotorNoiseAxis[] = AXES.map((name, ai) => {
+        const p = nums(h, `${name}PID`) ?? [0, 0, 0];
+        const ax = axes[name];
+        const cfg =
+            ax?.dterm ?? (p[2] > 0 && pidDtAll > 0 ? dtermConfigFromHeaders(h, ai as 0 | 1 | 2, pidDtAll) : null);
+        let validated: boolean | null = null;
+        if (ax?.dterm) validated = ax.dtermAccepted;
+        else if (cfg && cfg.d > 0) {
+            const loggedD = log.channels.axisD?.[ai] ?? null;
+            if (loggedD) {
+                const dIn = {
+                    timeUs: log.channels.timeUs,
+                    gyro: log.channels.gyroAdc[ai],
+                    rcThrottle: log.channels.rcThrottle,
+                };
+                const dyn = simulateDterm(dIn, cfg, { kind: "dynamic" });
+                const stat = simulateDterm(dIn, cfg, { kind: "fixed", hz: cfg.dtermLpf1StaticHz });
+                for (const x of [dyn, stat]) for (let k = 0; k < x.valid.length; k++) if (!mask[k]) x.valid[k] = 0;
+                validated = dtermFitAccepted(
+                    fitDterm(dyn, loggedD, log.sampleRateHz),
+                    fitDterm(stat, loggedD, log.sampleRateHz),
+                );
+            }
+        }
+        return {
+            axis: name,
+            current: { p: p[0], i: p[1], d: p[2], dMax: dmax[ai] ?? 0 },
+            dterm: cfg && cfg.d > 0 ? cfg : null,
+            dtermValidated: validated,
+            chainNoiseValidated: validation[ai]?.noiseBand === "PASS",
+            gyroAdc: log.channels.gyroAdc[ai],
+            yawLowpassHz: name === "yaw" ? (nums(h, "yaw_lowpass_hz")?.[0] ?? 0) : undefined,
+            loggedP: log.channels.jio?.axisP?.[ai] ?? null,
+            loggedD: log.channels.axisD?.[ai] ?? null,
+        };
+    });
+    // Noise is read in flight outside every CHIRP window (the sweep's own response is not noise).
+    const noiseMask = Uint8Array.from(mask);
+    for (const name of AXES) {
+        const c = log.chirp[name];
+        if (c) for (let k = Math.max(0, c.start); k < Math.min(noiseMask.length, c.end); k++) noiseMask[k] = 0;
+    }
+    const motorCount = log.channels.motors?.length ?? 0;
     const joint: JointSearchResult | null = analysed.length
         ? jointSearch({
               axes: analysed.flatMap((name) => {
@@ -1338,6 +1386,33 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
               baseSim: sim,
               sampleRateHz: log.sampleRateHz,
               flightMask: mask,
+              noiseMask,
+              motor: {
+                  axes: motorAxes,
+                  timeUs: log.channels.timeUs,
+                  rcThrottle: log.channels.rcThrottle,
+                  pidDt: pidDtAll,
+                  mixer:
+                      h["mixer_type"] === "LEGACY" && motorCount === 4
+                          ? { kind: "quadx", yawReversed: h["yaw_motors_reversed"] === "1" }
+                          : {
+                                kind: "unknown",
+                                reason: `mixer_type:${h["mixer_type"] ?? "unknown"}:motors_logged:${motorCount}`,
+                            },
+                  motors: log.channels.motors,
+              },
+              axisStatus: Object.fromEntries(
+                  AXES.map((name) => {
+                      const d = candidateDecisions[name]?.primary;
+                      return [
+                          name,
+                          d
+                              ? `${d.status}${d.firstCause ? `:${d.firstCause.rule}` : ""}`
+                              : "no_chirp_sweep_on_this_axis",
+                      ];
+                  }),
+              ),
+              probes: input.jointProbes,
           })
         : null;
     const experimentalOutcome = buildExperimentalProposal({

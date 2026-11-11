@@ -21,7 +21,7 @@ Reference method (recorded in the protocol):
   Signs/scales: setpoint and gyro from the log in deg/s (x0.1 applied), terms in Betaflight PID units; the loop is
   dimensionless. Timing: all signals are sampled at the same PID iteration; the plant delay is inside G.
 
-Usage: reference_loop.py controller_trace.npz out.json [--window a,b] [--scale 0.1|1]
+Usage: reference_loop.py controller_trace.npz out.json [--window a,b] [--scale 0.1|1] [--axis 0|1|2]
   (window in seconds of the chirp axis active; scale = log units per deg/s: 0.1 for high-resolution logs, 1 otherwise)
 """
 
@@ -38,7 +38,7 @@ FS = 1000.0
 NPERSEG = 2048
 BAND = (5.0, 50.0)
 GM_BAND = (5.0, 85.0)  # the phase crossing may lie above the assessment band (PROTOCOL.md, limit 4)
-AXIS = 0  # roll
+AXIS = 0  # roll; --axis 1 for pitch (block 13: two-axis sweeps)
 
 
 def h1(x: np.ndarray, y: np.ndarray):
@@ -102,6 +102,9 @@ def margins(f: np.ndarray, L: np.ndarray, coh_g: np.ndarray, coh_d: np.ndarray) 
 
 
 def main() -> int:
+    global AXIS
+    if "--axis" in sys.argv:
+        AXIS = int(sys.argv[sys.argv.index("--axis") + 1])
     npz = np.load(sys.argv[1])
     out_path = Path(sys.argv[2])
     window = None

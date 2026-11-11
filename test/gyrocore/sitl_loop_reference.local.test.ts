@@ -16,6 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { JointProbe } from "../../src/gyrocore/engine/jointSearch";
 import { readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { qualifyChirpFile } from "../../src/gyrocore/chirp/qualification";
@@ -35,7 +36,8 @@ import {
 } from "../../src/js/blackbox/betaflight_dterm_dynamic";
 import { evaluateControllerFrf } from "../../src/js/blackbox/betaflight_digital_controller";
 
-const jobs: { log: string; out: string; others?: string[] }[] = process.env.GYROFLIGHT_REF_JOBS
+const jobs: { log: string; out: string; others?: string[]; jointProbes?: JointProbe[] }[] = process.env
+    .GYROFLIGHT_REF_JOBS
     ? JSON.parse(process.env.GYROFLIGHT_REF_JOBS)
     : [];
 
@@ -57,7 +59,13 @@ describe.skipIf(!jobs.length)("SITL loop reference: GyroFlight side (local)", ()
             const picked = otherLogs.length ? pickPrimary([...logs, ...otherLogs]) : null;
             const primary = picked?.primary ?? logs[0];
             const others = picked?.others ?? [];
-            const r = runAutotuneV2({ primary, others, verifiedTune: null, createdAt: "2026-11-10T00:00:00Z" });
+            const r = runAutotuneV2({
+                primary,
+                others,
+                verifiedTune: null,
+                createdAt: "2026-11-10T00:00:00Z",
+                jointProbes: job.jointProbes,
+            });
             const m = r.margins.roll?.current ?? null;
             const headers = Object.fromEntries(primary.headerPairs.map(([k, v]) => [k, v])) as Record<string, string>;
             const cfg = headers ? controllerConfigFromHeaders(headers, 0) : null;

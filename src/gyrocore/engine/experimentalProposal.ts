@@ -358,7 +358,9 @@ export function buildExperimentalProposal(input: ExperimentalInput): Experimenta
             limitations.add("experimental:filter_change_not_flown");
             // A filter change moves the noise and margins of every axis; the ones without a sweep were not assessed.
             if (ch.noiseNotAssessedAxes.length)
-                limitations.add(`experimental:filter_change_not_assessed_on:${ch.noiseNotAssessedAxes.join(",")}`);
+                limitations.add(
+                    `experimental:filter_change_margins_not_assessed_on:${ch.noiseNotAssessedAxes.join(",")}`,
+                );
         }
     }
 

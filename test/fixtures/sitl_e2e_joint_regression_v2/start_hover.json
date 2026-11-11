@@ -1,0 +1,7 @@
+{
+    "source": "v2 dossier autotune-v2-sitl-e2e-joint-2026-11-11/start runs, noise_metrics.py protocol v3 hover window",
+    "motorHoverMedian": [1.9152150186385717, 1.9708568336356327, 1.9337091309364043, 1.8192400723019706],
+    "motorHoverSpreadRel": [0.047938481186563055, 0.04572097023864988, 0.01934940135068266, 0.0414779586380317],
+    "motorIssues": [],
+    "hoverSamples": [3920, 3917, 3919]
+}

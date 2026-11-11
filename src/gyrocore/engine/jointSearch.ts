@@ -52,8 +52,9 @@
  * power P(g, d) = (P(g + d) − P(g − d)) / 4. The ratio against the current tune is the candidate's
  * noiseRatio: the controller-output noise of that axis above the band, not the mixer's motor load. The
  * gyro and D-term lowpass are one setting for every axis, so a filter change also moves the noise and the
- * margins of the axes this search did not analyse (no sweep, PID unchanged): neither is assessed here and
- * the axes are named (`noiseNotAssessedAxes`, limitation `filter_change_not_assessed_on:<axes>`); the SITL proof of
+ * margins of the axes this search did not analyse (no sweep, PID unchanged). Since block 13 their noise is
+ * assessed (jointMotorNoise.ts: every axis, per motor; the motor rule), their margins are not (no plant):
+ * the axes are named (`noiseNotAssessedAxes`, limitation `filter_change_margins_not_assessed_on:<axes>`); the SITL proof of
  * 2026-11-11 showed the motor band rising ×1.45 while the roll controller noise fell ×0.92. The PID-only
  * comparison point (decideAxis's candidate) is read with its noise for information but is not subjected
  * to the noise and bandwidth rules: a filter change must beat it as it is (conservative asymmetry).
@@ -99,6 +100,14 @@ import {
     type PidValues,
 } from "./pidOptimizer";
 import { meetsMeasured, readableValues, scaledPid, scalesOf, type RouteDecision } from "./candidateDecision";
+import {
+    motorNoiseModel,
+    MOTOR_AXES,
+    type FilterSignals,
+    type MotorAssessment,
+    type MotorNoiseInput,
+    type AxisReproduction,
+} from "./jointMotorNoise";
 
 export type JointAxisName = "roll" | "pitch" | "yaw";
 
@@ -122,6 +131,12 @@ export const JOINT_SEARCH = Object.freeze({
     screenKeep: 3,
     /** Predicted controller-output noise above NOISE_BAND_HZ may not grow by more than this. */
     maxNoiseRatio: 1 + NOISE_ALLOWANCE,
+    /**
+     * Block 13: the predicted band power of every motor (QUAD X mixer sum of all three axes' controller
+     * output under the candidate filters, jointMotorNoise.ts) may not grow by more than this; the highest
+     * motor decides. A filter change whose motor load cannot be assessed is not eligible.
+     */
+    maxMotorNoiseRatio: 1 + NOISE_ALLOWANCE,
     /** The candidate's crossover keeps at least this fraction of the current one. */
     minCrossoverKeep: 0.8,
     /** A filter change must beat the PID-only best by this crossover factor at equal axes meeting. */
@@ -176,6 +191,48 @@ export interface JointSearchInput {
     flightMask: Uint8Array;
     /** The axes the filters apply to (default roll, pitch, yaw: Betaflight's lowpass settings are per profile, not per axis); the ones not analysed are named when a filter changes. */
     allAxes?: JointAxisName[];
+    /** Samples the noise is read on (in flight, outside every CHIRP window); default flightMask. */
+    noiseMask?: Uint8Array;
+    /** Every-axis noise and per-motor model input (all three axes, roll/pitch/yaw order); absent: no motor rule possible. */
+    motor?: Omit<MotorNoiseInput, "noiseMask" | "sampleRateHz">;
+    /** Why an axis has no margins of its own (no sweep, or the decision's first cause), per axis not analysed. */
+    axisStatus?: Partial<Record<JointAxisName, string>>;
+    /** Diagnostic reads of named candidates (harness only: the regression case and the positive control). */
+    probes?: JointProbe[];
+}
+
+export interface JointProbe {
+    label: string;
+    pids: Partial<Record<JointAxisName, PidValues>>;
+    gyroScale: number;
+    dtermScale: number;
+}
+
+/** What a candidate (PID per axis + filter scales) does on every axis the filters reach. */
+export interface JointAxisEffect {
+    axis: JointAxisName;
+    /** A sweep and a usable PID search on this axis (its margins can be read). */
+    analysed: boolean;
+    pidNow: PidValues | null;
+    pidCandidate: PidValues | null;
+    noise: { assessed: boolean; ratio: number | null; reason: string | null };
+    margins: {
+        assessed: boolean;
+        read: { crossoverHz: number | null; pmDeg: number | null; gmDb: number | null; sDb: number | null } | null;
+        reason: string | null;
+    };
+    dPath: "validated" | "not_validated" | "not_logged" | "no_d_term";
+    chain: "validated" | "not_validated" | "not_simulated";
+    /** The data that would make the missing assessments possible. */
+    missing: string[];
+}
+
+export interface JointAssessment {
+    gyroScale: number;
+    dtermScale: number;
+    pids: Partial<Record<JointAxisName, PidValues>>;
+    motor: MotorAssessment & { limit: number; withinLimit: boolean | null };
+    axes: JointAxisEffect[];
 }
 
 export interface JointNoise {
@@ -199,6 +256,8 @@ export interface JointCandidateRead {
     /** Crossover against the current tune. */
     crossoverGain: number | null;
     noise: JointNoise;
+    /** Predicted per-motor band power ratios (all axes, QUAD X mixer) with the other axes at their current PID. */
+    motor: { assessed: boolean; ratios: number[] | null; max: number | null };
 }
 
 export interface JointParameterEvidence {
@@ -218,6 +277,10 @@ export interface JointComboAxis {
     /** Usable candidates that met the targets but were turned down for noise or bandwidth. */
     excludedForNoise: number;
     excludedForBandwidth: number;
+    /** Met the targets, the axis noise and bandwidth rules, but the motor rule failed (or could not be assessed). */
+    excludedForMotor: number;
+    /** Meets the targets and the bandwidth floor but fails a noise or motor rule: the highest crossover (information). */
+    bestRejected: JointCandidateRead | null;
     /** The eligible candidate with the highest crossover; null: none meets the targets within the rules. */
     best: JointCandidateRead | null;
     /** Every eligible candidate (meets the targets within the noise and bandwidth rules), highest crossover first; at most ELIGIBLE_KEPT. */
@@ -262,6 +325,8 @@ export interface JointChosen {
     pidOnly: { axesMeeting: number; meanCrossoverGain: number | null };
     /** Axes whose noise and margins this candidate's filter change moves but which the search did not analyse (no sweep). */
     noiseNotAssessedAxes: JointAxisName[];
+    /** Every axis and every motor under this candidate (block 13). */
+    assessment: JointAssessment;
 }
 
 export type JointSearchStatus =
@@ -279,6 +344,7 @@ export interface JointSearchResult {
         screenPStep: number;
         screenKeep: number;
         maxNoiseRatio: number;
+        maxMotorNoiseRatio: number;
         minCrossoverKeep: number;
         minGainOverPidOnly: number;
         noiseBandHz: [number, number];
@@ -303,6 +369,20 @@ export interface JointSearchResult {
     pidOnly: Partial<Record<JointAxisName, JointCandidateRead | null>>;
     combos: JointCombo[];
     chosen: JointChosen | null;
+    /** Without a chosen candidate: the rejected candidate with the highest crossover over all combinations, assessed on every axis. */
+    bestRejected: JointAssessment | null;
+    /** The motor model: mixer, what it needs and what it lacks, and the logged motors' current band power (information). */
+    motorModel: {
+        assessable: boolean;
+        reasons: string[];
+        mixer: string;
+        limitations: string[];
+        loggedMotorBandPower: number[] | null;
+        noiseMask: string;
+        /** Model against the logged axisP + axisD per axis at the current tune (block 13). */
+        reproduction: AxisReproduction[] | null;
+    };
+    probes: (JointAssessment & { label: string })[];
     candidatesTried: number;
     candidatesUsable: number;
     /** Wall time (diagnostic, not deterministic: strip before comparing). */
@@ -444,6 +524,7 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         screenPStep: JOINT_SEARCH.screenPStep,
         screenKeep: JOINT_SEARCH.screenKeep,
         maxNoiseRatio: JOINT_SEARCH.maxNoiseRatio,
+        maxMotorNoiseRatio: JOINT_SEARCH.maxMotorNoiseRatio,
         minCrossoverKeep: JOINT_SEARCH.minCrossoverKeep,
         minGainOverPidOnly: JOINT_SEARCH.minGainOverPidOnly,
         noiseBandHz: [NOISE_BAND_HZ[0], NOISE_BAND_HZ[1]] as [number, number],
@@ -452,6 +533,36 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
     const axes = input.axes.filter((a) => a.decision.searchRan && a.decision.current && a.decision.measurementUsable);
     const chainCfg = input.chainCfg;
     const currentFilters: Record<string, number> = {};
+    // Block 13: noise on every axis and per motor, read in flight outside the CHIRP windows.
+    const noiseMask = input.noiseMask ?? input.flightMask;
+    const model = input.motor ? motorNoiseModel({ ...input.motor, noiseMask, sampleRateHz: input.sampleRateHz }) : null;
+    let loggedMotors: number[] | null | undefined;
+    // Filled once the filter signals exist (after the parameter evidence); null before or without a model.
+    let reproductionRows: AxisReproduction[] | null = null;
+    function motorModelInfo(): JointSearchResult["motorModel"] {
+        if (loggedMotors === undefined) loggedMotors = model?.loggedMotorBandPower() ?? null;
+        const mixer = input.motor?.mixer;
+        return {
+            assessable: !!model && !model.staticReasons.length,
+            reasons: model
+                ? [...model.staticReasons, ...model.gyroReasons.map((r) => `gyro_change:${r}`)]
+                : ["motor_model_input_missing"],
+            mixer: !mixer
+                ? "unknown"
+                : mixer.kind === "quadx"
+                  ? `quadx_assumed_from_legacy_mixer${mixer.yawReversed ? ":yaw_reversed" : ""}`
+                  : `unknown:${mixer.reason}`,
+            limitations: [
+                "i_term_and_feedforward_left_out",
+                "motor_and_esc_dynamics_not_modelled",
+                "mixer_saturation_and_airmode_not_modelled",
+                "predicts_the_controller_part_of_the_motor_signal_only",
+            ],
+            loggedMotorBandPower: loggedMotors,
+            noiseMask: input.noiseMask ? "in_flight_outside_chirp_windows" : "in_flight",
+            reproduction: reproductionRows,
+        };
+    }
     const result = (status: JointSearchStatus, extra: Partial<JointSearchResult> = {}): JointSearchResult => ({
         status,
         reasons,
@@ -472,6 +583,9 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         pidOnly: {},
         combos: [],
         chosen: null,
+        bestRejected: null,
+        motorModel: motorModelInfo(),
+        probes: [],
         candidatesTried: 0,
         candidatesUsable: 0,
         searchMs: Math.round(performance.now() - t0),
@@ -626,9 +740,35 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
             basisCache.set(key, out);
             return out;
         }
-        out = noiseBasis(g, Float64Array.from(d), valid, input.flightMask, fs);
+        // The P term acts on the error (setpoint − gyro): −g in the noise band, where the setpoint has no content.
+        // The sign fixes the cross term with the D path (simulated with the logged axisD's sign, −Δgyro).
+        out = noiseBasis(
+            Float64Array.from(g, (x) => -x),
+            Float64Array.from(d),
+            valid,
+            noiseMask,
+            fs,
+        );
         basisCache.set(key, out);
         return out;
+    };
+
+    // Filter signals for the motor model per (gyro scale, D-LPF scale): the chain simulation of that gyro
+    // scale (null when the gyro lowpass is not searched: logged gyroADC) and every axis's D path scaled.
+    const sigFor = (sg: number, sd: number): FilterSignals => ({
+        sim: gyroSearched ? (simFor(sg)?.sim ?? null) : null,
+        dterm: (input.motor?.axes ?? []).map((m) =>
+            m.dterm ? (sd === 1 || !dtermSearched ? m.dterm : scaledDterm(m.dterm, sd)) : null,
+        ),
+    });
+    const axisIdx = (n: JointAxisName) => MOTOR_AXES.indexOf(n);
+    if (model && !model.staticReasons.length) reproductionRows = model.reproduction(sigFor(1, 1));
+    const motorOf = (a: JointAxisInput, v: PidValues, sg: number, sd: number): JointCandidateRead["motor"] => {
+        if (!model) return { assessed: false, ratios: null, max: null };
+        const r = model.ratiosFor(`${sg}|${sd}`, sigFor(sg, sd), sigFor(1, 1), sg !== 1, axisIdx(a.axis), v);
+        return r
+            ? { assessed: true, ratios: r.motorRatios, max: Math.max(...r.motorRatios) }
+            : { assessed: false, ratios: null, max: null };
     };
 
     const kpOf = (p: number) => PTERM_SCALE * p;
@@ -677,6 +817,7 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                 meetsTargets: meetsMeasured(val),
                 crossoverGain: fc0 && val.crossoverHz ? val.crossoverHz / fc0 : null,
                 noise: noiseOf(a, v, sg, sd),
+                motor: motorOf(a, v, sg, sd),
             },
         };
     };
@@ -703,7 +844,9 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         r.noise.ratio !== null &&
         r.noise.ratio <= JOINT_SEARCH.maxNoiseRatio &&
         r.crossoverGain !== null &&
-        r.crossoverGain >= JOINT_SEARCH.minCrossoverKeep;
+        r.crossoverGain >= JOINT_SEARCH.minCrossoverKeep &&
+        r.motor.max !== null &&
+        r.motor.max <= JOINT_SEARCH.maxMotorNoiseRatio;
 
     // The PID-only best per axis: the grid's offered candidate (decideAxis), read here with its noise.
     const pidOnly: JointSearchResult["pidOnly"] = {};
@@ -759,6 +902,8 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                     usable: 0,
                     excludedForNoise: 0,
                     excludedForBandwidth: 0,
+                    excludedForMotor: 0,
+                    bestRejected: null,
                     best: null,
                     eligible: [],
                     safest: null,
@@ -810,12 +955,16 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                 const c = r.read;
                 if (!ca.safest || c.pmDeg! > ca.safest.pmDeg!) ca.safest = c;
                 if (!c.meetsTargets) continue;
-                if (c.noise.ratio === null || c.noise.ratio > JOINT_SEARCH.maxNoiseRatio) {
-                    ca.excludedForNoise++;
-                    continue;
-                }
                 if (c.crossoverGain === null || c.crossoverGain < JOINT_SEARCH.minCrossoverKeep) {
                     ca.excludedForBandwidth++;
+                    continue;
+                }
+                const noiseOk = c.noise.ratio !== null && c.noise.ratio <= JOINT_SEARCH.maxNoiseRatio;
+                const motorOk = c.motor.max !== null && c.motor.max <= JOINT_SEARCH.maxMotorNoiseRatio;
+                if (!noiseOk) ca.excludedForNoise++;
+                else if (!motorOk) ca.excludedForMotor++;
+                if (!noiseOk || !motorOk) {
+                    if (!ca.bestRejected || c.crossoverHz! > ca.bestRejected.crossoverHz!) ca.bestRejected = c;
                     continue;
                 }
                 if (!ca.best || c.crossoverHz! > ca.best.crossoverHz!) {
@@ -848,19 +997,157 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         const [nb, db] = changeCost(b);
         return nc !== nb ? nc < nb : dc < db;
     };
+    /** Every axis and motor under a candidate (block 13): what is assessed, what is not and why. */
+    const effect = (
+        name: JointAxisName,
+        sg: number,
+        sd: number,
+        pidCand: PidValues | null,
+        m: MotorAssessment,
+    ): JointAxisEffect => {
+        const ma = input.motor?.axes.find((x) => x.axis === name);
+        const an = axes.find((x) => x.axis === name);
+        const pidNow = an?.current ?? ma?.current ?? null;
+        const cand = pidCand ?? pidNow;
+        let margins: JointAxisEffect["margins"];
+        if (an && cand) {
+            const r = read(an, cand, sg, sd);
+            margins = r
+                ? {
+                      assessed: true,
+                      read: {
+                          crossoverHz: r.read.crossoverHz,
+                          pmDeg: r.read.pmDeg,
+                          gmDb: r.read.gmDb,
+                          sDb: r.read.sDb,
+                      },
+                      reason: null,
+                  }
+                : { assessed: false, read: null, reason: "not_readable_inside_the_identified_band" };
+        } else
+            margins = {
+                assessed: false,
+                read: null,
+                reason: input.axisStatus?.[name] ?? "no_chirp_sweep_on_this_axis",
+            };
+        const ratio = m.axisRatios[name] ?? null;
+        const rep = reproductionRows?.find((r) => r.axis === name) ?? null;
+        const dPath: JointAxisEffect["dPath"] = !ma
+            ? "not_logged"
+            : !ma.dterm || ma.dterm.d <= 0
+              ? "no_d_term"
+              : ma.dtermValidated === null
+                ? "not_logged"
+                : ma.dtermValidated
+                  ? "validated"
+                  : "not_validated";
+        // The chain's validation that matters for noise: the noise bands (80–500 Hz) on this axis.
+        const chain: JointAxisEffect["chain"] = !input.chainInput
+            ? "not_simulated"
+            : ma?.chainNoiseValidated
+              ? "validated"
+              : "not_validated";
+        const missing: string[] = [];
+        if (!an) missing.push(`required_measurement:chirp_${name}`);
+        if (dPath === "not_validated") missing.push("dterm_path_fit_on_logged_axisD");
+        if (dPath === "not_logged" && (ma?.dterm?.d ?? 0) > 0) missing.push("logged_axisD");
+        if (chain === "not_simulated") missing.push("required_measurement:log_gyro_unfilt");
+        if (chain === "not_validated" && sg !== 1) missing.push("gyro_chain_noise_band_validation");
+        if (!model) missing.push("motor_model_input");
+        if (rep && rep.reproduced === false) missing.push("noise_path_reproduction:axisP+axisD");
+        if (rep && rep.reproduced === null) missing.push("logged_axisP");
+        return {
+            axis: name,
+            analysed: !!an,
+            pidNow,
+            pidCandidate: cand,
+            noise: {
+                assessed: ratio !== null,
+                ratio,
+                reason:
+                    ratio !== null
+                        ? null
+                        : rep && rep.reproduced === false
+                          ? `noise_not_reproduced:model/logged_${rep.ratio?.toFixed(2)}${rep.share !== null ? `:share_${(rep.share * 100).toFixed(1)}pct` : ""}`
+                          : m.reasons.join(",") || "not_computable",
+            },
+            margins,
+            dPath,
+            chain,
+            missing,
+        };
+    };
+    const assessment = (sg: number, sd: number, pids: Partial<Record<JointAxisName, PidValues>>): JointAssessment => {
+        const m: MotorAssessment = model
+            ? model.assess(`${sg}|${sd}`, sigFor(sg, sd), sigFor(1, 1), sg !== 1, pids)
+            : {
+                  assessed: false,
+                  reasons: ["motor_model_input_missing"],
+                  motorRatios: null,
+                  maxMotorRatio: null,
+                  axisRatios: {},
+              };
+        return {
+            gyroScale: sg,
+            dtermScale: sd,
+            pids,
+            motor: {
+                ...m,
+                limit: JOINT_SEARCH.maxMotorNoiseRatio,
+                withinLimit: m.maxMotorRatio === null ? null : m.maxMotorRatio <= JOINT_SEARCH.maxMotorNoiseRatio,
+            },
+            axes: MOTOR_AXES.map((name) => effect(name, sg, sd, pids[name] ?? null, m)),
+        };
+    };
+    const probes = () =>
+        (input.probes ?? []).map((pr) => ({
+            label: pr.label,
+            ...assessment(pr.gyroScale, pr.dtermScale, pr.pids),
+        }));
+    // The rejected candidate with the highest crossover over the combinations searched (information).
+    const bestRejectedOf = (): JointAssessment | null => {
+        let br: JointCandidateRead | null = null;
+        let brAxis: JointAxisName | null = null;
+        for (const c of combos)
+            for (const ca of c.axes)
+                if (ca.bestRejected && (!br || ca.bestRejected.crossoverHz! > br.crossoverHz!)) {
+                    br = ca.bestRejected;
+                    brAxis = ca.axis;
+                }
+        return br && brAxis ? assessment(br.gyroScale, br.dtermScale, { [brAxis]: br.pid }) : null;
+    };
+
+    // The best combination whose combined assessment (every chosen axis together) stays within the
+    // motor limit; a combination that exceeds it is named and the next one is tried.
+    const ordered = combos.filter((c) => c.axesMeeting > 0).sort((x, y) => (better(x, y) ? -1 : better(y, x) ? 1 : 0));
     let bestCombo: JointCombo | null = null;
-    for (const c of combos) {
-        if (!c.axesMeeting) continue;
-        if (!bestCombo || better(c, bestCombo)) bestCombo = c;
+    let bestAssessment: JointAssessment | null = null;
+    for (const c of ordered) {
+        const pids = Object.fromEntries(c.axes.filter((x) => x.best).map((x) => [x.axis, x.best!.pid])) as Partial<
+            Record<JointAxisName, PidValues>
+        >;
+        const as = assessment(c.gyroScale, c.dtermScale, pids);
+        if (as.motor.withinLimit) {
+            bestCombo = c;
+            bestAssessment = as;
+            break;
+        }
+        reasons.push(
+            `combination_exceeds_motor_limit:gyro_x${c.gyroScale}:dterm_x${c.dtermScale}:${as.motor.maxMotorRatio === null ? "unknown" : as.motor.maxMotorRatio.toFixed(2)}`,
+        );
     }
     const base = { pidOnly, combos, candidatesTried: tried, candidatesUsable: usableN };
-    if (!bestCombo) {
+    if (!bestCombo || !bestAssessment) {
         reasons.push(
             pidOnlyMeeting
                 ? "no_filter_combination_meets_the_targets_within_rules; the PID-only candidate stands"
                 : "no_candidate_meets_all_targets_within_rules_in_any_filter_combination",
         );
-        return result(pidOnlyMeeting ? "pid_only_stands" : "no_candidate_meets_targets_within_rules", base);
+        return result(pidOnlyMeeting ? "pid_only_stands" : "no_candidate_meets_targets_within_rules", {
+            ...base,
+            bestRejected: bestRejectedOf(),
+            probes: probes(),
+        });
     }
     let reason: JointChosen["reason"] | null = null;
     if (bestCombo.axesMeeting > pidOnlyMeeting) reason = "more_axes_meet_targets";
@@ -875,7 +1162,7 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         reasons.push(
             `pid_only_candidate_stands: filters add no axis meeting the targets and no ${JOINT_SEARCH.minGainOverPidOnly}× crossover gain (best combination gyro ×${bestCombo.gyroScale}, D-LPF ×${bestCombo.dtermScale})`,
         );
-        return result("pid_only_stands", base);
+        return result("pid_only_stands", { ...base, bestRejected: bestRejectedOf(), probes: probes() });
     }
     // A filter change (either group) reaches every axis; the ones without a sweep are named once, here.
     const notAssessed =
@@ -916,8 +1203,9 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                     `margin_evidence:${m.evidence?.level ?? "unknown"}`,
                     `filters:gyro_lpf_x${bestCombo.gyroScale}:dterm_lpf_x${bestCombo.dtermScale}`,
                     `predicted_noise_ratio:${ca.best.noise.ratio === null ? "unknown" : ca.best.noise.ratio.toFixed(2)}`,
+                    `predicted_max_motor_noise_ratio:${bestAssessment.motor.maxMotorRatio === null ? "unknown" : bestAssessment.motor.maxMotorRatio.toFixed(2)}`,
                     "noise_simulated_on_logged_data",
-                    ...(notAssessed.length ? [`filter_change_not_assessed_on:${notAssessed.join(",")}`] : []),
+                    ...(notAssessed.length ? [`filter_change_margins_not_assessed_on:${notAssessed.join(",")}`] : []),
                     "required_measurement:ab_flight_with_proposal",
                     ...m.reasons.map((r) => `margins:${r}`),
                 ],
@@ -934,7 +1222,9 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
             reason,
             pidOnly: { axesMeeting: pidOnlyMeeting, meanCrossoverGain: pidOnlyMean },
             noiseNotAssessedAxes: notAssessed,
+            assessment: bestAssessment,
         },
+        probes: probes(),
     });
 }
 

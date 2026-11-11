@@ -1147,8 +1147,32 @@
     "gyroflightV2JointNoCandidateAxis": { "message": "no joint candidate on this axis" },
     "gyroflightV2JointNoPidOnly": { "message": "none within ±30 % meets the targets" },
     "gyroflightV2JointFilters": { "message": "Filters now → candidate" },
+    "gyroflightV2JointEffectsChosen": { "message": "Effects of the chosen candidate on every axis and motor ($1)" },
+    "gyroflightV2JointEffectsRejected": {
+        "message": "No candidate chosen. Effects of the best rejected candidate on every axis and motor ($1)"
+    },
+    "gyroflightV2JointEffectsNone": { "message": "No candidate to assess: what this log allows" },
+    "gyroflightV2JointEffectsPid": { "message": "PID now → candidate" },
+    "gyroflightV2JointEffectsNoise": { "message": "Noise (predicted)" },
+    "gyroflightV2JointEffectsMargins": { "message": "Margins" },
+    "gyroflightV2JointEffectsModel": { "message": "Model checks" },
+    "gyroflightV2JointEffectsMissing": { "message": "Missing data" },
+    "gyroflightV2JointEffectsUnchanged": { "message": "unchanged" },
+    "gyroflightV2JointEffectsNotAssessed": { "message": "not assessed" },
+    "gyroflightV2JointMotorsPredicted": { "message": "Motor noise, predicted band power against now" },
+    "gyroflightV2JointMotorsNotAssessed": { "message": "Motor noise not assessed" },
+    "gyroflightV2JointMotorsLogged": { "message": "logged motor band power now" },
+    "gyroflightV2JointMotorsNotLogged": { "message": "Motor outputs not logged" },
+    "gyroflightV2JointMotorLimit": { "message": "limit" },
+    "gyroflightV2JointMotorWithin": { "message": "within" },
+    "gyroflightV2JointMotorExceeds": { "message": "exceeds" },
+    "gyroflightV2JointMotorModel": { "message": "Mixer" },
+    "gyroflightV2JointNoiseWindow": { "message": "noise read on" },
+    "gyroflightV2JointReproduction": { "message": "model / logged P+D per axis" },
+    "gyroflightV2JointNotAssessable": { "message": "not assessable" },
+    "gyroflightV2JointLimitations": { "message": "not modelled" },
     "gyroflightV2JointNoiseNotAssessed": {
-        "message": "The gyro and D-term lowpass are one setting for every axis: for $1 (no sweep, PID unchanged) neither the noise nor the margins under these filters were assessed; less filtering raises their noise (the motor load can grow although the analysed axis gets quieter), more filtering adds phase lag at their crossover."
+        "message": "The gyro and D-term lowpass are one setting for every axis: for $1 (no sweep, PID unchanged) the margins under these filters were not assessed (no measured plant); their noise is assessed per axis and per motor in the table below where the model reproduces the logged P and D terms. Less filtering raises noise, more filtering adds phase lag at their crossover."
     },
     "gyroflightV2JointEvidenceToggle": { "message": "Evidence per filter parameter and search space" },
     "gyroflightV2JointSearched": { "message": "searched" },

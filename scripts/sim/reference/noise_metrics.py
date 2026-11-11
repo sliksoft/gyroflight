@@ -18,6 +18,16 @@ Ratios between two runs with the same noise seed and tick count are paired compa
 (0.1 deg/s with high resolution; PID units; motor output units); only ratios are compared.
 
 Usage: noise_metrics.py controller_trace.npz out.json [--from 2.0] [--band 100,500] [--scale 0.1]
+
+Per-motor reference (block 13, protocol v3; the fields above stay for comparison with protocol v2):
+  hover         the samples of steady hover outside the CHIRP: every motor above its disarmed value (> 1001) for at least
+                1 s before (spin-up and take-off excluded), and outside every active CHIRP of any axis ± 0.5 s (debug[1] >= 0
+                and debug[2] > 0). Welch per contiguous run (nperseg 1024, Hann, 50 %), weighted by
+                its segment count; a run shorter than one segment does not count.
+  motorBandHover[m]   band power 100–500 Hz of motor[m] (m = 0..3) on those samples, the paired per-motor measure;
+  axisCtrlHover[a]    band power of the logged axisP_a + axisD_a per axis on the same samples (in hover the setpoint has no
+                      content in the band, so axisP is the firmware's own Kp·gyro with TPA and the yaw lowpass);
+  motorClip           the fraction of hover samples with any motor at or above motorClipAt (2000) or at or below 1000.
 """
 
 from __future__ import annotations
@@ -89,6 +99,55 @@ def main() -> int:
         "motorMean": float(np.mean(motors)),
         "motorMax": float(np.max(motors)),
     }
+    # --- hover outside the CHIRP (protocol v3 per-motor measure) ---
+    tt = z["time_s"] - z["time_s"][0]
+    mot_all = z["motor"].astype(float)
+    dbg = z["debug"]
+    armed = np.all(mot_all > 1001, axis=1)
+    ok = np.zeros(len(tt), dtype=bool)
+    run_start = None
+    for k in range(len(tt)):
+        if armed[k]:
+            if run_start is None:
+                run_start = tt[k]
+            ok[k] = tt[k] - run_start >= 1.0
+        else:
+            run_start = None
+    # Every active CHIRP (any axis: debug[1] >= 0 and debug[2] > 0), each with ±0.5 s, is cut out.
+    act = (dbg[:, 1] >= 0) & (dbg[:, 2] > 0)
+    idx = np.flatnonzero(act)
+    if idx.size:
+        cuts = np.flatnonzero(np.diff(idx) > 1)
+        for a, b in zip(np.r_[idx[0], idx[cuts + 1]], np.r_[idx[cuts], idx[-1]]):
+            ok &= ~((tt >= tt[a] - 0.5) & (tt <= tt[b] + 0.5))
+    def runs(mask):
+        idx = np.flatnonzero(mask)
+        if not idx.size:
+            return []
+        cuts = np.flatnonzero(np.diff(idx) > 1)
+        starts = np.r_[idx[0], idx[cuts + 1]]
+        ends = np.r_[idx[cuts], idx[-1]] + 1
+        return [(a, b) for a, b in zip(starts, ends) if b - a >= NPERSEG]
+    def hover_power(x):
+        tot, w = 0.0, 0
+        for a, b in runs(ok):
+            n_seg = (b - a - NPERSEG) // (NPERSEG // 2) + 1
+            tot += band_power(x[a:b], *band) * n_seg
+            w += n_seg
+        return tot / w if w else None
+    hover_runs = runs(ok)
+    result["hover"] = {"samples": int(sum(b - a for a, b in hover_runs)), "runs": [[round(float(tt[a]), 3), round(float(tt[b - 1]), 3)] for a, b in hover_runs]}
+    result["motorBandHover"] = [hover_power(mot_all[:, m]) for m in range(mot_all.shape[1])]
+    # Per axis the logged controller part the gyro noise drives: axisP + axisD (in hover the setpoint carries
+    # nothing above 100 Hz, so axisP there is Kp·(−gyro) with the firmware's own Kp, TPA and yaw lowpass).
+    axis_ctrl = []
+    for ax in range(3):
+        p_ax = z["p"][:, ax].astype(float)
+        d_ax = z["d"][:, ax].astype(float) if z["d"].shape[1] > ax else np.zeros_like(p_ax)
+        axis_ctrl.append(hover_power(p_ax + d_ax))
+    result["axisCtrlHover"] = axis_ctrl
+    sel_h = ok
+    result["motorClip"] = float(np.mean(np.any((mot_all[sel_h] >= 2000) | (mot_all[sel_h] <= 1000), axis=1))) if sel_h.any() else None
     out.write_text(json.dumps(result) + "\n")
     print(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in result.items() if k != "bandHz"}))
     return 0
