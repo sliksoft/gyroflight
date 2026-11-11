@@ -34,6 +34,7 @@ import math
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # no __pycache__ in the harness tree (run_tune.sh refuses a dirty harness)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from e2e_verdict import TARGETS, TOL, improvement, js_round, misses  # noqa: E402
 

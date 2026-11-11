@@ -31,6 +31,8 @@ import re
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # no __pycache__ in the harness tree (run_tune.sh refuses a dirty harness)
+
 TOL = {"fcRel": 0.10, "pmDeg": 5.0, "sDb": 1.0, "gmDb": 1.5, "repeatPmDeg": 1.0}
 TARGETS = {"pm": 45.0, "gm": 6.0, "s": 6.0}
 SCALES = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3]
