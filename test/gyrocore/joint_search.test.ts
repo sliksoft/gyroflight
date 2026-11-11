@@ -517,7 +517,10 @@ describe("joint PID + filter search (block 12)", () => {
         // A D-term-only change (the gyro lowpass adds nothing here, the D-term lowpass carries the PM) reaches the
         // other axes' D paths just the same: named as well.
         model = (ps, _sg, sd) => ({ pm: 28 - 30 * (ps - 1) + 60 * (sd - 1), gm: 10, s: 5, fc: FC0 * ps });
-        const r3 = jointSearch(input(decision(false)));
+        // (the gyro lowpass is not searched here: chain not validated, so only the D-term group can move)
+        const r3 = jointSearch(
+            input(decision(false), { axes: [axisInput(decision(false), { chainValidated: false })] }),
+        );
         expect(r3.status).toBe("candidate_found");
         expect(r3.chosen!.gyroScale).toBe(1);
         expect(r3.chosen!.dtermScale).toBeGreaterThan(1);
