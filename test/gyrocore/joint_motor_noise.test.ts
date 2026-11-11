@@ -238,24 +238,52 @@ describe("every-axis noise and per-motor model (block 13)", () => {
         expect(g.axisRatios.yaw).toBeNull();
     });
 
-    it("yaw_motors_reversed flips the yaw sign in every motor (the per-motor powers change, the mixer table does not)", () => {
+    it("yaw_motors_reversed flips the yaw sign in every motor: per-motor powers equal the direct sum with yaw negated or not", () => {
+        // Yaw shares the frame's common noise with roll and pitch here, so its sign in the mixer changes the motor powers.
+        const gy = [gyro[0], gyro[1], Float64Array.from(gyro[2], (g, k) => g + 3 * common[k])];
+        const ax = axes().map((a, ai) => ({
+            ...a,
+            gyroAdc: gy[ai],
+            loggedP: Float64Array.from(gy[ai], (g) => -PTERM * a.current.p * g),
+        }));
+        const mk = (yawReversed: boolean) =>
+            motorNoiseModel({
+                axes: ax,
+                timeUs,
+                rcThrottle,
+                sampleRateHz: FS,
+                pidDt: 0.001,
+                noiseMask: mask,
+                mixer: { kind: "quadx", yawReversed },
+                motors: null,
+            });
         const cand = { p: 120, i: 79, d: 36, dMax: 48 };
-        const a = model().assess("1|1", base, base, false, { roll: cand });
-        const rev = motorNoiseModel({
-            axes: axes(),
-            timeUs,
-            rcThrottle,
-            sampleRateHz: FS,
-            pidDt: 0.001,
-            noiseMask: mask,
-            mixer: { kind: "quadx", yawReversed: true },
-            motors: null,
+        const normal = mk(false).assess("1|1", base, base, false, { roll: cand });
+        const reversed = mk(true).assess("1|1", base, base, false, { roll: cand });
+        const dRoll = dOf(0, dcfg(cand.d, cand.dMax)).d;
+        const dRoll0 = dOf(0, dcfg(30, 40)).d;
+        const dPitch = dOf(1, dcfg(61, 0)).d;
+        const valid = new Uint8Array(N);
+        const dv = [dOf(0, dcfg(30, 40)), dOf(0, dcfg(cand.d, cand.dMax)), dOf(1, dcfg(61, 0))];
+        for (let k = 0; k < N; k++) valid[k] = dv.every((x) => x.valid[k] && Number.isFinite(x.d[k])) ? 1 : 0;
+        const fin = (x: number) => (Number.isFinite(x) ? x : 0);
+        const uR = Float64Array.from(gy[0], (g, k) => -PTERM * cand.p * g + fin(dRoll[k]));
+        const uR0 = Float64Array.from(gy[0], (g, k) => -PTERM * 100 * g + fin(dRoll0[k]));
+        const uP = Float64Array.from(gy[1], (g, k) => -PTERM * 82 * g + fin(dPitch[k]));
+        const uY = Float64Array.from(gy[2], (g) => -PTERM * 56 * g);
+        const ratio = (row: readonly number[], yawSign: number) => {
+            const mix = (r: Float64Array) =>
+                Float64Array.from({ length: N }, (_, k) => row[0] * r[k] + row[1] * uP[k] + yawSign * row[2] * uY[k]);
+            return maskedBandPower(mix(uR), valid, mask, FS)! / maskedBandPower(mix(uR0), valid, mask, FS)!;
+        };
+        QUADX_MIX.forEach((row, m) => {
+            expect(normal.motorRatios![m]).toBeCloseTo(ratio(row, -1), 6);
+            expect(reversed.motorRatios![m]).toBeCloseTo(ratio(row, +1), 6);
         });
-        const b = rev.assess("1|1", base, base, false, { roll: cand });
-        // Yaw shares noise with nothing here (its gyro is independent), so the powers change only through cross terms:
-        // equal to well within 1 %, and both assessed.
-        expect(b.assessed).toBe(true);
-        a.motorRatios!.forEach((r, i) => expect(Math.abs(r - b.motorRatios![i]) / r).toBeLessThan(0.01));
+        // The flip is visible: on at least one motor the two differ by more than 1 %.
+        expect(
+            Math.max(...normal.motorRatios!.map((r, m) => Math.abs(r - reversed.motorRatios![m]) / r)),
+        ).toBeGreaterThan(0.01);
     });
 
     it("every ratio is paired: a candidate series with fewer valid samples reads the baseline on the same samples", () => {
@@ -268,5 +296,13 @@ describe("every-axis noise and per-motor model (block 13)", () => {
         expect(a.assessed).toBe(true);
         a.motorRatios!.forEach((r) => expect(r).toBeCloseTo(1, 9));
         expect(a.axisRatios.roll!).toBeCloseTo(1, 9);
+    });
+
+    it("the quadratic basis is paired too: a half-valid candidate series gives ratio 1 at the current tune", () => {
+        const half = Uint8Array.from({ length: N }, (_, k) => (k >= N / 2 ? 1 : 0));
+        const sim = { out: gyro, valid: half } as unknown as FilterSignals["sim"];
+        const q = model().ratiosFor("cand-basis", { sim, dterm: base.dterm }, base, true, 0, pids.roll)!;
+        q.motorRatios.forEach((r) => expect(r).toBeCloseTo(1, 9));
+        expect(q.axisRatio!).toBeCloseTo(1, 9);
     });
 });

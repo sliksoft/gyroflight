@@ -529,7 +529,8 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
         maxMotorNoiseRatio: JOINT_SEARCH.maxMotorNoiseRatio,
         minCrossoverKeep: JOINT_SEARCH.minCrossoverKeep,
         minGainOverPidOnly: JOINT_SEARCH.minGainOverPidOnly,
-        noiseBandHz: [NOISE_BAND_HZ[0], NOISE_BAND_HZ[1]] as [number, number],
+        // The band as measured: Welch sees bins up to Nyquist only (100–500 Hz on a 1 kHz log).
+        noiseBandHz: [NOISE_BAND_HZ[0], Math.min(NOISE_BAND_HZ[1], input.sampleRateHz / 2)] as [number, number],
     };
     // Axes the PID-only search could read at all (a plant, a current tune and a search that ran).
     const axes = input.axes.filter((a) => a.decision.searchRan && a.decision.current && a.decision.measurementUsable);
@@ -776,7 +777,7 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
 
     const kpOf = (p: number) => PTERM_SCALE * p;
     const noiseOf = (a: JointAxisInput, v: PidValues, sg: number, sd: number): JointNoise => {
-        const band: [number, number] = [NOISE_BAND_HZ[0], NOISE_BAND_HZ[1]];
+        const band: [number, number] = [NOISE_BAND_HZ[0], Math.min(NOISE_BAND_HZ[1], input.sampleRateHz / 2)];
         const b = basisFor(sg, sd, a);
         const b0 = basisFor(1, 1, a);
         if (!b || !b0) return { ratio: null, gyroTermRatio: null, dtermRatio: null, bandHz: band };
