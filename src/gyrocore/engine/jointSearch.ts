@@ -50,7 +50,14 @@
  * the samples both simulations hold. Kp scales with P, d with D (the D path is linear in Kd; d_max keeps
  * its ratio), so per (gyro scale, D-LPF scale) three band powers suffice: P(g), P(d) and the cross
  * power P(g, d) = (P(g + d) − P(g − d)) / 4. The ratio against the current tune is the candidate's
- * noiseRatio (its motor load above the band, before the mixer). I is left out (negligible there).
+ * noiseRatio: the controller-output noise of that axis above the band, not the mixer's motor load. The
+ * gyro lowpass is one setting for every axis, so a gyro filter change also moves the noise of the axes this
+ * search did not analyse (no sweep, PID unchanged): their noise is not assessed here and is named as such
+ * (`noiseNotAssessedAxes`, limitation `filter_change_noise_not_assessed_on:<axes>`); the SITL proof of
+ * 2026-11-11 showed the motor band rising ×1.45 while the roll controller noise fell ×0.92. The PID-only
+ * comparison point (decideAxis's candidate) is read with its noise for information but is not subjected
+ * to the noise and bandwidth rules: a filter change must beat it as it is (conservative asymmetry).
+ * I is left out of the noise (negligible there).
  *
  * Budget: every filter combination is screened on the coarse PID grid (P ×0.7…1.3 in 0.1 steps, I and
  * D each ×0.7, ×1, ×1.3, with the noise model); the three best (axes with an eligible point, then the sum of their highest
@@ -167,6 +174,8 @@ export interface JointSearchInput {
     baseSim: ChainSimulation | null;
     sampleRateHz: number;
     flightMask: Uint8Array;
+    /** Every axis the log holds a gyro for (default roll, pitch, yaw): the ones not analysed are named when a gyro filter changes. */
+    allAxes?: JointAxisName[];
 }
 
 export interface JointNoise {
@@ -251,6 +260,8 @@ export interface JointChosen {
     /** Why it was chosen over the PID-only best. */
     reason: "more_axes_meet_targets" | "higher_crossover_at_equal_axes";
     pidOnly: { axesMeeting: number; meanCrossoverGain: number | null };
+    /** Axes whose noise this candidate's gyro filter change moves but which the search did not analyse (no sweep). */
+    noiseNotAssessedAxes: JointAxisName[];
 }
 
 export type JointSearchStatus =
@@ -380,7 +391,8 @@ interface NoiseBasis {
     pgd: number;
 }
 
-function noiseBasis(
+/** Exported for its test. */
+export function noiseBasis(
     g: Float64Array,
     d: Float64Array,
     valid: Uint8Array,
@@ -403,7 +415,9 @@ function noiseBasis(
 }
 
 /** Controller-output noise power above the band for P gain `kp` (PID units) and D scale `ds` on a basis. */
-const noisePower = (b: NoiseBasis, kp: number, ds: number) => kp * kp * b.pgg + 2 * kp * ds * b.pgd + ds * ds * b.pdd;
+export const noisePower = (b: NoiseBasis, kp: number, ds: number) =>
+    kp * kp * b.pgg + 2 * kp * ds * b.pgd + ds * ds * b.pdd;
+export type { NoiseBasis };
 
 const PARAMETER_MODELS: Record<JointParameterEvidence["group"], string> = {
     gyro_filter:
@@ -705,7 +719,7 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
     let usableN = 0;
     const combos: JointCombo[] = [];
     const marginsOf = new Map<string, LoopMargins>();
-    // Stage 1: screen every combination on the coarse grid (margins only, no D path simulation).
+    // Stage 1: screen every combination on the coarse grid (with the noise model: the bases are cached per combination).
     for (const sg of gyroScales)
         for (const sd of dtermScales) {
             if (sg === 1 && sd === 1) continue;
@@ -898,6 +912,12 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
                     `filters:gyro_lpf_x${bestCombo.gyroScale}:dterm_lpf_x${bestCombo.dtermScale}`,
                     `predicted_noise_ratio:${ca.best.noise.ratio === null ? "unknown" : ca.best.noise.ratio.toFixed(2)}`,
                     "noise_simulated_on_logged_data",
+                    ...(bestCombo.gyroScale !== 1 &&
+                    (input.allAxes ?? ["roll", "pitch", "yaw"]).some((x) => !axes.some((a) => a.axis === x))
+                        ? [
+                              `filter_change_noise_not_assessed_on:${(input.allAxes ?? ["roll", "pitch", "yaw"]).filter((x) => !axes.some((a) => a.axis === x)).join(",")}`,
+                          ]
+                        : []),
                     "required_measurement:ab_flight_with_proposal",
                     ...m.reasons.map((r) => `margins:${r}`),
                 ],
@@ -913,6 +933,10 @@ export function jointSearch(input: JointSearchInput): JointSearchResult {
             axes: chosenAxes,
             reason,
             pidOnly: { axesMeeting: pidOnlyMeeting, meanCrossoverGain: pidOnlyMean },
+            noiseNotAssessedAxes:
+                bestCombo.gyroScale !== 1
+                    ? (input.allAxes ?? ["roll", "pitch", "yaw"]).filter((x) => !axes.some((a) => a.axis === x))
+                    : [],
         },
     });
 }

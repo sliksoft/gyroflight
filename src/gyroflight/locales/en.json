@@ -1147,6 +1147,9 @@
     "gyroflightV2JointNoCandidateAxis": { "message": "no joint candidate on this axis" },
     "gyroflightV2JointNoPidOnly": { "message": "none within ±30 % meets the targets" },
     "gyroflightV2JointFilters": { "message": "Filters now → candidate" },
+    "gyroflightV2JointNoiseNotAssessed": {
+        "message": "The gyro lowpass is one setting for every axis: the noise of $1 (no sweep, PID unchanged) was not assessed and rises with less filtering; the motor load can grow although the analysed axis gets quieter."
+    },
     "gyroflightV2JointEvidenceToggle": { "message": "Evidence per filter parameter and search space" },
     "gyroflightV2JointSearched": { "message": "searched" },
     "gyroflightV2JointNotSearched": { "message": "not searched" },

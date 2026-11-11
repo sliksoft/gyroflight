@@ -776,6 +776,13 @@
                     </table>
                 </div>
                 <p v-if="jointFilters" class="text-dimmed" data-gyrocore="v2-joint-filters">{{ jointFilters }}</p>
+                <p
+                    v-if="joint.chosen?.noiseNotAssessedAxes?.length"
+                    class="text-yellow-500"
+                    data-gyrocore="v2-joint-noise-not-assessed"
+                >
+                    {{ t("gyroflightV2JointNoiseNotAssessed", [joint.chosen.noiseNotAssessedAxes.join(", ")]) }}
+                </p>
                 <details class="text-sm">
                     <summary class="cursor-pointer text-dimmed">{{ $t("gyroflightV2JointEvidenceToggle") }}</summary>
                     <ul class="list-disc ps-5 [overflow-wrap:anywhere]" data-gyrocore="v2-joint-parameters">

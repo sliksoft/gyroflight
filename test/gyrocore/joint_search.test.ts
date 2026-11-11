@@ -124,7 +124,14 @@ vi.mock("../../src/js/blackbox/betaflight_dterm_dynamic", async (importOriginal)
     };
 });
 
-import { jointSearch, JOINT_SEARCH, type JointAxisInput } from "../../src/gyrocore/engine/jointSearch";
+import {
+    jointSearch,
+    JOINT_SEARCH,
+    noiseBasis,
+    noisePower,
+    type JointAxisInput,
+} from "../../src/gyrocore/engine/jointSearch";
+import { maskedBandPower } from "../../src/gyrocore/engine/filterOptimizer";
 import { buildExperimentalProposal } from "../../src/gyrocore/engine/experimentalProposal";
 import type { ProposalItem } from "../../src/gyrocore/releaseGate/releaseContract";
 
@@ -441,5 +448,71 @@ describe("joint PID + filter search (block 12)", () => {
         });
         expect(none.proposal).toBeNull();
         expect(none.withheld.map((w) => w.key)).toContain("pid_roll");
+    });
+
+    it("noise basis and power: Kp²·P(g) + 2·Kp·ds·P(g,d) + ds²·P(d) equals the band power of Kp·g + ds·d for a phased, partly uncorrelated d", () => {
+        const n = 8192;
+        const g = Float64Array.from({ length: n }, () => 100 * rnd());
+        // d: a delayed copy of g (phase) plus its own noise, so the cross term is neither zero nor full.
+        const d = Float64Array.from({ length: n }, (_, i) => 0.3 * (i >= 3 ? g[i - 3] : 0) + 20 * rnd());
+        const valid = new Uint8Array(n).fill(1);
+        const b = noiseBasis(g, d, valid, mask, FS)!;
+        expect(b).not.toBeNull();
+        for (const [kp, ds] of [
+            [3.2, 1],
+            [2.24, 0.9],
+            [1.0, 1.3],
+        ] as const) {
+            const u = Float64Array.from({ length: n }, (_, i) => kp * g[i] + ds * d[i]);
+            const direct = maskedBandPower(u, valid, mask, FS)!;
+            expect(Math.abs(noisePower(b, kp, ds) - direct) / direct).toBeLessThan(1e-9);
+        }
+        // The cross term carries sign: with d flipped it changes sign, the others do not.
+        const b2 = noiseBasis(
+            g,
+            Float64Array.from(d, (x) => -x),
+            valid,
+            mask,
+            FS,
+        )!;
+        expect(b2.pgd).toBeCloseTo(-b.pgd, 9);
+        expect(b2.pgg).toBeCloseTo(b.pgg, 9);
+        expect(b2.pdd).toBeCloseTo(b.pdd, 9);
+    });
+
+    it("a gyro filter change names the axes whose noise was not assessed; a D-term-only change does not", () => {
+        model = (ps, sg) => ({ pm: 28 + 40 * (sg - 1) - 30 * (ps - 1), gm: 10, s: 5, fc: FC0 * ps });
+        const r = jointSearch(input(decision(false)));
+        expect(r.status).toBe("candidate_found");
+        expect(r.chosen!.gyroScale).toBe(1.5);
+        expect(r.chosen!.noiseNotAssessedAxes).toEqual(["pitch", "yaw"]);
+        expect(r.chosen!.axes.roll!.proposal.reasons).toContain("filter_change_noise_not_assessed_on:pitch,yaw");
+        const built = buildExperimentalProposal({
+            primaryItems: [],
+            primaryPid: [],
+            jio: null,
+            decisions: { roll: { primary: decision(false), jio: null } },
+            joint: r,
+            buildProposal: (selected: ProposalItem[]) =>
+                ({
+                    id: "v2-t",
+                    createdAt: "x",
+                    log: { sha256: "x", logIndex: 1, headerPairs: [] },
+                    change: Object.fromEntries(selected.map((i) => [i.key, i.to])),
+                    items: selected,
+                    release: {
+                        measurement: { valid: true, reasons: [] },
+                        model: { status: "PARTIAL", reasons: [] },
+                        margins: [],
+                        independentValidation: null,
+                        safetyAnalysisEvidence: "",
+                        safetyReasons: [],
+                    },
+                }) as never,
+        });
+        expect(built.proposal!.limitations).toContain("experimental:filter_change_noise_not_assessed_on:pitch,yaw");
+        // Only the D-term lowpass can move: every axis of the log is the analysed one, nothing is named.
+        const r2 = jointSearch(input(decision(false), { allAxes: ["roll"] }));
+        expect(r2.chosen!.noiseNotAssessedAxes).toEqual([]);
     });
 });
