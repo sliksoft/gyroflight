@@ -1629,5 +1629,87 @@
     "gyroflightTechnicalSetTitle": { "message": "Measurement set and repeats per axis (CHIRP + JIO)" },
     "gyroflightTechnicalQualificationTitle": { "message": "Model-class qualification" },
     "gyroflightTechnicalPlotsTitle": { "message": "CHIRP + JIO plots per axis" },
-    "gyroflightTechnicalJioTitle": { "message": "CHIRP + JIO route (experimental): both candidate searches per axis" }
+    "gyroflightTechnicalJioTitle": { "message": "CHIRP + JIO route (experimental): both candidate searches per axis" },
+    "gyroflightSitlTitle": { "message": "AutoTune session (SITL)" },
+    "gyroflightSitlIntro": {
+        "message": "Simulator only: the session measures the tune on the Betaflight SITL bench, tries one bounded PID step at a time, measures again and keeps or restores the tune. Filters stay as they are. Nothing is written to a real flight controller."
+    },
+    "gyroflightSitlBench": { "message": "SITL bench" },
+    "gyroflightSitlBenchConnected": { "message": "connected (scenario $1, noise seed $2)" },
+    "gyroflightSitlBenchNotConnected": { "message": "not connected" },
+    "gyroflightSitlConnect": { "message": "Connect" },
+    "gyroflightSitlScripted": {
+        "message": "Restore test (the measurement decides as for any step); candidate fixed in advance:"
+    },
+    "gyroflightSitlStart": { "message": "Start session" },
+    "gyroflightSitlStop": { "message": "Stop and restore" },
+    "gyroflightSitlPhase_reading_active": { "message": "Reading the active tune over MSP" },
+    "gyroflightSitlPhase_committing": { "message": "Recording the tune the bench restores" },
+    "gyroflightSitlPhase_measuring": { "message": "Measuring" },
+    "gyroflightSitlPhase_analysing": { "message": "Analysing the logs" },
+    "gyroflightSitlPhase_choosing": { "message": "Choosing the next step" },
+    "gyroflightSitlPhase_setting": { "message": "Setting the candidate and reading it back" },
+    "gyroflightSitlPhase_deciding": { "message": "Deciding" },
+    "gyroflightSitlPhase_restoring": { "message": "Restoring the last accepted tune" },
+    "gyroflightSitlPhase_stopping": { "message": "Stopping: restoring the last accepted tune" },
+    "gyroflightSitlPhase_done": { "message": "Done" },
+    "gyroflightSitlProgressStep": { "message": "step $1 of at most $2" },
+    "gyroflightSitlProgressRun": { "message": "run $1 of $2" },
+    "gyroflightSitlColAxis": { "message": "Axis" },
+    "gyroflightSitlColChange": { "message": "P/I/D/d_max" },
+    "gyroflightSitlColPredicted": { "message": "Predicted" },
+    "gyroflightSitlColMeasured": { "message": "Measured (median of 3 runs)" },
+    "gyroflightSitlColSteps": { "message": "Step response" },
+    "gyroflightSitlColMotors": { "message": "Motors (highest, vs accepted / vs start)" },
+    "gyroflightSitlColReadback": { "message": "Read back after setting" },
+    "gyroflightSitlColDecision": { "message": "Decision" },
+    "gyroflightSitlColQuantity": { "message": "Quantity" },
+    "gyroflightSitlColStart": { "message": "Start tune" },
+    "gyroflightSitlColBest": { "message": "Best measured tune" },
+    "gyroflightSitlStopReason": { "message": "Session ended" },
+    "gyroflightSitlStop_targets_met": { "message": "every target is met on roll and pitch" },
+    "gyroflightSitlStop_no_eligible_candidate": {
+        "message": "no step within the limits is predicted to improve an axis that misses a target"
+    },
+    "gyroflightSitlStop_step_floor": {
+        "message": "the allowed step has become too small on every axis that misses a target"
+    },
+    "gyroflightSitlStop_budget": { "message": "the step budget of the session is used up" },
+    "gyroflightSitlStop_measurement_unreliable": { "message": "two measurements in a row were not usable" },
+    "gyroflightSitlStop_start_measurement_invalid": { "message": "the start tune could not be measured validly" },
+    "gyroflightSitlStop_aborted": { "message": "stopped by you; the last accepted tune was restored and read back" },
+    "gyroflightSitlStop_error": { "message": "error" },
+    "gyroflightSitlFinalActive": { "message": "Active on the bench now (read over MSP):" },
+    "gyroflightSitlFinalNote": {
+        "message": "These are the session's own measurements. The independent final measurement (other seed, independent reference) is in the dossier."
+    },
+    "gyroflightSitlWhy_G1_motor_vs_accepted": {
+        "message": "Motor noise $1 above the limit against the accepted tune: $2"
+    },
+    "gyroflightSitlWhy_G1_motor_vs_start": { "message": "Motor noise $1 above the limit against the start tune: $2" },
+    "gyroflightSitlWhy_G2_pm_stays_met": { "message": "$1: phase margin no longer meets its target: $2" },
+    "gyroflightSitlWhy_G2_gm_stays_met": { "message": "$1: gain margin no longer meets its target: $2" },
+    "gyroflightSitlWhy_G2_s_stays_met": { "message": "$1: sensitivity peak no longer meets its target: $2" },
+    "gyroflightSitlWhy_G2_pm_not_worse": { "message": "$1: phase margin got worse than allowed: $2" },
+    "gyroflightSitlWhy_G2_gm_not_worse": { "message": "$1: gain margin got worse than allowed: $2" },
+    "gyroflightSitlWhy_G2_s_not_worse": { "message": "$1: sensitivity peak got worse than allowed: $2" },
+    "gyroflightSitlWhy_G3_overshoot": { "message": "$1: more overshoot than allowed: $2" },
+    "gyroflightSitlWhy_G4_tracking": { "message": "$1: worse tracking than allowed: $2" },
+    "gyroflightSitlWhy_G5_rise": { "message": "$1: slower response than allowed: $2" },
+    "gyroflightSitlWhy_G5_crossover": { "message": "$1: lower bandwidth than allowed: $2" },
+    "gyroflightSitlWhy_G6_oscillation": { "message": "$1: more oscillation than allowed: $2" },
+    "gyroflightSitlWhy_G6_s_peak": { "message": "$1: sensitivity peak too high: $2" },
+    "gyroflightSitlWhy_G6_gm_assessable": { "message": "$1: gain margin could no longer be measured reliably" },
+    "gyroflightSitlWhy_V1_shortfall_drop": {
+        "message": "$1 improved: the distance to the targets fell beyond the measurement spread ($2)"
+    },
+    "gyroflightSitlWhy_V2_target_newly_met": { "message": "$1 improved: a missed target is now met with margin ($2)" },
+    "gyroflightSitlWhy_no_improvement": {
+        "message": "$1: no improvement beyond the measurement spread, so the step is not kept"
+    },
+    "gyroflightSitlWhy_aborted": { "message": "Stopped during this step" },
+    "gyroflightSitlWhy_readback_mismatch": {
+        "message": "The bench did not hold the candidate exactly after setting it"
+    },
+    "gyroflightSitlWhy_invalid": { "message": "Measurement not usable: $2" }
 }

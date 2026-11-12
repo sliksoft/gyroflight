@@ -945,6 +945,14 @@ function readCandidate(loop: AxisLoop, v: PidValues, kdRatio: number): ReturnTyp
     return readableValues(loopMargins(loop, { cfg: candidateCfg(loop.cfg, { ...v, d: v.d * kdRatio }) }));
 }
 
+/**
+ * One candidate's margins on `loop` by the rule every search reads with (readCandidate: within 0–250, PM, GM and |S|
+ * readable in band), or null. Exported for the AutoTune session's bounded step search (sessionSearch.ts, block 14).
+ */
+export function readPidCandidate(loop: AxisLoop, v: PidValues, kdRatio: number): ReturnType<typeof valuesOf> | null {
+    return readCandidate(loop, v, kdRatio);
+}
+
 /** The PID values at scale `ps` of P, `is` of I and `ds` of D (d_max keeps its ratio to D, never below D). */
 export function scaledPid(current: PidValues, ps: number, is: number, ds: number): PidValues {
     return scaled(current, ps, is, ds);

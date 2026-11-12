@@ -17,7 +17,9 @@ All over the samples from `--from` seconds (default 2.0, after the filters and t
 Ratios between two runs with the same noise seed and tick count are paired comparisons. Units are the log's own
 (0.1 deg/s with high resolution; PID units; motor output units); only ratios are compared.
 
-Usage: noise_metrics.py controller_trace.npz out.json [--from 2.0] [--band 100,500] [--scale 0.1]
+Usage: noise_metrics.py controller_trace.npz out.json [--from 2.0] [--band 100,500] [--scale 0.1] [--cut t0:t1 ...]
+  --cut t0:t1   (block 14) an extra interval in trace seconds (time_s − time_s[0]) cut from the hover samples with ± 0.5 s,
+                like a CHIRP window: the session's step block (repeatable).
 
 Per-motor reference (block 13, protocol v3; the fields above stay for comparison with protocol v2):
   hover         the samples of steady hover outside the CHIRP: every motor above its disarmed value (> 1001) for at least
@@ -56,7 +58,11 @@ def main() -> int:
     start_s = 2.0
     band = (100.0, 500.0)
     scale = 0.1  # log units per deg/s (high-resolution logs)
+    cuts_extra = []
     for k, a in enumerate(args):
+        if a == "--cut":
+            t0, t1 = (float(x) for x in args[k + 1].split(":"))
+            cuts_extra.append((t0, t1))
         if a == "--from":
             start_s = float(args[k + 1])
         if a == "--band":
@@ -122,6 +128,8 @@ def main() -> int:
         cuts = np.flatnonzero(np.diff(idx) > 1)
         for a, b in zip(np.r_[idx[0], idx[cuts + 1]], np.r_[idx[cuts], idx[-1]]):
             ok &= ~((tt >= tt[a] - 0.5) & (tt <= tt[b] + 0.5))
+    for t0, t1 in cuts_extra:
+        ok &= ~((tt >= t0 - 0.5) & (tt <= t1 + 0.5))
     def runs(mask):
         idx = np.flatnonzero(mask)
         if not idx.size:

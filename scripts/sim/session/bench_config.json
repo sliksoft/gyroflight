@@ -1,0 +1,22 @@
+{
+    "vliegaiRoot": "~/VliegAI/_worktrees/air65-sim-review-20261028",
+    "vliegaiHead": "20f6af5a7ebd40daacc6a2efe9a7160a1d55e0d7",
+    "python": "~/VliegAI/_envs/65mm-vision-foundation/bin/python",
+    "elf": "~/Gyroflight-audits/autotune-v2-sitl-loop-reference-2026-11-10/build/bf-src/obj/main/betaflight_SITL.elf",
+    "elfSha256": "6db21d7ece7681d281c82f5702bd1621381caca6396b003d697bedbf101eae13",
+    "betaflightCommit": "32c55793589ebc060e65dff2d50dfada5c838782",
+    "betaflightSource": "~/Gyroflight-audits/autotune-v2-sitl-loop-reference-2026-11-10/build/bf-src",
+    "baseOverlay": "~/VliegAI/_worktrees/air65-sim-review-20261028/configs/control/air65_ctbr_betaflight_oct19_candidate_v2.cfg",
+    "runtimeRoot": "/dev/shm/gf_sitl",
+    "fixedSettings": {
+        "debug_mode": "CHIRP",
+        "blackbox_disable_gyrounfilt": "OFF",
+        "chirp_frequency_start_deci_hz": 20,
+        "chirp_frequency_end_deci_hz": 1000,
+        "chirp_time_seconds": 20,
+        "chirp_amplitude_roll": 230,
+        "chirp_amplitude_pitch": 230,
+        "chirp_lag_freq_hz": 3,
+        "chirp_lead_freq_hz": 30
+    }
+}

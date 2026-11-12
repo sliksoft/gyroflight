@@ -1,0 +1,254 @@
+{
+    "version": "session_v1",
+    "fixedAt": "2026-11-12, before every final run (pilot seed 4 consumed; session seed 5 and final seed 6 unused)",
+    "question": "Does one complete AutoTune session in the normal GyroFlight app (SITL only) find and keep a measured improvement, restore a step that a valid re-measurement rejects, read every set and restore back exactly over MSP, and end with the best measured tune?",
+    "appCode": "src/gyrocore/sitlSession (session.ts, decision.ts, stepPolicy.ts, metrics.ts, analyzer.ts, protocol.ts), src/gyrocore/engine/sessionSearch.ts, src/composables/useSitlSession.ts, src/gyrocore/components/SitlSessionPanel.vue",
+    "bench": "scripts/sim/session (bench_server.mjs, sitl_bench.py, schedule.py)",
+    "measurement": {
+        "runs": 3,
+        "sessionSeed": 5,
+        "sessionStarts": [400, 450, 500],
+        "finalSeed": 6,
+        "finalStarts": [420, 470, 520],
+        "gyroNoise": {
+            "stdDps": 2.0,
+            "highpassHz": 150,
+            "highpassOrder": 2
+        },
+        "schedule": "schedule.py build(start): hover ANGLE; CHIRP roll [s,s+2100), pitch [s+2200,s+4300) outer ticks; acro step block from s+4400 (ANGLE off from s+4340, pilot-grant OFF tick at s+4370), doublets ±100 deg/s 10+10 ticks + 60 ticks per axis and sign (roll+, roll-, pitch+, pitch-); 6000 ticks total",
+        "pilot": {
+            "z0": 2.0,
+            "kz": 15.0,
+            "dz": 30.0,
+            "thrMax": 80.0,
+            "kxy": 32.0,
+            "dxy": 144.0,
+            "stickMax": 60.0,
+            "rollAxis": 1,
+            "rollSign": -1,
+            "pitchAxis": 0,
+            "pitchSign": 1
+        },
+        "highResolution": true,
+        "angleMode": true,
+        "filtersFixed": true
+    },
+    "scenarios": {
+        "base_filters": {
+            "fixedSettings": {}
+        },
+        "B_v4_filters": {
+            "fixedSettings": {
+                "dterm_lpf1_static_hz": 60,
+                "dterm_lpf1_dyn_min_hz": 60,
+                "dterm_lpf1_dyn_max_hz": 120,
+                "dterm_lpf2_static_hz": 120
+            }
+        }
+    },
+    "startTunes": {
+        "A": {
+            "roll": {
+                "p": 100,
+                "i": 79,
+                "d": 30,
+                "dMax": 40
+            },
+            "pitch": {
+                "p": 82,
+                "i": 117,
+                "d": 61,
+                "dMax": 0
+            },
+            "yaw": {
+                "p": 56,
+                "i": 79,
+                "d": 0,
+                "dMax": 0
+            }
+        },
+        "B": {
+            "roll": {
+                "p": 88,
+                "i": 55,
+                "d": 45,
+                "dMax": 60
+            },
+            "pitch": {
+                "p": 71,
+                "i": 82,
+                "d": 84,
+                "dMax": 0
+            },
+            "yaw": {
+                "p": 56,
+                "i": 79,
+                "d": 0,
+                "dMax": 0
+            }
+        },
+        "F": {
+            "roll": {
+                "p": 120,
+                "i": 79,
+                "d": 30,
+                "dMax": 40
+            },
+            "pitch": {
+                "p": 82,
+                "i": 117,
+                "d": 61,
+                "dMax": 0
+            },
+            "yaw": {
+                "p": 56,
+                "i": 79,
+                "d": 0,
+                "dMax": 0
+            }
+        }
+    },
+    "scripts": {
+        "restore-test-1": {
+            "steps": [
+                {
+                    "step": 1,
+                    "axis": "roll",
+                    "dScale": 1.6
+                }
+            ],
+            "maxTrialSteps": 2
+        },
+        "restore-test-2": {
+            "steps": [
+                {
+                    "step": 2,
+                    "axis": "roll",
+                    "dScale": 1.6
+                }
+            ],
+            "maxTrialSteps": 3
+        }
+    },
+    "sessions": [
+        {
+            "id": "A",
+            "kind": "normal",
+            "start": "A",
+            "scenario": "base_filters"
+        },
+        {
+            "id": "B",
+            "kind": "normal",
+            "start": "B",
+            "scenario": "B_v4_filters"
+        },
+        {
+            "id": "F",
+            "kind": "normal",
+            "start": "F",
+            "scenario": "base_filters"
+        },
+        {
+            "id": "R1",
+            "kind": "restore_test",
+            "start": "A",
+            "scenario": "base_filters",
+            "script": "restore-test-1",
+            "scriptedStep": 1,
+            "expectedGuard": "G1_motor",
+            "afterAccept": false
+        },
+        {
+            "id": "R2",
+            "kind": "restore_test",
+            "start": "A",
+            "scenario": "base_filters",
+            "script": "restore-test-2",
+            "scriptedStep": 2,
+            "expectedGuard": "G1_motor",
+            "afterAccept": true
+        },
+        {
+            "id": "S1",
+            "kind": "stop_test",
+            "start": "A",
+            "scenario": "base_filters",
+            "stopAt": "1:2",
+            "afterAccept": false
+        },
+        {
+            "id": "S2",
+            "kind": "stop_test",
+            "start": "A",
+            "scenario": "base_filters",
+            "stopAt": "2:2",
+            "afterAccept": true
+        },
+        {
+            "id": "D1",
+            "kind": "disconnect_test",
+            "start": "A",
+            "scenario": "base_filters",
+            "disconnectAt": "1:2",
+            "afterAccept": false
+        },
+        {
+            "id": "D2",
+            "kind": "disconnect_test",
+            "start": "A",
+            "scenario": "base_filters",
+            "disconnectAt": "2:2",
+            "afterAccept": true
+        }
+    ],
+    "targets": {
+        "pmDeg": 45,
+        "gmDb": 6,
+        "sDb": 6
+    },
+    "tolerance": {
+        "pmDeg": 5,
+        "gmDb": 1.5,
+        "sDb": 1
+    },
+    "validity": {
+        "pmSpreadDeg": 1,
+        "sSpreadDb": 0.3,
+        "fcSpreadRel": 0.02,
+        "motorSpreadRel": 0.15,
+        "trackingSpreadRel": 0.05,
+        "minHoverSamples": 3072,
+        "maxAbsAttitudeDeg": 45,
+        "minZ": 0.3,
+        "gmBandHz": [5, 85],
+        "gmMaxSigmaDb": 1.5
+    },
+    "guards": {
+        "motorMaxRatio": 1.1,
+        "overshootAbs": 0.02,
+        "trackingRel": 1.05,
+        "riseRel": 1.15,
+        "riseAbsMs": 2,
+        "fcMinRel": 0.9,
+        "oscillationMax": 0.08,
+        "sMaxDb": 10
+    },
+    "improvement": {
+        "v1MinShortfallDrop": 0.5,
+        "v2MarginUncertainties": 2
+    },
+    "policy": {
+        "rhoStart": 0.2,
+        "rhoMax": 0.2,
+        "rhoFloor": 0.05,
+        "predictedMinShortfallDrop": 0.5,
+        "exclusionRadiusShare": 0.5,
+        "maxTrialSteps": 5,
+        "maxRuns": 18,
+        "maxConsecutiveInvalid": 2,
+        "predictedFcMinRel": 0.92
+    },
+    "gmRule": "v4 (joint3 protocol v4): sigma = 20*log10(1+eps), eps = sqrt(1-coh)/(sqrt(coh)*sqrt(2)); app: coherence of the identified plant at the engine's phase crossing; reference: reference_loop coherence at its phase crossing. GM lower bound = median - 2*max sigma; assessable when every run has its crossing in 5-85 Hz with sigma <= 1.5 dB",
+    "criteria": ["C1 evidence", "C2 confirmed improvement", "C3 restore tests", "C4 no worse", "C5 interrupt tests"]
+}

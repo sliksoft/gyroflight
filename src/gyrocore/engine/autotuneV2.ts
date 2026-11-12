@@ -92,6 +92,7 @@ import { selectQualificationRung } from "./qualificationRung";
 import { optimizeAxisPid, type AxisPidProposal, type PidValues } from "./pidOptimizer";
 import { optimizeFilters, type FilterGroupResult } from "./filterOptimizer";
 import { jointSearch, type JointProbe, type JointSearchResult } from "./jointSearch";
+import { sessionSearch, type SessionSearchInput, type SessionSearchResult } from "./sessionSearch";
 import type { MotorNoiseAxis } from "./jointMotorNoise";
 import { optimizeFeedforward, type FeedforwardProposal } from "./feedforwardOptimizer";
 import { absoluteSafetyEvidence, type AxisName } from "./safetyEvidence";
@@ -195,6 +196,11 @@ export interface AutotuneLogInput {
     stick: { acroSeconds: number; latencyMs: Partial<Record<AxisName, number | null>> };
     /** M4 noise floor known on every axis. */
     noiseFloorKnown: boolean;
+    /**
+     * Sample ranges [start, end) that are not steady flight for the noise and motor-load reads (block 14: the AutoTune
+     * session's step block with its acro lead and tail, ± the CHIRP guard). Absent: none.
+     */
+    noiseExclusions?: readonly (readonly [number, number])[];
     /** Import order (higher = imported later). The blackbox header carries no usable date. */
     order?: number;
     /**
@@ -240,6 +246,12 @@ export interface AutotuneV2Input {
     createdAt?: string;
     /** Diagnostic reads of named joint candidates (SITL harness only; jointSearch probes). */
     jointProbes?: JointProbe[];
+    /**
+     * AutoTune session in SITL (block 14): run the bounded PID step search with the logged filters
+     * (sessionSearch.ts) and skip the joint PID + filter search (the session keeps the filters fixed).
+     * Absent: nothing of the session is computed and the result has no `sessionSearch`.
+     */
+    session?: SessionSearchInput;
 }
 
 export type ReportStatus = "IMPLEMENTED" | "VALIDATED" | "PARTIAL" | "BLOCKED";
@@ -329,6 +341,8 @@ export interface AutotuneV2Result {
      * experimental route. Null when not computed.
      */
     joint: JointSearchResult | null;
+    /** The AutoTune session's bounded step search; present only when the input asked for it (`session`). */
+    sessionSearch?: SessionSearchResult;
     /**
      * The agreed measurement (two CHIRP rounds, one sweep configuration for all axes), the frequencies
      * each axis's data does not show, and the existing data apart from the proposed settings
@@ -1363,62 +1377,83 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
             for (let k = Math.max(0, c.start - guard); k < Math.min(noiseMask.length, c.end + guard); k++)
                 noiseMask[k] = 0;
     }
+    for (const [a, b] of log.noiseExclusions ?? [])
+        for (let k = Math.max(0, a); k < Math.min(noiseMask.length, b); k++) noiseMask[k] = 0;
     const motorCount = log.channels.motors?.length ?? 0;
-    const joint: JointSearchResult | null = analysed.length
-        ? jointSearch({
-              axes: analysed.flatMap((name) => {
-                  const ax = axes[name]!;
-                  const dec = candidateDecisions[name]?.primary;
+    const motorInput = {
+        axes: motorAxes,
+        timeUs: log.channels.timeUs,
+        rcThrottle: log.channels.rcThrottle,
+        pidDt: pidDtAll,
+        mixer:
+            h["mixer_type"] === "LEGACY" && motorCount === 4
+                ? ({ kind: "quadx", yawReversed: h["yaw_motors_reversed"] === "1" } as const)
+                : ({
+                      kind: "unknown",
+                      reason: `mixer_type:${h["mixer_type"] ?? "unknown"}:motors_logged:${motorCount}`,
+                  } as const),
+        motors: log.channels.motors,
+    };
+    // The session keeps the filters: its bounded PID step search replaces the joint search (block 14).
+    const session: SessionSearchResult | null = input.session
+        ? sessionSearch({
+              input: input.session,
+              axes: input.session.axes.map((name) => {
+                  const ax = axes[name];
                   const p = nums(h, `${name}PID`);
-                  if (!dec || !p) return [];
-                  return [
-                      {
-                          axis: name,
-                          loop: ax.experimentalLoop,
-                          current: { p: p[0], i: p[1], d: p[2], dMax: dmax[AXES.indexOf(name)] ?? 0 },
-                          decision: dec,
-                          window: ax.window,
-                          dterm: ax.dterm,
-                          dtermValidated: ax.dtermAccepted,
-                          chainValidated: chainOk(AXES.indexOf(name)),
-                          gyroAdc: log.channels.gyroAdc[AXES.indexOf(name)],
-                      },
-                  ];
+                  return {
+                      axis: name,
+                      loop: ax?.experimentalLoop ?? null,
+                      current: p ? { p: p[0], i: p[1], d: p[2], dMax: dmax[AXES.indexOf(name)] ?? 0 } : null,
+                      reasons: ax ? [] : [log.chirp[name] ? "axis_not_analysed" : "no_chirp_sweep_on_this_axis"],
+                  };
               }),
-              chainCfg,
-              chainInput,
-              baseSim: sim,
-              sampleRateHz: log.sampleRateHz,
-              flightMask: mask,
-              noiseMask,
-              motor: {
-                  axes: motorAxes,
-                  timeUs: log.channels.timeUs,
-                  rcThrottle: log.channels.rcThrottle,
-                  pidDt: pidDtAll,
-                  mixer:
-                      h["mixer_type"] === "LEGACY" && motorCount === 4
-                          ? { kind: "quadx", yawReversed: h["yaw_motors_reversed"] === "1" }
-                          : {
-                                kind: "unknown",
-                                reason: `mixer_type:${h["mixer_type"] ?? "unknown"}:motors_logged:${motorCount}`,
-                            },
-                  motors: log.channels.motors,
-              },
-              axisStatus: Object.fromEntries(
-                  AXES.map((name) => {
-                      const d = candidateDecisions[name]?.primary;
-                      return [
-                          name,
-                          d
-                              ? `${d.status}${d.firstCause ? `:${d.firstCause.rule}` : ""}`
-                              : "no_chirp_sweep_on_this_axis",
-                      ];
-                  }),
-              ),
-              probes: input.jointProbes,
+              motor: { ...motorInput, noiseMask, sampleRateHz: log.sampleRateHz },
           })
         : null;
+    const joint: JointSearchResult | null =
+        analysed.length && !input.session
+            ? jointSearch({
+                  axes: analysed.flatMap((name) => {
+                      const ax = axes[name]!;
+                      const dec = candidateDecisions[name]?.primary;
+                      const p = nums(h, `${name}PID`);
+                      if (!dec || !p) return [];
+                      return [
+                          {
+                              axis: name,
+                              loop: ax.experimentalLoop,
+                              current: { p: p[0], i: p[1], d: p[2], dMax: dmax[AXES.indexOf(name)] ?? 0 },
+                              decision: dec,
+                              window: ax.window,
+                              dterm: ax.dterm,
+                              dtermValidated: ax.dtermAccepted,
+                              chainValidated: chainOk(AXES.indexOf(name)),
+                              gyroAdc: log.channels.gyroAdc[AXES.indexOf(name)],
+                          },
+                      ];
+                  }),
+                  chainCfg,
+                  chainInput,
+                  baseSim: sim,
+                  sampleRateHz: log.sampleRateHz,
+                  flightMask: mask,
+                  noiseMask,
+                  motor: motorInput,
+                  axisStatus: Object.fromEntries(
+                      AXES.map((name) => {
+                          const d = candidateDecisions[name]?.primary;
+                          return [
+                              name,
+                              d
+                                  ? `${d.status}${d.firstCause ? `:${d.firstCause.rule}` : ""}`
+                                  : "no_chirp_sweep_on_this_axis",
+                          ];
+                      }),
+                  ),
+                  probes: input.jointProbes,
+              })
+            : null;
     const experimentalOutcome = buildExperimentalProposal({
         primaryItems: items,
         primaryPid: pid,
@@ -1551,6 +1586,7 @@ export function runAutotuneV2(input: AutotuneV2Input): AutotuneV2Result {
         experimentalWithheld: experimentalOutcome.withheld,
         candidateDecisions,
         joint,
+        ...(session ? { sessionSearch: session } : {}),
         recordingPlan: recordingPlan({
             decisions: candidateDecisions,
             headers: h,

@@ -47,6 +47,8 @@
                 </template>
 
                 <template v-else-if="active === 'tuning'">
+                    <!-- Gyroflight block 14: the AutoTune session against a local SITL bench (only with ?sitlBench=ws://127.0.0.1:…) -->
+                    <SitlSessionPanel v-if="sitlBench" />
                     <!-- Gyroflight: first whether there is a proposal, then the three routes, each with its own checks -->
                     <TuningStatusPanel @open="sections.open" />
                     <template v-if="v2.result">
@@ -167,12 +169,15 @@ import AutotuneV2Panel from "@/gyrocore/components/AutotuneV2Panel.vue";
 import AutotuneOverview from "@/gyrocore/components/AutotuneOverview.vue";
 import TuningStatusPanel from "@/gyrocore/components/TuningStatusPanel.vue";
 import SliderRoutePanel from "@/gyrocore/components/SliderRoutePanel.vue";
+import SitlSessionPanel from "@/gyrocore/components/SitlSessionPanel.vue";
+import { benchUrlFromLocation } from "@/composables/useSitlSession";
 import { AUTOTUNE_SECTION_ICONS, useAutotuneSectionStore } from "@/gyroflight/autotune/sections";
 import { useAutotuneStore } from "@/stores/autotune";
 import { useAutotuneV2Store } from "@/gyrocore/stores/autotuneV2";
 
 const store = useAutotuneStore();
 const v2 = useAutotuneV2Store();
+const sitlBench = benchUrlFromLocation();
 const sections = useAutotuneSectionStore();
 const active = computed(() => sections.active);
 </script>

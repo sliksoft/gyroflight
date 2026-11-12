@@ -2178,6 +2178,45 @@ function qualifyModelClass(
 
 const MODEL_CLASS_NEED = "required_measurement:chirp_finer_resolution_model_class_qualification";
 
+/**
+ * The phase-crossing (GM) frequency of a loop as loopMargins reads it, the loop's own relative error ε there
+ * (UNCERTAINTY; null where unknown) and the plant measurement's coherence there (both interpolated between the two
+ * bins around the crossing). Block 14 (AutoTune session): the GM uncertainty of a measured GM. Reads only.
+ */
+export function loopPhaseCrossing(
+    loop: AxisLoop,
+    cand: LoopCandidate = { cfg: loop.cfg },
+): { gmHz: number | null; relErr: number | null; coherence: number | null } {
+    const pts = candidateLoop(loop, cand);
+    const read = readLoop(pts);
+    const hz = read.ok ? read.gmHz : null;
+    if (hz === null) return { gmHz: null, relErr: null, coherence: null };
+    let relErr: number | null = null;
+    for (let k = 1; k < pts.length; k++) {
+        if (pts[k].f >= hz) {
+            const a = pts[k - 1];
+            const b = pts[k];
+            if (a.err !== undefined && b.err !== undefined) {
+                const u = b.f > a.f ? (hz - a.f) / (b.f - a.f) : 0;
+                relErr = a.err + u * (b.err - a.err);
+            }
+            break;
+        }
+    }
+    let coherence: number | null = null;
+    const bins = loop.plant.bins;
+    for (let k = 1; k < bins.length; k++) {
+        if (bins[k].frequencyHz >= hz) {
+            const a = bins[k - 1];
+            const b = bins[k];
+            const u = b.frequencyHz > a.frequencyHz ? (hz - a.frequencyHz) / (b.frequencyHz - a.frequencyHz) : 0;
+            coherence = a.coherence + u * (b.coherence - a.coherence);
+            break;
+        }
+    }
+    return { gmHz: hz, relErr, coherence };
+}
+
 export function loopMargins(loop: AxisLoop, cand: LoopCandidate = { cfg: loop.cfg }): LoopMargins {
     const pts = candidateLoop(loop, cand);
     const read = readLoop(pts);
