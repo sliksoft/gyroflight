@@ -82,6 +82,11 @@ EOF
   [ -n "$STOPAT" ] && UIARGS+=(--stop-at "$STOPAT")
   [ -n "$DROPAT" ] && UIARGS+=(--disconnect-at "$DROPAT")
   node "$HERE/session_ui.mjs" "$SD/ui" 5299 "${UIARGS[@]}" > "$SD/ui.log" 2>&1 || echo "  ui exit $?"
+  # A session that should have ended on its own but the page is gone (e.g. the UI timed out): let the bench finish the
+  # restore it starts on the lost connection before it is stopped.
+  if [ -z "$DROPAT" ] && ! grep -q '"op":"finish"' "$SD/journal.jsonl" 2>/dev/null; then
+    for _ in $(seq 1 600); do grep -q '"op":"abort"' "$SD/journal.jsonl" && break; sleep 1; done
+  fi
   # The bench finishes its own restore after a lost connection: wait for its abort record.
   if [ -n "$DROPAT" ]; then for _ in $(seq 1 600); do grep -q '"op": *"abort"\|"op":"abort"' "$SD/journal.jsonl" && break; sleep 1; done; fi
   sleep 2
@@ -104,7 +109,9 @@ for s in p["sessions"]:
     if not fin: continue
     r = fin[-1]["result"]
     if not any(x["verdict"] == "ACCEPT" for x in r["steps"]): continue
-    print(s["id"], s["scenario"], json.dumps(r["startTune"]), json.dumps(r["bestTune"]))
+    # compact JSON: the shell reads the four fields of this line with `read`
+    c = dict(separators=(",", ":"))
+    print(s["id"], s["scenario"], json.dumps(r["startTune"], **c), json.dumps(r["bestTune"], **c))
 EOF
   while read -r SID SCEN START BEST; do
     for which in start best; do
