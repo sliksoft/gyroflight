@@ -335,7 +335,7 @@ export async function runSession(o: {
             } else {
                 const search = await guard(analyzer.search(base.runs, state.rho));
                 const acceptedVsStart = base.summary.motors!.map((s, m) => s.median / start!.summary.motors![m].median);
-                const out = chooseStep({ search, base: base.summary, acceptedVsStart, state });
+                const out = chooseStep({ search, base: base.summary, acceptedVsStart, state, start: start.summary });
                 if (out.kind === "stop") return result("finished", out.reason, out.detail, await bench.readActive());
                 choice = out.choice;
                 axis = choice.axis;

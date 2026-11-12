@@ -1,6 +1,6 @@
 {
-    "version": "session_v1",
-    "fixedAt": "2026-11-12, before every final run (pilot seed 4 consumed; session seed 5 and final seed 6 unused)",
+    "version": "session_v1.1",
+    "fixedAt": "2026-11-12, before every final run. v1.1: guards G2–G6 also against the start measurement (as G1), and the selection checks the predictable guards against the start too; found in review after a v1 start measurement of session A had begun on seed 5 and before any result was read (that partial run is kept unread in aborted_v1_unread/). Pilot seed 4 consumed; seeds 5 and 6 reused because nothing of the aborted run was read or used.",
     "question": "Does one complete AutoTune session in the normal GyroFlight app (SITL only) find and keep a measured improvement, restore a step that a valid re-measurement rejects, read every set and restore back exactly over MSP, and end with the best measured tune?",
     "appCode": "src/gyrocore/sitlSession (session.ts, decision.ts, stepPolicy.ts, metrics.ts, analyzer.ts, protocol.ts), src/gyrocore/engine/sessionSearch.ts, src/composables/useSitlSession.ts, src/gyrocore/components/SitlSessionPanel.vue",
     "bench": "scripts/sim/session (bench_server.mjs, sitl_bench.py, schedule.py)",

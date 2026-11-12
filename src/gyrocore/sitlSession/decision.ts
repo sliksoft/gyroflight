@@ -213,68 +213,73 @@ export function decide(o: {
         add(`G1_motor_vs_accepted:m${m + 1}`, rb <= G.motorMaxRatio, `${f(rb, 3)} ≤ ${G.motorMaxRatio}`);
         add(`G1_motor_vs_start:m${m + 1}`, rs <= G.motorMaxRatio, `${f(rs, 3)} ≤ ${G.motorMaxRatio}`);
     });
-    for (const ax of P.axes) {
-        const A = base.axes[ax]!;
-        const C = cand.axes[ax]!;
-        const u = (k: "pm" | "s" | "fc" | "tracking" | "overshoot" | "riseMs" | "gm") =>
-            Math.max(A[k].spread, C[k].spread);
-        // G2 targets met stay met; no margin worse than its tolerance.
-        const mA = measuredMeets(A);
-        const mC = measuredMeets(C);
-        if (mA.pm) add(`G2_pm_stays_met:${ax}`, mC.pm, `${f(C.pm.median, 1)}° ≥ 45°`);
-        if (mA.gm) add(`G2_gm_stays_met:${ax}`, mC.gm, `GM lower bound ${f(C.gmLow, 1)} ≥ 6 dB`);
-        if (mA.s) add(`G2_s_stays_met:${ax}`, mC.s, `|S| ${f(C.s.median)} ≤ 6 dB`);
-        add(
-            `G2_pm_not_worse:${ax}`,
-            C.pm.median >= A.pm.median - P.tolerance.pmDeg,
-            `${f(C.pm.median, 1)}° ≥ ${f(A.pm.median, 1)}° − 5°`,
-        );
-        add(
-            `G2_gm_not_worse:${ax}`,
-            C.gmLow >= A.gmLow - P.tolerance.gmDb,
-            `${f(C.gmLow, 1)} ≥ ${f(A.gmLow, 1)} − 1.5 dB`,
-        );
-        add(
-            `G2_s_not_worse:${ax}`,
-            C.s.median <= A.s.median + P.tolerance.sDb,
-            `${f(C.s.median)} ≤ ${f(A.s.median)} + 1 dB`,
-        );
-        // G3–G5 step response.
-        add(
-            `G3_overshoot:${ax}`,
-            C.overshoot.median <= A.overshoot.median + G.overshootAbs + u("overshoot"),
-            `${f(C.overshoot.median, 3)} ≤ ${f(A.overshoot.median, 3)} + 0.02 + ${f(u("overshoot"), 3)}`,
-        );
-        add(
-            `G4_tracking:${ax}`,
-            C.tracking.median <= G.trackingRel * A.tracking.median + u("tracking"),
-            `${f(C.tracking.median, 4)} ≤ 1.05·${f(A.tracking.median, 4)} + ${f(u("tracking"), 4)}`,
-        );
-        add(
-            `G5_rise:${ax}`,
-            C.riseMs.median <= G.riseRel * A.riseMs.median + G.riseAbsMs + u("riseMs"),
-            `${f(C.riseMs.median, 1)} ms ≤ 1.15·${f(A.riseMs.median, 1)} + 2 + ${f(u("riseMs"), 1)} ms`,
-        );
-        add(
-            `G5_crossover:${ax}`,
-            C.fc.median >= G.fcMinRel * A.fc.median - u("fc"),
-            `${f(C.fc.median, 1)} Hz ≥ 0.9·${f(A.fc.median, 1)} Hz`,
-        );
-        // G6 stability.
-        // An axis that already oscillates more than the limit may not get worse (pilot, start tune B pitch 0.12).
-        const oscLimit = Math.max(
-            G.oscillationMax,
-            A.oscillation.median + Math.max(A.oscillation.spread, C.oscillation.spread),
-        );
-        add(
-            `G6_oscillation:${ax}`,
-            C.oscillation.median <= oscLimit,
-            `${f(C.oscillation.median, 3)} ≤ ${f(oscLimit, 3)}`,
-        );
-        const sLimit = Math.max(G.sMaxDb, A.s.median + u("s"));
-        add(`G6_s_peak:${ax}`, C.s.median <= sLimit, `${f(C.s.median)} ≤ ${f(sLimit)} dB`);
-        if (A.gmAssessable) add(`G6_gm_assessable:${ax}`, C.gmAssessable, `σ ≤ 1.5 dB, crossing in 5–85 Hz`);
-    }
+    // G2–G6 against the last accepted measurement AND against the start (as G1): per-step allowances cannot add up over
+    // several accepted steps (session_v1.1; found in review before any final result was read).
+    const against = (refM: MeasurementSummary, sfx: string) => {
+        for (const ax of P.axes) {
+            const A = refM.axes[ax]!;
+            const C = cand.axes[ax]!;
+            const u = (k: "pm" | "s" | "fc" | "tracking" | "overshoot" | "riseMs" | "gm") =>
+                Math.max(A[k].spread, C[k].spread);
+            // G2 targets met stay met; no margin worse than its tolerance.
+            const mA = measuredMeets(A);
+            const mC = measuredMeets(C);
+            if (mA.pm) add(`G2_pm_stays_met${sfx}:${ax}`, mC.pm, `${f(C.pm.median, 1)}° ≥ 45°`);
+            if (mA.gm) add(`G2_gm_stays_met${sfx}:${ax}`, mC.gm, `GM lower bound ${f(C.gmLow, 1)} ≥ 6 dB`);
+            if (mA.s) add(`G2_s_stays_met${sfx}:${ax}`, mC.s, `|S| ${f(C.s.median)} ≤ 6 dB`);
+            add(
+                `G2_pm_not_worse${sfx}:${ax}`,
+                C.pm.median >= A.pm.median - P.tolerance.pmDeg,
+                `${f(C.pm.median, 1)}° ≥ ${f(A.pm.median, 1)}° − 5°`,
+            );
+            add(
+                `G2_gm_not_worse${sfx}:${ax}`,
+                C.gmLow >= A.gmLow - P.tolerance.gmDb,
+                `${f(C.gmLow, 1)} ≥ ${f(A.gmLow, 1)} − 1.5 dB`,
+            );
+            add(
+                `G2_s_not_worse${sfx}:${ax}`,
+                C.s.median <= A.s.median + P.tolerance.sDb,
+                `${f(C.s.median)} ≤ ${f(A.s.median)} + 1 dB`,
+            );
+            // G3–G5 step response.
+            add(
+                `G3_overshoot${sfx}:${ax}`,
+                C.overshoot.median <= A.overshoot.median + G.overshootAbs + u("overshoot"),
+                `${f(C.overshoot.median, 3)} ≤ ${f(A.overshoot.median, 3)} + 0.02 + ${f(u("overshoot"), 3)}`,
+            );
+            add(
+                `G4_tracking${sfx}:${ax}`,
+                C.tracking.median <= G.trackingRel * A.tracking.median + u("tracking"),
+                `${f(C.tracking.median, 4)} ≤ 1.05·${f(A.tracking.median, 4)} + ${f(u("tracking"), 4)}`,
+            );
+            add(
+                `G5_rise${sfx}:${ax}`,
+                C.riseMs.median <= G.riseRel * A.riseMs.median + G.riseAbsMs + u("riseMs"),
+                `${f(C.riseMs.median, 1)} ms ≤ 1.15·${f(A.riseMs.median, 1)} + 2 + ${f(u("riseMs"), 1)} ms`,
+            );
+            add(
+                `G5_crossover${sfx}:${ax}`,
+                C.fc.median >= G.fcMinRel * A.fc.median - u("fc"),
+                `${f(C.fc.median, 1)} Hz ≥ 0.9·${f(A.fc.median, 1)} Hz`,
+            );
+            // G6 stability. An axis that already oscillates more than the limit may not get worse (pilot: B pitch 0.12).
+            const oscLimit = Math.max(
+                G.oscillationMax,
+                A.oscillation.median + Math.max(A.oscillation.spread, C.oscillation.spread),
+            );
+            add(
+                `G6_oscillation${sfx}:${ax}`,
+                C.oscillation.median <= oscLimit,
+                `${f(C.oscillation.median, 3)} ≤ ${f(oscLimit, 3)}`,
+            );
+            const sLimit = Math.max(G.sMaxDb, A.s.median + u("s"));
+            add(`G6_s_peak${sfx}:${ax}`, C.s.median <= sLimit, `${f(C.s.median)} ≤ ${f(sLimit)} dB`);
+            if (A.gmAssessable) add(`G6_gm_assessable${sfx}:${ax}`, C.gmAssessable, `σ ≤ 1.5 dB, crossing in 5–85 Hz`);
+        }
+    };
+    against(base, "");
+    against(start, "_vs_start");
     // Improvement on the changed axis.
     const A = base.axes[axis]!;
     const C = cand.axes[axis]!;

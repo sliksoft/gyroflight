@@ -37,7 +37,9 @@
  *     (the same limits as decision.ts): a met target stays met, PM not more than 5° lower, GM not more than 1.5 dB lower,
  *     |S| not more than 1 dB higher and ≤ max(10 dB, current), crossover ≥ 0.92 × current (G2, G6 |S|, and G5
  *     crossover with a margin for the engine's 1–2 % crossover prediction error: G5 itself is 0.9);
- *     the step-response guards (G3–G5 rise, G6 oscillation) are not predicted: the re-measurement decides them;
+ *     the step-response guards (G3–G5 rise, G6 oscillation) are not predicted: the re-measurement decides them; the same
+ *     predicted guards also hold against the START measurement, with the predicted change applied to the accepted
+ *     measurement (session_v1.1: per-step allowances may not add up over several steps);
  *   - and (a) its predicted shortfall is at least predictedMinShortfallDrop below the current one as predicted, or
  *     (b) it is predicted to meet a target the current tune is predicted to miss (no size of the drop required: the
  *     re-measurement's V2 rule and the guards decide whether such a small step stays).
@@ -48,7 +50,7 @@
 import type { PidValues } from "@/gyrocore/engine/pidOptimizer";
 import type { SessionCandidate, SessionSearchResult } from "@/gyrocore/engine/sessionSearch";
 import { meetsOf, shortfallOf } from "@/gyrocore/engine/sessionSearch";
-import { measuredShortfall, type MeasurementSummary } from "./decision";
+import { measuredMeets as measuredMeetsOf, measuredShortfall, type MeasurementSummary } from "./decision";
 import { SESSION_PROTOCOL as P, type SessionAxis } from "./protocol";
 
 export interface Excluded {
@@ -112,6 +114,8 @@ export function chooseStep(o: {
     /** Per motor: measured median of the accepted measurement / that of the start measurement. */
     acceptedVsStart: number[];
     state: PolicyState;
+    /** The start measurement: the predicted guards also hold against it (session_v1.1); absent: the base is the start. */
+    start?: MeasurementSummary;
 }): PolicyOutcome {
     const order = axisOrder(o.base, o.state);
     if (!order.length) return { kind: "stop", reason: "targets_met", detail: [] };
@@ -163,6 +167,26 @@ export function chooseStep(o: {
                 pr.sDb <= Math.max(P.guards.sMaxDb, cr.sDb) &&
                 pr.crossoverHz >= P.policy.predictedFcMinRel * cr.crossoverHz;
             if (!predictedGuards) continue;
+            // Against the start: the predicted change applied to the accepted measurement, compared with the start measurement.
+            const bA = o.base.axes[axis];
+            const sA = (o.start ?? o.base).axes[axis];
+            if (bA && sA) {
+                const pm = bA.pm.median + (pr.pmDeg - cr.pmDeg);
+                const gm = bA.gmLow + (pr.gmDb - cr.gmDb);
+                const sp = bA.s.median + (pr.sDb - cr.sDb);
+                const fc = bA.fc.median * (pr.crossoverHz / cr.crossoverHz);
+                const sMet = measuredMeetsOf(sA);
+                const vsStart =
+                    (!sMet.pm || pm >= P.targets.pmDeg) &&
+                    (!sMet.gm || gm >= P.targets.gmDb) &&
+                    (!sMet.s || sp <= P.targets.sDb) &&
+                    pm >= sA.pm.median - P.tolerance.pmDeg &&
+                    gm >= sA.gmLow - P.tolerance.gmDb &&
+                    sp <= sA.s.median + P.tolerance.sDb &&
+                    sp <= Math.max(P.guards.sMaxDb, sA.s.median) &&
+                    fc >= P.policy.predictedFcMinRel * sA.fc.median;
+                if (!vsStart) continue;
+            }
             const drop = d0 - c.shortfall;
             const transition = (!m0.pm && c.meets.pm) || (!m0.gm && c.meets.gm) || (!m0.s && c.meets.s);
             if (drop >= P.policy.predictedMinShortfallDrop)

@@ -25,7 +25,7 @@
  */
 
 export const SESSION_PROTOCOL = Object.freeze({
-    version: "session_v1",
+    version: "session_v1.1",
     axes: ["roll", "pitch"] as const,
     targets: { pmDeg: 45, gmDb: 6, sDb: 6 },
     /** One shortfall unit per target (the prediction tolerances of the earlier proofs). */

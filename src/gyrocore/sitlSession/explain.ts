@@ -38,9 +38,11 @@ export interface WhyLine {
 export function whyOf(rule: string, decision: Decision | null): WhyLine {
     const [name, where = ""] = rule.split(":");
     const check = decision?.checks.find((c) => c.rule === rule);
+    const vsStart = name.endsWith("_vs_start");
+    const detail = check?.detail ?? rule.split(":").slice(2).join(":");
     return {
-        key: `gyroflightSitlWhy_${name}`,
-        params: [where, check?.detail ?? rule.split(":").slice(2).join(":")],
+        key: `gyroflightSitlWhy_${vsStart ? name.slice(0, -"_vs_start".length) : name}`,
+        params: [where, vsStart ? `against the start tune: ${detail}` : detail],
         rule,
     };
 }

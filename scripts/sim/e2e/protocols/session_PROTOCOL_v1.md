@@ -1,8 +1,22 @@
-# Protocol session_v1 — AutoTune-sessie in de gewone GyroFlight-app tegen Betaflight SITL (blok 14, 2026-11-12)
+# Protocol session_v1.1 — AutoTune-sessie in de gewone GyroFlight-app tegen Betaflight SITL (blok 14, 2026-11-12)
 
 Vastgelegd vóór elke definitieve run, in dezelfde commit als de sessiecode; machineleesbaar in `session_protocol_v1.json`
 (dossierkopie byte-gelijk, gecontroleerd door `run_session_demo.sh`). Alleen SITL en bestaande logs; geen flightcontroller,
 geen vlucht, geen push; PR #16 blijft draft. Pilotseed 4 is verbruikt (fase 0 en pilot); sessieseed 5 en eindseed 6 zijn ongebruikt.
+
+## Versie 1.1 (vóór elk definitief resultaat)
+Na het starten van de definitieve runs bleek bij een review dat G3–G6 alleen tegen de laatst geaccepteerde meting golden. De eindcontrole
+vergelijkt de beste tune echter met de begintune, met dezelfde drempels. Over meerdere geaccepteerde stappen zouden de toleranties per
+stap optellen, bijvoorbeeld fc −8 % en daarna −5 % = −13 % tegenover de begintune. Dat is een ontwerpfout van het protocol, geen
+eigenschap van de tuner.
+
+De run is gestopt toen de startmeting van sessie A op seed 5 net liep. Er is niets van gelezen; de data staan ongeopend in
+`aborted_v1_unread/`. Daarna is v1.1 vastgelegd:
+- G2–G6 gelden ook tegenover de startmeting, net als G1 (regelnamen `…_vs_start`);
+- de selectie toetst de voorspelbare bewakingsregels ook tegenover de start, met de voorspelde verandering toegepast op de geaccepteerde
+  meting.
+
+Seeds 5 en 6 blijven, omdat niets van de afgebroken run is gebruikt.
 
 ## Vraag
 Vindt één complete sessie in de gewone app zelf een gemeten verbetering en houdt ze die vast? Herstelt ze een stap die een
@@ -62,7 +76,8 @@ Deze selectie is een keuze op pilotdata en wordt zo gerapporteerd.
   - marges en stapmaten lezen op beide assen.
 - **Onzekerheid:** u = max(spreiding basis, spreiding kandidaat). GM-ondergrens = mediaan − 2·max σ (regel v4; een onbekende σ telt als
   1,5 dB).
-- **Bewakingsregels** op beide assen; elke regel moet gelden, anders RESTORE:
+- **Bewakingsregels** op beide assen, elk tegenover de laatst geaccepteerde meting én tegenover de startmeting (v1.1); elke regel moet
+  gelden, anders RESTORE:
   - **G1:** elke motor ≤ 1,10× tegenover de geaccepteerde tune en ≤ 1,10× tegenover de begintune.
   - **G2:** een gehaald doel blijft gehaald; PM niet meer dan 5° slechter, GM-ondergrens niet meer dan 1,5 dB, |S| niet meer dan +1 dB.
   - **G3:** overshoot ≤ basis + 0,02 + u.

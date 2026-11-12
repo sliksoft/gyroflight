@@ -321,4 +321,33 @@ describe("step policy (session_v1)", () => {
             chooseStep({ search: search([sWorse]), base, acceptedVsStart: ones, state: initialPolicyState() }).kind,
         ).toBe("stop");
     });
+
+    it("v1.1: the guards also hold against the start, so per-step allowances cannot add up (fc −8 %, then −5 %)", () => {
+        const start = meas({ pm: st(38, 0.05), fc: st(30, 0.02) });
+        const step1 = meas({ pm: st(42, 0.05), fc: st(27.6, 0.02) }); // −8 % against the start: passes
+        expect(decide({ base: start, cand: step1, start, axis: "roll" }).verdict).toBe("ACCEPT");
+        const step2 = meas({ pm: st(45.5, 0.05), fc: st(26.2, 0.02) }); // −5 % against step 1, −12.7 % against the start
+        const d = decide({ base: step1, cand: step2, start, axis: "roll" });
+        expect(d.verdict).toBe("RESTORE");
+        expect(d.reasons).toEqual(["G5_crossover_vs_start:roll"]);
+    });
+});
+
+describe("step policy against the start (session_v1.1)", () => {
+    it("a step whose predicted crossover drop passes against the accepted tune but not against the start is not eligible", () => {
+        const ones = [1, 1, 1, 1];
+        const start = meas({ pm: st(38), fc: st(30) });
+        const base = meas({ pm: st(42), fc: st(27.6) });
+        const c = {
+            ...cand({ p: 90, i: 80, d: 30, dMax: 40 }, 46, 0.9),
+            predicted: { crossoverHz: 26.6, pmDeg: 46, gmDb: 12, sDb: 5.5 },
+        };
+        // predicted against the accepted: 26.6 / 28 = 0.95 ≥ 0.92; projected 27.6 × 0.95 = 26.2 < 0.92 × 30 = 27.6 → not eligible
+        expect(chooseStep({ search: search([c]), base, acceptedVsStart: ones, state: initialPolicyState() }).kind).toBe(
+            "step",
+        );
+        expect(
+            chooseStep({ search: search([c]), base, acceptedVsStart: ones, state: initialPolicyState(), start }).kind,
+        ).toBe("stop");
+    });
 });
