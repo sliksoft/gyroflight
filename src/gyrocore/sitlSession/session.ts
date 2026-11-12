@@ -143,6 +143,11 @@ export interface SessionResult {
     finalActive: ActiveRead | null;
     error: string | null;
     runsUsed: number;
+    /**
+     * The tune read last over MSP equals the last accepted tune (the session's own guarantee). The app tells the bench the
+     * session is finished only then; otherwise the bench's own restore on a lost connection stays armed.
+     */
+    activeIsAccepted: boolean;
 }
 
 export interface SessionEvent {
@@ -277,12 +282,31 @@ export async function runSession(o: {
         finalActive,
         error,
         runsUsed,
+        activeIsAccepted: !!accepted && readbackExact(finalActive, accepted),
     });
 
+    /** A normal end: the active tune is read back over MSP and must be the last accepted one. */
+    const finished = async (reason: StopReason, detail: string[]): Promise<SessionResult> => {
+        const active = await guard(bench.readActive());
+        if (!readbackExact(active, accepted!))
+            return result(
+                "error",
+                "error",
+                ["restore_verification_failed", "active_tune_is_not_the_accepted_tune"],
+                active,
+                "restore_verification_failed",
+            );
+        return result("finished", reason, detail, active);
+    };
+
+    /** The tune of a commit the bench may already hold while its echo is still on the way (Stop during the commit). */
+    let pendingCommit: Tune | null = null;
     const commit = async (t: Tune, id: string) => {
         emit("committing", steps.length, id);
+        pendingCommit = t;
         const echo = await guard(bench.commitAccepted(t, id));
         if (!sameTune(echo.tune, t) || echo.measurementId !== id) throw new Error("commit_not_confirmed_by_bench");
+        pendingCommit = null;
         return echo;
     };
 
@@ -312,18 +336,13 @@ export async function runSession(o: {
         await commit(accepted, "start");
         start = await measure("start", accepted);
         o.onStart?.(start);
-        if (!start.summary.valid) return result("finished", "start_measurement_invalid", start.summary.issues, active);
+        if (!start.summary.valid) return await finished("start_measurement_invalid", start.summary.issues);
         base = start;
         await commit(accepted, start.id);
         for (let trial = 1; ; trial++) {
             checkAbort();
             if (trial > (o.maxTrialSteps ?? P.policy.maxTrialSteps) || runsUsed + P.measurement.runs > P.policy.maxRuns)
-                return result(
-                    "finished",
-                    "budget",
-                    [`trial_steps:${trial - 1}`, `runs:${runsUsed}`],
-                    await bench.readActive(),
-                );
+                return await finished("budget", [`trial_steps:${trial - 1}`, `runs:${runsUsed}`]);
             emit("choosing", trial, "");
             const scripted = o.scripted?.find((x) => x.step === trial) ?? null;
             let choice: StepChoice | null = null;
@@ -336,7 +355,7 @@ export async function runSession(o: {
                 const search = await guard(analyzer.search(base.runs, state.rho));
                 const acceptedVsStart = base.summary.motors!.map((s, m) => s.median / start!.summary.motors![m].median);
                 const out = chooseStep({ search, base: base.summary, acceptedVsStart, state, start: start.summary });
-                if (out.kind === "stop") return result("finished", out.reason, out.detail, await bench.readActive());
+                if (out.kind === "stop") return await finished(out.reason, out.detail);
                 choice = out.choice;
                 axis = choice.axis;
                 to = choice.to;
@@ -416,29 +435,42 @@ export async function runSession(o: {
                     state = afterRestore(state, c);
                 } else if (++invalidStreak >= P.policy.maxConsecutiveInvalid) {
                     o.onStep?.(rec);
-                    return result("finished", "measurement_unreliable", rec.reasons, rec.restore.readback);
+                    return await finished("measurement_unreliable", rec.reasons);
                 }
             }
             o.onStep?.(rec);
         }
     } catch (e) {
-        if (e instanceof SessionAborted || o.signal?.aborted) {
-            emit("stopping", steps.length, "");
-            const a = await bench.abort();
-            const exact = accepted ? readbackExact(a.restored, accepted) : false;
-            const last = steps[steps.length - 1];
-            if (last && last.verdict === "ABORTED") last.restore = { readback: a.restored, exact };
-            if (!a.helperStopped || !exact)
-                return result(
-                    "error",
-                    "error",
-                    ["restore_verification_failed", a.error ?? ""],
-                    a.restored,
-                    "restore_verification_failed",
-                );
-            return result("aborted", "aborted", [], a.restored);
+        const aborted = e instanceof SessionAborted || !!o.signal?.aborted;
+        const why = aborted ? "" : String(e instanceof Error ? e.message : e);
+        if (!accepted)
+            return result("error", "error", [why || "aborted_before_start"], null, why || "aborted_before_start");
+        // Stop, or any other failure once a tune may have been set: the bench stops its helper, restores the accepted tune
+        // and reads it back (the same path for both, so an error never leaves a candidate active).
+        emit("stopping", steps.length, "");
+        let a: Awaited<ReturnType<Bench["abort"]>> | null = null;
+        let abortError: string | null = null;
+        try {
+            a = await bench.abort();
+        } catch (x) {
+            abortError = String(x instanceof Error ? x.message : x);
         }
-        return result("error", "error", [String(e instanceof Error ? e.message : e)], null, String(e));
+        // A Stop during a commit: the bench may already hold the committed tune as its restore tune.
+        if (a && pendingCommit && readbackExact(a.restored, pendingCommit)) accepted = pendingCommit;
+        const exact = !!a && readbackExact(a.restored, accepted);
+        const last = steps[steps.length - 1];
+        if (last && (last.verdict === "ABORTED" || !aborted) && !last.restore)
+            last.restore = { readback: a?.restored ?? null, exact };
+        if (!a || !a.helperStopped || !exact)
+            return result(
+                "error",
+                "error",
+                ["restore_verification_failed", ...(why ? [why] : []), a?.error ?? abortError ?? ""].filter(Boolean),
+                a?.restored ?? null,
+                "restore_verification_failed",
+            );
+        if (!aborted) return result("error", "error", [why, "accepted_tune_restored"], a.restored, why);
+        return result("aborted", "aborted", [], a.restored);
     } finally {
         emit("done", steps.length, "");
     }

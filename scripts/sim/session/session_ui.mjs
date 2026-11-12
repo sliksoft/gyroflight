@@ -17,6 +17,8 @@ const opt = (k) => {
 const script = opt("--script");
 const stopAt = opt("--stop-at");
 const dropAt = opt("--disconnect-at");
+// --stop-then-close: after pressing Stop, close the page at once (a Stop followed by a lost connection: two aborts)
+const stopThenClose = rest.includes("--stop-then-close");
 mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true });
 const ctx = await b.newContext({ viewport: { width: 1600, height: 1100 }, deviceScaleFactor: 1 });
@@ -125,6 +127,12 @@ for (;;) {
             if (stopAt) {
                 action = { kind: "stop", at: Date.now() - t0, progress: r.progress };
                 await p.locator('[data-gyrocore="sitl-stop"]').click();
+                if (stopThenClose) {
+                    action.kind = "stop_then_close";
+                    await p.waitForTimeout(300);
+                    await p.close();
+                    break;
+                }
             } else {
                 action = { kind: "disconnect", at: Date.now() - t0, progress: r.progress };
                 await p.close();
@@ -139,7 +147,7 @@ for (;;) {
     }
 }
 const out = { url, script, stopAt, dropAt, action, ms: Date.now() - t0, errs, timeline };
-if (!(action?.kind === "disconnect")) {
+if (!(action?.kind === "disconnect" || action?.kind === "stop_then_close")) {
     const r = await read();
     out.read = r;
     await p.evaluate(() => document.querySelector('[data-gyrocore="sitl-session"]')?.scrollIntoView());

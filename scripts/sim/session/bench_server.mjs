@@ -116,7 +116,8 @@ function runHelper(action, extra, label) {
         const logs = [];
         child.stdout.on("data", (d) => logs.push(d));
         child.stderr.on("data", (d) => logs.push(d));
-        current = { child, action, out, killed: false };
+        // SITL processes that already ran before this helper are not the bench's to stop (Grok block 14 r1, note 7).
+        current = { child, action, out, killed: false, preexisting: new Set(sitlRunning()) };
         child.on("exit", (code, signal) => {
             writeFileSync(out + ".log", Buffer.concat(logs));
             const killed = current?.child === child && current.killed;
@@ -136,6 +137,7 @@ function runHelper(action, extra, label) {
 async function stopHelper() {
     const c = current;
     if (!c) return { helperStopped: sitlRunning().length === 0, wasRunning: false };
+    const ours = () => sitlRunning().filter((p) => !c.preexisting.has(p));
     c.killed = true;
     const done = new Promise((r) => c.child.once("exit", r));
     try {
@@ -149,14 +151,14 @@ async function stopHelper() {
     await done;
     clearTimeout(t);
     // The SITL process may sit in its own session: anything left running from the bench's ELF is stopped too.
-    for (let k = 0; k < 20 && sitlRunning().length; k++) {
-        for (const pid of sitlRunning())
+    for (let k = 0; k < 20 && ours().length; k++) {
+        for (const pid of ours())
             try {
                 process.kill(Number(pid), k < 10 ? "SIGTERM" : "SIGKILL");
             } catch {}
         await new Promise((r) => setTimeout(r, 250));
     }
-    return { helperStopped: sitlRunning().length === 0, wasRunning: true };
+    return { helperStopped: ours().length === 0, wasRunning: true };
 }
 
 const AXES = ["roll", "pitch", "yaw"];
@@ -292,7 +294,20 @@ const methods = {
     },
 };
 
-async function abort(why) {
+/** One abort at a time: a second request (Stop, then the page closes) waits for the first and gets its result. */
+let abortRunning = null;
+function abort(why) {
+    if (abortRunning) {
+        journal({ op: "abort_joined", why });
+        return abortRunning;
+    }
+    abortRunning = abortOnce(why).finally(() => {
+        abortRunning = null;
+    });
+    return abortRunning;
+}
+
+async function abortOnce(why) {
     aborting = true;
     const stop = await stopHelper();
     await queue; // the interrupted operation settles first

@@ -37,6 +37,9 @@ P = {
     "gmBand": (5.0, 85.0),
     "v1MinDrop": 0.5,
     "v2K": 2.0,
+    # validity limits (protocol session_v1.1 "validity"; main() takes them from the dossier's protocol.json)
+    "validity": {"pmSpreadDeg": 1.0, "sSpreadDb": 0.3, "fcSpreadRel": 0.02, "motorSpreadRel": 0.15, "trackingSpreadRel": 0.05,
+                 "minHoverSamples": 3072, "maxAbsAttitudeDeg": 45, "minZ": 0.3},
 }
 AXES = ("roll", "pitch")
 TUNE_AXES = ("roll", "pitch", "yaw")
@@ -61,7 +64,7 @@ def summary_of(meas):
         pl = r.get("plant") or {}
         if r["status"] != "ok":
             out["issues"].append(f"run_{r['start']}:{r['status']}")
-        elif max(pl.get("maxAbsRollDeg", 99), pl.get("maxAbsPitchDeg", 99)) > 45 or pl.get("minZ", 0) < 0.3:
+        elif max(pl.get("maxAbsRollDeg", 99), pl.get("maxAbsPitchDeg", 99)) > P["validity"]["maxAbsAttitudeDeg"] or pl.get("minZ", 0) < P["validity"]["minZ"]:
             out["issues"].append(f"run_{r['start']}:envelope")
         a = {k: int(v) for k, v in (r.get("active") or {}).get("roll", {}).items()} if r.get("active") else None
         if not r.get("active") or not tune_eq({x: r["active"][x] for x in TUNE_AXES}, meas["tune"]):
@@ -81,13 +84,21 @@ def summary_of(meas):
             "riseMs": stat([x["riseMs"] for x in st]), "oscillation": stat([x["oscillation"] for x in st]),
         }
         a = out["axes"][ax]
-        if a["pm"]["spread"] > 1.0:
+        V = P["validity"]
+        if a["pm"]["spread"] > V["pmSpreadDeg"]:
             out["issues"].append(f"pm_spread:{ax}")
-        if a["s"]["spread"] > 0.3:
+        if a["s"]["spread"] > V["sSpreadDb"]:
             out["issues"].append(f"s_spread:{ax}")
+        if a["fc"]["spread"] > V["fcSpreadRel"] * a["fc"]["median"]:
+            out["issues"].append(f"fc_spread:{ax}")
+        if a["tracking"]["spread"] > V["trackingSpreadRel"] * a["tracking"]["median"]:
+            out["issues"].append(f"tracking_spread:{ax}")
     out["motors"] = [stat([r["noise"]["motorBandHover"][m] for r in runs]) for m in range(4)]
+    for m, st_ in enumerate(out["motors"]):
+        if st_["spread"] > P["validity"]["motorSpreadRel"] * st_["median"]:
+            out["issues"].append(f"motor_spread:m{m + 1}")
     for r in runs:
-        if (r["noise"]["hover"]["samples"] or 0) < 3072:
+        if (r["noise"]["hover"]["samples"] or 0) < P["validity"]["minHoverSamples"]:
             out["issues"].append(f"run_{r['start']}:hover_samples")
         if (r["noise"].get("motorClip") or 0) > 0:
             out["issues"].append(f"run_{r['start']}:motor_clip")
@@ -237,6 +248,9 @@ def main():
         return selftest()
     D = Path(sys.argv[1])
     proto = json.loads((D / "protocol.json").read_text())
+    P["validity"].update({k: v for k, v in proto["validity"].items() if k in P["validity"]})
+    for k in ("motorMaxRatio",):
+        assert proto["guards"][k] == P["guards"]["motor"], "protocol guard differs from the verdict's"
     res = {"protocol": proto["version"], "sessions": {}, "criteria": {}, "spontaneousRestore": []}
     c1, c2_hits, c3, c4, c5 = [], [], [], [], []
     for s in proto["sessions"]:

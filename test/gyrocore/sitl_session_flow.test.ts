@@ -266,12 +266,56 @@ describe("AutoTune session flow (fake bench)", () => {
             expect(key(bench.flash)).toBe(key(expected));
         });
 
-    it("the commit must be echoed by the bench before the next step", async () => {
+    it("the commit after an ACCEPT must be echoed: an unconfirmed commit ends in error with the accepted tune restored", async () => {
         const bench = new FakeBench();
-        bench.commitAccepted = async (t, id) => ({ tune: T0, measurementId: id === "start" ? "start" : "other" });
+        const real = bench.commitAccepted.bind(bench);
+        let n = 0;
+        bench.commitAccepted = async (t, id) => {
+            n++;
+            const echo = await real(t, id);
+            // the third commit is the one after step 1's ACCEPT: the bench answers with another id
+            return n === 3 ? { ...echo, measurementId: "other" } : echo;
+        };
         const r = await runSession({ bench, analyzer: fakeAnalyzer(defaultPlant, (b) => [{ ...b.roll, p: 92 }]) });
+        expect(r.steps[0].verdict).toBe("ACCEPT");
         expect(r.status).toBe("error");
         expect(r.stopDetail).toContain("commit_not_confirmed_by_bench");
+        expect(bench.log).toContain("abort");
+        // the bench holds (and restored) what it recorded; the app sees exactly that tune active
+        expect(r.activeIsAccepted).toBe(true);
+    });
+
+    it("an error after a candidate was set (analysis throws) restores the accepted tune and reads it back (Grok r1 BLOCKER)", async () => {
+        const bench = new FakeBench();
+        const an = fakeAnalyzer(defaultPlant, (b) => [{ ...b.roll, p: 92 }]);
+        const runs = an.runs.bind(an);
+        let calls = 0;
+        an.runs = async (x) => {
+            if (++calls === 2) throw new Error("bench_log_not_decoded");
+            return runs(x);
+        };
+        const r = await runSession({ bench, analyzer: an });
+        expect(r.status).toBe("error");
+        expect(r.stopDetail).toEqual(["bench_log_not_decoded", "accepted_tune_restored"]);
+        expect(bench.log).toContain("abort");
+        expect(key(bench.flash)).toBe(key(T0));
+        expect(key(r.finalActive!.tune)).toBe(key(T0));
+        expect(r.activeIsAccepted).toBe(true);
+        expect(r.steps[0].restore).toMatchObject({ exact: true });
+    });
+
+    it("a normal end verifies the active tune: a bench that holds another tune ends the session in error", async () => {
+        const bench = new FakeBench();
+        const read = bench.readActive.bind(bench);
+        let n = 0;
+        bench.readActive = async () => {
+            const a = await read();
+            return ++n === 1 ? a : { ...a, tune: { ...a.tune, pitch: { ...a.tune.pitch, p: a.tune.pitch.p + 1 } } };
+        };
+        const r = await runSession({ bench, analyzer: fakeAnalyzer(defaultPlant, () => []) });
+        expect(r.status).toBe("error");
+        expect(r.stopDetail).toContain("active_tune_is_not_the_accepted_tune");
+        expect(r.activeIsAccepted).toBe(false);
     });
 
     it("a scripted first candidate is decided like any step (the pre-registered restore test)", async () => {
