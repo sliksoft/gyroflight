@@ -53,6 +53,15 @@ const SEED = Number(arg("--seed"));
 const STARTS = (arg("--starts", "400,450,500") || "").split(",").map(Number);
 const PORT = Number(arg("--port", "5299"));
 const START_TUNE = arg("--start-tune");
+/*
+ * Fault injection for the restore-path tests only (off unless named; each one is journalled when armed and when it fires):
+ *   end_flash_drift    on the session's second readActive (its end-of-session read) the bench first writes a drifted tune
+ *                      (pitch P + 1) into the flash, so the SITL really holds another tune and MSP reads it truthfully;
+ *   restore_fail_once  the first restore fails before it writes anything; the bench then reads the active tune over MSP
+ *                      (what the SITL holds after the failed restore) and journals it.
+ */
+const INJECT = new Set(args.flatMap((a, i) => (a === "--inject" ? [args[i + 1]] : [])));
+let readActiveCalls = 0;
 if (!DIR || !Number.isFinite(SEED)) {
     console.error("usage: bench_server.mjs --dir D --scenario S --seed N");
     process.exit(2);
@@ -230,6 +239,18 @@ const serial = (fn) => {
 async function restoreAccepted(why) {
     const acc = readAccepted();
     if (!acc) return { restored: null, error: "no_accepted_tune" };
+    if (INJECT.has("restore_fail_once")) {
+        INJECT.delete("restore_fail_once");
+        let held = null;
+        try {
+            held = await readActive(`after_failed_restore_${why}`);
+        } catch (e) {
+            held = { error: String(e) };
+        }
+        journal({ op: "injected", fault: "restore_fail_once", why, activeAfterFailedRestore: held });
+        journal({ op: "restore", why, accepted: acc, error: "injected_restore_failure" });
+        return { restored: null, error: "injected_restore_failure" };
+    }
     try {
         await provision(acc.tune, `restore_${why}`);
         const rb = await readActive(`restore_${why}`);
@@ -247,6 +268,15 @@ const methods = {
         return { session: DIR, scenario: SCENARIO, seed: SEED, starts: STARTS, accepted: readAccepted() };
     },
     async readActive() {
+        readActiveCalls++;
+        if (INJECT.has("end_flash_drift") && readActiveCalls === 2) {
+            INJECT.delete("end_flash_drift");
+            const acc = readAccepted();
+            const drift = JSON.parse(JSON.stringify(acc.tune));
+            drift.pitch.p += 1;
+            await provision(drift, "injected_end_flash_drift");
+            journal({ op: "injected", fault: "end_flash_drift", flashTune: drift });
+        }
         const a = await readActive("readActive");
         journal({ op: "readActive", active: a });
         sessionOpen = true;
@@ -328,6 +358,7 @@ if (sitlRunning().length) {
     console.error("STOP: a SITL process is already running");
     process.exit(2);
 }
+if (INJECT.size) journal({ op: "inject_armed", faults: [...INJECT] });
 if (START_TUNE) {
     const tune = JSON.parse(readFileSync(START_TUNE, "utf8"));
     await provision(tune, "craft_start_tune");
