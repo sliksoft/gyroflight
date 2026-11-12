@@ -287,6 +287,11 @@ const methods = {
         journal({ op: "measure", label, runs: runs.map(({ logBase64, ...x }) => x) });
         return { runs };
     },
+    /** The app's result for the journal without closing the session (a session that did not end on the accepted tune). */
+    async record({ result }) {
+        journal({ op: "app_result", result });
+        return { ok: true };
+    },
     async finish({ result }) {
         sessionOpen = false;
         journal({ op: "finish", result });
@@ -313,7 +318,8 @@ async function abortOnce(why) {
     await queue; // the interrupted operation settles first
     const r = await serial(() => restoreAccepted(why));
     journal({ op: "abort", why, ...stop, restoredExact: !r.error, error: r.error });
-    sessionOpen = false;
+    // Only a verified restore closes the session: otherwise a lost connection still triggers another restore (Grok r2 note A).
+    if (!r.error && stop.helperStopped) sessionOpen = false;
     aborting = false;
     return { helperStopped: stop.helperStopped, restored: r.restored, error: r.error };
 }

@@ -304,7 +304,7 @@ describe("AutoTune session flow (fake bench)", () => {
         expect(r.steps[0].restore).toMatchObject({ exact: true });
     });
 
-    it("a normal end verifies the active tune: a bench that holds another tune ends the session in error", async () => {
+    it("a normal end verifies the active tune: another tune active ends in error, and the accepted tune is restored", async () => {
         const bench = new FakeBench();
         const read = bench.readActive.bind(bench);
         let n = 0;
@@ -314,8 +314,10 @@ describe("AutoTune session flow (fake bench)", () => {
         };
         const r = await runSession({ bench, analyzer: fakeAnalyzer(defaultPlant, () => []) });
         expect(r.status).toBe("error");
-        expect(r.stopDetail).toContain("active_tune_is_not_the_accepted_tune");
-        expect(r.activeIsAccepted).toBe(false);
+        expect(r.stopDetail).toEqual(["active_tune_is_not_the_accepted_tune", "accepted_tune_restored"]);
+        // handled like any failure: the bench restored the accepted tune and read it back (Grok r2 note B)
+        expect(bench.log).toContain("abort");
+        expect(r.activeIsAccepted).toBe(true);
     });
 
     it("a scripted first candidate is decided like any step (the pre-registered restore test)", async () => {

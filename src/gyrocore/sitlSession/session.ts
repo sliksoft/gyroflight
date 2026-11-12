@@ -288,14 +288,8 @@ export async function runSession(o: {
     /** A normal end: the active tune is read back over MSP and must be the last accepted one. */
     const finished = async (reason: StopReason, detail: string[]): Promise<SessionResult> => {
         const active = await guard(bench.readActive());
-        if (!readbackExact(active, accepted!))
-            return result(
-                "error",
-                "error",
-                ["restore_verification_failed", "active_tune_is_not_the_accepted_tune"],
-                active,
-                "restore_verification_failed",
-            );
+        // Another tune active at a normal end: the same way as any failure (bench restores, reads back; Grok r2 note B).
+        if (!readbackExact(active, accepted!)) throw new Error("active_tune_is_not_the_accepted_tune");
         return result("finished", reason, detail, active);
     };
 

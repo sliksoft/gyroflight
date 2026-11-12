@@ -161,39 +161,39 @@ export function useSitlSession() {
             state.result = r;
             // Records for the bench journal: tunes, verdicts, reasons, read-backs; no logs. Only when the active tune is the
             // accepted one: otherwise the bench keeps its own restore on a lost connection armed.
-            if (r.activeIsAccepted)
-                await client
-                    .finish({
-                        status: r.status,
-                        stopReason: r.stopReason,
-                        stopDetail: r.stopDetail,
-                        error: r.error,
-                        runsUsed: r.runsUsed,
-                        startTune: r.start?.tune ?? null,
-                        startMeasurement: r.start ? { id: r.start.id, summary: r.start.summary } : null,
-                        bestTune: r.best?.tune ?? null,
-                        bestMeasurement: r.best ? { id: r.best.id, summary: r.best.summary } : null,
-                        finalActive: r.finalActive,
-                        steps: r.steps.map((s) => ({
-                            index: s.index,
-                            axis: s.axis,
-                            scripted: s.scripted,
-                            from: s.from,
-                            to: s.to,
-                            baseMeasurementId: s.baseMeasurementId,
-                            measurementId: s.measurement?.id ?? null,
-                            summary: s.measurement?.summary ?? null,
-                            runIssues: s.measurement?.reads.map((x) => x.issues) ?? null,
-                            choice: s.choice,
-                            checks: s.decision?.checks ?? null,
-                            verdict: s.verdict,
-                            reasons: s.reasons,
-                            setReadback: s.setReadback?.tune ?? null,
-                            restore: s.restore,
-                            commit: s.commit,
-                        })),
-                    })
-                    .catch(() => undefined);
+            const record = {
+                status: r.status,
+                stopReason: r.stopReason,
+                stopDetail: r.stopDetail,
+                error: r.error,
+                runsUsed: r.runsUsed,
+                startTune: r.start?.tune ?? null,
+                startMeasurement: r.start ? { id: r.start.id, summary: r.start.summary } : null,
+                bestTune: r.best?.tune ?? null,
+                bestMeasurement: r.best ? { id: r.best.id, summary: r.best.summary } : null,
+                finalActive: r.finalActive,
+                steps: r.steps.map((s) => ({
+                    index: s.index,
+                    axis: s.axis,
+                    scripted: s.scripted,
+                    from: s.from,
+                    to: s.to,
+                    baseMeasurementId: s.baseMeasurementId,
+                    measurementId: s.measurement?.id ?? null,
+                    summary: s.measurement?.summary ?? null,
+                    runIssues: s.measurement?.reads.map((x) => x.issues) ?? null,
+                    choice: s.choice,
+                    checks: s.decision?.checks ?? null,
+                    verdict: s.verdict,
+                    reasons: s.reasons,
+                    setReadback: s.setReadback?.tune ?? null,
+                    restore: s.restore,
+                    commit: s.commit,
+                })),
+            };
+            // Only a session that ends on the accepted tune is closed on the bench; otherwise the result is journalled and the
+            // bench's own restore on a lost connection stays armed (Grok r2 notes A and D).
+            await (r.activeIsAccepted ? client.finish(record) : client.record(record)).catch(() => undefined);
         } catch (e) {
             state.error = String(e instanceof Error ? e.message : e);
         } finally {

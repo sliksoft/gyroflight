@@ -135,4 +135,9 @@ export class BenchClient implements Bench {
     finish(result: unknown): Promise<unknown> {
         return this.call("finish", { result });
     }
+
+    /** Journal the app's result without ending the session on the bench (its restore on a lost connection stays armed). */
+    record(result: unknown): Promise<unknown> {
+        return this.call("record", { result });
+    }
 }
