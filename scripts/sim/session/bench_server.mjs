@@ -61,6 +61,11 @@ const START_TUNE = arg("--start-tune");
  *                      (what the SITL holds after the failed restore) and journals it.
  */
 const INJECT = new Set(args.flatMap((a, i) => (a === "--inject" ? [args[i + 1]] : [])));
+for (const f of INJECT)
+    if (!["end_flash_drift", "restore_fail_once"].includes(f)) {
+        console.error(`STOP: unknown --inject ${f}`);
+        process.exit(2);
+    }
 let readActiveCalls = 0;
 if (!DIR || !Number.isFinite(SEED)) {
     console.error("usage: bench_server.mjs --dir D --scenario S --seed N");
