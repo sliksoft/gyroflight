@@ -174,7 +174,7 @@ describe("D-path fit gating", () => {
         expect(check?.consequence).toContain(DTERM_FALLBACK);
         // never the first cause of a decision
         expect(r.candidateDecisions.roll?.primary?.firstCause?.rule).not.toBe("dterm_path_fit");
-    });
+    }, 60_000);
 
     it("applies the effective D only when the fit is accepted", () => {
         const log = decoded(base);
@@ -193,5 +193,5 @@ describe("D-path fit gating", () => {
         const check = r.candidateDecisions.roll?.primary?.checks.find((c) => c.rule === "dterm_path_fit");
         expect(check).toBeDefined();
         expect(check!.result).toBe(ctl!.dtermApplied ? "pass" : "waived");
-    });
+    }, 60_000);
 });

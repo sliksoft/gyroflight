@@ -43,7 +43,8 @@ jobs:
 
   browser-autotune:
     name: Autotune browser gates (lease + worker)
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.56.1 cannot install Chromium on ubuntu-26.04 (ubuntu-latest since Nov 2026).
+    runs-on: ubuntu-24.04
     # Scoped: Playwright Chromium only when this fork CI runs. No secrets.
     steps:
       - uses: actions/checkout@v5
