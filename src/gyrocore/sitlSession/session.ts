@@ -29,8 +29,11 @@
  *              MSP before arming; it must equal the candidate), decide (decision.ts):
  *                ACCEPT   the bench records the candidate as the tune to restore (commitAccepted, echo checked) before
  *                         the next step; the candidate's measurement becomes the base;
- *                RESTORE  set the last accepted tune again and read it back (exact, else the session ends in error
- *                         restore_verification_failed); the candidate is excluded, ρ of the axis halves;
+ *                RESTORE  the bench restores the last accepted tune (bench.restore: bounded attempts, each read back
+ *                         over MSP) and the session goes on only after an exact read-back; when every attempt fails
+ *                         the session ends restore_unconfirmed (no finish; the bench refuses further tuning actions),
+ *                         and a read-back the bench calls exact that is not ends in restore_verification_failed; the
+ *                         candidate is excluded, ρ of the axis halves;
  *                INVALID  restore the same way; no exclusion; two in a row end the session (measurement_unreliable).
  *   stop       targets met, no eligible candidate, step floor, budget (5 trial steps / 18 runs), unreliable
  *              measurements, or Stop: the bench stops its running helper, restores the accepted tune and reads it back.
@@ -76,6 +79,13 @@ export interface BenchRun {
     plant: { maxAbsRollDeg: number; maxAbsPitchDeg: number; minZ: number; finite: boolean } | null;
 }
 
+/** The bench's restore of the accepted tune: the last MSP read, and why it is not the accepted tune (null when it is). */
+export interface BenchRestore {
+    restored: ActiveRead | null;
+    error: string | null;
+    attempts?: number;
+}
+
 export interface Bench {
     readActive(): Promise<ActiveRead>;
     /** Write the tune into the flash (Betaflight CLI) and read it back over MSP from a booted SITL. */
@@ -83,8 +93,10 @@ export interface Bench {
     /** Record the tune the bench restores on Stop or a lost connection; resolves with the bench's echo. */
     commitAccepted(t: Tune, measurementId: string): Promise<{ tune: Tune; measurementId: string }>;
     measure(label: string): Promise<{ runs: BenchRun[] }>;
-    /** Stop the running helper, restore the accepted tune, read it back. */
-    abort(): Promise<{ helperStopped: boolean; restored: ActiveRead | null; error: string | null }>;
+    /** Restore the accepted tune (bounded attempts, each read back over MSP; error restore_unconfirmed when all fail). */
+    restore(): Promise<BenchRestore>;
+    /** Stop the running helper, restore the accepted tune the same way, read it back. */
+    abort(): Promise<BenchRestore & { helperStopped: boolean }>;
 }
 
 export interface Analyzer {
@@ -119,7 +131,7 @@ export interface StepRecord {
     decision: Decision | null;
     verdict: StepVerdict;
     reasons: string[];
-    restore: { readback: ActiveRead | null; exact: boolean } | null;
+    restore: { readback: ActiveRead | null; exact: boolean; attempts?: number; error?: string | null } | null;
     commit: { measurementId: string; echoed: boolean } | null;
 }
 
@@ -131,6 +143,7 @@ export type StopReason =
     | "measurement_unreliable"
     | "start_measurement_invalid"
     | "aborted"
+    | "restore_unconfirmed"
     | "error";
 
 export interface SessionResult {
@@ -315,13 +328,30 @@ export async function runSession(o: {
         return { id: measurementId(m.runs), label, tune, runs: m.runs, reads, summary: summarize(reads) };
     };
 
-    /** Restore the accepted tune and read it back; throws when the read-back differs. */
-    const restore = async (): Promise<{ readback: ActiveRead | null; exact: boolean }> => {
+    /** The bench restores the accepted tune; exact only when the bench confirms it and the read-back is the accepted tune. */
+    const restore = async (): Promise<NonNullable<StepRecord["restore"]>> => {
         emit("restoring", steps.length, "");
-        const rb = await bench.setTune(accepted!);
-        const exact = readbackExact(rb, accepted!);
-        return { readback: rb, exact };
+        const r = await bench.restore();
+        const exact = !r.error && readbackExact(r.restored, accepted!);
+        return { readback: r.restored, exact, attempts: r.attempts, error: r.error };
     };
+    /** A restore that did not end on the accepted tune: unconfirmed by the bench, or not exact although confirmed. */
+    const restoreFailed = (r: NonNullable<StepRecord["restore"]>, why: string[] = []): SessionResult =>
+        r.error === "restore_unconfirmed"
+            ? result(
+                  "error",
+                  "restore_unconfirmed",
+                  [`attempts:${r.attempts ?? "?"}`, ...why],
+                  r.readback,
+                  "restore_unconfirmed",
+              )
+            : result(
+                  "error",
+                  "error",
+                  ["restore_verification_failed", ...why, r.error ?? ""].filter(Boolean),
+                  r.readback,
+                  "restore_verification_failed",
+              );
 
     try {
         emit("reading_active", 0, "");
@@ -413,13 +443,7 @@ export async function runSession(o: {
                 rec.restore = await restore();
                 if (!rec.restore.exact) {
                     o.onStep?.(rec);
-                    return result(
-                        "error",
-                        "error",
-                        ["restore_verification_failed"],
-                        rec.restore.readback,
-                        "restore_verification_failed",
-                    );
+                    return restoreFailed(rec.restore);
                 }
                 if (rec.verdict === "RESTORE") {
                     invalidStreak = 0;
@@ -442,7 +466,7 @@ export async function runSession(o: {
         // Stop, or any other failure once a tune may have been set: the bench stops its helper, restores the accepted tune
         // and reads it back (the same path for both, so an error never leaves a candidate active).
         emit("stopping", steps.length, "");
-        let a: Awaited<ReturnType<Bench["abort"]>> | null = null;
+        let a: (BenchRestore & { helperStopped: boolean }) | null = null;
         let abortError: string | null = null;
         try {
             a = await bench.abort();
@@ -454,7 +478,12 @@ export async function runSession(o: {
         const exact = !!a && readbackExact(a.restored, accepted);
         const last = steps[steps.length - 1];
         if (last && (last.verdict === "ABORTED" || !aborted) && !last.restore)
-            last.restore = { readback: a?.restored ?? null, exact };
+            last.restore = { readback: a?.restored ?? null, exact, attempts: a?.attempts, error: a?.error ?? null };
+        if (a?.error === "restore_unconfirmed")
+            return restoreFailed({ readback: a.restored, exact: false, attempts: a.attempts, error: a.error }, [
+                ...(why ? [why] : []),
+                ...(a.helperStopped ? [] : ["helper_not_stopped"]),
+            ]);
         if (!a || !a.helperStopped || !exact)
             return result(
                 "error",

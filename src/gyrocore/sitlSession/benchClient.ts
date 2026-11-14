@@ -24,7 +24,7 @@
  * is accepted: the bench drives a simulator on this machine and never a flight controller.
  */
 
-import type { ActiveRead, Bench, BenchRun, Tune } from "./session";
+import type { ActiveRead, Bench, BenchRestore, BenchRun, Tune } from "./session";
 
 export interface BenchHello {
     session: string;
@@ -128,7 +128,12 @@ export class BenchClient implements Bench {
         };
     }
 
-    abort(): Promise<{ helperStopped: boolean; restored: ActiveRead | null; error: string | null }> {
+    /** No time-out on this side: the bench bounds its own attempts (bench_server.mjs, "Restore"). */
+    restore(): Promise<BenchRestore> {
+        return this.call("restore", { why: "app" });
+    }
+
+    abort(): Promise<BenchRestore & { helperStopped: boolean }> {
         return this.call("abort");
     }
 

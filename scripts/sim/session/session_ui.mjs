@@ -6,6 +6,9 @@
 // Usage: node scripts/sim/session/session_ui.mjs <outDir> <port> [--script NAME] [--stop-at STEP:RUN] [--disconnect-at STEP:RUN]
 //   --stop-at S:R        press "Stop and restore" when trial step S is measuring run R
 //   --disconnect-at S:R  close the page (the bench sees the connection drop) when trial step S is measuring run R
+//   --probe-locked TUNE_JSON  after a session that ends restore_unconfirmed, send setTune (TUNE_JSON), measure and
+//                        commitAccepted to the bench over the page's own WebSocket (routed through Playwright, so the
+//                        same connection; the app does not see the replies) and record the bench's answers; then close
 import { chromium } from "playwright-core";
 import { mkdirSync, writeFileSync } from "node:fs";
 
@@ -19,10 +22,44 @@ const stopAt = opt("--stop-at");
 const dropAt = opt("--disconnect-at");
 // --stop-then-close: after pressing Stop, close the page at once (a Stop followed by a lost connection: two aborts)
 const stopThenClose = rest.includes("--stop-then-close");
+const probeTune = opt("--probe-locked");
 mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true });
 const ctx = await b.newContext({ viewport: { width: 1600, height: 1100 }, deviceScaleFactor: 1 });
 const p = await ctx.newPage();
+// The bench connection routed through Playwright (only with --probe-locked): page → bench is forwarded as is; bench →
+// page too, except the answers to the probe's own requests (ids from 900001). Closing either side closes the other.
+const PROBE_ID = 900000;
+const probeReplies = new Map();
+let benchSide = null;
+let connections = 0;
+if (probeTune)
+    await p.routeWebSocket(
+        (u) => u.port === String(PORT),
+        (ws) => {
+            connections++;
+            const server = ws.connectToServer();
+            benchSide = server;
+            server.onMessage((m) => {
+                const id = (() => {
+                    try {
+                        return JSON.parse(String(m)).id;
+                    } catch {
+                        return null;
+                    }
+                })();
+                if (typeof id === "number" && id > PROBE_ID) probeReplies.set(id, JSON.parse(String(m)));
+                else ws.send(m);
+            });
+        },
+    );
+async function probe(k, method, params) {
+    const id = PROBE_ID + k;
+    const at = new Date().toISOString();
+    benchSide.send(JSON.stringify({ id, method, params }));
+    for (let w = 0; w < 600 && !probeReplies.has(id); w++) await p.waitForTimeout(100);
+    return { method, at, reply: probeReplies.get(id) ?? "no_reply_within_60_s" };
+}
 const errs = [];
 const consoleLines = [];
 p.on("pageerror", (e) => errs.push(e.message));
@@ -150,9 +187,31 @@ const out = { url, script, stopAt, dropAt, action, ms: Date.now() - t0, errs, ti
 if (!(action?.kind === "disconnect" || action?.kind === "stop_then_close")) {
     const r = await read();
     out.read = r;
+    out.unconfirmedNotice = await p.evaluate(
+        () =>
+            document
+                .querySelector('[data-gyrocore="sitl-restore-unconfirmed"]')
+                ?.textContent?.replace(/\s+/g, " ")
+                .trim() ?? null,
+    );
+    out.startDisabled = await p.locator('[data-gyrocore="sitl-start"]').isDisabled();
     await p.evaluate(() => document.querySelector('[data-gyrocore="sitl-session"]')?.scrollIntoView());
     await panel.screenshot({ path: `${OUT}/03_session_end.png` });
     await p.screenshot({ path: `${OUT}/04_full_page.png`, fullPage: true });
+    if (probeTune) {
+        out.probe = { connections, onlyWhen: "restore_unconfirmed", stopReason: r.stop?.reason ?? null, replies: [] };
+        if (r.stop?.reason === "restore_unconfirmed" && benchSide) {
+            const tune = JSON.parse(probeTune);
+            out.probe.replies.push(await probe(1, "setTune", { tune }));
+            out.probe.replies.push(await probe(2, "measure", { label: "probe" }));
+            out.probe.replies.push(await probe(3, "commitAccepted", { tune, measurementId: "probe" }));
+            out.probe.replies.push(await probe(4, "readActive", {}));
+        }
+        out.probe.connectionsAtEnd = connections;
+        // Close the page itself: the routed connection belongs to Playwright, so the bench must see this page go.
+        await p.close();
+        await new Promise((r) => setTimeout(r, 2000));
+    }
 }
 writeFileSync(`${OUT}/session_ui.json`, JSON.stringify(out, null, 1));
 writeFileSync(`${OUT}/console.log`, consoleLines.join("\n"));

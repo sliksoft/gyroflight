@@ -122,7 +122,8 @@ export function useSitlSession() {
     }
 
     async function start() {
-        if (!client || state.running) return;
+        // An unconfirmed restore ends the session for good: the bench refuses tuning actions until it restores.
+        if (!client || state.running || state.result?.stopReason === "restore_unconfirmed") return;
         state.running = true;
         state.stopping = false;
         state.steps = [];

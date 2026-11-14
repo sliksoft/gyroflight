@@ -1678,6 +1678,9 @@
     "gyroflightSitlStop_measurement_unreliable": { "message": "two measurements in a row were not usable" },
     "gyroflightSitlStop_start_measurement_invalid": { "message": "the start tune could not be measured validly" },
     "gyroflightSitlStop_aborted": { "message": "stopped by you; the last accepted tune was restored and read back" },
+    "gyroflightSitlStop_restore_unconfirmed": {
+        "message": "restore NOT confirmed: the bench could not restore the last accepted tune after its retries. The session is stopped; the tune active according to MSP is shown below, and the bench refuses further tuning actions"
+    },
     "gyroflightSitlStop_error": { "message": "error" },
     "gyroflightSitlFinalActive": { "message": "Active on the bench now (read over MSP):" },
     "gyroflightSitlFinalNote": {

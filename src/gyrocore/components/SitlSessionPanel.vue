@@ -21,7 +21,7 @@
         <div class="flex gap-2 mt-2">
             <UButton
                 size="sm"
-                :disabled="!s.connected || s.running"
+                :disabled="!s.connected || s.running || restoreUnconfirmed"
                 data-gyrocore="sitl-start"
                 @click="session.start()"
             >
@@ -137,6 +137,13 @@
             <p class="text-sm mt-1" data-gyrocore="sitl-final-active">
                 {{ $t("gyroflightSitlFinalActive") }} {{ tuneText(s.result.finalActive?.tune ?? null) }}
             </p>
+            <p
+                v-if="restoreUnconfirmed"
+                class="text-sm text-red-500 font-bold mt-1"
+                data-gyrocore="sitl-restore-unconfirmed"
+            >
+                {{ $t(stopKey("restore_unconfirmed")) }} — accepted: {{ tuneText(s.result.best?.tune ?? null) }}
+            </p>
             <p class="text-sm text-dimmed mt-1">{{ $t("gyroflightSitlFinalNote") }}</p>
         </template>
     </UiBox>
@@ -179,6 +186,8 @@ async function onConnect() {
     }
 }
 
+/** The bench could not confirm its restore: no new session from this panel (the bench refuses tuning actions too). */
+const restoreUnconfirmed = computed(() => s.result?.stopReason === "restore_unconfirmed");
 const panelState = computed(() =>
     s.running ? "running" : s.result ? s.result.status : s.connected ? "ready" : "offline",
 );
@@ -235,7 +244,9 @@ const stepRows = computed(() =>
             motors: motorsVsBase,
             readback: r.setReadback ? pid(r.setReadback.tune[r.axis]) : "–",
             restore: r.restore
-                ? `restored ${tuneText(r.restore.readback?.tune ?? null)} — read back ${r.restore.exact ? "exact" : "DIFFERENT"}`
+                ? r.restore.exact
+                    ? `restored ${tuneText(r.restore.readback?.tune ?? null)} — read back exact${r.restore.attempts ? ` (attempt ${r.restore.attempts})` : ""}`
+                    : `restore NOT confirmed${r.restore.attempts ? ` after ${r.restore.attempts} attempts` : ""} — MSP reads ${tuneText(r.restore.readback?.tune ?? null)}`
                 : r.commit
                   ? `kept; bench restore tune = this tune (${r.commit.measurementId})`
                   : "",

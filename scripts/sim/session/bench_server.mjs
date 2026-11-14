@@ -16,10 +16,18 @@
  *   setTune {tune}                → write into the flash (Betaflight CLI), then read back over MSP
  *   commitAccepted {tune, measurementId} → record the restore tune; echo it
  *   measure {label}               → one run per start tick (MSP read before arming each), logs as base64
+ *   restore {why}                 → restore the accepted tune (the app after a rejected step); see "Restore" below
  *   abort                         → stop the running helper (process group; no SITL left), restore the accepted
  *                                   tune and read it back
  *   finish                        → the session ended normally; no restore on disconnect afterwards
  * A connection that closes while the session is open is handled as abort (journal: connection_lost).
+ *
+ * Restore (one path for restore, abort and a lost connection): up to RESTORE_ATTEMPTS attempts while the connection stays
+ * open, RESTORE_WAIT_MS between them, no new attempt after RESTORE_DEADLINE_MS. Each attempt writes the accepted tune
+ * (Betaflight CLI) and reads the active tune over MSP; only an exact read (same tune, PID profile 0, disarmed) succeeds.
+ * Every attempt is journalled (restore_attempt). When all fail, the restore is unconfirmed: the bench then refuses
+ * setTune, measure and commitAccepted (restore_unconfirmed_locked) and does not close the session on finish, until a
+ * later restore succeeds; a lost connection tries once more.
  * --start-tune provisions that tune into a fresh flash before the server listens (the craft's tune before the session).
  */
 
@@ -57,15 +65,27 @@ const START_TUNE = arg("--start-tune");
  * Fault injection for the restore-path tests only (off unless named; each one is journalled when armed and when it fires):
  *   end_flash_drift    on the session's second readActive (its end-of-session read) the bench first writes a drifted tune
  *                      (pitch P + 1) into the flash, so the SITL really holds another tune and MSP reads it truthfully;
- *   restore_fail_once  the first restore fails before it writes anything; the bench then reads the active tune over MSP
- *                      (what the SITL holds after the failed restore) and journals it.
+ *   restore_fail_first:N  the bench's first N restore attempts (1 ≤ N < RESTORE_ATTEMPTS) fail before they write
+ *                      anything; each still reads the active tune over MSP (what the SITL holds) and journals it;
+ *   restore_fail_always   every restore attempt fails that way (the restore stays unconfirmed).
  */
+const RESTORE_ATTEMPTS = 3;
+const RESTORE_WAIT_MS = [2000, 5000];
+const RESTORE_DEADLINE_MS = 90_000;
 const INJECT = new Set(args.flatMap((a, i) => (a === "--inject" ? [args[i + 1]] : [])));
-for (const f of INJECT)
-    if (!["end_flash_drift", "restore_fail_once"].includes(f)) {
-        console.error(`STOP: unknown --inject ${f}`);
+let restoreFailFirst = 0;
+for (const f of INJECT) {
+    const m = /^restore_fail_first:(\d+)$/.exec(f);
+    if (m && Number(m[1]) >= 1 && Number(m[1]) < RESTORE_ATTEMPTS) restoreFailFirst = Number(m[1]);
+    else if (!["end_flash_drift", "restore_fail_always"].includes(f)) {
+        console.error(`STOP: unknown or invalid --inject ${f}`);
         process.exit(2);
     }
+}
+/** Restore attempts made so far (the injected failures count them). */
+let restoreAttempts = 0;
+/** Set when every attempt of a restore failed; cleared by a later exact restore. */
+let restoreUnconfirmed = false;
 let readActiveCalls = 0;
 if (!DIR || !Number.isFinite(SEED)) {
     console.error("usage: bench_server.mjs --dir D --scenario S --seed N");
@@ -241,32 +261,61 @@ const serial = (fn) => {
     return p;
 };
 
+/** One restore attempt: write the accepted tune, read the active tune over MSP; an injected failure writes nothing. */
+async function restoreAttempt(acc, why, n) {
+    restoreAttempts++;
+    const injected = INJECT.has("restore_fail_always") || restoreAttempts <= restoreFailFirst;
+    let rb = null;
+    let error = null;
+    try {
+        if (injected) {
+            journal({ op: "injected", fault: "restore_failure", why, attempt: n });
+            error = "injected_restore_failure";
+        } else await provision(acc.tune, `restore_${why}_a${n}`);
+        rb = await readActive(`restore_${why}_a${n}`);
+    } catch (e) {
+        error = error ?? String(e);
+    }
+    const exact =
+        !error && !!rb && rb.pidProfile === 0 && !rb.armed && JSON.stringify(rb.tune) === JSON.stringify(acc.tune);
+    if (!exact && !error) error = "restore_readback_differs";
+    journal({ op: "restore_attempt", why, n, of: RESTORE_ATTEMPTS, injected, readback: rb, exact, error });
+    return { rb, exact, error };
+}
+
+/** Restore the accepted tune: bounded attempts while the connection stays open (see "Restore" above). */
 async function restoreAccepted(why) {
     const acc = readAccepted();
-    if (!acc) return { restored: null, error: "no_accepted_tune" };
-    if (INJECT.has("restore_fail_once")) {
-        INJECT.delete("restore_fail_once");
-        let held = null;
-        try {
-            held = await readActive(`after_failed_restore_${why}`);
-        } catch (e) {
-            held = { error: String(e) };
+    if (!acc) return { restored: null, error: "no_accepted_tune", attempts: 0 };
+    const t0 = Date.now();
+    let last = null;
+    let n = 0;
+    while (n < RESTORE_ATTEMPTS && (n === 0 || Date.now() - t0 < RESTORE_DEADLINE_MS)) {
+        n++;
+        last = await restoreAttempt(acc, why, n);
+        if (last.exact) {
+            restoreUnconfirmed = false;
+            journal({ op: "restore", why, accepted: acc, readback: last.rb, exact: true, attempts: n });
+            return { restored: last.rb, error: null, attempts: n };
         }
-        journal({ op: "injected", fault: "restore_fail_once", why, activeAfterFailedRestore: held });
-        journal({ op: "restore", why, accepted: acc, error: "injected_restore_failure" });
-        return { restored: null, error: "injected_restore_failure" };
+        if (n < RESTORE_ATTEMPTS) await new Promise((r) => setTimeout(r, RESTORE_WAIT_MS[n - 1]));
     }
-    try {
-        await provision(acc.tune, `restore_${why}`);
-        const rb = await readActive(`restore_${why}`);
-        const exact = !!rb && rb.pidProfile === 0 && !rb.armed && JSON.stringify(rb.tune) === JSON.stringify(acc.tune);
-        journal({ op: "restore", why, accepted: acc, readback: rb, exact });
-        return { restored: rb, error: exact ? null : "restore_readback_differs" };
-    } catch (e) {
-        journal({ op: "restore", why, accepted: acc, error: String(e) });
-        return { restored: null, error: String(e) };
-    }
+    restoreUnconfirmed = true;
+    journal({
+        op: "restore",
+        why,
+        accepted: acc,
+        readback: last?.rb ?? null,
+        exact: false,
+        attempts: n,
+        error: "restore_unconfirmed",
+        lastError: last?.error ?? null,
+    });
+    return { restored: last?.rb ?? null, error: "restore_unconfirmed", attempts: n };
 }
+
+/** Tuning actions the bench refuses while a restore is unconfirmed. */
+const LOCKED = new Set(["setTune", "measure", "commitAccepted"]);
 
 const methods = {
     async hello() {
@@ -292,6 +341,10 @@ const methods = {
         const a = await readActive("set");
         journal({ op: "setTune", tune, readback: a });
         return a;
+    },
+    /** The app's restore after a rejected step (RESTORE / INVALID). */
+    async restore({ why }) {
+        return restoreAccepted(why || "app");
     },
     async commitAccepted({ tune, measurementId }) {
         const v = { tune, measurementId, at: new Date().toISOString() };
@@ -328,6 +381,11 @@ const methods = {
         return { ok: true };
     },
     async finish({ result }) {
+        // An unconfirmed restore keeps the session open: a lost connection still tries to restore.
+        if (restoreUnconfirmed) {
+            journal({ op: "finish_refused", reason: "restore_unconfirmed_locked", result });
+            throw new Error("restore_unconfirmed_locked");
+        }
         sessionOpen = false;
         journal({ op: "finish", result });
         return { ok: true };
@@ -352,11 +410,11 @@ async function abortOnce(why) {
     const stop = await stopHelper();
     await queue; // the interrupted operation settles first
     const r = await serial(() => restoreAccepted(why));
-    journal({ op: "abort", why, ...stop, restoredExact: !r.error, error: r.error });
+    journal({ op: "abort", why, ...stop, restoredExact: !r.error, error: r.error, attempts: r.attempts });
     // Only a verified restore closes the session: otherwise a lost connection still triggers another restore (Grok r2 note A).
     if (!r.error && stop.helperStopped) sessionOpen = false;
     aborting = false;
-    return { helperStopped: stop.helperStopped, restored: r.restored, error: r.error };
+    return { helperStopped: stop.helperStopped, restored: r.restored, error: r.error, attempts: r.attempts };
 }
 
 if (sitlRunning().length) {
@@ -397,7 +455,14 @@ wss.on("connection", (ws) => {
         try {
             if (method === "abort") return send({ ok: true, result: await abort("stop") });
             if (!methods[method]) return send({ ok: false, error: `unknown_method:${method}` });
-            const result = await serial(() => methods[method](params || {}, notify));
+            // Checked in turn (a request queued behind a failing restore is refused too).
+            const result = await serial(() => {
+                if (LOCKED.has(method) && restoreUnconfirmed) {
+                    journal({ op: "refused", method, reason: "restore_unconfirmed_locked" });
+                    throw new Error("restore_unconfirmed_locked");
+                }
+                return methods[method](params || {}, notify);
+            });
             send({ ok: true, result });
         } catch (e) {
             send({ ok: false, error: String(e instanceof Error ? e.message : e) });

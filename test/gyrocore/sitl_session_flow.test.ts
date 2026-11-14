@@ -1,7 +1,8 @@
 /**
  * Block 14: the AutoTune session's state machine (session.ts) against a fake bench and a fake analysis.
- * The fake bench behaves like bench_server.mjs: a flash holding the active tune, an accepted (restore) tune, and an
- * abort that stops the running operation, restores the accepted tune and reads it back.
+ * The fake bench behaves like bench_server.mjs: a flash holding the active tune, an accepted (restore) tune, a restore
+ * of up to three attempts (each read back; all failed → restore_unconfirmed and tuning actions refused), and an abort
+ * that stops the running operation and restores the same way.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +10,7 @@ import {
     type ActiveRead,
     type Analyzer,
     type Bench,
+    type BenchRestore,
     type BenchRun,
     type Tune,
 } from "../../src/gyrocore/sitlSession/session";
@@ -38,6 +40,11 @@ class FakeBench implements Bench {
     measureGate: Promise<void> | null = null;
     corruptSet = false;
     corruptRestore = false;
+    /** The first N restore attempts fail before writing (bench --inject restore_fail_first:N). */
+    restoreFailFirst = 0;
+    restoreFailAlways = false;
+    locked = false;
+    private restoreCalls = 0;
     private seq = 0;
     private rejectRunning: ((e: Error) => void) | null = null;
     constructor(readonly plant: Plant = defaultPlant) {}
@@ -48,20 +55,48 @@ class FakeBench implements Bench {
         this.log.push("readActive");
         return this.read(this.flash);
     }
+    private refuseWhenLocked(op: string) {
+        if (this.locked) {
+            this.log.push(`refused:${op}`);
+            throw new Error("restore_unconfirmed_locked");
+        }
+    }
     async setTune(t: Tune) {
+        this.refuseWhenLocked("setTune");
         this.log.push(`setTune:${t.roll.p}`);
         this.flash = t;
-        const isRestore = this.accepted && key(t) === key(this.accepted.tune);
-        if (this.corruptSet && !isRestore) return this.read({ ...t, roll: { ...t.roll, dMax: 0 } });
-        if (this.corruptRestore && isRestore) return this.read({ ...t, roll: { ...t.roll, p: t.roll.p + 1 } });
+        if (this.corruptSet) return this.read({ ...t, roll: { ...t.roll, dMax: 0 } });
         return this.read(t);
     }
+    private restoreAttempts(): BenchRestore {
+        for (let n = 1; n <= 3; n++) {
+            this.restoreCalls++;
+            const fail = this.restoreFailAlways || this.restoreCalls <= this.restoreFailFirst;
+            this.log.push(`restoreAttempt:${n}:${fail ? "fail" : "ok"}`);
+            if (fail) continue;
+            this.flash = this.accepted!.tune;
+            // a bench that calls a different read exact (the app's own check must catch it)
+            const t = this.corruptRestore
+                ? { ...this.flash, roll: { ...this.flash.roll, p: this.flash.roll.p + 1 } }
+                : this.flash;
+            this.locked = false;
+            return { restored: this.read(t), error: null, attempts: n };
+        }
+        this.locked = true;
+        return { restored: this.read(this.flash), error: "restore_unconfirmed", attempts: 3 };
+    }
+    async restore() {
+        this.log.push("restore");
+        return this.restoreAttempts();
+    }
     async commitAccepted(t: Tune, measurementId: string) {
+        this.refuseWhenLocked("commitAccepted");
         this.log.push(`commit:${t.roll.p}:${measurementId}`);
         this.accepted = { tune: t, measurementId };
         return { ...this.accepted };
     }
     async measure(label: string) {
+        this.refuseWhenLocked("measure");
         this.log.push(`measure:${label}`);
         if (this.measureGate) {
             await new Promise<void>((resolve, reject) => {
@@ -83,8 +118,7 @@ class FakeBench implements Bench {
     async abort() {
         this.log.push("abort");
         this.rejectRunning?.(new Error("stopped_by_abort"));
-        this.flash = this.accepted!.tune;
-        return { helperStopped: true, restored: this.read(this.flash), error: null };
+        return { helperStopped: true, ...this.restoreAttempts() };
     }
 }
 
@@ -333,5 +367,80 @@ describe("AutoTune session flow (fake bench)", () => {
         expect(r.steps[0].restore).toMatchObject({ exact: true });
         expect(key(bench.flash)).toBe(key(T0));
         expect(r.stopReason).toBe("no_eligible_candidate");
+    });
+
+    describe("restore with retries (HERSTELPLAN_SITL: one bench restore path, bounded attempts, same connection)", () => {
+        const scripted = [{ step: 1, axis: "roll" as const, dScale: 1.3 }];
+
+        it("H1b: a RESTORE whose first attempt fails goes on only after the second attempt reads the accepted tune back", async () => {
+            const bench = new FakeBench();
+            bench.restoreFailFirst = 1;
+            const r = await runSession({ bench, analyzer: fakeAnalyzer(defaultPlant, () => []), scripted });
+            expect(r.steps[0].verdict).toBe("RESTORE");
+            expect(r.steps[0].restore).toMatchObject({ exact: true, attempts: 2, error: null });
+            expect(key(r.steps[0].restore!.readback!.tune)).toBe(key(T0));
+            // the restore goes through bench.restore, never a setTune of the accepted tune
+            const i = bench.log.indexOf("restore");
+            expect(bench.log.slice(i, i + 3)).toEqual(["restore", "restoreAttempt:1:fail", "restoreAttempt:2:ok"]);
+            expect(bench.log.filter((x) => x.startsWith("setTune"))).toEqual([`setTune:${T0.roll.p}`]);
+            // nothing else happens on the bench between the request and the exact attempt; the session then goes on
+            expect(bench.log.slice(i + 3)).toEqual(["readActive"]);
+            expect(r.status).toBe("finished");
+            expect(r.activeIsAccepted).toBe(true);
+        });
+
+        it("H2 after a RESTORE: every attempt fails → restore_unconfirmed, no next step, the bench refuses tuning actions", async () => {
+            const bench = new FakeBench();
+            bench.restoreFailAlways = true;
+            const r = await runSession({ bench, analyzer: fakeAnalyzer(defaultPlant, () => []), scripted });
+            expect(r.status).toBe("error");
+            expect(r.stopReason).toBe("restore_unconfirmed");
+            expect(r.error).toBe("restore_unconfirmed");
+            expect(r.stopDetail).toEqual(["attempts:3"]);
+            expect(r.steps).toHaveLength(1);
+            expect(r.steps[0].restore).toMatchObject({ exact: false, attempts: 3, error: "restore_unconfirmed" });
+            // honest: the candidate is still active, and the result says so
+            expect(key(r.finalActive!.tune)).toBe(key(r.steps[0].to));
+            expect(r.activeIsAccepted).toBe(false);
+            expect(bench.log.at(-1)).toBe("restoreAttempt:3:fail");
+            await expect(bench.setTune(T0)).rejects.toThrow("restore_unconfirmed_locked");
+            await expect(bench.measure("x")).rejects.toThrow("restore_unconfirmed_locked");
+            await expect(bench.commitAccepted(T0, "x")).rejects.toThrow("restore_unconfirmed_locked");
+        });
+
+        for (const always of [false, true])
+            it(`${always ? "H2" : "H1"}: Stop during a candidate measurement, ${always ? "every attempt fails" : "the first attempt fails"}`, async () => {
+                const bench = new FakeBench();
+                if (always) bench.restoreFailAlways = true;
+                else bench.restoreFailFirst = 1;
+                const abort = new AbortController();
+                let release: () => void = () => {};
+                const an = fakeAnalyzer(defaultPlant, (b) => [{ ...b.roll, p: Math.round(b.roll.p * 0.95) }]);
+                const origMeasure = bench.measure.bind(bench);
+                let n = 0;
+                bench.measure = async (label: string) => {
+                    if (++n === 2) {
+                        bench.measureGate = new Promise<void>((res) => (release = res));
+                        setTimeout(() => abort.abort(), 5);
+                    } else bench.measureGate = null;
+                    return origMeasure(label);
+                };
+                const r = await runSession({ bench, analyzer: an, signal: abort.signal });
+                release();
+                const last = r.steps[r.steps.length - 1];
+                expect(last.verdict).toBe("ABORTED");
+                if (always) {
+                    expect(r.status).toBe("error");
+                    expect(r.stopReason).toBe("restore_unconfirmed");
+                    expect(last.restore).toMatchObject({ exact: false, attempts: 3, error: "restore_unconfirmed" });
+                    expect(key(r.finalActive!.tune)).toBe(key(last.to));
+                    expect(r.activeIsAccepted).toBe(false);
+                } else {
+                    expect(r.status).toBe("aborted");
+                    expect(last.restore).toMatchObject({ exact: true, attempts: 2 });
+                    expect(key(r.finalActive!.tune)).toBe(key(T0));
+                    expect(r.activeIsAccepted).toBe(true);
+                }
+            });
     });
 });
