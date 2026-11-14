@@ -49,13 +49,15 @@ def checks(name, j, row, acc, ind):
     a = [j[k] for k in idx]
     # the candidate active before that restore (the last tune set before it)
     cand = next((e["tune"] for e in reversed(j[: idx[0]] if idx else j) if e["op"] == "setTune"), None)
+    # the tune the bench held as accepted at that restore (a later ACCEPT may change accepted.json afterwards)
+    acc_then = next((e["tune"] for e in reversed(j[: idx[0]] if idx else j) if e["op"] == "commitAccepted"), None)
     c("one_connection", ops.count("connected") == 1, f"connected={ops.count('connected')}")
     c("attempts_before_any_disconnect", bool(idx) and max(idx) < first_drop, f"attempt idx={idx} first disconnect={first_drop}")
     if name.startswith("H1"):
         c("attempt1_injected_fails_reads_candidate", len(a) >= 1 and a[0]["injected"] and not a[0]["exact"] and cand is not None and tune_of(a[0]) == cand,
           f"attempt1 read {tune_of(a[0]) if a else None} candidate {cand}")
-        c("attempt2_exact_accepted", len(a) == 2 and a[1]["exact"] and not a[1]["injected"] and acc and tune_of(a[1]) == acc["tune"],
-          f"attempts={len(a)}")
+        c("attempt2_exact_accepted", len(a) == 2 and a[1]["exact"] and not a[1]["injected"] and acc_then is not None and tune_of(a[1]) == acc_then,
+          f"attempts={len(a)} read {tune_of(a[1]) if len(a) > 1 else None} accepted then {acc_then}")
         c("app_record_via_finish", app["via"] == "finish", str(app))
         c("disconnect_with_session_closed", any(e["op"] == "disconnected" and e.get("sessionOpen") is False for e in j))
         c("no_restore_on_lost_connection", not att("connection_lost"))
