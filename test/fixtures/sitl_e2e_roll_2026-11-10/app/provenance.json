@@ -1,0 +1,8 @@
+{
+    "reconstructed": true,
+    "note": "Written after the fact (Grok round 1, finding 4): the harness wrote no provenance for the app step in f487613ba. Sources: phase_app_candidate.log ('head f487613ba'), the app build string in app/tuning_and_apply_viewport.png ('2026.12.0-alpha (f487613ba)'), file times of app/ (21:55-21:56Z), git log (f487613ba 21:49:10Z, 5b33219d4 21:57:26Z). src/ state at Calculate: not recorded; git diff --stat fa8dadd74 -- src was empty before and after (no product change in either commit).",
+    "gyroflightHead": "f487613ba45e46e318a41da9de1da60f494f7098",
+    "srcDirty": null,
+    "srcDirtyRecordedAtCalculate": false,
+    "port": 5199
+}

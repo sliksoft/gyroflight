@@ -1,0 +1,169 @@
+{
+    "logs": [
+        "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/01_100_79_30_40_s200/chirp.BFL",
+        "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/02_100_79_30_40_s250/chirp.BFL",
+        "~/Gyroflight-audits/autotune-v2-sitl-e2e-roll-2026-11-10/start/runs/03_100_79_30_40_s300/chirp.BFL"
+    ],
+    "errs": [],
+    "importedMs": 3968,
+    "calculateMs": 4303,
+    "rollItems": [
+        {
+            "key": "p_roll",
+            "source": "primary_route",
+            "status": "BLOCKED",
+            "cells": [
+                "p_roll",
+                "100",
+                "80",
+                "primary route (CHIRP loop model)",
+                "MEASURED (BLOCKED)",
+                "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+            ]
+        },
+        {
+            "key": "i_roll",
+            "source": "primary_route",
+            "status": "BLOCKED",
+            "cells": [
+                "i_roll",
+                "79",
+                "55",
+                "primary route (CHIRP loop model)",
+                "MEASURED (BLOCKED)",
+                "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+            ]
+        },
+        {
+            "key": "d_roll",
+            "source": "primary_route",
+            "status": "BLOCKED",
+            "cells": [
+                "d_roll",
+                "30",
+                "39",
+                "primary route (CHIRP loop model)",
+                "MEASURED (BLOCKED)",
+                "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+            ]
+        },
+        {
+            "key": "d_max_roll",
+            "source": "primary_route",
+            "status": "BLOCKED",
+            "cells": [
+                "d_max_roll",
+                "40",
+                "52",
+                "primary route (CHIRP loop model)",
+                "MEASURED (BLOCKED)",
+                "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+            ]
+        }
+    ],
+    "rollStep": {
+        "axis": "roll",
+        "state": "step",
+        "source": "candidate_within_max_step",
+        "text": "roll\tP 100, I 79, D 30, d_max 40 → P 80, I 55, D 39, d_max 52 (P -20 %, I -30 %, D +30 %)\t\ncrossover 28.6 → 29.3 Hz\nPM 39° → 46°\nGM 12.1 dB → 12.2 dB\n|S| 5.6 dB → 5.0 dB\n\tMEASURED · also the offered experimental candidate\tnone (meets PM ≥ 45°, GM ≥ 6 dB, |S| ≤ 6 dB)"
+    },
+    "rollDecision": null,
+    "read": {
+        "experimentalNone": [],
+        "experimentalStatus": [
+            "EXPERIMENTAL · experimental tuning; hardware validation has not been shown; not a released proposal"
+        ],
+        "experimentalItems": [
+            {
+                "key": "p_roll",
+                "source": "primary_route",
+                "status": "BLOCKED",
+                "cells": [
+                    "p_roll",
+                    "100",
+                    "80",
+                    "primary route (CHIRP loop model)",
+                    "MEASURED (BLOCKED)",
+                    "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+                ]
+            },
+            {
+                "key": "i_roll",
+                "source": "primary_route",
+                "status": "BLOCKED",
+                "cells": [
+                    "i_roll",
+                    "79",
+                    "55",
+                    "primary route (CHIRP loop model)",
+                    "MEASURED (BLOCKED)",
+                    "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+                ]
+            },
+            {
+                "key": "d_roll",
+                "source": "primary_route",
+                "status": "BLOCKED",
+                "cells": [
+                    "d_roll",
+                    "30",
+                    "39",
+                    "primary route (CHIRP loop model)",
+                    "MEASURED (BLOCKED)",
+                    "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+                ]
+            },
+            {
+                "key": "d_max_roll",
+                "source": "primary_route",
+                "status": "BLOCKED",
+                "cells": [
+                    "d_max_roll",
+                    "40",
+                    "52",
+                    "primary route (CHIRP loop model)",
+                    "MEASURED (BLOCKED)",
+                    "experimental_search_on_measured_margins; margin_evidence:MEASURED; margins:chain_model_not_validated_on_this_log; margins:chain_spread_unknown; margins:independent_validation_missing; margins:uncertainty_unknown:dwell_below_one_segment:246_bins"
+                ]
+            }
+        ],
+        "withheld": [],
+        "limits": [
+            "Limitations: experimental:not_releasable, experimental:not_hardware_validated, experimental:margins_depend_on_the_identified_loop_model, experimental:roll:margins_measured_in_band_not_bounded"
+        ],
+        "checks": [
+            "✓ the proposal is this analysis's experimental proposal (recomputed at the write)",
+            "✓ every value computed by a route from a valid measurement; nothing withheld in the change",
+            "✗ finite integers inside the firmware ranges, plausible step, craft named by the log (fc_identity_binding:log_board_missing)",
+            "· Checked when you click: same craft, board and firmware, disarmed",
+            "· Checked when you click: the flight controller still holds the logged values",
+            "· Checked when you click: every value reads back as written, before and after saving"
+        ],
+        "blocks": ["fc_identity_binding:log_board_missing; fc:not_connected; experimental:not_acknowledged"],
+        "applyButton": {
+            "present": true,
+            "disabled": true,
+            "text": "Review and apply experimental…"
+        },
+        "previewButton": {
+            "present": true,
+            "disabled": true
+        },
+        "ackCheckbox": {
+            "present": true,
+            "checked": false
+        },
+        "buttonsInsideStepBlock": 0,
+        "decisions": [],
+        "verified": [],
+        "improvementRows": [
+            {
+                "axis": "roll",
+                "state": "step",
+                "source": "candidate_within_max_step",
+                "text": "roll\tP 100, I 79, D 30, d_max 40 → P 80, I 55, D 39, d_max 52 (P -20 %, I -30 %, D +30 %)\t\ncrossover 28.6 → 29.3 Hz\nPM 39° → 46°\nGM 12.1 dB → 12.2 dB\n|S| 5.6 dB → 5.0 dB\n\tMEASURED · also the offered experimental candidate\tnone (meets PM ≥ 45°, GM ≥ 6 dB, |S| ≤ 6 dB)"
+            }
+        ],
+        "rollShown": "proposal"
+    }
+}

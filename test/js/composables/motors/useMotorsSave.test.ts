@@ -5,6 +5,9 @@ import MSP from "../../../../src/js/msp";
 import MSPCodes from "../../../../src/js/msp/MSPCodes";
 import { mspHelper } from "../../../../src/js/msp/MSPHelper";
 import { useMotorsSave, type MotorsSaveOptions } from "../../../../src/composables/motors/useMotorsSave";
+import { createPinia, setActivePinia } from "pinia";
+import { useFlightControllerStore } from "../../../../src/stores/fc";
+import { TRANSACTION_STORAGE_KEY } from "../../../../src/gyrocore/stores/fcTransactionState";
 
 const { saveToEeprom, saveAndReboot, tracking } = vi.hoisted(() => ({
     saveToEeprom: vi.fn(),
@@ -44,6 +47,8 @@ describe("useMotorsSave", () => {
         // reset, not clear: a failure stubbed in one test must not leak into the next
         vi.resetAllMocks();
         vi.useFakeTimers();
+        setActivePinia(createPinia());
+        localStorage.clear();
         events = [];
         configHasChanged = ref(true);
         escSensorPortChanged = ref(false);
@@ -90,6 +95,21 @@ describe("useMotorsSave", () => {
         await vi.runAllTimersAsync();
         await done;
     };
+
+    it("refuses before any SET on a craft whose last Gyroflight write ended unverified (WP8)", async () => {
+        useFlightControllerStore().config.uid = [1, 2, 3];
+        const entry = { uid: [1, 2, 3], action: "absolute_apply", stage: "write", saved: "no", backupId: "bk-1" };
+        localStorage.setItem(
+            TRANSACTION_STORAGE_KEY,
+            JSON.stringify([{ ...entry, profiles: [0], detail: "", at: "" }]),
+        );
+        const failed = vi.spyOn(console, "error").mockImplementation(() => {});
+        await save();
+        // runSave reports the refusal as a failed save.
+        expect(String(failed.mock.calls.flat().join(" "))).toMatch(/fc:transaction_state_uncertain:bk-1/);
+        // The motors were still stopped; no parameter group, the filter block among them, was sent.
+        expect(events).toEqual(["confirm", "stop:1500"]);
+    });
 
     it("does nothing without a config or port change", async () => {
         configHasChanged.value = false;

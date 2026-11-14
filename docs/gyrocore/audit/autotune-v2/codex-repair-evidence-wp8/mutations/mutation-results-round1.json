@@ -1,0 +1,341 @@
+[
+ {
+  "id": "M101",
+  "finding": "F03",
+  "file": "src/js/protocols/WebSerial.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/js/webserial_send_queue.test.ts"
+  ],
+  "summary": "Tests  2 failed | 3 passed (5)"
+ },
+ {
+  "id": "M102",
+  "finding": "F03-R",
+  "file": "src/js/serial.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_review_transport.test.ts"
+  ],
+  "summary": "Tests  2 failed | 7 passed (9)"
+ },
+ {
+  "id": "M103",
+  "finding": "F09",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/js/msp_cli_drain_isolation.test.ts",
+   "test/js/msp_cli_queue.test.ts"
+  ],
+  "summary": "Tests  4 failed | 11 passed (15)"
+ },
+ {
+  "id": "M104",
+  "finding": "F09",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/js/msp_cli_drain_isolation.test.ts",
+   "test/gyrocore/wp8_repair_save_evidence.test.ts"
+  ],
+  "summary": "Tests  6 failed | 22 passed (28)"
+ },
+ {
+  "id": "M105",
+  "finding": "F09-R",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_review_transport.test.ts",
+   "test/js/msp_cli_drain_isolation.test.ts"
+  ],
+  "summary": "Tests  5 failed | 14 passed (19)"
+ },
+ {
+  "id": "M106",
+  "finding": "F01",
+  "file": "src/composables/useMspCliSession.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_save_evidence.test.ts"
+  ],
+  "summary": "Tests  6 failed | 12 passed (18)"
+ },
+ {
+  "id": "M107",
+  "finding": "F01",
+  "file": "src/js/utils/AutoRestore.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_save_evidence.test.ts"
+  ],
+  "summary": "Tests  2 failed | 16 passed (18)"
+ },
+ {
+  "id": "M108",
+  "finding": "F01-R",
+  "file": "src/composables/useMspCliSession.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_save_evidence.test.ts"
+  ],
+  "summary": "Tests  1 failed | 17 passed (18)"
+ },
+ {
+  "id": "M109",
+  "finding": "F10",
+  "file": "src/composables/useCli.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_cli_exit.test.ts"
+  ],
+  "summary": "Tests  7 failed | 2 passed (9)"
+ },
+ {
+  "id": "M110",
+  "finding": "F10-R",
+  "file": "src/composables/useCli.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_cli_exit.test.ts"
+  ],
+  "summary": "Tests  3 failed | 6 passed (9)"
+ },
+ {
+  "id": "M111",
+  "finding": "F04",
+  "file": "src/js/msp/eepromSave.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_eeprom_save.test.ts"
+  ],
+  "summary": "Tests  3 failed | 10 passed (13)"
+ },
+ {
+  "id": "M112",
+  "finding": "F04",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_eeprom_save.test.ts"
+  ],
+  "summary": "Tests  8 failed | 5 passed (13)"
+ },
+ {
+  "id": "M113",
+  "finding": "F04-R",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_eeprom_save.test.ts"
+  ],
+  "summary": "Tests  1 failed | 12 passed (13)"
+ },
+ {
+  "id": "M114",
+  "finding": "F04-R",
+  "file": "src/js/msp/eepromSave.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_eeprom_save.test.ts"
+  ],
+  "summary": "Tests  1 failed | 12 passed (13)"
+ },
+ {
+  "id": "M115",
+  "finding": "F05",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_failsafe_save.test.ts"
+  ],
+  "summary": "Tests  2 failed | 9 passed (11)"
+ },
+ {
+  "id": "M116",
+  "finding": "F05",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_failsafe_save.test.ts"
+  ],
+  "summary": "Tests  4 failed | 7 passed (11)"
+ },
+ {
+  "id": "M117",
+  "finding": "F06",
+  "file": "src/composables/failsafe/useFailsafeSave.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_failsafe_save.test.ts",
+   "test/components/FailsafeTab.test.ts"
+  ],
+  "summary": "Tests  4 failed | 11 passed (15)"
+ },
+ {
+  "id": "M118",
+  "finding": "F06-R",
+  "file": "src/composables/failsafe/useFailsafeSave.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/components/FailsafeTab.test.ts"
+  ],
+  "summary": "Tests  1 failed | 3 passed (4)"
+ },
+ {
+  "id": "M119",
+  "finding": "F08",
+  "file": "src/gyrocore/stores/tuneBackup.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_backup_retention.test.ts",
+   "test/gyrocore/wp8_final_acceptance_evidence.test.ts"
+  ],
+  "summary": "Tests  15 failed | 15 passed (30)"
+ },
+ {
+  "id": "M120",
+  "finding": "F08-R",
+  "file": "src/gyrocore/stores/transactionRecords.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_backup_retention.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M121",
+  "finding": "F08-R",
+  "file": "src/composables/useTuneApply.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_backup_retention.test.ts"
+  ],
+  "summary": "Tests  1 failed | 23 passed (24)"
+ },
+ {
+  "id": "M122",
+  "finding": "F02",
+  "file": "src/composables/fcWriteLease.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_write_lease.test.ts",
+   "test/gyrocore/wp8_repair_cross_page.test.ts"
+  ],
+  "summary": "Tests  8 failed | 7 passed (15)"
+ },
+ {
+  "id": "M123",
+  "finding": "F02",
+  "file": "src/composables/fcWriteLease.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_write_lease.test.ts"
+  ],
+  "summary": "Tests  3 failed | 10 passed (13)"
+ },
+ {
+  "id": "M124",
+  "finding": "F02",
+  "file": "src/composables/fcWriteGuard.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_cross_page.test.ts",
+   "test/gyrocore/wp8_repair_write_lease.test.ts"
+  ],
+  "summary": "Tests  3 failed | 12 passed (15)"
+ },
+ {
+  "id": "M125",
+  "finding": "F02",
+  "file": "src/composables/fcWriteLease.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_write_lease.test.ts"
+  ],
+  "summary": "Tests  4 failed | 9 passed (13)"
+ },
+ {
+  "id": "M126",
+  "finding": "F07",
+  "file": "src/gyrocore/recovery/transactionDiagnosis.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  4 failed | 15 passed (19)"
+ },
+ {
+  "id": "M127",
+  "finding": "F07",
+  "file": "src/gyrocore/recovery/transactionDiagnosis.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_recovery_diagnosis.test.ts"
+  ],
+  "summary": "Tests  2 failed | 17 passed (19)"
+ },
+ {
+  "id": "M128",
+  "finding": "F03/F09-R",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_review_transport.test.ts"
+  ],
+  "summary": "Tests  1 failed | 8 passed (9)"
+ },
+ {
+  "id": "M87",
+  "finding": "P0 (earlier)",
+  "file": "src/composables/fcWriteGuard.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_final_acceptance_transport.test.ts"
+  ],
+  "summary": "Tests  1 failed | 31 passed (32)"
+ },
+ {
+  "id": "M88",
+  "finding": "P0 (earlier)",
+  "file": "src/composables/fcWriteGuard.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_final_acceptance_transport.test.ts"
+  ],
+  "summary": "Tests  7 failed | 25 passed (32)"
+ },
+ {
+  "id": "M89",
+  "finding": "P0 (earlier)",
+  "file": "src/composables/fcWriteGuard.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_final_acceptance_transport.test.ts"
+  ],
+  "summary": "Tests  2 failed | 30 passed (32)"
+ },
+ {
+  "id": "M92",
+  "finding": "P0 (earlier)",
+  "file": "src/composables/fcWriteGuard.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_final_acceptance_transport.test.ts"
+  ],
+  "summary": "Tests  1 failed | 31 passed (32)"
+ },
+ {
+  "id": "M93",
+  "finding": "P0 (earlier)",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_final_acceptance_transport.test.ts",
+   "test/gyrocore/wp8_p0_closure_transport.test.ts",
+   "test/gyrocore/wp8_repair_review_transport.test.ts"
+  ],
+  "summary": "Tests  5 failed | 58 passed (63)"
+ }
+]

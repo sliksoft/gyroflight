@@ -80,6 +80,7 @@ import { safetyForComposite } from "../../src/gyrocore/safety/authorize";
 import { MERGE_E2E_CASES } from "./harness/mergeE2eCases";
 import { qualifiedReportFor } from "./harness/qualifiedReport";
 import { readJsonFile } from "./harness/fixtures";
+import { FIXTURE_FIRMWARE, FIXTURE_UID, verifiedTuneFixture } from "./harness/verifiedTuneFixture";
 
 const SENTENCE = "Apply is disabled until Gyroflight Safety validation is complete.";
 
@@ -96,22 +97,35 @@ describe("product Apply lock (production default)", () => {
     });
 
     it("each release condition blocks on its own and only both together release", () => {
-        const validation = { id: "verified-tune-1" };
-        expect(productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: null })).toEqual([
-            "independent_pid_validation_missing",
-        ]);
+        const validation = verifiedTuneFixture();
+        const craft = { uid: FIXTURE_UID, firmware: FIXTURE_FIRMWARE };
         expect(
-            productApplyBlocks({ safetyAnalysisEvidence: "not_available", independentPidValidation: validation }),
-        ).toEqual(["full_safety_engine_pending"]);
-        expect(
-            productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: { id: "" } }),
+            productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: null, craft }),
         ).toEqual(["independent_pid_validation_missing"]);
         expect(
-            productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: validation }),
+            productApplyBlocks({
+                safetyAnalysisEvidence: "not_available",
+                independentPidValidation: validation,
+                craft,
+            }),
+        ).toEqual(["full_safety_engine_pending"]);
+        expect(
+            productApplyBlocks({
+                safetyAnalysisEvidence: "available",
+                independentPidValidation: verifiedTuneFixture({ truePlantScale: 1.4 }),
+                craft,
+            }),
+        ).toContain("independent_pid_validation_missing");
+        expect(
+            productApplyBlocks({ safetyAnalysisEvidence: "available", independentPidValidation: validation, craft }),
         ).toEqual([]);
         expect(() => assertProductApplyReleased()).toThrow(ApplyBlockedError);
         expect(() =>
-            assertProductApplyReleased({ safetyAnalysisEvidence: "available", independentPidValidation: validation }),
+            assertProductApplyReleased({
+                safetyAnalysisEvidence: "available",
+                independentPidValidation: validation,
+                craft,
+            }),
         ).not.toThrow();
     });
 

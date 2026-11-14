@@ -529,8 +529,9 @@ async function restoreBackup(backup: Backup) {
         return;
     }
 
-    gui_log(t("userBackupRestoreSuccess"));
-    await saveAndReconnect();
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F01): restored only once the FC confirmed
+    // its save; saveAndReconnect tells the user otherwise.
+    if ((await saveAndReconnect()).ok) gui_log(t("userBackupRestoreSuccess"));
 }
 
 function closeRestoreErrors(saveAnyway: boolean) {

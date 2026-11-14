@@ -1,0 +1,72 @@
+[
+ {
+  "id": "M149",
+  "finding": "INT R1 not yet on the wire",
+  "file": "src/js/msp/MSPHelper.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  1 failed | 6 passed (7)"
+ },
+ {
+  "id": "M150",
+  "finding": "INT R1 ambiguity",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  2 failed | 5 passed (7)"
+ },
+ {
+  "id": "M151",
+  "finding": "INT R1 writes never attach",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/js/msp_promise.test.ts"
+  ],
+  "summary": "Tests  1 failed | 17 passed (18)"
+ },
+ {
+  "id": "M152",
+  "finding": "INT R3 onResult before next send",
+  "file": "src/js/serial.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  1 failed | 6 passed (7)"
+ },
+ {
+  "id": "M153",
+  "finding": "INT R2 run check",
+  "file": "src/js/utils/AutoRestore.ts",
+  "status": "SURVIVED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  7 passed (7)"
+ },
+ {
+  "id": "M154",
+  "finding": "RECHECK history kept",
+  "file": "src/js/msp.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  1 failed | 6 passed (7)"
+ },
+ {
+  "id": "M155",
+  "finding": "RECHECK finally",
+  "file": "src/js/utils/AutoRestore.ts",
+  "status": "KILLED",
+  "tests": [
+   "test/gyrocore/wp8_repair_integration.test.ts"
+  ],
+  "summary": "Tests  no tests"
+ }
+]

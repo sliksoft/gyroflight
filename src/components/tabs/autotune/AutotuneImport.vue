@@ -26,14 +26,15 @@
         </div>
 
         <!-- Done / summary -->
+        <!-- Gyroflight: the row and its fields wrap, so a narrow window keeps the button in view. -->
         <div
             v-if="store.analysisState === 'done' && store.analysisResult"
-            class="flex items-center justify-between gap-4"
+            class="flex flex-wrap items-center justify-between gap-4"
         >
-            <div class="flex gap-5">
-                <div class="flex flex-col">
+            <div class="flex flex-wrap gap-x-5 gap-y-2 min-w-0">
+                <div class="flex flex-col min-w-0">
                     <span class="text-xs text-dimmed" v-html="$t('autotuneFile')"></span>
-                    <span class="font-bold">{{ store.analysisResult.filename }}</span>
+                    <span class="font-bold break-all">{{ store.analysisResult.filename }}</span>
                 </div>
                 <div class="flex flex-col">
                     <!-- Gyroflight: the message has a rate placeholder; passing no rate showed it literally. -->

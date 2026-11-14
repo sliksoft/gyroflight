@@ -1,0 +1,53 @@
+{
+ "base": "working tree on d3f39ee2",
+ "runner": "npx vitest run <test>",
+ "mutants": [
+  {
+   "mutant": "M1 unwrap limit 90->1000",
+   "test": "test/gyrocore/v2_phase_unwrap.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M2 unwrap check removed",
+   "test": "test/gyrocore/v2_phase_unwrap.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M3 filter status PARTIAL->VALIDATED",
+   "test": "test/gyrocore/v2_filter_status.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M4 chain check removed",
+   "test": "test/gyrocore/v2_filter_status.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M5 rejected D-term not blocked",
+   "test": "test/gyrocore/v2_filter_status.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M6 gaps reason removed",
+   "test": "test/gyrocore/v2_craft_class_truth.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M7 plan duration Ts^2->Ts",
+   "test": "test/gyrocore/v2_craft_class_truth.test.ts",
+   "result": "KILLED"
+  },
+  {
+   "mutant": "M8 band lower edge fc/4->fc/8",
+   "test": "test/gyrocore/v2_craft_class_truth.test.ts",
+   "result": "SURVIVED",
+   "note": "equivalent on the craft-class data (first identified bin above fc/4); killed by test/gyrocore/wp3_measurement_plan.test.ts (1 failed / 10)",
+   "result_with_existing_suite": "KILLED"
+  },
+  {
+   "mutant": "M9 need text removed",
+   "test": "test/gyrocore/v2_measurement_need_texts.test.ts",
+   "result": "KILLED"
+  }
+ ]
+}

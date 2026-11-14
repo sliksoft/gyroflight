@@ -35,6 +35,7 @@ import type {
 // by GyroCore before Betaflight's recommendation may be shown or applied.
 // See docs/gyrocore/CHIRP_QUALIFICATION.md.
 import { qualifyChirpFile, recomputeRecommendations, type AutotuneMath } from "@/gyrocore/chirp/qualification";
+import { useAutotuneV2Store } from "@/gyrocore/stores/autotuneV2";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { attachChirpFlightIdentity } from "@/gyrocore/chirp/qualityV2/identity";
 import { applyTune } from "@/composables/useTuneApply";
@@ -116,6 +117,10 @@ export function useAutotune() {
             // Gyroflight: WU1 file and Flight identity on each CHIRP Quality V2 report.
             await attachChirpFlightIdentity(report, data);
             gate.setReport(report);
+            // Autotune engine v2 runs on the same file on request (Calculate); nothing is computed here.
+            if (report.state !== "no_chirp") {
+                useAutotuneV2Store().addSource(data, file.name, report);
+            }
             if (report.state === "no_chirp") {
                 throw new Error(i18n.getMessage("gyrocoreChirpNoChirpError", [report.logCount]));
             }

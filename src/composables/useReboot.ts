@@ -22,11 +22,22 @@
 import { reinitializeConnection } from "@/js/serial_backend"; // Backend logic
 import { tabSwitchCleanup } from "@/js/tab_adapters";
 import { mspHelper } from "@/js/msp/MSPHelper";
-import MSP from "@/js/msp";
-import MSPCodes from "@/js/msp/MSPCodes";
 import { useFlightControllerStore } from "@/stores/fc";
 import { gui_log } from "@/js/gui_log";
 import { i18n } from "@/js/localization";
+import { assertNoUncertainWriteOnConnectedCraft } from "@/gyrocore/stores/fcTransactionState";
+import { EepromSaveError, saveEeprom } from "@/js/msp/eepromSave";
+import { withSaveFailureMessage } from "@/composables/useSaving";
+
+/**
+ * Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F04): an EEPROM save that was not confirmed
+ * says so in the tab's save failure (the FC's RAM may hold what EEPROM does not).
+ */
+function notConfirmed(err: unknown): unknown {
+    return err instanceof EepromSaveError
+        ? withSaveFailureMessage(err, i18n.getMessage("gyroflightEepromNotConfirmed"))
+        : err;
+}
 
 /**
  * Persist the current configuration to EEPROM without rebooting. This is the await-able,
@@ -41,12 +52,21 @@ import { i18n } from "@/js/localization";
  * @returns {Promise<void>} resolves once the EEPROM write is acknowledged
  */
 async function saveToEeprom(): Promise<void> {
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md): no save on a craft whose last Gyroflight write
+    // ended unverified; it would write or persist those values.
+    assertNoUncertainWriteOnConnectedCraft();
     const fcStore = useFlightControllerStore();
     // Never persist while arming is possible (matches writeConfiguration).
     if (!fcStore.config.armingDisabled) {
         mspHelper.disableArming();
     }
-    await MSP.promise(MSPCodes.MSP_EEPROM_WRITE);
+    // Gyroflight hook (audit WP8-F04): saved only on the firmware's ACK (eepromSave.ts); its error
+    // reply, a lost answer or a cleared queue is an error, not a cancellation useSaving swallows.
+    try {
+        await saveEeprom();
+    } catch (err) {
+        throw notConfirmed(err);
+    }
     gui_log(i18n.getMessage("configurationEepromSaved"));
 }
 
@@ -68,11 +88,26 @@ export function useReboot() {
     /**
      * Persist the current configuration to EEPROM and then reboot the board,
      * settling the connection state via the shared reboot flow.
+     * @param options.onSaved Gyroflight (audit WP8-F06): runs once the firmware acknowledged the
+     *   EEPROM save, before the reboot (a tab resets its clean baseline there, not earlier)
      * @returns {Promise<void>} resolves once the reboot sequence has started
      */
-    function saveAndReboot(): Promise<void> {
-        return new Promise<void>((resolve) => {
-            mspHelper.writeConfiguration(false, () => cleanupAndReboot(resolve));
+    function saveAndReboot({ onSaved }: { onSaved?: () => void } = {}): Promise<void> {
+        try {
+            // Gyroflight hook (docs/gyrocore/UPSTREAM.md): see saveToEeprom.
+            assertNoUncertainWriteOnConnectedCraft();
+        } catch (err) {
+            return Promise.reject(err);
+        }
+        return new Promise<void>((resolve, reject) => {
+            mspHelper.writeConfiguration(
+                false,
+                () => {
+                    onSaved?.();
+                    cleanupAndReboot(resolve);
+                },
+                (err) => reject(notConfirmed(err)),
+            );
         });
     }
 

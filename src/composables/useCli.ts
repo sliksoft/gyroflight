@@ -27,7 +27,7 @@ import BuildApi from "../js/BuildApi";
 import CliAutoComplete from "../js/CliAutoComplete";
 import { gui_log } from "../js/gui_log";
 import { serial } from "../js/serial";
-import { reinitializeConnection } from "../js/serial_backend";
+import { disconnectCliModeUnknown, reinitializeConnection } from "../js/serial_backend";
 import FileSystem from "../js/FileSystem";
 import { ispConnected } from "../js/utils/connection";
 import { get as getConfig } from "../js/ConfigStorage";
@@ -37,7 +37,16 @@ import { escapeHtml } from "../js/utils/common";
 import { addTimeout, removeTimeout } from "../js/timers";
 import { useAppInfoStore } from "../stores/appInfo";
 import { useConnectionStore } from "../stores/connection";
+// Gyroflight hook (docs/gyrocore/UPSTREAM.md): the CLI tab writes to the serial line directly.
+import {
+    foreignWritesRefused,
+    interactiveCliStillAllowed,
+    interactiveCliText,
+    reportRefusedWrite,
+} from "./fcWriteGuard";
 
+// Gyroflight (audit WP8-F10): how long leaving the CLI waits for the transport's result for `exit`.
+const EXIT_RESULT_TIMEOUT_MS = 2000;
 const backspaceCode = 8;
 const lineFeedCode = 10;
 const carriageReturnCode = 13;
@@ -48,7 +57,8 @@ const CLI_ENTRY_MARKER = "CLI";
 const CLI_PROMPT = "# ";
 const CLI_ENTRY_PROMPT = `\r\n${CLI_PROMPT}`;
 
-type SendCallback = (sendInfo: unknown) => void;
+/** Gyroflight: `delivered` is true only when the transport took every byte that was sent. */
+type SendCallback = (sendInfo: unknown, delivered: boolean) => void;
 
 /** What serial hands to read(): a read event carrying the bytes, or the bytes themselves. */
 type CliReadInfo = { data: ArrayBuffer } | ArrayBuffer | Uint8Array;
@@ -250,6 +260,10 @@ export function useCli(): Cli {
     let flushing = false; // true during DOM mutations; prevents spurious scrollPinned flips
     let scrollRaf: number | null = null; // deferred scroll; separates DOM writes from scrollTop write (avoids forced reflow)
     let pastePollInterval: ReturnType<typeof setInterval> | null = null;
+    // Gyroflight (audit WP8-F10): an `exit` was handed to the transport and its result is not in;
+    // or it did not go out whole, and the link is being dropped (no second `exit`).
+    let exitPending = false;
+    let exitFailed = false;
     let supportPollInterval: ReturnType<typeof setInterval> | null = null;
 
     const flushOutput = () => {
@@ -324,10 +338,37 @@ export function useCli(): Cli {
     };
 
     const encoder = new TextEncoder();
-    const send = (line: string, callback?: SendCallback) => {
-        // serial.send never rejects: it logs a failure and reports it through the callback.
-        void serial.send(encoder.encode(line), callback);
+    /** Sends `line`; false when the write check refused it (nothing was sent). */
+    const send = (line: string, callback?: SendCallback): boolean => {
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md): while the craft's state is uncertain only
+        // reads go out, behind bytes that empty the firmware's line (fcWriteGuard interactiveCliText).
+        const out = interactiveCliText(line);
+        if (out.refused) {
+            reportRefusedWrite("CLI command", out.refused);
+            writeLineToOutput(`###ERROR Gyroflight: not sent (${out.refused.join(", ")})`);
+            return false;
+        }
+        // serial.send never rejects: it logs a failure and reports it through the callback. Checked
+        // again right before its bytes go out (WP8-F03): it may wait behind an earlier send.
+        const bytes = encoder.encode(out.text);
+        let stopped = false;
+        const stillWanted = () => (stopped = !interactiveCliStillAllowed(line, out.text)) === false;
+        void serial.send(
+            bytes,
+            (result) => {
+                if (stopped) writeLineToOutput("###ERROR Gyroflight: not sent (the state changed before it went out)");
+                callback?.(result, result?.bytesSent === bytes.byteLength);
+            },
+            { stillWanted },
+        );
+        return true;
     };
+
+    // Gyroflight hook (docs/gyrocore/UPSTREAM.md): what to send for `command` given what the firmware
+    // echoed of its line. While writes are refused that line is emptied first (send), so the whole
+    // command goes out, not the rest of it after the echoed part.
+    const commandAfterBuffer = (command: string) =>
+        foreignWritesRefused() ? command : getCliCommand(command, cliBuffer);
 
     const executeCommands = (outString: string) => {
         history.add(outString.trim());
@@ -360,7 +401,7 @@ export function useCli(): Cli {
                 const isLast = commandArray.length === 0;
 
                 if (isLast && cliBuffer) {
-                    line = getCliCommand(line, cliBuffer);
+                    line = commandAfterBuffer(line);
                 }
 
                 const isProfile = line.toLowerCase().startsWith("profile");
@@ -862,19 +903,53 @@ export function useCli(): Cli {
 
         // `exit` + MSP_REBOOT reboots the FC. Keep tab_switch_in_progress held across the
         // handoff; prepareDisconnect (run on every reboot path) releases it after the disconnect.
-        const rebooting = connectionStore.connectionValid && connectionStore.cliValid && connectionStore.cliActive;
-        if (rebooting) {
-            send(getCliCommand("exit\r", cliBuffer), function () {
-                reinitializeConnection();
-            });
+        // Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F10): a refused `exit` starts no
+        // reboot, and the handoff waits for the transport: only an `exit` it took whole leaves the
+        // CLI. Otherwise the FC may still be in it (the flags stay) and the link is dropped
+        // without MSP. The return value is "exit handed to the transport".
+        if (exitPending) {
+            return true;
         }
+        if (exitFailed) {
+            // Re-entered from the disconnect below (tab cleanup): no second `exit`, let it finish.
+            return false;
+        }
+        let exitTimer: ReturnType<typeof setTimeout> | null = null;
+        // The connection this exit belongs to (WP8-F10 review): never reboot or drop a later one.
+        const connection = serial.connectionGeneration;
+        const exitResult = (delivered: boolean) => {
+            if (!exitPending) return;
+            exitPending = false;
+            if (exitTimer) clearTimeout(exitTimer);
+            if (serial.connectionGeneration !== connection) return;
+            if (delivered) {
+                connectionStore.cliActive = false;
+                connectionStore.cliValid = false;
+                reinitializeConnection();
+            } else {
+                exitFailed = true;
+                gui_log(i18n.getMessage("gyroflightCliExitNotDelivered"));
+                disconnectCliModeUnknown();
+            }
+        };
+        const exiting =
+            connectionStore.connectionValid &&
+            connectionStore.cliValid &&
+            connectionStore.cliActive &&
+            send(commandAfterBuffer("exit\r"), (_result, delivered) => exitResult(delivered));
 
-        connectionStore.cliActive = false;
-        connectionStore.cliValid = false;
+        if (exiting) {
+            exitPending = true;
+            // A transport that never reports on it: the same as not sent whole (no reboot handoff).
+            exitTimer = setTimeout(() => exitResult(false), EXIT_RESULT_TIMEOUT_MS);
+        } else {
+            connectionStore.cliActive = false;
+            connectionStore.cliValid = false;
+        }
 
         CliAutoComplete.cleanup();
 
-        return rebooting;
+        return exiting;
     };
 
     const adaptPhones = () => {

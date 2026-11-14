@@ -140,15 +140,42 @@ describe("useMspCliSession.scheduleReconnect", () => {
         DeviceHandler.devicePicker.autoConnect = false;
         const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
         // `save` reboots the FC: the port closes before it replies, so the in-flight command is
-        // drained with the tagged connection-closed error.
+        // drained with the tagged connection-closed error. Gyroflight (audit WP8-F01): it went out
+        // whole and the firmware printed "# saving" before it reset.
         vi.mocked(MSP.send_cli_command).mockImplementation((_cmd, cb) => {
-            cb?.([], Object.assign(new Error("Serial connection closed"), { connectionClosed: true }));
+            cb?.(
+                [],
+                Object.assign(new Error("Serial connection closed"), {
+                    connectionClosed: true,
+                    delivered: true,
+                    output: ["", "# saving", "", "Rebooting"],
+                }),
+            );
         });
 
         const result = await saveAndReconnect();
 
         expect(result.ok).toBe(true);
+        expect(result.persistence).toBe("confirmed");
         expect(errSpy).not.toHaveBeenCalled();
+        errSpy.mockRestore();
+    });
+
+    // Gyroflight (audit WP8-F01): a closed port alone does not show the save went out.
+    it("does not take a connection-closed drain of a save that never went out whole for success", async () => {
+        DeviceHandler.devicePicker.autoConnect = false;
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(MSP.send_cli_command).mockImplementation((_cmd, cb) => {
+            cb?.(
+                [],
+                Object.assign(new Error("Serial connection closed"), { connectionClosed: true, delivered: false }),
+            );
+        });
+
+        const result = await saveAndReconnect();
+
+        expect(result.ok).toBe(false);
+        expect(result.persistence).toBe("unknown");
         errSpy.mockRestore();
     });
 

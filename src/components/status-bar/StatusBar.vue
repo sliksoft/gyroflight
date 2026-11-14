@@ -152,6 +152,8 @@ import { useTranslation } from "i18next-vue";
 import semver from "semver";
 import { vueTabState } from "../../js/vue_tab_mounter.js";
 import { switchTab } from "../../js/tab_switch.js";
+import { useAutotuneSectionStore } from "../../gyroflight/autotune/sections";
+import { withAutotuneSections } from "../../gyroflight/autotune/sidebarSections";
 import { isExpertModeEnabled } from "../../js/utils/isExpertModeEnabled";
 import { shortenTargetDisplay, stripVersionDisplay } from "./statusBarText";
 import { API_VERSION_1_46 } from "../../js/data_storage";
@@ -216,18 +218,33 @@ export default defineComponent({
 
         // The compact bar is the navigation: the same tabs the sidebar shows, scrolled sideways.
         const activeTabs = useVisibleTabs();
-        const visibleTabs = computed(() =>
-            activeTabs.value.map((item) => {
-                const key = item.tab ?? item.key;
-                return {
-                    key,
-                    icon: item.icon,
-                    label: t(item.i18n),
-                    active: vueTabState.activeTabName === key,
-                    select: () => switchTab(key, { mode: item.mode, label: t(item.i18n) }),
-                };
-            }),
-        );
+        const autotuneSections = useAutotuneSectionStore();
+        const visibleTabs = computed(() => {
+            const keys = activeTabs.value.map((item) => item.tab ?? item.key);
+            const tabs = activeTabs.value.map((item, i) => ({
+                key: keys[i],
+                label: t(item.i18n),
+                icon: item.icon,
+                active: vueTabState.activeTabName === keys[i],
+                tooltip: { text: t(item.i18n) },
+                onSelect: () => switchTab(keys[i], { mode: item.mode, label: t(item.i18n) }),
+            }));
+            // Gyroflight: the Autotune sections follow Autotune here too, as in the sidebar.
+            return withAutotuneSections(tabs, keys, {
+                activeTab: vueTabState.activeTabName,
+                activeSection: autotuneSections.active,
+                t,
+                openSection: autotuneSections.open,
+                indent: false,
+                closeMobileSidebar: () => {},
+            }).map((entry) => ({
+                key: "key" in entry ? entry.key : `autotune:${entry["data-autotune-section"]}`,
+                icon: entry.icon,
+                label: entry.label,
+                active: entry.active,
+                select: () => entry.onSelect(),
+            }));
+        });
 
         const currentTime = ref(Date.now());
         const expertMode = ref(isExpertModeEnabled());

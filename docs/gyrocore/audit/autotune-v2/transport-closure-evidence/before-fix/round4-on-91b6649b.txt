@@ -1,0 +1,5 @@
+     × a cleanup while the link stays open (kept-link reboot) keeps the unanswered transmission
+     × a cancelled open that fails leaves nothing behind: the next connect opens normally
+     × a connect while a cancelled open is still running waits for its close; no port is left open
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed | 41 passed (44)

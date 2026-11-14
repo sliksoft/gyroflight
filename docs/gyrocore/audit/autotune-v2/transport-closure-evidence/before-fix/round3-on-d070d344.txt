@@ -1,0 +1,7 @@
+     × a CRC-invalid frame for the code does not use up the earlier unanswered transmission
+     × a disconnect while the port is still opening waits for it, closes it, and the open does not come back
+     × forceClose while the port is still opening closes it once open
+     × a connect to the device already open (the kept-link reboot retry) uses that connection
+     × this tab's own transaction does not start while a send of this tab is still with a transport
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  5 failed | 36 passed (41)

@@ -1560,9 +1560,11 @@ async function refreshConfig() {
     analyticsChanges.value = {};
 }
 
-// Save OSD configuration to FC
-const saveConfig = () =>
-    runSave(async () => {
+// Save OSD configuration to FC. Gyroflight hook (docs/gyrocore/UPSTREAM.md, audit WP8-F04): true only
+// when every write and the EEPROM save were confirmed.
+const saveConfig = async (): Promise<boolean> => {
+    let saved = false;
+    await runSave(async () => {
         // Warn before a pick that would take a port from another feature; a cancel here leaves the
         // save untouched, before anything has been written to the FC.
         if (!(await confirmPortConflicts())) {
@@ -1577,6 +1579,7 @@ const saveConfig = () =>
             await writeOsdPort();
             await writeCustomTextPort();
         });
+        saved = true;
 
         // Track analytics
         const changes = analyticsChanges.value;
@@ -1590,11 +1593,13 @@ const saveConfig = () =>
         gui_log(i18n.getMessage("osdSettingsSaved"));
         flashSaveButtonText(i18n.getMessage("osdButtonSaved"), 2000);
     });
+    return saved;
+};
 
 // A UART assignment only takes effect at serial init, so the port rows need a reboot to bite.
+// Gyroflight: no reboot after a save that failed or was not confirmed (it would drop the RAM values).
 const saveAndRebootConfig = async () => {
-    await saveConfig();
-    await reboot();
+    if (await saveConfig()) await reboot();
 };
 
 // The primary button does what its label says: with a port change pending it saves and reboots.

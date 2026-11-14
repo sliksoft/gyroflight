@@ -203,6 +203,33 @@ export function highResolutionScale(h: LoggedHeaders): number {
     return upstreamValue(h, "blackbox_high_resolution") ? 0.1 : 1;
 }
 
+/**
+ * The fields the firmware multiplies by 10 when blackbox_high_resolution is on (blackbox.c:
+ * gyroADC[0..2], gyroUnfilt[0..2], rcCommand[0..3] and setpoint[0..2]). setpoint[3] is the mixer
+ * throttle × 1000, written without the scale; everything else (axisP/I/D/F, debug, motor) is
+ * unscaled too.
+ */
+export const HIGH_RESOLUTION_FIELDS = /^(gyroADC\[[0-2]\]|gyroUnfilt\[[0-2]\]|rcCommand\[[0-3]\]|setpoint\[[0-2]\])$/;
+
+/**
+ * Raw decoded channels in firmware units: the high-resolution fields divided back to deg/s and µs,
+ * the others untouched. The one place the scale is applied to engine channels; the readers downstream
+ * (D path, gyro chain, I relax, JIO) take deg/s and 1000…2000 µs as the firmware holds them.
+ */
+export function descaleHighResolution<T extends Record<string, Float64Array | null>>(named: T, h: LoggedHeaders): T {
+    const scale = highResolutionScale(h);
+    if (scale === 1) return named;
+    const out: Record<string, Float64Array | null> = { ...named };
+    for (const key of Object.keys(named)) {
+        const col = named[key];
+        if (!col || !HIGH_RESOLUTION_FIELDS.test(key)) continue;
+        const scaled = new Float64Array(col.length);
+        for (let i = 0; i < col.length; i++) scaled[i] = col[i] * scale;
+        out[key] = scaled;
+    }
+    return out as T;
+}
+
 export function chirpFrequencyRangeHz(h: LoggedHeaders): [number, number] | null {
     const start = loggedInt(h, "chirp_frequency_start_deci_hz");
     const end = loggedInt(h, "chirp_frequency_end_deci_hz");
