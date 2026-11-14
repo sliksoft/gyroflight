@@ -1655,6 +1655,8 @@
     "gyroflightSitlPhase_done": { "message": "Done" },
     "gyroflightSitlProgressStep": { "message": "step $1 of at most $2" },
     "gyroflightSitlProgressRun": { "message": "run $1 of $2" },
+    "gyroflightSitlProgressAttempt": { "message": "restore attempt $1 of $2" },
+    "gyroflightSitlRestoreUnconfirmedAccepted": { "message": "Not restored — the last accepted tune would be:" },
     "gyroflightSitlColAxis": { "message": "Axis" },
     "gyroflightSitlColChange": { "message": "P/I/D/d_max" },
     "gyroflightSitlColPredicted": { "message": "Predicted" },

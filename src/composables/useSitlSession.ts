@@ -194,7 +194,9 @@ export function useSitlSession() {
             };
             // Only a session that ends on the accepted tune is closed on the bench; otherwise the result is journalled and the
             // bench's own restore on a lost connection stays armed (Grok r2 notes A and D).
-            await (r.activeIsAccepted ? client.finish(record) : client.record(record)).catch(() => undefined);
+            // Never a finish after an unconfirmed restore, whatever MSP read last (Grok r7 N2).
+            const closes = r.activeIsAccepted && r.stopReason !== "restore_unconfirmed";
+            await (closes ? client.finish(record) : client.record(record)).catch(() => undefined);
         } catch (e) {
             state.error = String(e instanceof Error ? e.message : e);
         } finally {

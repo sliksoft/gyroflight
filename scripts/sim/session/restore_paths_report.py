@@ -59,7 +59,10 @@ def checks(name, j, row, acc, ind):
         c("attempt2_exact_accepted", len(a) == 2 and a[1]["exact"] and not a[1]["injected"] and acc_then is not None and tune_of(a[1]) == acc_then,
           f"attempts={len(a)} read {tune_of(a[1]) if len(a) > 1 else None} accepted then {acc_then}")
         c("app_record_via_finish", app["via"] == "finish", str(app))
-        c("disconnect_with_session_closed", any(e["op"] == "disconnected" and e.get("sessionOpen") is False for e in j))
+        # ordered (Grok r7 N3): the only disconnect comes after the app's finish, with the session closed
+        fin = [k for k, e in enumerate(j) if e["op"] == "finish"]
+        c("disconnect_after_finish_session_closed", first_drop < len(j) and j[first_drop].get("sessionOpen") is False and bool(fin) and fin[-1] < first_drop,
+          f"finish idx={fin} first disconnect={first_drop}")
         c("no_restore_on_lost_connection", not att("connection_lost"))
         if name.startswith("H1b"):
             st = (row["app"]["steps"] or [[None, None, None]])[0]
@@ -67,10 +70,15 @@ def checks(name, j, row, acc, ind):
             c("app_shows_exact_attempt_2", "read back exact (attempt 2)" in (st[2] or ""), str(st[2]))
             k = max(idx) if idx else len(j)
             after = [e["op"] for e in j[k + 1:] if e["op"] not in ("restore",)]
-            c("nothing_between_request_and_exact_read", all(e["op"] in ("restore_attempt", "injected") for e in j[min(idx):k + 1]) if idx else False)
+            # from the candidate's measurement to the exact attempt only the restore itself (the app's request is not journalled)
+            mk = max((q for q, e in enumerate(j[: idx[0]]) if e["op"] == "measure"), default=None) if idx else None
+            c("nothing_between_candidate_measurement_and_exact_read", mk is not None and all(e["op"] in ("restore_attempt", "injected") for e in j[mk + 1:k + 1]),
+              f"ops {[e['op'] for e in j[mk + 1:k + 1]] if mk is not None else None}")
             c("session_goes_on_after_exact_restore", bool(after) and after[0] in ("readActive", "setTune", "measure"), str(after[:3]))
         else:
-            c("abort_stop_restored_exact", any(e["op"] == "abort" and e["why"] == "stop" and e.get("restoredExact") for e in j))
+            ab = [q for q, e in enumerate(j) if e["op"] == "abort" and e["why"] == "stop" and e.get("restoredExact")]
+            c("abort_stop_restored_exact_after_attempts_before_disconnect", bool(ab) and bool(idx) and max(idx) < ab[0] < first_drop,
+              f"abort idx={ab} attempts={idx} first disconnect={first_drop}")
             c("app_panel_aborted", row["app"]["panelState"] == "aborted", str(row["app"]["panelState"]))
         c("independent_read_equals_accepted", row["independentEqualsAccepted"], f"independent {row['independentRead']}")
     else:
@@ -85,7 +93,11 @@ def checks(name, j, row, acc, ind):
         rep = {(r["method"]): (r["reply"] if isinstance(r["reply"], dict) else {}) for r in (row["probe"] or {}).get("replies", [])}
         for m in ("setTune", "measure", "commitAccepted"):
             c(f"bench_refuses_{m}", rep.get(m, {}).get("ok") is False and rep.get(m, {}).get("error") == "restore_unconfirmed_locked", str(rep.get(m)))
-        c("refusals_journalled", sorted(e["method"] for e in j if e["op"] == "refused") == ["commitAccepted", "measure", "setTune"])
+        un = next((q for q, e in enumerate(j) if e["op"] == "restore" and e["why"] == "stop" and e.get("error") == "restore_unconfirmed"), len(j))
+        refs = [(q, e) for q, e in enumerate(j) if e["op"] == "refused"]
+        c("refusals_journalled_after_unconfirmed_before_disconnect",
+          sorted(e["method"] for _, e in refs) == ["commitAccepted", "measure", "setTune"]
+          and all(un < q < first_drop and e["reason"] == "restore_unconfirmed_locked" for q, e in refs), f"refused {[(q, e['method']) for q, e in refs]} unconfirmed={un}")
         c("probe_on_same_connection", (row["probe"] or {}).get("connectionsAtEnd") == 1 and ops.count("connected") == 1)
         lost = att("connection_lost")
         c("lost_connection_tries_again_and_fails", len(lost) == 3 and all(not e["exact"] for e in lost)

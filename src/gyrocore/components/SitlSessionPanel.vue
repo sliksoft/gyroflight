@@ -48,8 +48,16 @@
         >
             {{ $t(`gyroflightSitlPhase_${s.event?.phase ?? "reading_active"}`) }} —
             {{ msg("gyroflightSitlProgressStep", [String(s.event?.step ?? 0), String(P.policy.maxTrialSteps)]) }}
-            <span v-if="s.progress && s.event?.phase === 'measuring'">
+            <span v-if="s.progress && s.event?.phase === 'measuring' && s.progress.label !== 'restore'">
                 · {{ msg("gyroflightSitlProgressRun", [String(s.progress.run), String(s.progress.of)]) }}
+            </span>
+            <span
+                v-if="
+                    s.progress?.label === 'restore' && (s.event?.phase === 'restoring' || s.event?.phase === 'stopping')
+                "
+                data-gyrocore="sitl-restore-attempt"
+            >
+                · {{ msg("gyroflightSitlProgressAttempt", [String(s.progress.run), String(s.progress.of)]) }}
             </span>
             · {{ elapsed }}
         </p>
@@ -142,7 +150,7 @@
                 class="text-sm text-red-500 font-bold mt-1"
                 data-gyrocore="sitl-restore-unconfirmed"
             >
-                {{ $t(stopKey("restore_unconfirmed")) }} — accepted: {{ tuneText(s.result.best?.tune ?? null) }}
+                {{ $t("gyroflightSitlRestoreUnconfirmedAccepted") }} {{ tuneText(s.result.best?.tune ?? null) }}
             </p>
             <p class="text-sm text-dimmed mt-1">{{ $t("gyroflightSitlFinalNote") }}</p>
         </template>

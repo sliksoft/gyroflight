@@ -22,12 +22,14 @@
  *   finish                        → the session ended normally; no restore on disconnect afterwards
  * A connection that closes while the session is open is handled as abort (journal: connection_lost).
  *
- * Restore (one path for restore, abort and a lost connection): up to RESTORE_ATTEMPTS attempts while the connection stays
- * open, RESTORE_WAIT_MS between them, no new attempt after RESTORE_DEADLINE_MS. Each attempt writes the accepted tune
- * (Betaflight CLI) and reads the active tune over MSP; only an exact read (same tune, PID profile 0, disarmed) succeeds.
- * Every attempt is journalled (restore_attempt). When all fail, the restore is unconfirmed: the bench then refuses
- * setTune, measure and commitAccepted (restore_unconfirmed_locked) and does not close the session on finish, until a
- * later restore succeeds; a lost connection tries once more.
+ * Restore (one path for restore, abort and a lost connection): up to RESTORE_ATTEMPTS attempts without waiting for the
+ * app to reconnect (restore and Stop: on the open connection; a lost connection: after it closed), RESTORE_WAIT_MS between
+ * them, no new attempt starts after RESTORE_DEADLINE_MS (an attempt already started finishes). Each attempt writes the
+ * accepted tune (Betaflight CLI) and reads the active tune over MSP; only an exact read (same tune, PID profile 0,
+ * disarmed) succeeds. Every attempt is journalled (restore_attempt) and announced to the app (progress, label "restore").
+ * When all fail, the restore is unconfirmed: the bench then refuses setTune, measure and commitAccepted
+ * (restore_unconfirmed_locked) and does not close the session on finish, until a later restore succeeds; a lost
+ * connection tries once more. While an abort runs, the same actions are refused too (abort_in_progress).
  * --start-tune provisions that tune into a fresh flash before the server listens (the craft's tune before the session).
  */
 
@@ -283,8 +285,8 @@ async function restoreAttempt(acc, why, n) {
     return { rb, exact, error };
 }
 
-/** Restore the accepted tune: bounded attempts while the connection stays open (see "Restore" above). */
-async function restoreAccepted(why) {
+/** Restore the accepted tune: bounded attempts (see "Restore" above); notify announces each attempt to the app. */
+async function restoreAccepted(why, notify = () => {}) {
     const acc = readAccepted();
     if (!acc) return { restored: null, error: "no_accepted_tune", attempts: 0 };
     const t0 = Date.now();
@@ -292,6 +294,7 @@ async function restoreAccepted(why) {
     let n = 0;
     while (n < RESTORE_ATTEMPTS && (n === 0 || Date.now() - t0 < RESTORE_DEADLINE_MS)) {
         n++;
+        notify({ event: "progress", label: "restore", run: n, of: RESTORE_ATTEMPTS });
         last = await restoreAttempt(acc, why, n);
         if (last.exact) {
             restoreUnconfirmed = false;
@@ -343,8 +346,8 @@ const methods = {
         return a;
     },
     /** The app's restore after a rejected step (RESTORE / INVALID). */
-    async restore({ why }) {
-        return restoreAccepted(why || "app");
+    async restore({ why }, notify) {
+        return restoreAccepted(why || "app", notify);
     },
     async commitAccepted({ tune, measurementId }) {
         const v = { tune, measurementId, at: new Date().toISOString() };
@@ -394,22 +397,22 @@ const methods = {
 
 /** One abort at a time: a second request (Stop, then the page closes) waits for the first and gets its result. */
 let abortRunning = null;
-function abort(why) {
+function abort(why, notify) {
     if (abortRunning) {
         journal({ op: "abort_joined", why });
         return abortRunning;
     }
-    abortRunning = abortOnce(why).finally(() => {
+    abortRunning = abortOnce(why, notify).finally(() => {
         abortRunning = null;
     });
     return abortRunning;
 }
 
-async function abortOnce(why) {
+async function abortOnce(why, notify) {
     aborting = true;
     const stop = await stopHelper();
     await queue; // the interrupted operation settles first
-    const r = await serial(() => restoreAccepted(why));
+    const r = await serial(() => restoreAccepted(why, notify));
     journal({ op: "abort", why, ...stop, restoredExact: !r.error, error: r.error, attempts: r.attempts });
     // Only a verified restore closes the session: otherwise a lost connection still triggers another restore (Grok r2 note A).
     if (!r.error && stop.helperStopped) sessionOpen = false;
@@ -453,13 +456,20 @@ wss.on("connection", (ws) => {
         const { id, method, params } = msg;
         const send = (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify({ id, ...m }));
         try {
-            if (method === "abort") return send({ ok: true, result: await abort("stop") });
+            if (method === "abort") return send({ ok: true, result: await abort("stop", notify) });
             if (!methods[method]) return send({ ok: false, error: `unknown_method:${method}` });
-            // Checked in turn (a request queued behind a failing restore is refused too).
+            // Checked in turn (a request queued behind a failing restore or an abort is refused too; Grok r7 N1).
             const result = await serial(() => {
-                if (LOCKED.has(method) && restoreUnconfirmed) {
-                    journal({ op: "refused", method, reason: "restore_unconfirmed_locked" });
-                    throw new Error("restore_unconfirmed_locked");
+                const refuse = !LOCKED.has(method)
+                    ? null
+                    : restoreUnconfirmed
+                      ? "restore_unconfirmed_locked"
+                      : aborting
+                        ? "abort_in_progress"
+                        : null;
+                if (refuse) {
+                    journal({ op: "refused", method, reason: refuse });
+                    throw new Error(refuse);
                 }
                 return methods[method](params || {}, notify);
             });
