@@ -70,8 +70,8 @@ export const STEP_METHOD = Object.freeze({
      * length). Hann on both signals is exact only where the taper is nearly flat over the response:
      * an event in the outer quarter of the window biases overshoot and final value by 0.03–0.12
      * (Grok r1 SHOULD-FIX-1, reproduced; test "edge bias"). The band (0.6 s at 2 s) is wider than the
-     * hop (0.4 s), so every sample lies in the band of at least one window: an isolated flick keeps
-     * a window. A smaller flick within about 1–1.4 s of a larger one is never a window's peak in the
+     * hop (0.4 s), so every sample away from the ends of a usable stretch lies in the band of at least
+     * one window: an isolated flick away from those ends keeps a window. A smaller flick within about 1–1.4 s of a larger one is never a window's peak in the
      * band and is not counted (Grok r2 SHOULD-FIX-A; test "a smaller flick next to a larger one").
      */
     centreBand: Object.freeze([0.4, 0.7] as const),

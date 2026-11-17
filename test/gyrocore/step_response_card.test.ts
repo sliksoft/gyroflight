@@ -14,6 +14,8 @@ globalThis.ResizeObserver = class {
 };
 
 const picked = vi.hoisted(() => ({ bytes: new Uint8Array() as Uint8Array, name: "test.bbl" }));
+/** Every object-form call of getMessage, to check the card turns i18next escaping off. */
+const objectCalls = vi.hoisted(() => [] as Record<string, unknown>[]);
 
 vi.mock("../../src/js/FileSystem", () => ({
     default: {
@@ -27,6 +29,8 @@ vi.mock("../../src/js/localization", async (importOriginal) => ({
     i18n: {
         // Positional arrays, or the card's object form { "1": …, "2": …, interpolation } (no escaping)
         getMessage: (key: string, args?: string[] | Record<string, unknown>) => {
+            // the card's positional object form ({ "1": … }); other callers pass named i18next values
+            if (args && !Array.isArray(args) && "1" in args) objectCalls.push(args);
             const list = Array.isArray(args)
                 ? args
                 : Object.keys(args ?? {})
@@ -115,6 +119,11 @@ describe("normal import → step-response card", () => {
         }
         expect(q(container, "[data-gyrocore='step-loop-info']")!.textContent).toContain(
             "gyrocoreStepLoopItermRelax|1|1|25",
+        );
+        // every argument-carrying message of the card is asked for without i18next HTML escaping
+        expect(objectCalls.length).toBeGreaterThan(0);
+        expect(objectCalls.every((c) => (c.interpolation as { escapeValue?: boolean })?.escapeValue === false)).toBe(
+            true,
         );
         unmount();
     });

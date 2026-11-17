@@ -93,8 +93,8 @@ Every result is given per axis for both lower bounds, **40 and 80 deg/s**. A win
 
 What the rule costs (Grok review round 2):
 
-- **Isolated flicks keep a window.** The band is 0.6 s wide, wider than the hop of 0.4 s, so every sample lies in the band of at least one window.
-- **A smaller flick next to a larger one is lost.** A flick within about 1–1.4 s of a larger one is never the largest |setpoint| of a window that has it in its band, so it is not counted (test "a smaller flick next to a larger one"). Fewer manoeuvres make INSUFFICIENT more likely (conservative). The mean leans toward the larger flick of each 1–2.6 s stretch: with a linear loop that changes nothing; with TPA, motor limits or feedforward shaping the response can depend on amplitude.
+- **Isolated flicks keep a window**, away from the edges below. The band is 0.6 s wide, wider than the hop of 0.4 s, so every sample lies in the band of at least one window.
+- **A smaller flick next to a larger one is lost.** A flick within about 1–1.4 s of a larger one is never the largest |setpoint| of a window that has it in its band, so it is not counted (test "a smaller flick next to a larger one"). Fewer manoeuvres make INSUFFICIENT more likely (conservative). Of two flicks closer than that, only the larger one counts, so the mean leans toward larger flicks: with a linear loop that changes nothing; with TPA, motor limits or feedforward shaping the response can depend on amplitude.
 - **Edges.** A flick whose peak lies in the first ~0.8 s or the last ~0.6 s of a usable stretch (log start or end, next to a frame gap, mode change, CHIRP or ground) is not counted.
 - **Remaining bias over the band:** +0.015 at 40 % to −0.022 at 70 % for a 150 ms flick, up to +0.03 for long holds whose peak falls late. That is below the 90th-percentile noise error of about 0.09 at 5 manoeuvres.
 
