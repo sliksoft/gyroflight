@@ -178,7 +178,27 @@ describe("window position: the peak must lie in the centre band (Grok r1 SHOULD-
             expect(t.rejected.peak_off_centre).toBe(1 - used);
         }
     });
-    it("the band is wider than the hop, so every flick keeps at least one window", () => {
+    it("a smaller flick next to a larger one is not counted (fixed on purpose, docs §3)", () => {
+        const make = (flicks: [number, number][]) => {
+            const raw = new Float64Array(10 * fs);
+            for (const [t, amp] of flicks) raw.fill(amp, Math.round(t * fs), Math.round(t * fs) + 150);
+            let s = 0;
+            return raw.map((v) => (s += 0.2 * (v - s)));
+        };
+        const alone = make([[5, 120]]);
+        expect(at80(run(alone, simulate(alone, fs, p), fs)).manoeuvres).toBe(1);
+        const next = make([
+            [4, 200],
+            [5, 120],
+        ]);
+        expect(at80(run(next, simulate(next, fs, p), fs)).manoeuvres).toBe(1);
+        const apart = make([
+            [4, 200],
+            [6, 120],
+        ]);
+        expect(at80(run(apart, simulate(apart, fs, p), fs)).manoeuvres).toBe(2);
+    });
+    it("the band is wider than the hop, so every isolated flick keeps at least one window", () => {
         expect((STEP_METHOD.centreBand[1] - STEP_METHOD.centreBand[0]) * STEP_METHOD.windowS).toBeGreaterThan(
             STEP_METHOD.hopS,
         );
@@ -246,7 +266,7 @@ describe("exclusions (criterion 4)", () => {
         const clean = at(run(sp, gy), 80);
         const t = at(run(sp, gy, FS, ev), 80);
         expect(t.rejected.frame_gap).toBe(windowsOver(10 * FS));
-        // every other window is judged exactly as without the gap
+        // the gap windows are counted under frame_gap; no other window is lost to the gap
         expect(t.windowsUsed).toBeGreaterThanOrEqual(clean.windowsUsed - t.rejected.frame_gap);
         expect(sumCounts(t)).toBe(clean.windowsTotal);
         expect(t.status).toBe("MEASURED");

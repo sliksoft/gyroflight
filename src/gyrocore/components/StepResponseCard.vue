@@ -290,7 +290,16 @@ import {
 import { STEP_AXES, type StepAxis, type StepLogResult } from "@/gyrocore/stepResponse/stepLog";
 import { SETTING_GROUPS, type SettingGroup } from "@/gyrocore/stepResponse/stepSettings";
 
-const t = (key: string, args: (string | number)[] = []) => i18n.getMessage(key, args.map(String));
+/**
+ * Positional message arguments ($1, $2 …) without i18next's HTML escaping: Vue renders the result
+ * as text and escapes it itself, so escaping here would show "&#x2F;" for a "/" in a file name,
+ * firmware revision or reason.
+ */
+const t = (key: string, args: (string | number)[] = []) =>
+    i18n.getMessage(key, {
+        ...Object.fromEntries(args.map((a, i) => [String(i + 1), String(a)])),
+        interpolation: { escapeValue: false },
+    });
 
 const store = useStepResponseStore();
 const SIDES = ["a", "b"] as const;

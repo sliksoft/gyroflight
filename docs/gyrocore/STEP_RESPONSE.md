@@ -89,7 +89,14 @@ Every result is given per axis for both lower bounds, **40 and 80 deg/s**. A win
 | 11  | `peak_off_centre`          | the sample of largest \|setpoint\| lies outside 40–70 % of the window (see below)                                                                                                                                                                                      |
 | 12  | `deconvolution_failed`     | the result is not finite                                                                                                                                                                                                                                               |
 
-**Why the peak must lie in the centre of the window.** Hann on both signals is exact only where the taper is nearly flat over the 500 ms response. A single flick with its onset in the outer quarter of the window is biased by the taper and the cut-off tail: overshoot and final value deviate by 0.03–0.12, against ≤ 0.02 in the centre (Grok review round 1, reproduced in the test "window position"). A window is therefore used only when its sample of largest |setpoint| lies at 40–70 % of the window. That band is 0.6 s wide, wider than the hop of 0.4 s, so every flick keeps at least one window.
+**Why the peak must lie in the centre of the window.** Hann on both signals is exact only where the taper is nearly flat over the 500 ms response. A single flick with its onset in the outer quarter of the window is biased by the taper and the cut-off tail: overshoot and final value deviate by 0.03–0.12, against ≤ 0.03 over the band (Grok review rounds 1 and 2, reproduced in the test "window position"). A window is therefore used only when its sample of largest |setpoint| lies at 40–70 % of the window.
+
+What the rule costs (Grok review round 2):
+
+- **Isolated flicks keep a window.** The band is 0.6 s wide, wider than the hop of 0.4 s, so every sample lies in the band of at least one window.
+- **A smaller flick next to a larger one is lost.** A flick within about 1–1.4 s of a larger one is never the largest |setpoint| of a window that has it in its band, so it is not counted (test "a smaller flick next to a larger one"). Fewer manoeuvres make INSUFFICIENT more likely (conservative). The mean leans toward the larger flick of each 1–2.6 s stretch: with a linear loop that changes nothing; with TPA, motor limits or feedforward shaping the response can depend on amplitude.
+- **Edges.** A flick whose peak lies in the first ~0.8 s or the last ~0.6 s of a usable stretch (log start or end, next to a frame gap, mode change, CHIRP or ground) is not counted.
+- **Remaining bias over the band:** +0.015 at 40 % to −0.022 at 70 % for a 150 ms flick, up to +0.03 for long holds whose peak falls late. That is below the 90th-percentile noise error of about 0.09 at 5 manoeuvres.
 
 **Mode names are read by name, per firmware.** They come from the Viewer's `FLIGHT_LOG_FLIGHT_MODE_NAME`, which `adjustFieldDefsList` sets for the firmware version of each log. The bit positions are not hardcoded.
 

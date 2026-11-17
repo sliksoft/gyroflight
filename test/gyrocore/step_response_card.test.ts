@@ -24,7 +24,18 @@ vi.mock("../../src/js/FileSystem", () => ({
 
 vi.mock("../../src/js/localization", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../src/js/localization")>()),
-    i18n: { getMessage: (key: string, args?: string[]) => (args?.length ? `${key}|${args.join("|")}` : key) },
+    i18n: {
+        // Positional arrays, or the card's object form { "1": …, "2": …, interpolation } (no escaping)
+        getMessage: (key: string, args?: string[] | Record<string, unknown>) => {
+            const list = Array.isArray(args)
+                ? args
+                : Object.keys(args ?? {})
+                      .filter((k) => /^\d+$/.test(k))
+                      .sort((a, b) => Number(a) - Number(b))
+                      .map((k) => String((args as Record<string, unknown>)[k]));
+            return list.length ? `${key}|${list.join("|")}` : key;
+        },
+    },
 }));
 
 import UApp from "@nuxt/ui/components/App.vue";
@@ -166,5 +177,14 @@ describe("normal import → step-response card", () => {
         expect(q(cellEl, "[data-gyrocore='step-no-delta-roll-80']")!.textContent).toContain("extra_change:ff_weight");
         expect(q(container, "[data-check='settings_as_intended']")!.dataset.status).toBe("FAIL");
         unmount();
+    });
+});
+
+describe("message arguments are not HTML-escaped twice", () => {
+    it("i18next escapes interpolated values by default; the card's escapeValue: false keeps a '/' as '/'", async () => {
+        const i18next = (await import("i18next")).default.createInstance();
+        await i18next.init({ lng: "en", resources: { en: { translation: { noDelta: "No delta: {{1}}" } } } });
+        expect(i18next.t("noDelta", { 1: "a / b" })).toContain("&#x2F;");
+        expect(i18next.t("noDelta", { 1: "a / b", interpolation: { escapeValue: false } })).toBe("No delta: a / b");
     });
 });
