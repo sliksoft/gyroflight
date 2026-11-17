@@ -1765,6 +1765,7 @@
     "gyrocoreStepCheck_same_logging_rate": { "message": "Same logging rate" },
     "gyrocoreStepCheck_saturation_known": { "message": "Motor saturation known" },
     "gyrocoreStepCheck_settings_as_intended": { "message": "Settings as intended" },
+    "gyrocoreStepCheck_comparable_battery": { "message": "Comparable battery voltage in flight" },
     "gyrocoreStepChanged": { "message": "Changed from A to B: $1" },
     "gyrocoreStepUnknownSettings": { "message": "Not in both logs (unknown, never counted as unchanged): $1" },
     "gyrocoreStepChartTitle": { "message": "Peak |setpoint| from $1 deg/s" },

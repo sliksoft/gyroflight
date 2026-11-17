@@ -185,8 +185,37 @@ describe("UNKNOWN is not MATCH", () => {
         }
     });
     it("motor_poles and dshot_bidir count as 'other' (they also drive dynamic idle)", () => {
-        const rows = compareSettings([["dshot_bidir", "1"]], [["dshot_bidir", "0"]]);
-        expect(rows.find((r) => r.id === "dshot_bidir")!.group).toBe("other");
+        for (const [key, va, vb] of [
+            ["dshot_bidir", "1", "0"],
+            ["motor_poles", "12", "14"],
+        ] as const) {
+            expect(compareSettings([[key, va]], [[key, vb]]).find((r) => r.id === key)).toMatchObject({
+                group: "other",
+                status: "DIFF",
+            });
+        }
+    });
+    it("a log with both d_max and its alias d_min is ambiguous: UNKNOWN", () => {
+        const rows = compareSettings(
+            [
+                ["d_max", "40,0,0"],
+                ["d_min", "20,0,0"],
+            ],
+            [["d_max", "40,0,0"]],
+        );
+        expect(rows.find((r) => r.id === "d_max")).toMatchObject({ status: "UNKNOWN", a: "duplicate_key_conflict" });
+    });
+    it("link tolerance: rx_smoothed too, the 5 % boundary, and empty or non-decimal elements compare exactly", () => {
+        const st = (key: string, va: string, vb: string) =>
+            compareSettings([[key, va]], [[key, vb]]).find((r) => r.id === key)!.status;
+        expect(st("rc_smoothing_rx_smoothed", "250", "245")).toBe("MATCH");
+        expect(st("rc_smoothing_rx_smoothed", "125", "250")).toBe("DIFF");
+        expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "100,100", "105,100")).toBe("MATCH");
+        expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "100,100", "106,100")).toBe("DIFF");
+        expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "106,", "106,0")).toBe("DIFF");
+        expect(st("rc_smoothing_rx_smoothed", "", "0")).toBe("DIFF");
+        expect(st("rc_smoothing_rx_smoothed", "0x6A", "106")).toBe("DIFF");
+        expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "106,106", "106")).toBe("DIFF");
     });
     it("identity, logging, measurement, derived and self-level-only keys are not compared", () => {
         const rows = compareSettings(
@@ -210,6 +239,34 @@ describe("UNKNOWN is not MATCH", () => {
     it("d_min (Betaflight 4.5) and d_max name the same D Max setting", () => {
         const rows = compareSettings([["d_min", "37,57,0"]], [["d_min", "37,57,0"]]);
         expect(rows.find((r) => r.id === "d_max")!.status).toBe("MATCH");
+    });
+});
+
+describe("battery state (Grok r6)", () => {
+    it("a median in-flight voltage more than 5 % apart fails comparable_battery; within 5 % passes", () => {
+        const fresh = flight({ seed: 41, startUs: 41_000_000, vbat: 420 });
+        const close = flight({ seed: 42, startUs: 43_000_000, vbat: 405 });
+        const sagging = flight({ seed: 43, startUs: 45_000_000, vbat: 370 });
+        expect(fresh.battery.medianInFlight).toBe(420);
+        expect(
+            compareStepLogs(fresh, close, { kind: "none" }).pairChecks.find((x) => x.id === "comparable_battery")!
+                .status,
+        ).toBe("PASS");
+        const c = compareStepLogs(fresh, sagging, { kind: "none" });
+        expect(c.pairChecks.find((x) => x.id === "comparable_battery")!.status).toBe("FAIL");
+        expect(c.axes.every((x) => x.delta === null)).toBe(true);
+    });
+    it("battery voltage not logged: unknown, so no delta", () => {
+        const b = { ...B_SAME, battery: { medianInFlight: null } };
+        expect(
+            compareStepLogs(A, b, { kind: "none" }).pairChecks.find((x) => x.id === "comparable_battery")!.detail,
+        ).toBe("battery_voltage_unknown");
+    });
+    it("a logging key repeated with different values fails same_logging_rate", () => {
+        const b = { ...B_SAME, headerPairs: [...B_SAME.headerPairs, ["P ratio", "64"] as const] };
+        expect(
+            compareStepLogs(A, b, { kind: "none" }).pairChecks.find((x) => x.id === "same_logging_rate")!.status,
+        ).toBe("FAIL");
     });
 });
 

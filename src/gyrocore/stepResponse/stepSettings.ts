@@ -179,7 +179,10 @@ function headerValue(pairs: readonly (readonly [string, string])[], key: string)
 }
 
 function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef): HeaderValue {
-    for (const key of [def.key, ...(def.aliases ?? [])]) {
+    // A log carrying both a key and its alias (d_max and d_min) is ambiguous: never a value (Grok r5).
+    const names = [def.key, ...(def.aliases ?? [])];
+    if (names.filter((k) => pairs.some(([p]) => p === k)).length > 1) return CONFLICT;
+    for (const key of names) {
         const v = headerValue(pairs, key);
         if (v === null) continue;
         if (v === CONFLICT || def.element === undefined) return v;
@@ -198,10 +201,16 @@ function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef):
 export const LINK_DERIVED_TOLERANCE = 0.05;
 const LINK_DERIVED_KEYS = [/^rc_smoothing_active_cutoffs/, /^rc_smoothing_rx_smoothed$/];
 
+const DECIMAL = /^-?\d+(\.\d+)?$/;
+
 function sameWithin(a: string, b: string, rel: number): boolean {
-    const pa = a.split(",").map((x) => Number(x.trim()));
-    const pb = b.split(",").map((x) => Number(x.trim()));
-    if (pa.length !== pb.length || [...pa, ...pb].some((x) => !Number.isFinite(x))) return a === b;
+    const ea = a.split(",").map((x) => x.trim());
+    const eb = b.split(",").map((x) => x.trim());
+    // Only plain decimals are compared numerically; an empty, hex or exponent element falls back to
+    // exact text (Number("") is 0, which would match "0": fail open, Grok r6).
+    if (ea.length !== eb.length || [...ea, ...eb].some((x) => !DECIMAL.test(x))) return a === b;
+    const pa = ea.map(Number);
+    const pb = eb.map(Number);
     return pa.every((x, i) => Math.abs(x - pb[i]) <= rel * Math.max(Math.abs(x), Math.abs(pb[i])));
 }
 

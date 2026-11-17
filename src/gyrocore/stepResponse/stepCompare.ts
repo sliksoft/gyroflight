@@ -39,6 +39,11 @@ export const STEP_COMPARE = Object.freeze({
     sampleRateTolerance: 0.02,
     /** Median manoeuvre peak |setpoint| and median 100 ms change of B over A must lie in this range. */
     excitationRatio: Object.freeze([2 / 3, 3 / 2] as const),
+    /**
+     * Median in-flight battery voltage of B over A must lie within this fraction (thrust scales
+     * roughly with V², so 5 % voltage is about 10 % actuator authority). Not logged: fails.
+     */
+    batteryTolerance: 0.05,
     /** Header keys that set the logging rate; they must be equal. */
     loggingKeys: Object.freeze([
         "looptime",
@@ -93,7 +98,12 @@ export interface StepComparison {
     authorization: { status: "NOT_AUTHORIZED"; reasons: string[] };
 }
 
-const head = (l: StepLogResult, key: string) => l.headerPairs.find(([k]) => k === key)?.[1]?.trim() ?? null;
+/** A header value; a key repeated with different values never equals anything (fail closed, Grok r5). */
+const head = (l: StepLogResult, key: string) => {
+    const values = new Set(l.headerPairs.filter(([k]) => k === key).map(([, v]) => v.trim()));
+    if (!values.size) return null;
+    return values.size > 1 ? `duplicate_key_conflict:${l.key}` : [...values][0];
+};
 
 const uidText = (l: StepLogResult) => (l.identity.uid ? l.identity.uid.join(":") : null);
 
@@ -152,6 +162,17 @@ function pairChecks(a: StepLogResult, b: StepLogResult, intentCheck: IntentCheck
             "saturation_known",
             a.saturation === "KNOWN" && b.saturation === "KNOWN",
             `${a.saturation} / ${b.saturation}`,
+        ),
+    );
+    const va = a.battery.medianInFlight;
+    const vb = b.battery.medianInFlight;
+    out.push(
+        check(
+            "comparable_battery",
+            va !== null && vb !== null && Math.abs(vb / va - 1) <= STEP_COMPARE.batteryTolerance,
+            va === null || vb === null
+                ? "battery_voltage_unknown"
+                : `median in flight ${va} / ${vb} (×${(vb / va).toFixed(3)})`,
         ),
     );
     out.push(check("settings_as_intended", intentCheck.passed, intentCheck.reasons.join("; ") || "ok"));

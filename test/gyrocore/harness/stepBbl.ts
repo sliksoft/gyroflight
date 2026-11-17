@@ -92,6 +92,8 @@ export interface AcroLogOptions {
     saturateAt?: { start: number; end: number }[];
     /** Header overrides (tune, identity, logging). */
     headers?: Record<string, string>;
+    /** Logged battery voltage (vbatLatest, log units); default 400. */
+    vbat?: number;
     /** Throttle (rcCommand[3]); default 1400 (flight). */
     throttle?: number;
     /** First loopIteration (0: the log holds its session start). */
@@ -157,7 +159,7 @@ export function acroLog(o: AcroLogOptions = {}): Uint8Array {
             gyro: [Math.round(axes[0].gy[i]), Math.round(axes[1].gy[i]), Math.round(axes[2].gy[i])],
             debug: o.debug ? o.debug(i) : [0, 0, 0, 0],
             motors: sat ? [2047, 900, 900, 900] : [900, 900, 900, 900],
-            extra: [o.throttle ?? 1400],
+            extra: [o.throttle ?? 1400, o.vbat ?? 400],
         });
         if (dropAfter.has(i)) skip = dropAfter.get(i)!;
     }
@@ -180,7 +182,7 @@ export function acroLog(o: AcroLogOptions = {}): Uint8Array {
         pidProcessDenom: Math.round(dtUs / 125),
         slowFields: o.slowFields,
         motorCount: 4,
-        extraFields: ["rcCommand[3]"],
+        extraFields: ["rcCommand[3]", "vbatLatest"],
         debugMode: o.debugMode ?? 0,
         firstIteration: o.firstIteration ?? 0,
         sFrames: (o.flagChanges ?? []).map((c) => ({ atFrame: frameIndexOf(c.at), flightModeFlags: c.flags })),

@@ -97,6 +97,7 @@ const FIELDS = [
     "axisI[0]",
     "axisI[1]",
     "axisI[2]",
+    "vbatLatest",
 ] as const;
 
 export type Knowledge = "KNOWN" | "UNKNOWN";
@@ -141,6 +142,12 @@ export interface StepLogResult {
     chirp: { debugModeChirp: boolean; segments: number; boxInFirmware: boolean; boxSeen: boolean };
     saturation: Knowledge;
     failsafe: Knowledge;
+    /**
+     * Median logged battery voltage (vbatLatest, log units) over the airborne samples; null when
+     * not logged. A flight-state covariate for the A/B (Grok r6): at a fixed motor command the
+     * thrust scales with the voltage, so a fresh and a sagging pack can change the loop gain.
+     */
+    battery: { medianInFlight: number | null };
     /** Mode names (bits) active in the log, for the report. */
     modesSeen: string[];
     notes: string[];
@@ -220,6 +227,7 @@ function emptyResult(
         chirp: { debugModeChirp: false, segments: 0, boxInFirmware: false, boxSeen: false },
         saturation: "UNKNOWN",
         failsafe: "UNKNOWN",
+        battery: { medianInFlight: null },
         modesSeen: [],
         notes: [],
         loop: loopInfo(base.headerPairs, []),
@@ -465,6 +473,14 @@ function analyzeLog(
     };
     const airborne = new Uint8Array(n);
     for (let i = 0; i < n; i++) airborne[i] = ev.notAirborne[i] ? 0 : 1;
+    const vbat = ch.vbatLatest;
+    if (vbat) {
+        const v: number[] = [];
+        for (let i = 0; i < n; i++) if (airborne[i] && Number.isFinite(vbat[i]) && vbat[i] > 0) v.push(vbat[i]);
+        v.sort((x, y) => x - y);
+        result.battery = { medianInFlight: v.length ? v[v.length >> 1] : null };
+    }
+    if (result.battery.medianInFlight === null) notes.push("battery_voltage_not_logged_in_flight");
     result.seconds = {
         airborne: count(airborne),
         chirp: count(ev.chirp),
