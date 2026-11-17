@@ -129,6 +129,20 @@ describe("UNKNOWN is not MATCH", () => {
             expect(rows.find((r) => r.id === key)!.status).toBe("DIFF");
         }
     });
+    it("link-derived cutoffs: jitter within 5 % on one link matches, a link change is a difference", () => {
+        const st = (va: string, vb: string) =>
+            compareSettings(
+                [["rc_smoothing_active_cutoffs_ff_sp_thr", va]],
+                [["rc_smoothing_active_cutoffs_ff_sp_thr", vb]],
+            ).find((r) => r.id === "rc_smoothing_active_cutoffs_ff_sp_thr")!.status;
+        expect(st("106,106", "107,107")).toBe("MATCH");
+        expect(st("53,53", "106,106")).toBe("DIFF");
+        // other settings stay exact
+        expect(
+            compareSettings([["iterm_windup", "80"]], [["iterm_windup", "81"]]).find((r) => r.id === "iterm_windup")!
+                .status,
+        ).toBe("DIFF");
+    });
     it("vbatref is the battery voltage at arming (flight state), not a setting: not compared", () => {
         expect(
             compareSettings([["vbatref", "418"]], [["vbatref", "377"]]).find((r) => r.id === "vbatref"),

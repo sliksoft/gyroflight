@@ -189,6 +189,22 @@ function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef):
     return null;
 }
 
+/**
+ * Values the firmware computes from the measured RX frame rate (not set by the user). They jitter
+ * between two logs on the same link (AIR65 20261106_011849: 106 and 107 Hz), so each element is
+ * compared with this relative tolerance; a link change (125 → 250 Hz, a factor 2) stays a DIFF.
+ * The tolerance was chosen after seeing that jitter on the AIR65 logs.
+ */
+export const LINK_DERIVED_TOLERANCE = 0.05;
+const LINK_DERIVED_KEYS = [/^rc_smoothing_active_cutoffs/, /^rc_smoothing_rx_smoothed$/];
+
+function sameWithin(a: string, b: string, rel: number): boolean {
+    const pa = a.split(",").map((x) => Number(x.trim()));
+    const pb = b.split(",").map((x) => Number(x.trim()));
+    if (pa.length !== pb.length || [...pa, ...pb].some((x) => !Number.isFinite(x))) return a === b;
+    return pa.every((x, i) => Math.abs(x - pb[i]) <= rel * Math.max(Math.abs(x), Math.abs(pb[i])));
+}
+
 function row(group: SettingGroup | "other", id: string, va: HeaderValue, vb: HeaderValue): SettingRow {
     const shown = (v: HeaderValue) => (v === CONFLICT ? "duplicate_key_conflict" : v);
     const status: SettingMatch =
@@ -198,7 +214,7 @@ function row(group: SettingGroup | "other", id: string, va: HeaderValue, vb: Hea
               ? "NOT_LOGGED"
               : va === null || vb === null
                 ? "UNKNOWN"
-                : va === vb
+                : va === vb || (LINK_DERIVED_KEYS.some((k) => k.test(id)) && sameWithin(va, vb, LINK_DERIVED_TOLERANCE))
                   ? "MATCH"
                   : "DIFF";
     return { group, id, a: shown(va), b: shown(vb), status };
