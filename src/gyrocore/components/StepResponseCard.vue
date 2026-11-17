@@ -102,7 +102,9 @@
             :data-status="cmp.status"
         >
             <UBadge
-                :color="cmp.status === 'COMPARED' ? 'success' : cmp.status === 'COMPARABLE_NO_DELTA' ? 'neutral' : 'warning'"
+                :color="
+                    cmp.status === 'COMPARED' ? 'success' : cmp.status === 'COMPARABLE_NO_DELTA' ? 'neutral' : 'warning'
+                "
                 variant="subtle"
                 class="mb-2"
                 data-gyrocore="step-ab-badge"
@@ -185,7 +187,7 @@
                                 <tr v-for="m in METRICS" :key="m.key" :data-row="m.key">
                                     <th scope="row" class="text-start font-normal text-dimmed">{{ $t(m.label) }}</th>
                                     <td v-for="s in shown" :key="s.side" class="text-end" :data-side="s.side">
-                                        {{ metricText(res(s, axis, thr)?.metrics ?? null, m.key) }}
+                                        {{ metricText(res(s, axis, thr), m.key) }}
                                     </td>
                                     <td v-if="deltaOf(axis, thr)" class="text-end" data-side="delta">
                                         {{ deltaText(deltaOf(axis, thr)![m.key].delta, m.key) }}
@@ -224,6 +226,17 @@
                                 </tr>
                             </tbody>
                         </table>
+                        <p
+                            v-if="
+                                shown.some(
+                                    (s) => res(s, axis, thr)?.metrics && res(s, axis, thr)?.status !== 'MEASURED',
+                                )
+                            "
+                            class="text-xs text-dimmed mt-1"
+                            :data-gyrocore="`step-indication-${axis}-${thr}`"
+                        >
+                            {{ t("gyrocoreStepIndicationOnly", [MIN_MANOEUVRES]) }}
+                        </p>
                         <details class="text-xs mt-1" :data-gyrocore="`step-rejections-${axis}-${thr}`">
                             <summary class="cursor-pointer text-dimmed">{{ $t("gyrocoreStepRejections") }}</summary>
                             <div v-for="s in shown" :key="s.side" :data-side="s.side">
@@ -283,6 +296,7 @@ const store = useStepResponseStore();
 const SIDES = ["a", "b"] as const;
 const AXES = STEP_AXES;
 const THRESHOLDS = STEP_METHOD.thresholdsDegS;
+const MIN_MANOEUVRES = STEP_METHOD.minManoeuvres;
 const AXIS_KEYS = { roll: "autotuneAxisRoll", pitch: "autotuneAxisPitch", yaw: "autotuneAxisYaw" } as const;
 const METRICS: { key: keyof StepMetrics; label: string }[] = [
     { key: "overshoot", label: "gyrocoreStepOvershoot" },
@@ -342,11 +356,18 @@ function deltaOf(axis: StepAxis, thr: number) {
     return cmpCell(axis, thr)?.delta ?? null;
 }
 
-function metricText(m: StepMetrics | null, key: keyof StepMetrics): string {
+/** A number from fewer than the minimum of manoeuvres is shown in brackets: an indication only. */
+function metricText(r: StepThresholdResult | null, key: keyof StepMetrics): string {
+    const m = r?.metrics;
     if (!m) return "—";
     const v = m[key];
-    if (v === null) return i18n.getMessage("gyrocoreStepNotReached");
-    return key === "overshoot" || key === "finalValue" ? v.toFixed(3) : `${v.toFixed(1)} ms`;
+    const text =
+        v === null
+            ? i18n.getMessage("gyrocoreStepNotReached")
+            : key === "overshoot" || key === "finalValue"
+              ? v.toFixed(3)
+              : `${v.toFixed(1)} ms`;
+    return r.status === "MEASURED" ? text : `(${text})`;
 }
 
 function deltaText(v: number | null, key: keyof StepMetrics): string {

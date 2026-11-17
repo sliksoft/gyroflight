@@ -1737,7 +1737,7 @@
     "gyrocoreStepClear": { "message": "Remove all logs from this card" },
     "gyrocoreStepAbHead": { "message": "Flight A / B" },
     "gyrocoreStepAbHelp": {
-        "message": "Choose two different flights and what the comparison tests. A delta is shown only for the same axis and threshold when both are MEASURED and every check passes."
+        "message": "This Flight A/B is separate from the Tune Session Flight A/B above: it works on the logs imported in this browser tab, also without CHIRP. Choose two different flights and what the comparison tests. A delta is shown only for the same axis and threshold when both are MEASURED and every check passes."
     },
     "gyrocoreStepFlightA": { "message": "Flight A" },
     "gyrocoreStepFlightB": { "message": "Flight B" },
@@ -1794,6 +1794,8 @@
     "gyrocoreStepReason_input_above_max": { "message": "stick above 500 deg/s" },
     "gyrocoreStepReason_insufficient_change": { "message": "too little stick change" },
     "gyrocoreStepReason_deconvolution_failed": { "message": "estimate failed" },
+    "gyrocoreStepReason_peak_off_centre": { "message": "stick peak not in the middle of the window" },
+    "gyrocoreStepIndicationOnly": { "message": "(…) fewer than $1 manoeuvres: an indication only, not a measurement." },
     "gyrocoreStepNoDelta": { "message": "No delta: $1" },
     "gyrocoreStepNotReached": { "message": "not reached" },
     "gyrocoreStepLoopHead": { "message": "iterm_relax and feedforward in these logs" },

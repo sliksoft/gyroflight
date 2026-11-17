@@ -120,6 +120,11 @@ describe("log-level exclusions", () => {
         expect(cell(r, "yaw", 80).rejected.saturation).toBeGreaterThan(0);
         expect(r.seconds.saturated).toBeCloseTo(0.1, 2);
     });
+    it("bit 31 of the box mask (PREARM) does not turn the flags into 'unknown'", () => {
+        const r = one(acroLog({ seconds: 20, flags: ARM_FLAG | 0x80000000 }));
+        expect(cell(r, "roll", 80).status).toBe("MEASURED");
+        expect(cell(r, "roll", 80).rejected.not_airborne).toBeLessThan(cell(r, "roll", 80).windowsTotal);
+    });
     it("no flightModeFlags: the mode is unknown, so the log is BLOCKED", () => {
         const r = one(acroLog({ seconds: 10, slowFields: false }));
         expect(r.status).toBe("BLOCKED");

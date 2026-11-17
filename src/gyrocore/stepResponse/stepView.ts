@@ -79,7 +79,8 @@ export function stepChart(series: StepChartSeries[], width: number, height: numb
         const lower = [...idx].reverse().map((k) => `L${x(timeMs[k]).toFixed(1)} ${y(p25[k]).toFixed(1)}`);
         bands.push({ id: s.id, d: `${upper.join(" ")} ${lower.join(" ")} Z` });
     }
-    const yTicks = [lo, 0, 0.5, 1, hi].filter((v, i, a) => a.indexOf(v) === i && v >= lo && v <= hi);
+    // The fixed references 0, 0.5 and 1, plus the range ends where they are not too close to one.
+    const yTicks = [0, 0.5, 1, ...[lo, hi].filter((e) => [0, 0.5, 1].every((r) => Math.abs(e - r) >= 0.15))];
     return {
         lines,
         bands,

@@ -88,11 +88,17 @@ describe("UNKNOWN is not MATCH", () => {
         expect(checkIntent(rows, { kind: "group", group: "tpa" }).passed).toBe(false);
         expect(compareStepLogs(A, b, { kind: "none" }).status).toBe("NOT_COMPARABLE");
     });
-    it("a group setting absent from both logs is UNKNOWN; an 'other' setting absent from both is not logged", () => {
+    it("a setting absent from both logs is not logged (the firmware has none): no UNKNOWN, the A/B stays possible", () => {
         const strip = (l: StepLogResult) => l.headerPairs.filter(([k]) => k !== "tpa_rate" && k !== "abs_control_gain");
         const rows = compareSettings(strip(A), strip(B_SAME));
-        expect(rows.find((r) => r.id === "tpa_rate")!.status).toBe("UNKNOWN");
+        expect(rows.find((r) => r.id === "tpa_rate")!.status).toBe("NOT_LOGGED");
         expect(rows.find((r) => r.id === "abs_control_gain")!.status).toBe("NOT_LOGGED");
+        expect(checkIntent(rows, { kind: "none" }).passed).toBe(true);
+        // a group whose settings this firmware does not log cannot be the intended change
+        const tpaGone = (l: StepLogResult) => l.headerPairs.filter(([k]) => !k.startsWith("tpa_"));
+        expect(
+            checkIntent(compareSettings(tpaGone(A), tpaGone(B_SAME)), { kind: "group", group: "tpa" }).reasons,
+        ).toEqual(["expected_change_missing:tpa"]);
     });
     it("d_min (Betaflight 4.5) and d_max name the same D Max setting", () => {
         const rows = compareSettings([["d_min", "37,57,0"]], [["d_min", "37,57,0"]]);
@@ -183,6 +189,19 @@ describe("the same flight never is A and B", () => {
 
 describe("store: imports in memory, selection over unique flights", () => {
     beforeEach(() => setActivePinia(createPinia()));
+    it("a file added while the analysis runs is analysed too (Grok r1 SHOULD-FIX-2)", async () => {
+        const store = useStepResponseStore();
+        await store.addFile(acroLog({ seconds: 10, seed: 1 }), "first.bbl");
+        const running = store.analyzePending();
+        expect(store.analyzing).toBe(true);
+        await store.addFile(acroLog({ seconds: 10, seed: 2, startUs: 9_000_000 }), "second.bbl");
+        // the card's watch calls again; while a pass runs that call returns at once
+        const refused = store.analyzePending();
+        await refused;
+        await running;
+        expect(store.pending).toBe(false);
+        expect(store.files.every((f) => f.logs)).toBe(true);
+    });
     it("a flight carried by two files is offered once; one log cannot be A and B", async () => {
         const store = useStepResponseStore();
         const f1 = acroLog({ seconds: 20, seed: 1, startUs: 4_000_000 });

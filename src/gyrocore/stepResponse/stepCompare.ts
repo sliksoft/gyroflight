@@ -270,9 +270,7 @@ export function compareStepLogs(a: StepLogResult | null, b: StepLogResult | null
 }
 
 /** For a no-change control pair: the per-metric spread the flights show between themselves. */
-export function controlSpread(
-    cmp: StepComparison,
-): {
+export function controlSpread(cmp: StepComparison): {
     axis: StepAxis;
     thresholdDegS: number;
     overshoot: number;

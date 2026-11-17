@@ -65,6 +65,14 @@ export const STEP_METHOD = Object.freeze({
      * threshold carries no information about the first 500 ms of the response.
      */
     changeSpanMs: 100,
+    /**
+     * The sample of largest |setpoint| must lie in this part of the window (fraction of the window
+     * length). Hann on both signals is exact only where the taper is nearly flat over the response:
+     * an event in the outer quarter of the window biases overshoot and final value by 0.03–0.12
+     * (Grok r1 SHOULD-FIX-1, reproduced; test "edge bias"). The band (0.6 s at 2 s) is wider than the
+     * hop (0.4 s), so every peak lies in the band of at least one window.
+     */
+    centreBand: Object.freeze([0.4, 0.7] as const),
     /** A window's final value outside this range is flagged (kept in the primary result). */
     finalValueRange: Object.freeze([0.5, 1.5] as const),
     /** Fewer manoeuvres than this: INSUFFICIENT. */
@@ -95,6 +103,7 @@ export const STEP_WINDOW_REASONS = [
     "input_below_threshold",
     "input_above_max",
     "insufficient_change",
+    "peak_off_centre",
     "deconvolution_failed",
 ] as const;
 export type StepWindowReason = (typeof STEP_WINDOW_REASONS)[number];
@@ -427,6 +436,8 @@ interface WindowRecord {
     peak: number;
     argmax: number;
     change: number;
+    /** The peak lies in STEP_METHOD.centreBand. */
+    centred: boolean;
     curve: Float64Array | null;
     deconvFailed: boolean;
     finalValue: number;
@@ -536,6 +547,8 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
     const W = Math.round(STEP_METHOD.windowS * fs);
     const hop = Math.round(STEP_METHOD.hopS * fs);
     const span = Math.max(2, Math.round((STEP_METHOD.changeSpanMs / 1000) * fs));
+    const centreLo = Math.round(STEP_METHOD.centreBand[0] * W);
+    const centreHi = Math.round(STEP_METHOD.centreBand[1] * W);
     const minThr = Math.min(...STEP_METHOD.thresholdsDegS);
     const pAir = prefix(ev.notAirborne);
     const pGap = prefix(ev.gapBefore);
@@ -585,7 +598,8 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
         let curve: Float64Array | null = null;
         let deconvFailed = false;
         let finalValue = NaN;
-        if (!common && peak >= minThr && peak <= STEP_METHOD.maxPeakDegS && change >= minThr) {
+        const centred = argmax >= start + centreLo && argmax <= start + centreHi;
+        if (!common && peak >= minThr && peak <= STEP_METHOD.maxPeakDegS && change >= minThr && centred) {
             curve = deconvolveStep(
                 Array.prototype.slice.call(setpoint, start, end) as number[],
                 Array.prototype.slice.call(gyro, start, end) as number[],
@@ -596,7 +610,7 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
             else deconvFailed = true;
         }
         mw = ev.modeWord[start];
-        records.push({ start, common, peak, argmax, change, curve, deconvFailed, finalValue, modeWord: mw });
+        records.push({ start, common, peak, argmax, change, centred, curve, deconvFailed, finalValue, modeWord: mw });
     }
     const [lo, hi] = STEP_METHOD.finalValueRange;
     const thresholds: StepThresholdResult[] = STEP_METHOD.thresholdsDegS.map((thr) => {
@@ -608,6 +622,7 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
             if (!reason && r.peak < thr) reason = "input_below_threshold";
             else if (!reason && r.peak > STEP_METHOD.maxPeakDegS) reason = "input_above_max";
             else if (!reason && r.change < thr) reason = "insufficient_change";
+            else if (!reason && !r.centred) reason = "peak_off_centre";
             else if (!reason && (r.deconvFailed || !r.curve)) reason = "deconvolution_failed";
             if (reason) {
                 rejected[reason]++;

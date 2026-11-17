@@ -82,11 +82,14 @@ Every result is given per axis for both lower bounds, **40 and 80 deg/s**. A win
 | 4   | `chirp_active`             | the BOXCHIRP flag, where the firmware has the box, or a sweep segment from the existing `extractChirp`, where the debug mode is CHIRP. Plus 0.25 s guard on both sides (`SEGMENTATION_THRESHOLDS.chirpGuardS`). **A CHIRP debug mode without a sweep is not activity** |
 | 5   | `mode_change`              | a change in the flight-relevant boxes inside the window: the boxes of 6, plus ARM, AIRMODE, ANTIGRAVITY and CHIRP                                                                                                                                                      |
 | 6   | `self_level_or_automation` | ANGLE, HORIZON, MAG, ALTHOLD, BARO, HEADFREE, PASSTHRU, FAILSAFE, POSHOLD, GPSHOME, GPSHOLD, GPSRESCUE, AUTOPILOT, 3D, FPVANGLEMIX, FLIPOVERAFTERCRASH, ACROTRAINER, LAUNCHCONTROL                                                                                     |
-| 7   | `saturation`               | a motor at either end of `motorOutput` (min or max)                                                                                                                                                                                                                    |
+| 7   | `saturation`               | a motor at either end of `motorOutput` (min or max), or a motor value that is not finite                                                                                                                                                                               |
 | 8   | `input_below_threshold`    | peak \|setpoint\| < threshold                                                                                                                                                                                                                                          |
 | 9   | `input_above_max`          | peak \|setpoint\| > 500 deg/s                                                                                                                                                                                                                                          |
 | 10  | `insufficient_change`      | the largest change of the setpoint (max − min) within any 100 ms stretch of the window is < threshold                                                                                                                                                                  |
-| 11  | `deconvolution_failed`     | the result is not finite                                                                                                                                                                                                                                               |
+| 11  | `peak_off_centre`          | the sample of largest \|setpoint\| lies outside 40–70 % of the window (see below)                                                                                                                                                                                      |
+| 12  | `deconvolution_failed`     | the result is not finite                                                                                                                                                                                                                                               |
+
+**Why the peak must lie in the centre of the window.** Hann on both signals is exact only where the taper is nearly flat over the 500 ms response. A single flick with its onset in the outer quarter of the window is biased by the taper and the cut-off tail: overshoot and final value deviate by 0.03–0.12, against ≤ 0.02 in the centre (Grok review round 1, reproduced in the test "window position"). A window is therefore used only when its sample of largest |setpoint| lies at 40–70 % of the window. That band is 0.6 s wide, wider than the hop of 0.4 s, so every flick keeps at least one window.
 
 **Mode names are read by name, per firmware.** They come from the Viewer's `FLIGHT_LOG_FLIGHT_MODE_NAME`, which `adjustFieldDefsList` sets for the firmware version of each log. The bit positions are not hardcoded.
 
@@ -138,18 +141,21 @@ All three are tests.
 | **INSUFFICIENT** | fewer (`manoeuvres_below_minimum:n<5`) |
 | **BLOCKED**      | see §3                                 |
 
-**Why the minimum is 5.** A seeded Monte Carlo was run on the known second-order system at 14 dB SNR (1 kHz, 600 runs). It gives the 90th-percentile error of the overshoot, by manoeuvre count:
+**Why the minimum is 5.** A seeded Monte Carlo was run on the known second-order system at 14 dB SNR (1 kHz, 600 runs, with the centre-band rule of §3). It gives the 90th-percentile error by manoeuvre count:
 
-| manoeuvres | 90th-percentile overshoot error |
-| ---------- | ------------------------------- |
-| 1–3        | 0.17–0.20                       |
-| 4          | 0.12                            |
-| 5          | 0.10                            |
-| 6–9        | 0.07–0.10                       |
+| manoeuvres | overshoot error | t50 error  |
+| ---------- | --------------- | ---------- |
+| 1          | 0.23            | 3.0 ms     |
+| 2          | 0.15            | 2.0 ms     |
+| 3          | 0.12            | 1.5 ms     |
+| 4          | 0.10            | 1.3 ms     |
+| 5          | 0.09            | 1.3 ms     |
+| 6–8        | 0.08–0.10       | 1.0–1.1 ms |
 
-- From 5 on the error levels off. t50 behaves the same: the 90th percentile is ≤ 1.4 ms from 5 on.
+- From 5 on the error levels off; 5 is a soft knee, not a sharp optimum.
 - A test keeps the property: at 5 or more manoeuvres the 90th percentile is ≤ 0.12, and at 3 or fewer it is clearly larger.
-- This is a minimum on synthetic data. It has not yet been validated on real flights (§8).
+- This is a minimum on synthetic data (linear plant, white noise). It has not yet been validated on real flights (§8).
+- With fewer manoeuvres the card still shows the curve and the numbers, in brackets and marked as an indication only.
 
 **Final value outside 0.5–1.5.** The window is flagged and stays in the primary result. The card also reports the full aggregation **without** those windows. Manoeuvres can disappear there, and the status can drop to INSUFFICIENT.
 
@@ -175,8 +181,9 @@ All three are tests.
 - Settings are compared as logged header text. PID values are split per axis and term (`roll_p`, …).
 - `d_min` (Betaflight 4.5) and `d_max` count as the same D Max setting.
 - The `simplified_*` slider keys are not compared. The firmware logs the PID, D Max, feedforward and filter values the sliders produce, so a slider move shows up in the group whose values changed.
-- A group setting absent from either log is **UNKNOWN**. **UNKNOWN never counts as MATCH**, and it fails both intents.
-- **"Other":** looptime, pid_process_denom, anti-gravity, I windup, pidsum limits, motor and idle settings, rc smoothing, deadband, throttle limits and similar settings must always MATCH. A key that is absent from both logs there is "not logged" (this firmware does not have it).
+- A setting present in one log only is **UNKNOWN**. **UNKNOWN never counts as MATCH**, and it fails both intents.
+- A setting absent from **both** logs is "not logged": that firmware has no such setting. The A/B requires the same firmware revision, so absence is a property of the firmware, not a missing value (Grok review round 1). A group whose settings the firmware does not log cannot be the intended change (`expected_change_missing`).
+- **"Other":** looptime, pid_process_denom, anti-gravity, I windup, pidsum limits, motor and idle settings, rc smoothing, deadband, throttle limits and similar settings must always MATCH.
 - **Rule per intent:**
     - "No change" requires every relevant setting to MATCH.
     - A group requires at least one DIFF in that group and MATCH everywhere else. A change elsewhere is named as `extra_change:…`.
@@ -211,12 +218,12 @@ All three are tests.
 
 **Pair status:**
 
-| status | meaning |
-|---|---|
-| INCOMPLETE | A or B not chosen |
-| NOT_COMPARABLE | a pair check failed |
+| status              | meaning                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| INCOMPLETE          | A or B not chosen                                                                             |
+| NOT_COMPARABLE      | a pair check failed                                                                           |
 | COMPARABLE_NO_DELTA | the pair checks pass, but no axis and threshold has a delta (for example nothing is MEASURED) |
-| COMPARED | at least one delta |
+| COMPARED            | at least one delta                                                                            |
 
 **Flight-to-flight spread.** A "no change" pair gives the spread between flights (`controlSpread`). A change counts as above the spread only when its delta clearly exceeds the spread measured on comparable flights. One control pair is a first indication, not a distribution.
 
@@ -249,5 +256,5 @@ These were fixed before verification (dossier `PLAN.md`, 17 November 2026). All 
 - **The minimum of 5 manoeuvres** and the excitation ratio ×2/3…×3/2 are justified on synthetic data. They have not yet been checked against real flights.
 - **The flight runs reuse the M4 take-off threshold** (rcCommand[3] ≥ 1150). A craft that hovers below it is counted as on the ground.
 - **The M4 segmentation hardcodes the 2025.12+ bit positions** for ANGLE/HORIZON/CHIRP. Only its flight ranges are used here, and those rely on ARM (bit 0 in every table) and the throttle. The mode exclusions are read by name per firmware. The M4 issue itself is outside this WU.
-- **Box bits beyond 31 are not logged:** ACROTRAINER and LAUNCHCONTROL.
+- **Box bits beyond 31 are not logged:** ACROTRAINER and LAUNCHCONTROL. Bit 31 itself (PREARM in 2025.12+) is cleared before use, so it cannot read as the "no S-frame yet" marker.
 - **Not in this WU:** the throttle heatmap, a second CHIRP estimator, validation with pichim's logs, and permanent storage.

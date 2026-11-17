@@ -78,13 +78,16 @@ export const useStepResponseStore = defineStore("gyrocoreStepResponse", () => {
         if (analyzing.value) return;
         analyzing.value = true;
         try {
-            for (const f of files.value) {
-                if (f.logs || f.error || !f.bytes) continue;
+            // Re-read the list on every pass: a file added while this loop runs is analysed too
+            // (Grok r1 SHOULD-FIX-2).
+            for (;;) {
+                const f = files.value.find((x) => !x.logs && !x.error && x.bytes);
+                if (!f) break;
                 await new Promise((r) => setTimeout(r, 0));
                 let logs: StepLogResult[] | null = null;
                 let error: string | null = null;
                 try {
-                    logs = analyzeStepFile(f.bytes, f.fileName, f.sha256);
+                    logs = analyzeStepFile(f.bytes!, f.fileName, f.sha256);
                 } catch (err) {
                     error = err instanceof Error ? err.message : "analysis_failed";
                 }
@@ -94,6 +97,9 @@ export const useStepResponseStore = defineStore("gyrocoreStepResponse", () => {
             analyzing.value = false;
         }
         reconcile();
+        // A file whose import finished just after the last pass (or while a pass was refused because
+        // one was running) is picked up here, so nothing stays pending.
+        if (files.value.some((f) => !f.logs && !f.error && f.bytes)) await analyzePending();
     }
 
     const pending = computed(() => files.value.some((f) => !f.logs && !f.error));

@@ -4,12 +4,12 @@
         <p v-if="!chart" class="text-xs text-dimmed" data-gyrocore="step-chart-empty">{{ emptyText }}</p>
         <svg
             v-else
-            :viewBox="`0 0 ${W + PAD_L + 4} ${H + PAD_B + 4}`"
+            :viewBox="`0 0 ${W + PAD_L + 4} ${H + PAD_B + PAD_T + 2}`"
             class="w-full h-auto"
             role="img"
             :aria-label="title"
         >
-            <g :transform="`translate(${PAD_L},2)`">
+            <g :transform="`translate(${PAD_L},${PAD_T})`">
                 <line :x1="0" :x2="W" :y1="H" :y2="H" class="stroke-current text-dimmed" stroke-width="1" />
                 <line
                     :x1="0"
@@ -100,6 +100,7 @@ const W = 360;
 const H = 140;
 const PAD_L = 28;
 const PAD_B = 14;
+const PAD_T = 6;
 
 const chart = computed(() => stepChart(props.series, W, H));
 

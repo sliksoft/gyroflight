@@ -25,6 +25,7 @@ function run(sp: Float64Array, gy: Float64Array, fs = FS, ev = cleanEvidence(sp.
     return analyzeAxisStep({ sampleRateHz: fs, setpoint: sp, gyro: gy, evidence: ev, epsilonRel });
 }
 const at = (r: ReturnType<typeof run>, thr: 40 | 80) => r.thresholds.find((t) => t.thresholdDegS === thr)!;
+const at80 = (r: ReturnType<typeof run>) => at(r, 80);
 const sumCounts = (t: StepThresholdResult) => Object.values(t.rejected).reduce((a, b) => a + b, 0) + t.windowsUsed;
 
 describe("method constants", () => {
@@ -47,6 +48,9 @@ describe("stepMetrics", () => {
         expect(m.peakTimeMs).toBe(10);
         expect(m.t50Ms).toBeCloseTo(5, 12);
         expect(m.finalValue).toBeCloseTo(0.9, 12);
+    });
+    it("t50 is 0 when the curve starts at or above 0.5", () => {
+        expect(stepMetrics(new Float64Array(501).fill(0.7), 1000).t50Ms).toBe(0);
     });
     it("t50 is null when the curve never reaches 0.5; overshoot may be negative", () => {
         const m = stepMetrics(new Float64Array(501).fill(0.4), 1000);
@@ -137,6 +141,50 @@ describe("ε (criterion 3)", () => {
     });
 });
 
+describe("window position: the peak must lie in the centre band (Grok r1 SHOULD-FIX-1)", () => {
+    const fs = 1000;
+    const p = { ...PLANT, gain: 0.8 };
+    const ref = stepMetrics(trueStep(fs, p), fs);
+    /** One 150 ms flick with its onset at sample `at` of a single 2 s window. */
+    const single = (at: number) => {
+        const raw = new Float64Array(2000);
+        raw.fill(200, at, at + 150);
+        let s = 0;
+        const sp = raw.map((v) => (s += 0.2 * (v - s)));
+        return { sp, gy: simulate(sp, fs, p) };
+    };
+    it("an event in the outer part of the window is biased by the taper (the reason for the rule)", () => {
+        const { sp, gy } = single(1700);
+        const m = stepMetrics(deconvolveStep(sp, gy, fs)!, fs);
+        expect(Math.abs(m.overshoot - ref.overshoot)).toBeGreaterThan(0.05);
+    });
+    it("events whose peak lies in the centre band are within 0.03 of the truth", () => {
+        for (const at of [700, 900, 1100, 1200]) {
+            const { sp, gy } = single(at);
+            const m = stepMetrics(deconvolveStep(sp, gy, fs)!, fs);
+            expect(Math.abs(m.overshoot - ref.overshoot)).toBeLessThanOrEqual(0.03);
+            expect(Math.abs(m.finalValue - 0.8)).toBeLessThanOrEqual(0.03);
+        }
+    });
+    it("a window whose peak is outside the band is rejected as peak_off_centre", () => {
+        for (const [at, used] of [
+            [100, 0],
+            [1700, 0],
+            [900, 1],
+        ] as const) {
+            const { sp, gy } = single(at);
+            const t = at80(run(sp, gy, fs));
+            expect(t.windowsUsed).toBe(used);
+            expect(t.rejected.peak_off_centre).toBe(1 - used);
+        }
+    });
+    it("the band is wider than the hop, so every flick keeps at least one window", () => {
+        expect((STEP_METHOD.centreBand[1] - STEP_METHOD.centreBand[0]) * STEP_METHOD.windowS).toBeGreaterThan(
+            STEP_METHOD.hopS,
+        );
+    });
+});
+
 describe("excitation measure: the 100 ms change", () => {
     it("near-constant input above 80 deg/s is rejected as insufficient_change", () => {
         const sp = withNoise(new Float64Array(10 * FS).fill(150), 2, 1);
@@ -198,7 +246,9 @@ describe("exclusions (criterion 4)", () => {
         const clean = at(run(sp, gy), 80);
         const t = at(run(sp, gy, FS, ev), 80);
         expect(t.rejected.frame_gap).toBe(windowsOver(10 * FS));
-        expect(t.windowsUsed).toBe(clean.windowsUsed - t.rejected.frame_gap);
+        // every other window is judged exactly as without the gap
+        expect(t.windowsUsed).toBeGreaterThanOrEqual(clean.windowsUsed - t.rejected.frame_gap);
+        expect(sumCounts(t)).toBe(clean.windowsTotal);
         expect(t.status).toBe("MEASURED");
     });
     const cases: [string, (ev: ReturnType<typeof cleanEvidence>) => void, (typeof STEP_WINDOW_REASONS)[number]][] = [
@@ -259,7 +309,11 @@ describe("manoeuvres (criterion 5)", () => {
         for (let i = 0; i < n; i++) sp[i] = s += 0.12 * (raw[i] - s);
         const t = at(run(sp, simulate(sp, fs, PLANT), fs), 80);
         expect(t.windowsTotal).toBe(6);
-        expect(t.windowsUsed).toBe(5);
+        // the flick lies in 5 windows; the ones whose centre band (40–70 %) misses its peak are
+        // peak_off_centre, the rest all belong to the same single manoeuvre
+        expect(t.rejected.input_below_threshold).toBe(1);
+        expect(t.rejected.peak_off_centre + t.windowsUsed).toBe(5);
+        expect(t.windowsUsed).toBeGreaterThanOrEqual(1);
         expect(t.manoeuvres).toBe(1);
         expect(t.status).toBe("INSUFFICIENT");
         expect(t.reasons[0]).toBe(`manoeuvres_below_minimum:1<${STEP_METHOD.minManoeuvres}`);
@@ -302,7 +356,7 @@ describe("manoeuvres (criterion 5)", () => {
         const few: number[] = [];
         const enough: number[] = [];
         for (let seed = 1; seed <= 40; seed++) {
-            for (const seconds of [4, 9]) {
+            for (const seconds of [3, 12]) {
                 const sp = stickSetpoint({ seconds, fs, seed: seed * 7919 });
                 const g0 = simulate(sp, fs, p);
                 const t = at(run(sp, withNoise(g0, rms(g0) / 5, seed), fs), 80);

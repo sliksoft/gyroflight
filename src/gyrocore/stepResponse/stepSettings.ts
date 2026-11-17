@@ -109,7 +109,6 @@ export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly Se
     rates: keys("rates_type", "rc_rates", "rc_expo", "rates", "rate_limits"),
     /**
      * Not a selectable change, but read by the loop during the flight: must MATCH in every A/B.
-     * A key absent from both logs is "not logged" (this firmware has no such setting), not UNKNOWN.
      */
     other: keys(
         "looptime",
@@ -149,6 +148,11 @@ export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly Se
     ),
 };
 
+/**
+ * A key absent from BOTH logs is NOT_LOGGED: the firmware has no such setting. The A/B also requires
+ * the same firmware revision (stepCompare.ts), so absence there is a property of that firmware, not
+ * a missing value. A key in one log only is UNKNOWN, and UNKNOWN never counts as MATCH.
+ */
 export type SettingMatch = "MATCH" | "DIFF" | "UNKNOWN" | "NOT_LOGGED";
 
 export interface SettingRow {
@@ -183,9 +187,7 @@ export function compareSettings(
             const vb = lookup(b, def);
             const status: SettingMatch =
                 va === null && vb === null
-                    ? group === "other"
-                        ? "NOT_LOGGED"
-                        : "UNKNOWN"
+                    ? "NOT_LOGGED"
                     : va === null || vb === null
                       ? "UNKNOWN"
                       : va === vb

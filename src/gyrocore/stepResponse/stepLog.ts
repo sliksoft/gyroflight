@@ -300,7 +300,9 @@ function analyzeLog(
         reasons.push(`sample_rate_below_minimum:${Math.round(fs)}<${STEP_METHOD.minSampleRateHz}`);
 
     const flags = new Int32Array(n);
-    for (let i = 0; i < n; i++) flags[i] = Number.isFinite(flagsRaw![i]) ? Math.trunc(flagsRaw![i]) : -1;
+    // −1: no S-frame yet (unknown). Bit 31 (PREARM in 2025.12+) is cleared so that a set bit 31 does not
+    // read as that unknown marker; it is not a flight mode (Grok r1 NOTE-4).
+    for (let i = 0; i < n; i++) flags[i] = Number.isFinite(flagsRaw![i]) ? Math.trunc(flagsRaw![i]) & 0x7fffffff : -1;
     const failsafe = ch.failsafePhase;
     const throttle = ch["rcCommand[3]"]!;
 
@@ -439,7 +441,8 @@ function analyzeLog(
         for (let i = 0; i < n; i++) {
             for (const m of ex.motors) {
                 const v = m[i];
-                if (v >= range[1] || v <= range[0]) {
+                // A missing (non-finite) motor value cannot show it is inside the range: counted as saturated.
+                if (!(v < range[1] && v > range[0])) {
                     sat[i] = 1;
                     break;
                 }
