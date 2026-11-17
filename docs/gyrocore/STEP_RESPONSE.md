@@ -195,11 +195,11 @@ All three are tests.
 - **Not compared** (`NOT_COMPARED_KEYS`), because they are not tune settings or have no effect on the Acro windows used:
     - identity, format and logging: product, firmware, board, craft name, DeviceUID, field definitions, I/P interval and ratio, `blackbox_high_resolution` (identity and logging rate are separate checks);
     - measurement set-up: `chirp_*`, `debug_mode`, `fields_disabled_mask`, the debug-axis keys;
-    - sensor scales without effect on the rate loop: `gyro_scale`, `acc_1G`, `currentSensor`. The vbat keys (`vbat_scale`, `vbatcellvoltage`, `vbatref`) **are** compared, because vbat sag compensation uses them (Grok review round 4);
+    - sensor scales without effect on the rate loop: `gyro_scale`, `acc_1G`, `currentSensor`. `vbat_scale` and `vbatcellvoltage` **are** compared, because vbat sag compensation uses them (Grok review round 4). `vbatref` is not compared: it is the battery voltage measured at arming, a flight state like the charge level, and it differs between every two flights (AIR65: 377–423);
     - the slider inputs `simplified_*` (their results are compared). The active rc smoothing cutoffs and the link rate (`rc_smoothing_active_cutoffs*`, `rc_smoothing_rx_smoothed`) **are** compared: the feedforward cutoff acts between the logged setpoint and the motors, so two flights on different radio links are not a control pair (Grok review round 4);
     - self-levelling and autopilot only: `levelPID`, `angle_*`, `horizon_*`, `ap_*`, `altitude_*` (windows in those modes are excluded).
 - **A key logged twice with different values** is UNKNOWN (`duplicate_key_conflict`), never a value.
-- On the AIR65 logs of one build this changes nothing: the 18 pairs that pass the pair checks differ only in `chirp_*` (the October and November logs used another sweep range), which is measurement set-up.
+- **On the AIR65 logs:** besides `chirp_*` (measurement set-up), 20261106_011849 was flown on another radio link than the earlier logs: `rc_smoothing_rx_smoothed` 250 instead of 125 Hz, so the active feedforward cutoff is 106 instead of 53 Hz. Those pairs are therefore no control pairs; that is intended.
 - **Interpretation to confirm:** a key absent from both logs is "not logged" rather than UNKNOWN (see above). This reads the rule "UNKNOWN is not MATCH" as applying to a value that one log has and the other lacks.
 - **Rule per intent:**
     - "No change" requires every relevant setting to MATCH.

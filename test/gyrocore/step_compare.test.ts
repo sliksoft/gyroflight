@@ -129,6 +129,11 @@ describe("UNKNOWN is not MATCH", () => {
             expect(rows.find((r) => r.id === key)!.status).toBe("DIFF");
         }
     });
+    it("vbatref is the battery voltage at arming (flight state), not a setting: not compared", () => {
+        expect(
+            compareSettings([["vbatref", "418"]], [["vbatref", "377"]]).find((r) => r.id === "vbatref"),
+        ).toBeUndefined();
+    });
     it("a key logged twice with different values is UNKNOWN, never MATCH", () => {
         const rows = compareSettings(
             [

@@ -233,11 +233,14 @@ export const NOT_COMPARED_KEYS: readonly (string | RegExp)[] = [
     "fields_disabled_mask",
     "gyro_debug_axis",
     "rc_smoothing_debug_axis",
-    // sensor scales without effect on the rate loop (vbat_scale, vbatcellvoltage and vbatref are
-    // compared: vbat sag compensation uses them, Grok r4)
+    // sensor scales without effect on the rate loop (vbat_scale and vbatcellvoltage are compared:
+    // vbat sag compensation uses them, Grok r4)
     "gyro_scale",
     "acc_1G",
     "currentSensor",
+    // the battery voltage measured at arming (flight state, like the charge level), not a setting:
+    // it differs between every two flights (AIR65: 377-423)
+    "vbatref",
     // the slider inputs: their results (PID, D Max, feedforward, filters) are logged and compared.
     // The active rc smoothing cutoffs and the link rate are compared: the feedforward cutoff acts
     // between the logged setpoint and the motors (Grok r4).
