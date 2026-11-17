@@ -1733,7 +1733,9 @@
     "gyrocoreStepAnalyzing": { "message": "Analysing the imported logs…" },
     "gyrocoreStepFileError": { "message": "$1: analysis failed ($2)" },
     "gyrocoreStepLogLabel": { "message": "$1 · Log $2 of $3" },
-    "gyrocoreStepLogFacts": { "message": "$1 Hz, $2 s, $3 s in flight, $4 frame gaps, modes $5" },
+    "gyrocoreStepLogFacts": {
+        "message": "$1 Hz, $2 s, $3 s in flight, $4 frame gaps, modes $5, median battery in flight $6 (log units)"
+    },
     "gyrocoreStepClear": { "message": "Remove all logs from this card" },
     "gyrocoreStepAbHead": { "message": "Flight A / B" },
     "gyrocoreStepAbHelp": {
@@ -1765,7 +1767,7 @@
     "gyrocoreStepCheck_same_logging_rate": { "message": "Same logging rate" },
     "gyrocoreStepCheck_saturation_known": { "message": "Motor saturation known" },
     "gyrocoreStepCheck_settings_as_intended": { "message": "Settings as intended" },
-    "gyrocoreStepCheck_comparable_battery": { "message": "Comparable battery voltage in flight" },
+    "gyrocoreStepCheck_comparable_battery": { "message": "Comparable battery voltage during the used windows" },
     "gyrocoreStepChanged": { "message": "Changed from A to B: $1" },
     "gyrocoreStepUnknownSettings": { "message": "Not in both logs (unknown, never counted as unchanged): $1" },
     "gyrocoreStepChartTitle": { "message": "Peak |setpoint| from $1 deg/s" },

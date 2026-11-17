@@ -259,8 +259,10 @@ describe("battery state during the used windows (Grok r6/r7)", () => {
         expect(c.axes.every((x) => x.delta === null)).toBe(true);
     });
     it("the check is symmetric: A and B swapped give the same verdict", () => {
+        // 400 vs 421: the old one-sided ratio gave 5.25 % one way (FAIL) and 4.99 % the other (PASS)
         const a = flight({ seed: 44, startUs: 47_000_000, vbat: 400 });
-        const b = flight({ seed: 45, startUs: 49_000_000, vbat: 420 });
+        const b = flight({ seed: 45, startUs: 49_000_000, vbat: 421 });
+        expect(battery(compareStepLogs(a, b, { kind: "none" })).status).toBe("PASS");
         expect(battery(compareStepLogs(a, b, { kind: "none" })).status).toBe(
             battery(compareStepLogs(b, a, { kind: "none" })).status,
         );

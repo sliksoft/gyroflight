@@ -169,10 +169,13 @@ function pairChecks(a: StepLogResult, b: StepLogResult, intentCheck: IntentCheck
     return out;
 }
 
-/** Per axis and threshold: both MEASURED, the same flight mode, comparable excitation. */
 /** |a − b| / max(a, b): symmetric, so the verdict does not depend on which flight is A (Grok r7). */
 const relDiff = (a: number, b: number) => Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b));
 
+/**
+ * Per axis and threshold: battery voltage during the used windows, both MEASURED, the same flight
+ * mode, comparable excitation and stick directions.
+ */
 function axisChecks(ra: StepThresholdResult | null, rb: StepThresholdResult | null): AbCheck[] {
     const out: AbCheck[] = [];
     // Battery voltage during the used windows of this axis and threshold (Grok r6/r7).

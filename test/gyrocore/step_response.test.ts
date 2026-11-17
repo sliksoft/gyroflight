@@ -428,5 +428,10 @@ describe("battery voltage over the used windows", () => {
         expect(
             analyzeAxisStep({ sampleRateHz: FS, setpoint: sp, gyro: gy, evidence: ev }).thresholds[1].batteryMedian,
         ).toBeNull();
+        const short = vb.subarray(0, vb.length - 1);
+        expect(
+            analyzeAxisStep({ sampleRateHz: FS, setpoint: sp, gyro: gy, evidence: ev, battery: short }).thresholds[1]
+                .batteryMedian,
+        ).toBeNull();
     });
 });

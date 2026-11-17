@@ -342,6 +342,7 @@ function logFacts(l: StepLogResult): (string | number)[] {
         l.seconds.airborne.toFixed(1),
         l.timestamps?.gapCount ?? "?",
         l.modesSeen.join("+") || "—",
+        l.battery.medianInFlight ?? "?",
     ];
 }
 

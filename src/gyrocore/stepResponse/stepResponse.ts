@@ -672,8 +672,9 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
                   }
                 : null,
             modeWords: [...new Set(used.map((u) => u.rec.modeWord))].sort((a, b) => a - b),
+            // a battery signal of another length is not this log's: no value (Grok r8)
             batteryMedian: batteryOver(
-                input.battery,
+                input.battery && input.battery.length === n ? input.battery : null,
                 used.map((u) => u.rec.start),
                 W,
             ),
