@@ -1,0 +1,231 @@
+/*
+ * This file is part of Gyroflight, a derivative of the Betaflight App.
+ *
+ * Gyroflight is free software. You can redistribute this software
+ * and/or modify this software under the terms of the GNU General
+ * Public License as published by the Free Software Foundation,
+ * either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * Gyroflight is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this software.
+ *
+ * If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
+ * The tune settings a step-response A/B compares, grouped as the user changes them
+ * (docs/gyrocore/STEP_RESPONSE.md §5). Values are compared as logged header text; a setting
+ * missing from either log is UNKNOWN, and UNKNOWN never counts as MATCH.
+ *
+ * The simplified_* slider keys are not compared: the firmware logs the PID, D Max, feedforward and
+ * filter values the sliders produce, and those are compared here, so a slider move shows up in
+ * the group whose values it changed.
+ */
+
+export type SettingGroup =
+    "p" | "i" | "d" | "dMax" | "feedforward" | "dtermFilter" | "gyroFilter" | "tpa" | "itermRelax" | "rates";
+
+export const SETTING_GROUPS: readonly SettingGroup[] = [
+    "p",
+    "i",
+    "d",
+    "dMax",
+    "feedforward",
+    "dtermFilter",
+    "gyroFilter",
+    "tpa",
+    "itermRelax",
+    "rates",
+];
+
+/** A setting: header key, or one element of a comma list (`rollPID` element 0 = roll P). */
+interface SettingDef {
+    id: string;
+    key: string;
+    /** Header keys that mean the same setting in other firmware versions (e.g. d_min / d_max). */
+    aliases?: string[];
+    element?: number;
+}
+
+const pid = (term: 0 | 1 | 2, name: string): SettingDef[] =>
+    (["roll", "pitch", "yaw"] as const).map((axis) => ({ id: `${axis}_${name}`, key: `${axis}PID`, element: term }));
+
+const keys = (...k: string[]): SettingDef[] => k.map((key) => ({ id: key, key }));
+
+export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly SettingDef[]>> = {
+    p: pid(0, "p"),
+    i: pid(1, "i"),
+    d: pid(2, "d"),
+    dMax: [{ id: "d_max", key: "d_max", aliases: ["d_min"] }, ...keys("d_max_gain", "d_max_advance")],
+    feedforward: keys(
+        "ff_weight",
+        "feedforward_transition",
+        "feedforward_averaging",
+        "feedforward_smooth_factor",
+        "feedforward_jitter_factor",
+        "feedforward_boost",
+        "feedforward_max_rate_limit",
+    ),
+    dtermFilter: keys(
+        "dterm_lpf1_type",
+        "dterm_lpf1_static_hz",
+        "dterm_lpf1_dyn_hz",
+        "dterm_lpf1_dyn_expo",
+        "dterm_lpf2_type",
+        "dterm_lpf2_static_hz",
+        "dterm_notch_hz",
+        "dterm_notch_cutoff",
+        "yaw_lowpass_hz",
+    ),
+    gyroFilter: keys(
+        "gyro_lpf1_type",
+        "gyro_lpf1_static_hz",
+        "gyro_lpf1_dyn_hz",
+        "gyro_lpf1_dyn_expo",
+        "gyro_lpf2_type",
+        "gyro_lpf2_static_hz",
+        "gyro_notch_hz",
+        "gyro_notch_cutoff",
+        "dyn_notch_count",
+        "dyn_notch_q",
+        "dyn_notch_min_hz",
+        "dyn_notch_max_hz",
+        "rpm_filter_harmonics",
+        "rpm_filter_weights",
+        "rpm_filter_q",
+        "rpm_filter_min_hz",
+        "rpm_filter_fade_range_hz",
+        "rpm_filter_lpf_hz",
+    ),
+    tpa: keys("tpa_mode", "tpa_rate", "tpa_breakpoint", "tpa_low_rate", "tpa_low_breakpoint", "tpa_low_always"),
+    itermRelax: keys("iterm_relax", "iterm_relax_type", "iterm_relax_cutoff"),
+    rates: keys("rates_type", "rc_rates", "rc_expo", "rates", "rate_limits"),
+    /**
+     * Not a selectable change, but read by the loop during the flight: must MATCH in every A/B.
+     * A key absent from both logs is "not logged" (this firmware has no such setting), not UNKNOWN.
+     */
+    other: keys(
+        "looptime",
+        "pid_process_denom",
+        "gyro_sync_denom",
+        "iterm_windup",
+        "anti_gravity_gain",
+        "anti_gravity_cutoff_hz",
+        "anti_gravity_p_gain",
+        "pidsum_limit",
+        "pidsum_limit_yaw",
+        "use_integrated_yaw",
+        "abs_control_gain",
+        "motor_output_limit",
+        "thrust_linear",
+        "vbat_sag_compensation",
+        "throttle_boost",
+        "throttle_boost_cutoff",
+        "mixer_type",
+        "motor_pwm_protocol",
+        "dshot_idle_value",
+        "motor_idle",
+        "dyn_idle_min_rpm",
+        "dyn_idle_p_gain",
+        "dyn_idle_i_gain",
+        "dyn_idle_d_gain",
+        "dyn_idle_max_increase",
+        "rc_smoothing",
+        "rc_smoothing_auto_factor",
+        "rc_smoothing_setpoint_cutoff",
+        "rc_smoothing_feedforward_cutoff",
+        "deadband",
+        "yaw_deadband",
+        "throttle_limit_type",
+        "throttle_limit_percent",
+        "pid_at_min_throttle",
+    ),
+};
+
+export type SettingMatch = "MATCH" | "DIFF" | "UNKNOWN" | "NOT_LOGGED";
+
+export interface SettingRow {
+    group: SettingGroup | "other";
+    id: string;
+    a: string | null;
+    b: string | null;
+    status: SettingMatch;
+}
+
+function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef): string | null {
+    for (const key of [def.key, ...(def.aliases ?? [])]) {
+        const raw = pairs.find(([k]) => k === key)?.[1];
+        if (raw === undefined) continue;
+        const v = raw.trim();
+        if (def.element === undefined) return v;
+        const part = v.split(",")[def.element];
+        return part === undefined ? null : part.trim();
+    }
+    return null;
+}
+
+/** Every setting of every group, A against B. */
+export function compareSettings(
+    a: readonly (readonly [string, string])[],
+    b: readonly (readonly [string, string])[],
+): SettingRow[] {
+    const rows: SettingRow[] = [];
+    for (const group of [...SETTING_GROUPS, "other"] as const) {
+        for (const def of GROUP_SETTINGS[group]) {
+            const va = lookup(a, def);
+            const vb = lookup(b, def);
+            const status: SettingMatch =
+                va === null && vb === null
+                    ? group === "other"
+                        ? "NOT_LOGGED"
+                        : "UNKNOWN"
+                    : va === null || vb === null
+                      ? "UNKNOWN"
+                      : va === vb
+                        ? "MATCH"
+                        : "DIFF";
+            rows.push({ group, id: def.id, a: va, b: vb, status });
+        }
+    }
+    return rows;
+}
+
+/** What the A/B is meant to test: no change at all (spread control), or a change in one group. */
+export type AbIntent = { kind: "none" } | { kind: "group"; group: SettingGroup };
+
+export interface IntentCheck {
+    passed: boolean;
+    /** Reasons it does not pass (empty when it passes). */
+    reasons: string[];
+    changed: SettingRow[];
+    unknown: SettingRow[];
+}
+
+/**
+ * "No change": every relevant setting MATCH. A group: at least one DIFF in that group and every
+ * other relevant setting MATCH. UNKNOWN anywhere fails either intent (it is not a MATCH, and an
+ * unknown value in the changed group leaves what changed unknown).
+ */
+export function checkIntent(rows: readonly SettingRow[], intent: AbIntent): IntentCheck {
+    const relevant = rows.filter((r) => r.status !== "NOT_LOGGED");
+    const changed = relevant.filter((r) => r.status === "DIFF");
+    const unknown = relevant.filter((r) => r.status === "UNKNOWN");
+    const reasons: string[] = [];
+    if (unknown.length) reasons.push(`settings_unknown:${unknown.map((r) => r.id).join(",")}`);
+    if (intent.kind === "none") {
+        if (changed.length) reasons.push(`unexpected_change:${changed.map((r) => r.id).join(",")}`);
+    } else {
+        const inGroup = changed.filter((r) => r.group === intent.group);
+        const outside = changed.filter((r) => r.group !== intent.group);
+        if (!inGroup.length) reasons.push(`expected_change_missing:${intent.group}`);
+        if (outside.length) reasons.push(`extra_change:${outside.map((r) => r.id).join(",")}`);
+    }
+    return { passed: reasons.length === 0, reasons, changed, unknown };
+}

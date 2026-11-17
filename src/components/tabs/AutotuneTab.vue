@@ -95,6 +95,8 @@
                     </UButton>
                     <!-- Gyroflight: saved session, Flight A/B, comparability and the diagnostic comparison (no tuning) -->
                     <FlightAbSelector />
+                    <!-- Gyroflight: step response from ordinary flights, A/B over the imported logs (diagnosis) -->
+                    <StepResponseCard />
                     <AutotuneV2Panel
                         :title="$t('gyroflightAutotuneCompareV2Title')"
                         :parts="['verifiedTune', 'multi']"
@@ -163,6 +165,7 @@ import ChirpQualificationPanel from "@/gyrocore/components/ChirpQualificationPan
 import DiagnosticOnlyBanner from "@/gyrocore/components/DiagnosticOnlyBanner.vue";
 import GlobalTunePanel from "@/gyrocore/components/GlobalTunePanel.vue";
 import FlightAbSelector from "@/gyrocore/components/FlightAbSelector.vue";
+import StepResponseCard from "@/gyrocore/components/StepResponseCard.vue";
 import M4FlightMetricsPanel from "@/gyrocore/components/M4FlightMetricsPanel.vue";
 import TuneWorkflowPanel from "@/gyrocore/components/TuneWorkflowPanel.vue";
 import AutotuneV2Panel from "@/gyrocore/components/AutotuneV2Panel.vue";
