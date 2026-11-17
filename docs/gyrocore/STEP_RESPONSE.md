@@ -191,13 +191,14 @@ All three are tests.
 - A setting present in one log only is **UNKNOWN**. **UNKNOWN never counts as MATCH**, and it fails both intents.
 - A setting absent from **both** logs is "not logged": that firmware has no such setting. The A/B requires the same firmware revision, so absence is a property of the firmware, not a missing value (Grok review round 1). A group whose settings the firmware does not log cannot be the intended change (`expected_change_missing`).
 - **Fail closed: every logged key is compared.** Besides the named groups, every further header key present in either log counts under **"other"** and must MATCH: looptime, pid_process_denom, anti-gravity, I windup, pidsum limits, motor and idle settings, rc smoothing, deadband, throttle limits, acc limits, airmode and EZ-landing settings, `features`, and any key this list does not know. A key that differs is a change; a key in one log only is UNKNOWN.
-- **Group mapping of less obvious keys:** `feedforward_yaw_hold_gain` / `_time` count as feedforward; `gyro_hardware_lpf`, `motor_poles` and `dshot_bidir` count as gyro filter (RPM filter inputs).
+- **Group mapping of less obvious keys:** `feedforward_yaw_hold_gain` / `_time` count as feedforward; `gyro_hardware_lpf` counts as gyro filter. `motor_poles` and `dshot_bidir` count as "other": besides the RPM filter they also drive dynamic idle, so a change there is never a pure filter change (Grok review round 4).
 - **Not compared** (`NOT_COMPARED_KEYS`), because they are not tune settings or have no effect on the Acro windows used:
     - identity, format and logging: product, firmware, board, craft name, DeviceUID, field definitions, I/P interval and ratio, `blackbox_high_resolution` (identity and logging rate are separate checks);
     - measurement set-up: `chirp_*`, `debug_mode`, `fields_disabled_mask`, the debug-axis keys;
-    - sensor scales: `gyro_scale`, `acc_1G`, the vbat and current-sensor scales;
-    - firmware-derived values: `simplified_*` (their results are compared), `rc_smoothing_active_cutoffs*`, `rc_smoothing_rx_smoothed`;
+    - sensor scales without effect on the rate loop: `gyro_scale`, `acc_1G`, `currentSensor`. The vbat keys (`vbat_scale`, `vbatcellvoltage`, `vbatref`) **are** compared, because vbat sag compensation uses them (Grok review round 4);
+    - the slider inputs `simplified_*` (their results are compared). The active rc smoothing cutoffs and the link rate (`rc_smoothing_active_cutoffs*`, `rc_smoothing_rx_smoothed`) **are** compared: the feedforward cutoff acts between the logged setpoint and the motors, so two flights on different radio links are not a control pair (Grok review round 4);
     - self-levelling and autopilot only: `levelPID`, `angle_*`, `horizon_*`, `ap_*`, `altitude_*` (windows in those modes are excluded).
+- **A key logged twice with different values** is UNKNOWN (`duplicate_key_conflict`), never a value.
 - On the AIR65 logs of one build this changes nothing: the 18 pairs that pass the pair checks differ only in `chirp_*` (the October and November logs used another sweep range), which is measurement set-up.
 - **Interpretation to confirm:** a key absent from both logs is "not logged" rather than UNKNOWN (see above). This reads the rule "UNKNOWN is not MATCH" as applying to a value that one log has and the other lacks.
 - **Rule per intent:**
@@ -208,15 +209,15 @@ All three are tests.
 
 **Per pair:**
 
-| check                  | rule                                                                                                                                            |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `both_analysed`        | neither log is BLOCKED                                                                                                                          |
-| `independent_flights`  | `flightRelation` is INDEPENDENT. SAME (the same log, the same samples, ≥ 4 shared gyro windows) and UNKNOWN both give no delta, with the reason |
-| `same_craft`           | DeviceUID and board equal                                                                                                                       |
-| `same_firmware`        | firmware revision equal, including the build hash                                                                                               |
-| `same_logging_rate`    | looptime, pid_process_denom, P interval, P ratio, I interval and blackbox_high_resolution equal, and the measured rates within 2 %              |
-| `saturation_known`     | known in both                                                                                                                                   |
-| `settings_as_intended` | as above                                                                                                                                        |
+| check                  | rule                                                                                                                                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `both_analysed`        | neither log is BLOCKED                                                                                                                             |
+| `independent_flights`  | `flightRelation` is INDEPENDENT. SAME (the same log, the same samples, ≥ 4 shared gyro windows) and UNKNOWN both give no delta, with the reason    |
+| `same_craft`           | DeviceUID and board equal                                                                                                                          |
+| `same_firmware`        | firmware revision equal, including the build hash                                                                                                  |
+| `same_logging_rate`    | looptime, pid_process_denom, P interval, P ratio, P num, P denom, I interval and blackbox_high_resolution equal, and the measured rates within 2 % |
+| `saturation_known`     | known in both                                                                                                                                      |
+| `settings_as_intended` | as above                                                                                                                                           |
 
 **Per axis and threshold:**
 

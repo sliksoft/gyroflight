@@ -106,8 +106,6 @@ export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly Se
         "rpm_filter_fade_range_hz",
         "rpm_filter_lpf_hz",
         "gyro_hardware_lpf",
-        "motor_poles",
-        "dshot_bidir",
     ),
     tpa: keys("tpa_mode", "tpa_rate", "tpa_breakpoint", "tpa_low_rate", "tpa_low_breakpoint", "tpa_low_always"),
     itermRelax: keys("iterm_relax", "iterm_relax_type", "iterm_relax_cutoff"),
@@ -169,16 +167,41 @@ export interface SettingRow {
     status: SettingMatch;
 }
 
-function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef): string | null {
+/** A key logged more than once with different values: never a value (fail closed, Grok r4). */
+const CONFLICT = Symbol("conflicting duplicate header key");
+type HeaderValue = string | null | typeof CONFLICT;
+
+/** The trimmed value of `key`, null when absent, CONFLICT when repeated with different values. */
+function headerValue(pairs: readonly (readonly [string, string])[], key: string): HeaderValue {
+    const values = new Set(pairs.filter(([k]) => k === key).map(([, v]) => v.trim()));
+    if (!values.size) return null;
+    return values.size > 1 ? CONFLICT : [...values][0];
+}
+
+function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef): HeaderValue {
     for (const key of [def.key, ...(def.aliases ?? [])]) {
-        const raw = pairs.find(([k]) => k === key)?.[1];
-        if (raw === undefined) continue;
-        const v = raw.trim();
-        if (def.element === undefined) return v;
+        const v = headerValue(pairs, key);
+        if (v === null) continue;
+        if (v === CONFLICT || def.element === undefined) return v;
         const part = v.split(",")[def.element];
         return part === undefined ? null : part.trim();
     }
     return null;
+}
+
+function row(group: SettingGroup | "other", id: string, va: HeaderValue, vb: HeaderValue): SettingRow {
+    const shown = (v: HeaderValue) => (v === CONFLICT ? "duplicate_key_conflict" : v);
+    const status: SettingMatch =
+        va === CONFLICT || vb === CONFLICT
+            ? "UNKNOWN"
+            : va === null && vb === null
+              ? "NOT_LOGGED"
+              : va === null || vb === null
+                ? "UNKNOWN"
+                : va === vb
+                  ? "MATCH"
+                  : "DIFF";
+    return { group, id, a: shown(va), b: shown(vb), status };
 }
 
 /**
@@ -210,17 +233,15 @@ export const NOT_COMPARED_KEYS: readonly (string | RegExp)[] = [
     "fields_disabled_mask",
     "gyro_debug_axis",
     "rc_smoothing_debug_axis",
-    // sensor scales and calibration constants
+    // sensor scales without effect on the rate loop (vbat_scale, vbatcellvoltage and vbatref are
+    // compared: vbat sag compensation uses them, Grok r4)
     "gyro_scale",
     "acc_1G",
-    "vbat_scale",
-    "vbatcellvoltage",
-    "vbatref",
     "currentSensor",
-    // derived by the firmware: the slider inputs (their results are compared) and the cutoffs it computes per link
+    // the slider inputs: their results (PID, D Max, feedforward, filters) are logged and compared.
+    // The active rc smoothing cutoffs and the link rate are compared: the feedforward cutoff acts
+    // between the logged setpoint and the motors (Grok r4).
     /^simplified_/,
-    /^rc_smoothing_active_cutoffs/,
-    "rc_smoothing_rx_smoothed",
     // self-levelling and autopilot only: no effect in Acro, and windows with those modes are excluded
     "levelPID",
     /^angle_/,
@@ -241,17 +262,7 @@ export function compareSettings(
     const rows: SettingRow[] = [];
     for (const group of [...SETTING_GROUPS, "other"] as const) {
         for (const def of GROUP_SETTINGS[group]) {
-            const va = lookup(a, def);
-            const vb = lookup(b, def);
-            const status: SettingMatch =
-                va === null && vb === null
-                    ? "NOT_LOGGED"
-                    : va === null || vb === null
-                      ? "UNKNOWN"
-                      : va === vb
-                        ? "MATCH"
-                        : "DIFF";
-            rows.push({ group, id: def.id, a: va, b: vb, status });
+            rows.push(row(group, def.id, lookup(a, def), lookup(b, def)));
         }
     }
     // Fail closed: every further key of either log that is not excluded counts under "other".
@@ -262,15 +273,7 @@ export function compareSettings(
     );
     const extra = new Set([...a, ...b].map(([k]) => k).filter((k) => !covered.has(k) && !notCompared(k)));
     for (const key of [...extra].sort()) {
-        const va = a.find(([k]) => k === key)?.[1]?.trim() ?? null;
-        const vb = b.find(([k]) => k === key)?.[1]?.trim() ?? null;
-        rows.push({
-            group: "other",
-            id: key,
-            a: va,
-            b: vb,
-            status: va === null || vb === null ? "UNKNOWN" : va === vb ? "MATCH" : "DIFF",
-        });
+        rows.push(row("other", key, headerValue(a, key), headerValue(b, key)));
     }
     return rows;
 }

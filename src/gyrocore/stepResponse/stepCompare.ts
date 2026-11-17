@@ -46,6 +46,8 @@ export const STEP_COMPARE = Object.freeze({
         "P interval",
         "P ratio",
         "I interval",
+        "P num",
+        "P denom",
         "blackbox_high_resolution",
     ] as const),
 });

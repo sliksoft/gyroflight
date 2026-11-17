@@ -6,7 +6,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { analyzeStepFile, type StepLogResult } from "@/gyrocore/stepResponse/stepLog";
 import { compareStepLogs, controlSpread } from "@/gyrocore/stepResponse/stepCompare";
-import { checkIntent, compareSettings } from "@/gyrocore/stepResponse/stepSettings";
+import {
+    checkIntent,
+    compareSettings,
+    GROUP_SETTINGS,
+    NOT_COMPARED_KEYS,
+    SETTING_GROUPS,
+} from "@/gyrocore/stepResponse/stepSettings";
 import { useStepResponseStore } from "@/gyrocore/stores/stepResponse";
 import { concatLogs } from "./harness/chirpSim";
 import { acroLog, type AcroLogOptions } from "./harness/stepBbl";
@@ -112,6 +118,57 @@ describe("UNKNOWN is not MATCH", () => {
             "UNKNOWN",
         );
     });
+    it("compared after Grok r4: the active FF cutoff, the link rate and the vbat keys", () => {
+        for (const [key, va, vb] of [
+            ["rc_smoothing_active_cutoffs_ff_sp_thr", "106,106", "53,53"],
+            ["rc_smoothing_rx_smoothed", "250", "500"],
+            ["vbatcellvoltage", "310,330,440", "300,330,440"],
+            ["vbat_scale", "110", "115"],
+        ] as const) {
+            const rows = compareSettings([[key, va]], [[key, vb]]);
+            expect(rows.find((r) => r.id === key)!.status).toBe("DIFF");
+        }
+    });
+    it("a key logged twice with different values is UNKNOWN, never MATCH", () => {
+        const rows = compareSettings(
+            [
+                ["tpa_rate", "60"],
+                ["tpa_rate", "70"],
+                ["iterm_windup", "80"],
+                ["iterm_windup", "85"],
+            ],
+            [
+                ["tpa_rate", "60"],
+                ["iterm_windup", "80"],
+            ],
+        );
+        expect(rows.find((r) => r.id === "tpa_rate")).toMatchObject({ status: "UNKNOWN", a: "duplicate_key_conflict" });
+        expect(rows.find((r) => r.id === "iterm_windup")!.status).toBe("UNKNOWN");
+        const same = compareSettings(
+            [
+                ["tpa_rate", "60"],
+                ["tpa_rate", "60"],
+            ],
+            [["tpa_rate", "60"]],
+        );
+        expect(same.find((r) => r.id === "tpa_rate")!.status).toBe("MATCH");
+    });
+    it("no key of a selectable group is ever excluded from the comparison", () => {
+        for (const group of SETTING_GROUPS) {
+            for (const def of GROUP_SETTINGS[group]) {
+                for (const key of [def.key, ...(def.aliases ?? [])]) {
+                    expect(
+                        NOT_COMPARED_KEYS.some((k) => (typeof k === "string" ? k === key : k.test(key))),
+                        key,
+                    ).toBe(false);
+                }
+            }
+        }
+    });
+    it("motor_poles and dshot_bidir count as 'other' (they also drive dynamic idle)", () => {
+        const rows = compareSettings([["dshot_bidir", "1"]], [["dshot_bidir", "0"]]);
+        expect(rows.find((r) => r.id === "dshot_bidir")!.group).toBe("other");
+    });
     it("identity, logging, measurement, derived and self-level-only keys are not compared", () => {
         const rows = compareSettings(
             [
@@ -120,7 +177,6 @@ describe("UNKNOWN is not MATCH", () => {
                 ["chirp_time_seconds", "20"],
                 ["simplified_i_gain", "80"],
                 ["levelPID", "90,75,75"],
-                ["rc_smoothing_active_cutoffs_ff_sp_thr", "106,106"],
             ],
             [
                 ["Craft name", "B"],
@@ -128,7 +184,6 @@ describe("UNKNOWN is not MATCH", () => {
                 ["chirp_time_seconds", "30"],
                 ["simplified_i_gain", "90"],
                 ["levelPID", "70,70,75"],
-                ["rc_smoothing_active_cutoffs_ff_sp_thr", "53,53"],
             ],
         );
         expect(rows.filter((r) => r.status === "DIFF")).toEqual([]);
