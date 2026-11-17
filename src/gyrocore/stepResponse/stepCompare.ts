@@ -40,8 +40,9 @@ export const STEP_COMPARE = Object.freeze({
     /** Median manoeuvre peak |setpoint| and median 100 ms change of B over A must lie in this range. */
     excitationRatio: Object.freeze([2 / 3, 3 / 2] as const),
     /**
-     * Median in-flight battery voltage of B over A must lie within this fraction (thrust scales
-     * roughly with V², so 5 % voltage is about 10 % actuator authority). Not logged: fails.
+     * Median battery voltage over the used windows of A and B (per axis and threshold) may differ
+     * by at most this fraction of the larger (thrust scales roughly with V², so 5 % voltage is about
+     * 10 % actuator authority). Not logged: fails.
      */
     batteryTolerance: 0.05,
     /** Header keys that set the logging rate; they must be equal. */
@@ -164,24 +165,28 @@ function pairChecks(a: StepLogResult, b: StepLogResult, intentCheck: IntentCheck
             `${a.saturation} / ${b.saturation}`,
         ),
     );
-    const va = a.battery.medianInFlight;
-    const vb = b.battery.medianInFlight;
-    out.push(
-        check(
-            "comparable_battery",
-            va !== null && vb !== null && Math.abs(vb / va - 1) <= STEP_COMPARE.batteryTolerance,
-            va === null || vb === null
-                ? "battery_voltage_unknown"
-                : `median in flight ${va} / ${vb} (×${(vb / va).toFixed(3)})`,
-        ),
-    );
     out.push(check("settings_as_intended", intentCheck.passed, intentCheck.reasons.join("; ") || "ok"));
     return out;
 }
 
 /** Per axis and threshold: both MEASURED, the same flight mode, comparable excitation. */
+/** |a − b| / max(a, b): symmetric, so the verdict does not depend on which flight is A (Grok r7). */
+const relDiff = (a: number, b: number) => Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b));
+
 function axisChecks(ra: StepThresholdResult | null, rb: StepThresholdResult | null): AbCheck[] {
     const out: AbCheck[] = [];
+    // Battery voltage during the used windows of this axis and threshold (Grok r6/r7).
+    const va = ra?.batteryMedian ?? null;
+    const vb = rb?.batteryMedian ?? null;
+    out.push(
+        check(
+            "comparable_battery",
+            va !== null && vb !== null && relDiff(va, vb) <= STEP_COMPARE.batteryTolerance,
+            va === null || vb === null
+                ? "battery_voltage_unknown"
+                : `median over the used windows ${va} / ${vb} (${(100 * relDiff(va, vb)).toFixed(1)} %)`,
+        ),
+    );
     out.push(
         check(
             "both_measured",

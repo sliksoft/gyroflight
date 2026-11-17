@@ -478,7 +478,8 @@ function analyzeLog(
         const v: number[] = [];
         for (let i = 0; i < n; i++) if (airborne[i] && Number.isFinite(vbat[i]) && vbat[i] > 0) v.push(vbat[i]);
         v.sort((x, y) => x - y);
-        result.battery = { medianInFlight: v.length ? v[v.length >> 1] : null };
+        const m = v.length >> 1;
+        result.battery = { medianInFlight: v.length ? (v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2) : null };
     }
     if (result.battery.medianInFlight === null) notes.push("battery_voltage_not_logged_in_flight");
     result.seconds = {
@@ -488,7 +489,13 @@ function analyzeLog(
         saturated: ev.saturated ? count(ev.saturated) : null,
     };
     STEP_AXES.forEach((axis, a) => {
-        result.axes[axis] = analyzeAxisStep({ sampleRateHz: fs, setpoint: sp[a]!, gyro: gy[a]!, evidence: ev });
+        result.axes[axis] = analyzeAxisStep({
+            sampleRateHz: fs,
+            setpoint: sp[a]!,
+            gyro: gy[a]!,
+            evidence: ev,
+            battery: vbat ?? null,
+        });
     });
     return result;
 }

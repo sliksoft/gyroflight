@@ -411,3 +411,22 @@ describe("final value outside 0.5–1.5", () => {
         expect(t.withoutOutliers.metrics).toEqual(t.metrics);
     });
 });
+
+describe("battery voltage over the used windows", () => {
+    it("is the median of the logged voltage inside the used windows only", () => {
+        const sp = stickSetpoint({ seconds: 20, fs: FS, seed: 61 });
+        const gy = simulate(sp, FS, PLANT);
+        // 380 everywhere except 420 inside the first 4 s: the median follows where the used windows are
+        const vb = new Float64Array(sp.length).fill(380);
+        vb.fill(420, 0, 4 * FS);
+        const ev = cleanEvidence(sp.length);
+        ev.notAirborne.fill(1, 4 * FS); // only the first 4 s can be used
+        const t = analyzeAxisStep({ sampleRateHz: FS, setpoint: sp, gyro: gy, evidence: ev, battery: vb })
+            .thresholds[1];
+        expect(t.windowsUsed).toBeGreaterThan(0);
+        expect(t.batteryMedian).toBe(420);
+        expect(
+            analyzeAxisStep({ sampleRateHz: FS, setpoint: sp, gyro: gy, evidence: ev }).thresholds[1].batteryMedian,
+        ).toBeNull();
+    });
+});

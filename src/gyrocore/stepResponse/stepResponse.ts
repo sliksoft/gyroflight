@@ -135,6 +135,8 @@ export interface StepAxisInput {
     evidence: StepSampleEvidence;
     /** Override of STEP_METHOD.epsilonRel (tests of the ε choice only). */
     epsilonRel?: number;
+    /** Logged battery voltage (vbatLatest, log units), aligned; absent: not logged. */
+    battery?: ArrayLike<number> | null;
 }
 
 export interface StepMetrics {
@@ -192,6 +194,12 @@ export interface StepThresholdResult extends StepAggregate {
     excitation: { medianPeakDegS: number; medianChangeDegS: number; positive: number; negative: number } | null;
     /** Flight-relevant mode words seen in the used windows. */
     modeWords: number[];
+    /**
+     * Median logged battery voltage over the samples of the used windows (log units); null when
+     * not logged or no window was used. The A/B covariate (Grok r7): the voltage the loop saw
+     * during the measured manoeuvres, not over the whole flight.
+     */
+    batteryMedian: number | null;
 }
 
 export interface StepAxisResult {
@@ -664,6 +672,11 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
                   }
                 : null,
             modeWords: [...new Set(used.map((u) => u.rec.modeWord))].sort((a, b) => a - b),
+            batteryMedian: batteryOver(
+                input.battery,
+                used.map((u) => u.rec.start),
+                W,
+            ),
         };
     });
     return {
@@ -676,6 +689,20 @@ export function analyzeAxisStep(input: StepAxisInput): StepAxisResult {
         saturationKnown: !!ev.saturated,
         thresholds,
     };
+}
+
+/** Median of the finite, positive battery samples inside the given windows (each sample once). */
+function batteryOver(battery: ArrayLike<number> | null | undefined, starts: number[], W: number): number | null {
+    if (!battery || !starts.length) return null;
+    const covered = new Uint8Array(battery.length);
+    for (const s of starts) covered.fill(1, s, Math.min(battery.length, s + W));
+    const v: number[] = [];
+    for (let i = 0; i < battery.length; i++)
+        if (covered[i] && Number.isFinite(battery[i]) && battery[i] > 0) v.push(battery[i]);
+    if (!v.length) return null;
+    v.sort((x, y) => x - y);
+    const m = v.length >> 1;
+    return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 }
 
 /** Evidence with nothing excluded (synthetic tests, and the base for stepLog.ts). */

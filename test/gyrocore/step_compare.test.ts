@@ -242,25 +242,49 @@ describe("UNKNOWN is not MATCH", () => {
     });
 });
 
-describe("battery state (Grok r6)", () => {
-    it("a median in-flight voltage more than 5 % apart fails comparable_battery; within 5 % passes", () => {
+describe("battery state during the used windows (Grok r6/r7)", () => {
+    const battery = (c: ReturnType<typeof compareStepLogs>, axis = "roll", thr = 80) =>
+        c.axes
+            .find((x) => x.axis === axis && x.thresholdDegS === thr)!
+            .checks.find((x) => x.id === "comparable_battery")!;
+    it("a voltage more than 5 % apart fails comparable_battery; within 5 % passes", () => {
         const fresh = flight({ seed: 41, startUs: 41_000_000, vbat: 420 });
         const close = flight({ seed: 42, startUs: 43_000_000, vbat: 405 });
         const sagging = flight({ seed: 43, startUs: 45_000_000, vbat: 370 });
         expect(fresh.battery.medianInFlight).toBe(420);
-        expect(
-            compareStepLogs(fresh, close, { kind: "none" }).pairChecks.find((x) => x.id === "comparable_battery")!
-                .status,
-        ).toBe("PASS");
+        expect(fresh.axes.roll!.thresholds[1].batteryMedian).toBe(420);
+        expect(battery(compareStepLogs(fresh, close, { kind: "none" })).status).toBe("PASS");
         const c = compareStepLogs(fresh, sagging, { kind: "none" });
-        expect(c.pairChecks.find((x) => x.id === "comparable_battery")!.status).toBe("FAIL");
+        expect(battery(c).status).toBe("FAIL");
         expect(c.axes.every((x) => x.delta === null)).toBe(true);
     });
-    it("battery voltage not logged: unknown, so no delta", () => {
-        const b = { ...B_SAME, battery: { medianInFlight: null } };
-        expect(
-            compareStepLogs(A, b, { kind: "none" }).pairChecks.find((x) => x.id === "comparable_battery")!.detail,
-        ).toBe("battery_voltage_unknown");
+    it("the check is symmetric: A and B swapped give the same verdict", () => {
+        const a = flight({ seed: 44, startUs: 47_000_000, vbat: 400 });
+        const b = flight({ seed: 45, startUs: 49_000_000, vbat: 420 });
+        expect(battery(compareStepLogs(a, b, { kind: "none" })).status).toBe(
+            battery(compareStepLogs(b, a, { kind: "none" })).status,
+        );
+    });
+    it("the voltage of the used windows counts, not the median of the whole flight", () => {
+        // The same flight with two batteries: equal whole-flight median, but the manoeuvres fall on 420 in A and 380 in B.
+        const a = flight({ seed: 46, startUs: 51_000_000, vbat: 420 });
+        const b = flight({ seed: 47, startUs: 53_000_000, vbat: 380 });
+        const sameWholeFlight = { ...b, battery: { medianInFlight: a.battery.medianInFlight } };
+        expect(battery(compareStepLogs(a, sameWholeFlight, { kind: "none" })).status).toBe("FAIL");
+    });
+    it("battery voltage not logged: unknown, FAIL, and no delta", () => {
+        const strip = (l: StepLogResult): StepLogResult => ({
+            ...l,
+            axes: Object.fromEntries(
+                Object.entries(l.axes).map(([k, v]) => [
+                    k,
+                    { ...v!, thresholds: v!.thresholds.map((t) => ({ ...t, batteryMedian: null })) },
+                ]),
+            ),
+        });
+        const c = compareStepLogs(A, strip(B_SAME), { kind: "none" });
+        expect(battery(c)).toMatchObject({ status: "FAIL", detail: "battery_voltage_unknown" });
+        expect(c.axes.every((x) => x.delta === null)).toBe(true);
     });
     it("a logging key repeated with different values fails same_logging_rate", () => {
         const b = { ...B_SAME, headerPairs: [...B_SAME.headerPairs, ["P ratio", "64"] as const] };
