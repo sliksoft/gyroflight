@@ -1779,7 +1779,7 @@
     "gyrocoreStepManoeuvres": { "message": "Separate manoeuvres" },
     "gyrocoreStepOutliers": { "message": "Final value outside 0.5–1.5" },
     "gyrocoreStepOutlierDetail": {
-        "message": "$1 windows; without them: $2, $3 manoeuvres, overshoot $4, final value $5"
+        "message": "$1 windows; without them: $2, $3 manoeuvres, overshoot $4, peak time $5, t50 $6, final value $7"
     },
     "gyrocoreStepRejections": { "message": "Rejected windows per reason" },
     "gyrocoreStepNoRejections": { "message": "none" },

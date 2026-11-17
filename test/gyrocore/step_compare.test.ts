@@ -100,6 +100,39 @@ describe("UNKNOWN is not MATCH", () => {
             checkIntent(compareSettings(tpaGone(A), tpaGone(B_SAME)), { kind: "group", group: "tpa" }).reasons,
         ).toEqual(["expected_change_missing:tpa"]);
     });
+    it("fail closed: a difference in any logged setting outside the lists fails 'no change'", () => {
+        const yawHold = flight({ seed: 31, startUs: 31_000_000, headers: { feedforward_yaw_hold_gain: "20" } });
+        const base = flight({ seed: 32, startUs: 33_000_000, headers: { feedforward_yaw_hold_gain: "15" } });
+        const c = compareStepLogs(base, yawHold, { kind: "none" });
+        expect(c.intentCheck!.reasons).toEqual(["unexpected_change:feedforward_yaw_hold_gain"]);
+        expect(compareStepLogs(base, yawHold, { kind: "group", group: "feedforward" }).intentCheck!.passed).toBe(true);
+        const rows = compareSettings([["some_new_setting", "1"]], [["some_new_setting", "2"]]);
+        expect(rows.find((r) => r.id === "some_new_setting")).toMatchObject({ group: "other", status: "DIFF" });
+        expect(compareSettings([["some_new_setting", "1"]], []).find((r) => r.id === "some_new_setting")!.status).toBe(
+            "UNKNOWN",
+        );
+    });
+    it("identity, logging, measurement, derived and self-level-only keys are not compared", () => {
+        const rows = compareSettings(
+            [
+                ["Craft name", "A"],
+                ["debug_mode", "96"],
+                ["chirp_time_seconds", "20"],
+                ["simplified_i_gain", "80"],
+                ["levelPID", "90,75,75"],
+                ["rc_smoothing_active_cutoffs_ff_sp_thr", "106,106"],
+            ],
+            [
+                ["Craft name", "B"],
+                ["debug_mode", "6"],
+                ["chirp_time_seconds", "30"],
+                ["simplified_i_gain", "90"],
+                ["levelPID", "70,70,75"],
+                ["rc_smoothing_active_cutoffs_ff_sp_thr", "53,53"],
+            ],
+        );
+        expect(rows.filter((r) => r.status === "DIFF")).toEqual([]);
+    });
     it("d_min (Betaflight 4.5) and d_max name the same D Max setting", () => {
         const rows = compareSettings([["d_min", "37,57,0"]], [["d_min", "37,57,0"]]);
         expect(rows.find((r) => r.id === "d_max")!.status).toBe("MATCH");

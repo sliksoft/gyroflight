@@ -394,6 +394,12 @@ function outlierText(r: StepThresholdResult | null): string {
         w.status,
         w.manoeuvres,
         w.metrics ? w.metrics.overshoot.toFixed(3) : "—",
+        w.metrics ? `${w.metrics.peakTimeMs.toFixed(1)} ms` : "—",
+        w.metrics
+            ? w.metrics.t50Ms === null
+                ? i18n.getMessage("gyrocoreStepNotReached")
+                : `${w.metrics.t50Ms.toFixed(1)} ms`
+            : "—",
         w.metrics ? w.metrics.finalValue.toFixed(3) : "—",
     ]);
 }

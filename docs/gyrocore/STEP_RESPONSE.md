@@ -190,7 +190,16 @@ All three are tests.
 - The `simplified_*` slider keys are not compared. The firmware logs the PID, D Max, feedforward and filter values the sliders produce, so a slider move shows up in the group whose values changed.
 - A setting present in one log only is **UNKNOWN**. **UNKNOWN never counts as MATCH**, and it fails both intents.
 - A setting absent from **both** logs is "not logged": that firmware has no such setting. The A/B requires the same firmware revision, so absence is a property of the firmware, not a missing value (Grok review round 1). A group whose settings the firmware does not log cannot be the intended change (`expected_change_missing`).
-- **"Other":** looptime, pid_process_denom, anti-gravity, I windup, pidsum limits, motor and idle settings, rc smoothing, deadband, throttle limits and similar settings must always MATCH.
+- **Fail closed: every logged key is compared.** Besides the named groups, every further header key present in either log counts under **"other"** and must MATCH: looptime, pid_process_denom, anti-gravity, I windup, pidsum limits, motor and idle settings, rc smoothing, deadband, throttle limits, acc limits, airmode and EZ-landing settings, `features`, and any key this list does not know. A key that differs is a change; a key in one log only is UNKNOWN.
+- **Group mapping of less obvious keys:** `feedforward_yaw_hold_gain` / `_time` count as feedforward; `gyro_hardware_lpf`, `motor_poles` and `dshot_bidir` count as gyro filter (RPM filter inputs).
+- **Not compared** (`NOT_COMPARED_KEYS`), because they are not tune settings or have no effect on the Acro windows used:
+    - identity, format and logging: product, firmware, board, craft name, DeviceUID, field definitions, I/P interval and ratio, `blackbox_high_resolution` (identity and logging rate are separate checks);
+    - measurement set-up: `chirp_*`, `debug_mode`, `fields_disabled_mask`, the debug-axis keys;
+    - sensor scales: `gyro_scale`, `acc_1G`, the vbat and current-sensor scales;
+    - firmware-derived values: `simplified_*` (their results are compared), `rc_smoothing_active_cutoffs*`, `rc_smoothing_rx_smoothed`;
+    - self-levelling and autopilot only: `levelPID`, `angle_*`, `horizon_*`, `ap_*`, `altitude_*` (windows in those modes are excluded).
+- On the AIR65 logs of one build this changes nothing: the 18 pairs that pass the pair checks differ only in `chirp_*` (the October and November logs used another sweep range), which is measurement set-up.
+- **Interpretation to confirm:** a key absent from both logs is "not logged" rather than UNKNOWN (see above). This reads the rule "UNKNOWN is not MATCH" as applying to a value that one log has and the other lacks.
 - **Rule per intent:**
     - "No change" requires every relevant setting to MATCH.
     - A group requires at least one DIFF in that group and MATCH everywhere else. A change elsewhere is named as `extra_change:…`.

@@ -72,6 +72,8 @@ export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly Se
         "feedforward_jitter_factor",
         "feedforward_boost",
         "feedforward_max_rate_limit",
+        "feedforward_yaw_hold_gain",
+        "feedforward_yaw_hold_time",
     ),
     dtermFilter: keys(
         "dterm_lpf1_type",
@@ -103,12 +105,16 @@ export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly Se
         "rpm_filter_min_hz",
         "rpm_filter_fade_range_hz",
         "rpm_filter_lpf_hz",
+        "gyro_hardware_lpf",
+        "motor_poles",
+        "dshot_bidir",
     ),
     tpa: keys("tpa_mode", "tpa_rate", "tpa_breakpoint", "tpa_low_rate", "tpa_low_breakpoint", "tpa_low_always"),
     itermRelax: keys("iterm_relax", "iterm_relax_type", "iterm_relax_cutoff"),
     rates: keys("rates_type", "rc_rates", "rc_expo", "rates", "rate_limits"),
     /**
      * Not a selectable change, but read by the loop during the flight: must MATCH in every A/B.
+     * Named here for the report; every other logged key not excluded below is compared as well.
      */
     other: keys(
         "looptime",
@@ -175,7 +181,59 @@ function lookup(pairs: readonly (readonly [string, string])[], def: SettingDef):
     return null;
 }
 
-/** Every setting of every group, A against B. */
+/**
+ * Header keys that are not tune settings, or have no effect on the Acro windows used, and are
+ * therefore not compared. Everything else in either log is (fail closed: an unlisted key that
+ * differs is a change in "other").
+ */
+export const NOT_COMPARED_KEYS: readonly (string | RegExp)[] = [
+    // identity, format and logging (identity and logging rate are separate A/B checks)
+    "Product",
+    "Data version",
+    "Firmware type",
+    "Firmware revision",
+    "Firmware date",
+    "Board information",
+    "Log start datetime",
+    "Craft name",
+    "DeviceUID",
+    /^Field /,
+    "I interval",
+    "P interval",
+    "P ratio",
+    "P denom",
+    "P num",
+    "blackbox_high_resolution",
+    // measurement set-up: what is logged and the CHIRP generator, not the loop
+    /^chirp_/,
+    "debug_mode",
+    "fields_disabled_mask",
+    "gyro_debug_axis",
+    "rc_smoothing_debug_axis",
+    // sensor scales and calibration constants
+    "gyro_scale",
+    "acc_1G",
+    "vbat_scale",
+    "vbatcellvoltage",
+    "vbatref",
+    "currentSensor",
+    // derived by the firmware: the slider inputs (their results are compared) and the cutoffs it computes per link
+    /^simplified_/,
+    /^rc_smoothing_active_cutoffs/,
+    "rc_smoothing_rx_smoothed",
+    // self-levelling and autopilot only: no effect in Acro, and windows with those modes are excluded
+    "levelPID",
+    /^angle_/,
+    /^horizon_/,
+    /^ap_/,
+    /^altitude_/,
+];
+
+function notCompared(key: string): boolean {
+    return NOT_COMPARED_KEYS.some((k) => (typeof k === "string" ? k === key : k.test(key)));
+}
+
+/** Every setting of every group, and every other logged key, A against B. */
 export function compareSettings(
     a: readonly (readonly [string, string])[],
     b: readonly (readonly [string, string])[],
@@ -195,6 +253,24 @@ export function compareSettings(
                         : "DIFF";
             rows.push({ group, id: def.id, a: va, b: vb, status });
         }
+    }
+    // Fail closed: every further key of either log that is not excluded counts under "other".
+    const covered = new Set(
+        Object.values(GROUP_SETTINGS)
+            .flat()
+            .flatMap((d) => [d.key, ...(d.aliases ?? [])]),
+    );
+    const extra = new Set([...a, ...b].map(([k]) => k).filter((k) => !covered.has(k) && !notCompared(k)));
+    for (const key of [...extra].sort()) {
+        const va = a.find(([k]) => k === key)?.[1]?.trim() ?? null;
+        const vb = b.find(([k]) => k === key)?.[1]?.trim() ?? null;
+        rows.push({
+            group: "other",
+            id: key,
+            a: va,
+            b: vb,
+            status: va === null || vb === null ? "UNKNOWN" : va === vb ? "MATCH" : "DIFF",
+        });
     }
     return rows;
 }
