@@ -36,6 +36,7 @@ import type {
 // See docs/gyrocore/CHIRP_QUALIFICATION.md.
 import { qualifyChirpFile, recomputeRecommendations, type AutotuneMath } from "@/gyrocore/chirp/qualification";
 import { useAutotuneV2Store } from "@/gyrocore/stores/autotuneV2";
+import { useStepResponseStore } from "@/gyrocore/stores/stepResponse";
 import { useChirpQualificationStore } from "@/gyrocore/stores/chirpQualification";
 import { attachChirpFlightIdentity } from "@/gyrocore/chirp/qualityV2/identity";
 import { applyTune } from "@/composables/useTuneApply";
@@ -105,6 +106,13 @@ export function useAutotune() {
             store.progressMessage = `Reading ${file.name}...`;
             const blob = await FileSystem.readFileAsBlob(file);
             const data = new Uint8Array(await blob.arrayBuffer());
+            // Gyroflight: every imported file, with or without CHIRP, is offered to the step response
+            // from ordinary flights (Compare); it is analysed there on request, kept in memory only.
+            try {
+                await useStepResponseStore().addFile(data, file.name);
+            } catch {
+                // The step card is a diagnosis; a failure there never stops the CHIRP import.
+            }
 
             store.analysisState = "analyzing";
             store.progressMessage = "Decoding logs...";

@@ -64,7 +64,9 @@
     "gyrocoreChirpStateRejectedText": { "message": "CHIRP was found, but no measurement is valid for tuning." },
     "gyrocoreChirpStateWarnText": { "message": "At least one measurement is valid for tuning, with warnings." },
     "gyrocoreChirpStateUsableText": { "message": "At least one measurement is valid for tuning." },
-    "gyrocoreChirpNoChirpError": { "message": "No CHIRP sweep found in any of the $1 embedded logs." },
+    "gyrocoreChirpNoChirpError": {
+        "message": "No CHIRP sweep found in any of the $1 embedded logs. The file is still available under Compare → Step response from ordinary flights."
+    },
     "gyrocoreChirpRejectedError": {
         "message": "CHIRP found, but no measurement is valid for tuning and none could be analysed. See Gyroflight CHIRP qualification below."
     },
@@ -1716,5 +1718,98 @@
     "gyroflightSitlWhy_readback_mismatch": {
         "message": "The bench did not hold the candidate exactly after setting it"
     },
-    "gyroflightSitlWhy_invalid": { "message": "Measurement not usable: $2" }
+    "gyroflightSitlWhy_invalid": { "message": "Measurement not usable: $2" },
+    "gyrocoreStepTitle": { "message": "Step response from ordinary flights (diagnosis)" },
+    "gyrocoreStepIntro": {
+        "message": "Estimates the step response from setpoint to gyro per axis from ordinary Acro flights in the imported Blackbox logs, with or without CHIRP. Use it to see whether a deliberate tune change improved tracking, overshoot or speed: compare two flights as Flight A and B."
+    },
+    "gyrocoreStepNotATune": {
+        "message": "Diagnosis only: nothing is saved or written to the flight controller, and a difference between two flights is not a tune, a Verified Tune or an Apply."
+    },
+    "gyrocoreStepLogsHead": { "message": "Imported logs (this browser tab)" },
+    "gyrocoreStepLogsEmpty": {
+        "message": "No logs yet. Import a Blackbox log above; every imported file is offered here."
+    },
+    "gyrocoreStepAnalyzing": { "message": "Analysing the imported logs…" },
+    "gyrocoreStepFileError": { "message": "$1: analysis failed ($2)" },
+    "gyrocoreStepLogLabel": { "message": "$1 · Log $2 of $3" },
+    "gyrocoreStepLogFacts": {
+        "message": "$1 Hz, $2 s, $3 s in flight, $4 frame gaps, modes $5, median battery in flight $6 (log units)"
+    },
+    "gyrocoreStepClear": { "message": "Remove all logs from this card" },
+    "gyrocoreStepAbHead": { "message": "Flight A / B" },
+    "gyrocoreStepAbHelp": {
+        "message": "This Flight A/B is separate from the Tune Session Flight A/B above: it works on the logs imported in this browser tab, also without CHIRP. Choose two different flights and what the comparison tests. A delta is shown only for the same axis and threshold when both are MEASURED and every check passes."
+    },
+    "gyrocoreStepFlightA": { "message": "Flight A" },
+    "gyrocoreStepFlightB": { "message": "Flight B" },
+    "gyrocoreStepNone": { "message": "— none —" },
+    "gyrocoreStepIntent": { "message": "What changed from A to B" },
+    "gyrocoreStepIntentNone": { "message": "No change (flight-to-flight spread)" },
+    "gyrocoreStepIntentGroup": { "message": "Only $1" },
+    "gyrocoreStepGroup_p": { "message": "P" },
+    "gyrocoreStepGroup_i": { "message": "I" },
+    "gyrocoreStepGroup_d": { "message": "D" },
+    "gyrocoreStepGroup_dMax": { "message": "D Max" },
+    "gyrocoreStepGroup_feedforward": { "message": "feedforward" },
+    "gyrocoreStepGroup_dtermFilter": { "message": "D-term filter" },
+    "gyrocoreStepGroup_gyroFilter": { "message": "gyro filter" },
+    "gyrocoreStepGroup_tpa": { "message": "TPA" },
+    "gyrocoreStepGroup_itermRelax": { "message": "iterm_relax" },
+    "gyrocoreStepGroup_rates": { "message": "rates" },
+    "gyrocoreStepAb_COMPARED": { "message": "Comparable" },
+    "gyrocoreStepAb_NOT_COMPARABLE": { "message": "Not comparable" },
+    "gyrocoreStepAb_COMPARABLE_NO_DELTA": { "message": "Comparable flights, but no axis has a delta" },
+    "gyrocoreStepCheck_both_analysed": { "message": "Both logs analysed" },
+    "gyrocoreStepCheck_independent_flights": { "message": "Two different flights" },
+    "gyrocoreStepCheck_same_craft": { "message": "Same craft" },
+    "gyrocoreStepCheck_same_firmware": { "message": "Same firmware" },
+    "gyrocoreStepCheck_same_logging_rate": { "message": "Same logging rate" },
+    "gyrocoreStepCheck_saturation_known": { "message": "Motor saturation known" },
+    "gyrocoreStepCheck_settings_as_intended": { "message": "Settings as intended" },
+    "gyrocoreStepCheck_comparable_battery": { "message": "Comparable battery voltage during the used windows" },
+    "gyrocoreStepChanged": { "message": "Changed from A to B: $1" },
+    "gyrocoreStepUnknownSettings": { "message": "Unknown settings (never counted as unchanged, so no delta): $1" },
+    "gyrocoreStepMissing_both": { "message": "Not logged (A and B)" },
+    "gyrocoreStepMissing_a": { "message": "Not logged in A" },
+    "gyrocoreStepMissing_b": { "message": "Not logged in B" },
+    "gyrocoreStepMissing_conflict": { "message": "logged twice with different values" },
+    "gyrocoreStepNotInFirmware": { "message": "Not compared: absent from this firmware build (checked in the firmware source): $1" },
+    "gyrocoreStepChartTitle": { "message": "Peak |setpoint| from $1 deg/s" },
+    "gyrocoreStepChartEmpty": { "message": "No curve: no manoeuvre was usable." },
+    "gyrocoreStepChartAxes": { "message": "x: 0–500 ms · y: gyro / commanded step · band: 25–75 % of the manoeuvres" },
+    "gyrocoreStepStatus": { "message": "Status" },
+    "gyrocoreStepOvershoot": { "message": "Overshoot (peak − 1)" },
+    "gyrocoreStepPeakTime": { "message": "Peak time" },
+    "gyrocoreStepT50": { "message": "t50 (first time at 0.5)" },
+    "gyrocoreStepFinal": { "message": "Final value (200–500 ms)" },
+    "gyrocoreStepWindows": { "message": "Windows used / examined" },
+    "gyrocoreStepManoeuvres": { "message": "Separate manoeuvres" },
+    "gyrocoreStepOutliers": { "message": "Final value outside 0.5–1.5" },
+    "gyrocoreStepOutlierDetail": {
+        "message": "$1 windows; without them: $2, $3 manoeuvres, overshoot $4, peak time $5, t50 $6, final value $7"
+    },
+    "gyrocoreStepRejections": { "message": "Rejected windows per reason" },
+    "gyrocoreStepNoRejections": { "message": "none" },
+    "gyrocoreStepReason_not_airborne": { "message": "not in flight" },
+    "gyrocoreStepReason_frame_gap": { "message": "frame gap" },
+    "gyrocoreStepReason_non_finite": { "message": "invalid value" },
+    "gyrocoreStepReason_chirp_active": { "message": "CHIRP active" },
+    "gyrocoreStepReason_mode_change": { "message": "mode switch" },
+    "gyrocoreStepReason_self_level_or_automation": { "message": "ANGLE / HORIZON / automation" },
+    "gyrocoreStepReason_saturation": { "message": "motor saturation" },
+    "gyrocoreStepReason_input_below_threshold": { "message": "stick below threshold" },
+    "gyrocoreStepReason_input_above_max": { "message": "stick above 500 deg/s" },
+    "gyrocoreStepReason_insufficient_change": { "message": "too little stick change" },
+    "gyrocoreStepReason_deconvolution_failed": { "message": "estimate failed" },
+    "gyrocoreStepReason_peak_off_centre": { "message": "stick peak not in the middle of the window" },
+    "gyrocoreStepIndicationOnly": { "message": "(…) fewer than $1 manoeuvres: an indication only, not a measurement." },
+    "gyrocoreStepNoDelta": { "message": "No delta: $1" },
+    "gyrocoreStepNotReached": { "message": "not reached" },
+    "gyrocoreStepLoopHead": { "message": "iterm_relax and feedforward in these logs" },
+    "gyrocoreStepLoopNote": {
+        "message": "The curve is the response of the whole active loop during that flight (P, I, D, D Max, feedforward, iterm_relax, TPA and filters as they acted then); it does not separate them."
+    },
+    "gyrocoreStepLoopItermRelax": { "message": "iterm_relax $1, type $2, cutoff $3" },
+    "gyrocoreStepLoopFeedforward": { "message": "ff_weight $1, boost $2, smooth factor $3, axisF logged: $4" }
 }
