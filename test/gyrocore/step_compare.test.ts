@@ -94,17 +94,107 @@ describe("UNKNOWN is not MATCH", () => {
         expect(checkIntent(rows, { kind: "group", group: "tpa" }).passed).toBe(false);
         expect(compareStepLogs(A, b, { kind: "none" }).status).toBe("NOT_COMPARABLE");
     });
-    it("a setting absent from both logs is not logged (the firmware has none): no UNKNOWN, the A/B stays possible", () => {
-        const strip = (l: StepLogResult) => l.headerPairs.filter(([k]) => k !== "tpa_rate" && k !== "abs_control_gain");
-        const rows = compareSettings(strip(A), strip(B_SAME));
-        expect(rows.find((r) => r.id === "tpa_rate")!.status).toBe("NOT_LOGGED");
-        expect(rows.find((r) => r.id === "abs_control_gain")!.status).toBe("NOT_LOGGED");
-        expect(checkIntent(rows, { kind: "none" }).passed).toBe(true);
-        // a group whose settings this firmware does not log cannot be the intended change
+    it("a setting missing from both logs is UNKNOWN (not logged), never MATCH: no delta, curves stay", () => {
+        const strip = (l: StepLogResult) => ({ ...l, headerPairs: l.headerPairs.filter(([k]) => k !== "tpa_rate") });
+        const rows = compareSettings(strip(A).headerPairs, strip(B_SAME).headerPairs);
+        expect(rows.find((r) => r.id === "tpa_rate")).toMatchObject({ status: "UNKNOWN", missing: "both" });
+        expect(checkIntent(rows, { kind: "none" }).reasons).toEqual(["settings_not_logged:tpa_rate"]);
+        for (const intent of [
+            { kind: "none" },
+            { kind: "group", group: "p" },
+            { kind: "group", group: "tpa" },
+        ] as const) {
+            const c = compareStepLogs(strip(A), strip(B_SAME), intent);
+            expect(c.status).toBe("NOT_COMPARABLE");
+            expect(c.intentCheck!.reasons).toContain("settings_not_logged:tpa_rate");
+            expect(c.axes.every((x) => x.delta === null)).toBe(true);
+            const cell = c.axes.find((x) => x.axis === "roll" && x.thresholdDegS === 80)!;
+            expect(cell.noDeltaReasons.join()).toMatch(/settings_as_intended:settings_not_logged:tpa_rate/);
+            expect(cell.a?.curve).toBeTruthy();
+            expect(cell.b?.curve).toBeTruthy();
+        }
+    });
+    it("the same setting missing from one log is UNKNOWN for that side", () => {
+        const b = { ...B_SAME, headerPairs: B_SAME.headerPairs.filter(([k]) => k !== "tpa_rate") };
+        const c = compareStepLogs(A, b, { kind: "group", group: "tpa" });
+        expect(c.settings!.find((r) => r.id === "tpa_rate")).toMatchObject({ status: "UNKNOWN", missing: "b" });
+        expect(c.intentCheck!.reasons).toEqual(["settings_unknown:tpa_rate", "expected_change_missing:tpa"]);
+        expect(c.status).toBe("NOT_COMPARABLE");
+        expect(c.axes.every((x) => x.delta === null && x.a?.curve && x.b?.curve)).toBe(true);
+    });
+    it("positive control: every relevant setting known in both logs, so the pair is compared", () => {
+        const c = compareStepLogs(A, B_SAME, { kind: "none" });
+        expect(c.settings!.filter((r) => r.status !== "MATCH")).toEqual([]);
+        expect(c.intentCheck).toMatchObject({ passed: true, unknown: [], notInFirmware: [] });
+        expect(c.status).toBe("COMPARED");
+    });
+    it("an empty value, or an empty element of a list, is missing, not equal", () => {
+        const empty = (l: StepLogResult, k: string, v: string) =>
+            l.headerPairs.map(([key, val]): [string, string] => [key, key === k ? v : val]);
+        const rows = compareSettings(empty(A, "tpa_rate", ""), empty(B_SAME, "tpa_rate", ""));
+        expect(rows.find((r) => r.id === "tpa_rate")).toMatchObject({ status: "UNKNOWN", missing: "both" });
+        const pid = compareSettings(empty(A, "rollPID", "56,79"), empty(B_SAME, "rollPID", "56,79"));
+        expect(pid.find((r) => r.id === "roll_d")).toMatchObject({ status: "UNKNOWN", missing: "both" });
+        expect(pid.find((r) => r.id === "roll_p")!.status).toBe("MATCH");
+    });
+    it("NOT_IN_FIRMWARE only for a listed setting of a listed build named by both logs", () => {
+        const rev = (l: StepLogResult, r: string, drop: string[]) =>
+            l.headerPairs
+                .filter(([k]) => !drop.includes(k))
+                .map(([k, v]): [string, string] => [k, k === "Firmware revision" ? r : v]);
+        const bf26 = "Betaflight 2026.6.2 (43875a55a) STM32G474";
+        const gone = ["abs_control_gain", "rc_smoothing_feedforward_cutoff"];
+        const rows = compareSettings(rev(A, bf26, gone), rev(B_SAME, bf26, gone));
+        for (const id of gone)
+            expect(rows.find((r) => r.id === id)).toMatchObject({
+                status: "NOT_IN_FIRMWARE",
+                firmware: { build: "43875a55a" },
+            });
+        const ok = checkIntent(rows, { kind: "none" });
+        expect(ok.passed).toBe(true);
+        expect(ok.notInFirmware.map((r) => r.id)).toEqual(gone);
+        // a setting that build does have stays UNKNOWN when missing
+        const tpa = compareSettings(rev(A, bf26, ["tpa_rate"]), rev(B_SAME, bf26, ["tpa_rate"]));
+        expect(tpa.find((r) => r.id === "tpa_rate")!.status).toBe("UNKNOWN");
+        // another build, one side another build, or a longer hex string that only contains the hash
+        for (const [ra, rb] of [
+            ["Betaflight 2026.6.2 (1234567ab) STM32G474", "Betaflight 2026.6.2 (1234567ab) STM32G474"],
+            [bf26, "Betaflight 2026.6.2 (1234567ab) STM32G474"],
+            ["Betaflight 2026.6.2 (43875a55a0) STM32G474", "Betaflight 2026.6.2 (43875a55a0) STM32G474"],
+        ]) {
+            const r = compareSettings(rev(A, ra, gone), rev(B_SAME, rb, gone));
+            expect(r.find((x) => x.id === "abs_control_gain")).toMatchObject({ status: "UNKNOWN", missing: "both" });
+        }
+        // 4.5.1 has no feedforward yaw hold, but does have absolute control
+        const bf45 = "Betaflight 4.5.1 (77d01ba3b) STM32G47X";
+        const yaw = ["feedforward_yaw_hold_gain", "feedforward_yaw_hold_time", "abs_control_gain"];
+        const r45 = compareSettings(rev(A, bf45, yaw), rev(B_SAME, bf45, yaw));
+        expect(r45.find((x) => x.id === "feedforward_yaw_hold_gain")!.status).toBe("NOT_IN_FIRMWARE");
+        expect(r45.find((x) => x.id === "abs_control_gain")!.status).toBe("UNKNOWN");
+    });
+    it("motor_idle and its older name dshot_idle_value are one setting", () => {
+        const rename = (l: StepLogResult) =>
+            l.headerPairs.map(([k, v]): [string, string] => [k === "motor_idle" ? "dshot_idle_value" : k, v]);
+        const rows = compareSettings(rename(A), rename(B_SAME));
+        expect(rows.find((r) => r.id === "motor_idle")!.status).toBe("MATCH");
+        expect(rows.find((r) => r.id === "dshot_idle_value")).toBeUndefined();
+    });
+    it("a group whose settings are all not logged cannot be the intended change", () => {
         const tpaGone = (l: StepLogResult) => l.headerPairs.filter(([k]) => !k.startsWith("tpa_"));
         expect(
             checkIntent(compareSettings(tpaGone(A), tpaGone(B_SAME)), { kind: "group", group: "tpa" }).reasons,
-        ).toEqual(["expected_change_missing:tpa"]);
+        ).toEqual([
+            "settings_not_logged:tpa_mode,tpa_rate,tpa_breakpoint,tpa_low_rate,tpa_low_breakpoint,tpa_low_always",
+            "expected_change_missing:tpa",
+        ]);
+    });
+    it("a key on the exclusion list gives no row, also when one log lacks it", () => {
+        const rows = compareSettings(
+            [...A.headerPairs, ["vbatref", "418"]],
+            B_SAME.headerPairs.filter(([k]) => k !== "Craft name" && k !== "debug_mode"),
+        );
+        for (const k of ["vbatref", "Craft name", "debug_mode"]) expect(rows.find((r) => r.id === k)).toBeUndefined();
+        expect(checkIntent(rows, { kind: "none" }).passed).toBe(true);
     });
     it("fail closed: a difference in any logged setting outside the lists fails 'no change'", () => {
         const yawHold = flight({ seed: 31, startUs: 31_000_000, headers: { feedforward_yaw_hold_gain: "20" } });
@@ -213,7 +303,7 @@ describe("UNKNOWN is not MATCH", () => {
         expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "100,100", "105,100")).toBe("MATCH");
         expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "100,100", "106,100")).toBe("DIFF");
         expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "106,", "106,0")).toBe("DIFF");
-        expect(st("rc_smoothing_rx_smoothed", "", "0")).toBe("DIFF");
+        expect(st("rc_smoothing_rx_smoothed", "", "0")).toBe("UNKNOWN");
         expect(st("rc_smoothing_rx_smoothed", "0x6A", "106")).toBe("DIFF");
         expect(st("rc_smoothing_active_cutoffs_ff_sp_thr", "106,106", "106")).toBe("DIFF");
     });

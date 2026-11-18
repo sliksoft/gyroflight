@@ -12,7 +12,10 @@ export const ANGLE_FLAG = 1 << 1;
 export const HORIZON_FLAG = 1 << 2;
 export { CHIRP_FLAG };
 
-/** The tune headers of the synthetic craft (the AIR65 begin tune); override per test. */
+/**
+ * The tune headers of the synthetic craft (the AIR65 begin tune), with every setting the step A/B
+ * names (stepSettings.ts GROUP_SETTINGS): a setting missing from both logs is UNKNOWN. Override per test.
+ */
 export const SYNTH_TUNE: Record<string, string> = {
     rollPID: "56,79,30",
     pitchPID: "82,117,61",
@@ -73,6 +76,37 @@ export const SYNTH_TUNE: Record<string, string> = {
     anti_gravity_gain: "80",
     motor_output_limit: "100",
     thrust_linear: "0",
+    feedforward_yaw_hold_gain: "15",
+    feedforward_yaw_hold_time: "100",
+    gyro_hardware_lpf: "0",
+    anti_gravity_cutoff_hz: "5",
+    anti_gravity_p_gain: "100",
+    pidsum_limit: "500",
+    pidsum_limit_yaw: "400",
+    use_integrated_yaw: "0",
+    vbat_sag_compensation: "100",
+    throttle_boost: "10",
+    throttle_boost_cutoff: "15",
+    mixer_type: "LEGACY",
+    motor_pwm_protocol: "6",
+    motor_idle: "550",
+    dyn_idle_min_rpm: "40",
+    dyn_idle_p_gain: "50",
+    dyn_idle_i_gain: "50",
+    dyn_idle_d_gain: "50",
+    dyn_idle_max_increase: "150",
+    rc_smoothing: "1",
+    rc_smoothing_auto_factor: "25",
+    rc_smoothing_setpoint_cutoff: "0",
+    deadband: "0",
+    yaw_deadband: "0",
+    throttle_limit_type: "0",
+    throttle_limit_percent: "100",
+    pid_at_min_throttle: "1",
+    // Not in a real 2026.6 build (STEP_FIRMWARE_ABSENT), but the synthetic craft logs every setting the
+    // A/B names, so no test depends on the firmware table unless it says so.
+    abs_control_gain: "0",
+    rc_smoothing_feedforward_cutoff: "0",
     "P ratio": "128",
 };
 
@@ -92,6 +126,8 @@ export interface AcroLogOptions {
     saturateAt?: { start: number; end: number }[];
     /** Header overrides (tune, identity, logging). */
     headers?: Record<string, string>;
+    /** Header keys left out of the log (a setting the firmware did not log). */
+    omitHeaders?: string[];
     /** Logged battery voltage (vbatLatest, log units); default 400. */
     vbat?: number;
     /** Throttle (rcCommand[3]); default 1400 (flight). */
@@ -186,7 +222,9 @@ export function acroLog(o: AcroLogOptions = {}): Uint8Array {
         debugMode: o.debugMode ?? 0,
         firstIteration: o.firstIteration ?? 0,
         sFrames: (o.flagChanges ?? []).map((c) => ({ atFrame: frameIndexOf(c.at), flightModeFlags: c.flags })),
-        extraHeaders: Object.entries(headers).map(([k, v]) => `${k}:${v}`),
+        extraHeaders: Object.entries(headers)
+            .filter(([k]) => !o.omitHeaders?.includes(k))
+            .map(([k, v]) => `${k}:${v}`),
     });
     return o.firmwareRevision ? replaceRevision(bytes, o.firmwareRevision) : bytes;
 }

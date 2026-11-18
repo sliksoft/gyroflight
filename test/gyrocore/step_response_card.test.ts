@@ -189,6 +189,48 @@ describe("normal import → step-response card", () => {
     });
 });
 
+describe("A/B with a setting that is not logged", () => {
+    async function pair(omitA: string[], omitB: string[]) {
+        await importFile(acroLog({ seconds: 20, seed: 1, startUs: 4_000_000, omitHeaders: omitA }), "a.bbl");
+        await importFile(acroLog({ seconds: 20, seed: 2, startUs: 8_000_000, omitHeaders: omitB }), "b.bbl");
+        const m = await mount();
+        const store = useStepResponseStore();
+        store.select("a", store.options[0].key);
+        store.select("b", store.options[1].key);
+        await flush();
+        return m;
+    }
+    function expectCurvesWithoutDelta(container: HTMLElement) {
+        expect(q(container, "[data-gyrocore='step-ab-status']")!.dataset.status).toBe("NOT_COMPARABLE");
+        expect(q(container, "[data-check='settings_as_intended']")!.dataset.status).toBe("FAIL");
+        expect(container.querySelector("[data-side='delta']")).toBeNull();
+        const cellEl = q(container, "[data-gyrocore='step-cell-roll-80']")!;
+        expect(q(cellEl, "[data-line='a']")).not.toBeNull();
+        expect(q(cellEl, "[data-line='b']")).not.toBeNull();
+    }
+
+    it("missing from both logs: Not logged (A and B), named, curves shown, no delta", async () => {
+        const { container, unmount } = await pair(["tpa_rate"], ["tpa_rate"]);
+        expectCurvesWithoutDelta(container);
+        expect(q(container, "[data-gyrocore='step-unknown-settings']")!.textContent).toContain(
+            "tpa_rate: gyrocoreStepMissing_both",
+        );
+        expect(q(container, "[data-gyrocore='step-no-delta-roll-80']")!.textContent).toContain(
+            "settings_not_logged:tpa_rate",
+        );
+        unmount();
+    });
+
+    it("missing from one log: Not logged in B, named, curves shown, no delta", async () => {
+        const { container, unmount } = await pair([], ["tpa_rate"]);
+        expectCurvesWithoutDelta(container);
+        expect(q(container, "[data-gyrocore='step-unknown-settings']")!.textContent).toContain(
+            "tpa_rate: gyrocoreStepMissing_b",
+        );
+        unmount();
+    });
+});
+
 describe("message arguments are not HTML-escaped twice", () => {
     it("i18next escapes interpolated values by default; the card's escapeValue: false keeps a '/' as '/'", async () => {
         const i18next = (await import("i18next")).default.createInstance();

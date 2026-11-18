@@ -138,7 +138,18 @@
                 class="text-xs mt-1 text-warning"
                 data-gyrocore="step-unknown-settings"
             >
-                {{ t("gyrocoreStepUnknownSettings", [cmp.intentCheck.unknown.map((r) => r.id).join(", ")]) }}
+                {{ t("gyrocoreStepUnknownSettings", [cmp.intentCheck.unknown.map(unknownText).join("; ")]) }}
+            </p>
+            <p
+                v-if="cmp.intentCheck?.notInFirmware.length"
+                class="text-xs mt-1 text-dimmed"
+                data-gyrocore="step-not-in-firmware"
+            >
+                {{
+                    t("gyrocoreStepNotInFirmware", [
+                        cmp.intentCheck.notInFirmware.map((r) => `${r.id} (${r.firmware?.build})`).join(", "),
+                    ])
+                }}
             </p>
         </section>
 
@@ -288,7 +299,7 @@ import {
     type StepThresholdResult,
 } from "@/gyrocore/stepResponse/stepResponse";
 import { STEP_AXES, type StepAxis, type StepLogResult } from "@/gyrocore/stepResponse/stepLog";
-import { SETTING_GROUPS, type SettingGroup } from "@/gyrocore/stepResponse/stepSettings";
+import { SETTING_GROUPS, type SettingGroup, type SettingRow } from "@/gyrocore/stepResponse/stepSettings";
 
 /**
  * Positional message arguments ($1, $2 …) without i18next's HTML escaping: Vue renders the result
@@ -403,6 +414,11 @@ function outlierText(r: StepThresholdResult | null): string {
             : "—",
         w.metrics ? w.metrics.finalValue.toFixed(3) : "—",
     ]);
+}
+
+/** An UNKNOWN setting with the log(s) that lack it: "Not logged" in A, B or both, or a conflicting duplicate. */
+function unknownText(r: SettingRow): string {
+    return `${r.id}: ${i18n.getMessage(`gyrocoreStepMissing_${r.missing ?? "conflict"}`)}`;
 }
 
 function rejectionText(r: StepThresholdResult | null): string {

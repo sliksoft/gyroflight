@@ -164,8 +164,10 @@ describe.skipIf(!DIR)("AIR65: step response from ordinary flights (local only)",
                 const c = compareStepLogs(analysed[i].l, analysed[j].l, { kind: "none" });
                 const deltas = c.axes.filter((x) => x.delta).length;
                 const failed = c.pairChecks.filter((x) => x.status === "FAIL").map((x) => x.id);
+                const settings = c.intentCheck?.reasons.join("; ") || "–";
+                const absent = c.intentCheck?.notInFirmware.map((r) => `${r.id} (${r.firmware?.build})`).join(", ");
                 pairs.push(
-                    `| ${analysed[i].id} | ${analysed[j].id} | ${c.status} | ${failed.join(", ") || "–"} | ${deltas} |`,
+                    `| ${analysed[i].id} | ${analysed[j].id} | ${c.status} | ${failed.join(", ") || "–"} | ${settings} | ${absent || "–"} | ${deltas} |`,
                 );
             }
         }
@@ -183,8 +185,8 @@ describe.skipIf(!DIR)("AIR65: step response from ordinary flights (local only)",
             ...axisRows,
             "",
             "## Pairs as a no-change control",
-            "| A | B | status | failed pair checks | deltas |",
-            "|---|---|---|---|---|",
+            "| A | B | status | failed pair checks | settings (intent: no change) | not in this build | deltas |",
+            "|---|---|---|---|---|---|---|",
             ...pairs,
             "",
         ].join("\n");
