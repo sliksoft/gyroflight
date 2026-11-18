@@ -161,6 +161,8 @@ describe("UNKNOWN is not MATCH", () => {
             ["Betaflight 2026.6.2 (1234567ab) STM32G474", "Betaflight 2026.6.2 (1234567ab) STM32G474"],
             [bf26, "Betaflight 2026.6.2 (1234567ab) STM32G474"],
             ["Betaflight 2026.6.2 (43875a55a0) STM32G474", "Betaflight 2026.6.2 (43875a55a0) STM32G474"],
+            ["Betaflight 2026.6.2 43875a55a STM32G474", "Betaflight 2026.6.2 43875a55a STM32G474"],
+            ["Emuflight 2026.6.2 (43875a55a) STM32G474", "Emuflight 2026.6.2 (43875a55a) STM32G474"],
         ]) {
             const r = compareSettings(rev(A, ra, gone), rev(B_SAME, rb, gone));
             expect(r.find((x) => x.id === "abs_control_gain")).toMatchObject({ status: "UNKNOWN", missing: "both" });

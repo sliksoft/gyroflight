@@ -151,7 +151,9 @@ export const GROUP_SETTINGS: Readonly<Record<SettingGroup | "other", readonly Se
             "throttle_limit_percent",
             "pid_at_min_throttle",
         ),
-        // renamed from dshot_idle_value in Betaflight 2026.6 (firmware 5ffeea6ab, #13936)
+        // renamed from dshot_idle_value in firmware 5ffeea6ab (#13936), first released in 2026.6.0: same
+        // range and unit for DShot. With analog PWM the old key had no effect, so a MATCH across the
+        // rename would mean less there; such a pair already fails same_firmware (Grok r9).
         { id: "motor_idle", key: "motor_idle", aliases: ["dshot_idle_value"] },
     ],
 };
@@ -254,10 +256,14 @@ export const STEP_FIRMWARE_ABSENT: Readonly<Record<string, readonly { id: string
     ],
 };
 
-/** The build of `hash` that both revisions name as a delimited token (a longer hex string is another build). */
+/**
+ * The listed build both revisions name in the Betaflight form "Betaflight <x.y.z> (<hash>) <target>":
+ * the hash only in parentheses right after the version (Grok r9). A longer hex string is another build.
+ */
 function sharedBuild(revA: HeaderValue, revB: HeaderValue): string | null {
     if (typeof revA !== "string" || typeof revB !== "string") return null;
-    const has = (rev: string, hash: string) => new RegExp(`(^|[^0-9a-fA-F])${hash}([^0-9a-fA-F]|$)`).test(rev);
+    const has = (rev: string, hash: string) =>
+        new RegExp(`^Betaflight \\d+\\.\\d+\\.\\d+ \\(${hash}\\)( |$)`).test(rev);
     return Object.keys(STEP_FIRMWARE_ABSENT).find((h) => has(revA, h) && has(revB, h)) ?? null;
 }
 
